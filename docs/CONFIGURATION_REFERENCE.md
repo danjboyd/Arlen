@@ -72,7 +72,14 @@ Common keys:
 
 - `connectionString`: DSN or connection string
 - `adapter`: `postgresql` by default; optional MSSQL support is also available
-- `poolSize`: adapter connection pool size
+- `poolSize`: adapter connection pool size (env `ARLEN_DB_POOL_SIZE`)
+- `poolAcquireTimeoutSeconds`: seconds a request waits for a free pooled
+  connection when all `poolSize` connections are in use; `0` (default) fails
+  immediately with a pool-exhausted error (env
+  `ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`). Arlen normalizes this key; apps
+  that create their own `ALNPg`/`ALNMSSQL` pass it to the adapter's
+  `acquireTimeout`. See
+  [ArlenData](ARLEN_DATA.md#connection-pool-acquire-timeout).
 
 If you are just starting, set the connection string first and leave the rest
 alone until you need different pool behavior.

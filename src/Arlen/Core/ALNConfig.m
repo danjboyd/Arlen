@@ -89,6 +89,19 @@ static void ALNApplyIntegerOverride(NSMutableDictionary *target,
   target[key] = @(parsed);
 }
 
+static void ALNApplyNonNegativeSecondsOverride(NSMutableDictionary *target,
+                                               NSString *value,
+                                               NSString *key) {
+  if ([value length] == 0) {
+    return;
+  }
+  double parsed = [value doubleValue];
+  if (!(parsed >= 0.0)) {
+    return;
+  }
+  target[key] = @(parsed);
+}
+
 static void ALNApplyLimitOverride(NSMutableDictionary *limits, NSString *value, NSString *key) {
   ALNApplyIntegerOverride(limits, value, key, 1);
 }
@@ -492,6 +505,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_DATABASE_URL", "MOJOOBJC_DATABASE_URL");
   NSString *databasePoolSize =
       ALNEnvValueCompat("ARLEN_DB_POOL_SIZE", "MOJOOBJC_DB_POOL_SIZE");
+  NSString *databasePoolAcquireTimeoutSeconds =
+      ALNEnvValueCompat("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", NULL);
   NSString *databaseAdapter =
       ALNEnvValueCompat("ARLEN_DB_ADAPTER", "MOJOOBJC_DB_ADAPTER");
   NSString *stateDurable = ALNEnvValueCompat("ARLEN_STATE_DURABLE", NULL);
@@ -691,6 +706,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     database[@"adapter"] = [databaseAdapter lowercaseString];
   }
   ALNApplyIntegerOverride(database, databasePoolSize, @"poolSize", 1);
+  ALNApplyNonNegativeSecondsOverride(database,
+                                     databasePoolAcquireTimeoutSeconds,
+                                     @"poolAcquireTimeoutSeconds");
   config[@"database"] = database;
 
   NSMutableDictionary *state =
@@ -1075,6 +1093,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalDatabase[@"poolSize"] == nil) {
     finalDatabase[@"poolSize"] = @(8);
   }
+  if (finalDatabase[@"poolAcquireTimeoutSeconds"] == nil) {
+    finalDatabase[@"poolAcquireTimeoutSeconds"] = @(0);
+  }
   if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
       [finalDatabase[@"adapter"] length] == 0) {
     finalDatabase[@"adapter"] = @"postgresql";
@@ -1415,6 +1436,12 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   config[@"propaneAccessories"] = finalAccessories;
 
   finalDatabase[@"poolSize"] = @([finalDatabase[@"poolSize"] integerValue]);
+  double poolAcquireTimeoutSeconds =
+      [finalDatabase[@"poolAcquireTimeoutSeconds"] respondsToSelector:@selector(doubleValue)]
+          ? [finalDatabase[@"poolAcquireTimeoutSeconds"] doubleValue]
+          : 0.0;
+  finalDatabase[@"poolAcquireTimeoutSeconds"] =
+      @((poolAcquireTimeoutSeconds > 0.0) ? poolAcquireTimeoutSeconds : 0.0);
   if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
       [finalDatabase[@"adapter"] length] == 0) {
     finalDatabase[@"adapter"] = @"postgresql";

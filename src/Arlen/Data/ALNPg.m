@@ -3152,7 +3152,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign, readwrite) NSUInteger maxConnections;
 @property(nonatomic, strong) NSMutableArray *idleConnections;
 @property(nonatomic, assign) NSUInteger inUseConnections;
-@property(nonatomic, strong) NSRecursiveLock *poolLock;
+@property(nonatomic, strong) NSCondition *poolCondition;
+@property(nonatomic, assign) NSUInteger acquireWaitCount;
+@property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
+@property(nonatomic, assign) NSUInteger poolExhaustedCount;
 
 @end
 
@@ -3209,10 +3212,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   self = [super init];
   if (self != nil) {
     // Created before the pool is shared; libobjc2's first @synchronized on an
-    // instance can race (gnustep/libobjc2#424). Recursive to keep
-    // @synchronized's re-entrancy: diagnostics listeners run while connections
-    // are validated or rolled back under this lock.
-    _poolLock = [[NSRecursiveLock alloc] init];
+    // instance can race (gnustep/libobjc2#424). Guards pool bookkeeping only
+    // (slot count and idle list). Connects, on-borrow liveness checks and
+    // release-time rollbacks run outside it, so one slow checkout does not
+    // stall every other borrower and diagnostics listeners never run under
+    // it. acquireTimeout waiters block on it for a released slot.
+    _poolCondition = [[NSCondition alloc] init];
   }
   return self;
 }
@@ -3259,80 +3264,137 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 }
 
 - (void)dealloc {
-  [self.poolLock lock];
+  [self.poolCondition lock];
   @try {
     for (ALNPgConnection *connection in self.idleConnections) {
       [connection close];
     }
     [self.idleConnections removeAllObjects];
   } @finally {
-    [self.poolLock unlock];
+    [self.poolCondition unlock];
   }
+}
+
+- (void)configurePooledConnection:(ALNPgConnection *)connection {
+  connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
+  connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
+  connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
+  connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
+  connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
+  connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
+}
+
+// Give back a slot reserved by acquireConnection: whose connection could not
+// be handed out, and wake any acquireTimeout waiter.
+- (void)returnReservedSlot {
+  [self.poolCondition lock];
+  if (self.inUseConnections > 0) {
+    self.inUseConnections -= 1;
+  }
+  [self.poolCondition broadcast];
+  [self.poolCondition unlock];
 }
 
 - (ALNPgConnection *)acquireConnection:(NSError **)error {
   ALNPgClearError(error);
-  [self.poolLock lock];
-  @try {
-    while ([self.idleConnections count] > 0) {
-      ALNPgConnection *connection = [self.idleConnections lastObject];
-      [self.idleConnections removeLastObject];
+  NSTimeInterval timeout = self.acquireTimeout;
+  NSDate *deadline = nil;
+  NSTimeInterval waited = 0;
+
+  while (YES) {
+    ALNPgConnection *candidate = nil;
+    BOOL createNew = NO;
+
+    // Reserve a slot: either an idle connection or room to open a new one.
+    // The slot counts as in use from here until it is handed out or returned.
+    [self.poolCondition lock];
+    @try {
+      while (YES) {
+        if ([self.idleConnections count] > 0) {
+          candidate = [self.idleConnections lastObject];
+          [self.idleConnections removeLastObject];
+          self.inUseConnections += 1;
+          break;
+        }
+        if (self.inUseConnections < self.maxConnections) {
+          self.inUseConnections += 1;
+          createNew = YES;
+          break;
+        }
+        if (timeout <= 0 || (deadline != nil && [deadline timeIntervalSinceNow] <= 0)) {
+          self.poolExhaustedCount += 1;
+          if (error != NULL) {
+            NSString *message =
+                (deadline != nil)
+                    ? [NSString stringWithFormat:@"connection pool exhausted after waiting %.3fs",
+                                                 waited]
+                    : @"connection pool exhausted";
+            *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorPoolExhausted,
+                                                   message,
+                                                   nil,
+                                                   nil,
+                                                   @{
+                                                     @"max_connections" : @(self.maxConnections),
+                                                     @"acquire_timeout_seconds" : @(timeout),
+                                                     @"acquire_wait_seconds" : @(waited),
+                                                   });
+          }
+          return nil;
+        }
+        if (deadline == nil) {
+          deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+          self.acquireWaitCount += 1;
+        }
+        // The loop re-checks the pool after every wakeup, so spurious wakeups
+        // and a slot taken first by another borrower are both harmless.
+        NSDate *sliceStarted = [NSDate date];
+        (void)[self.poolCondition waitUntilDate:deadline];
+        NSTimeInterval slice = -[sliceStarted timeIntervalSinceNow];
+        waited += slice;
+        self.acquireWaitSecondsTotal += slice;
+      }
+    } @finally {
+      [self.poolCondition unlock];
+    }
+
+    BOOL handedOut = NO;
+    @try {
+      if (createNew) {
+        NSError *connectionError = nil;
+        ALNPgConnection *connection =
+            [[ALNPgConnection alloc] initWithConnectionString:self.connectionString
+                                                        error:&connectionError];
+        if (connection == nil) {
+          if (error != NULL) {
+            *error = connectionError;
+          }
+          return nil;
+        }
+        [self configurePooledConnection:connection];
+        handedOut = YES;
+        return connection;
+      }
+
       // Drop a locally-known-dead idle connection with zero round-trip
       // before doing any further work. This self-heals the pool: dead
-      // connections are discarded here and the create-new path below
-      // refills capacity, so the pool recovers its size instead of
-      // handing out poison. Works even when liveness checks are disabled.
-      if (![connection isConnectionUsable]) {
-        [connection close];
-        continue;
-      }
-      connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
-      connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
-      connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
-      connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
-      connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
-      connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
-      if (self.connectionLivenessChecksEnabled) {
+      // connections are discarded here and the create-new path refills
+      // capacity, so the pool recovers its size instead of handing out
+      // poison. Works even when liveness checks are disabled.
+      if ([candidate isConnectionUsable]) {
+        [self configurePooledConnection:candidate];
         NSError *livenessError = nil;
-        if (![connection checkConnectionLiveness:&livenessError]) {
-          [connection close];
-          continue;
+        if (!self.connectionLivenessChecksEnabled ||
+            [candidate checkConnectionLiveness:&livenessError]) {
+          handedOut = YES;
+          return candidate;
         }
       }
-      self.inUseConnections += 1;
-      return connection;
-    }
-
-    NSUInteger total = self.inUseConnections + [self.idleConnections count];
-    if (total >= self.maxConnections) {
-      if (error != NULL) {
-        *error = ALNPgMakeError(ALNPgErrorPoolExhausted,
-                                @"connection pool exhausted",
-                                nil,
-                                nil);
+      [candidate close];
+    } @finally {
+      if (!handedOut) {
+        [self returnReservedSlot];
       }
-      return nil;
     }
-
-    NSError *connectionError = nil;
-    ALNPgConnection *connection =
-        [[ALNPgConnection alloc] initWithConnectionString:self.connectionString error:&connectionError];
-    if (connection == nil) {
-      if (error != NULL) {
-        *error = connectionError;
-      }
-      return nil;
-    }
-    connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
-    connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
-    connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
-    connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
-    connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
-    connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
-    self.inUseConnections += 1;
-    return connection;
-  } @finally {
-    [self.poolLock unlock];
   }
 }
 
@@ -3340,11 +3402,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   if (connection == nil) {
     return;
   }
-  [self.poolLock lock];
+  BOOL reusable = NO;
   @try {
-    if (self.inUseConnections > 0) {
-      self.inUseConnections -= 1;
-    }
     if (connection.isOpen && [connection hasActiveTransaction]) {
       NSError *rollbackError = nil;
       if (![connection rollbackTransaction:&rollbackError]) {
@@ -3357,13 +3416,37 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     // here poisons the pool and every subsequent borrower fails the same way
     // until the worker is restarted. isConnectionUsable asks libpq directly,
     // so a dead connection is torn down instead of recirculated.
-    if ([connection isConnectionUsable]) {
-      [self.idleConnections addObject:connection];
-    } else {
+    reusable = [connection isConnectionUsable];
+    if (!reusable) {
       [connection close];
     }
   } @finally {
-    [self.poolLock unlock];
+    [self.poolCondition lock];
+    if (self.inUseConnections > 0) {
+      self.inUseConnections -= 1;
+    }
+    if (reusable) {
+      [self.idleConnections addObject:connection];
+    }
+    [self.poolCondition broadcast];
+    [self.poolCondition unlock];
+  }
+}
+
+- (NSDictionary<NSString *, id> *)poolDiagnostics {
+  [self.poolCondition lock];
+  @try {
+    return @{
+      @"max_connections" : @(self.maxConnections),
+      @"in_use_connections" : @(self.inUseConnections),
+      @"idle_connections" : @([self.idleConnections count]),
+      @"acquire_timeout_seconds" : @(self.acquireTimeout),
+      @"acquire_wait_count" : @(self.acquireWaitCount),
+      @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
+      @"pool_exhausted_count" : @(self.poolExhaustedCount),
+    };
+  } @finally {
+    [self.poolCondition unlock];
   }
 }
 

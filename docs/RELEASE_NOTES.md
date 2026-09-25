@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- `ALNPg` and `ALNMSSQL` accept an optional `acquireTimeout`: when every pooled
+  connection is in use, `acquireConnection:` waits up to that many seconds for
+  one to be released before failing with the pool-exhausted error. The default,
+  `0`, keeps the existing fail-fast behaviour. Pool connects, checkout liveness
+  checks and release-time rollbacks no longer run under the pool lock, and
+  `poolDiagnostics` reports occupancy, wait and exhaustion counters. The
+  optional `database.poolAcquireTimeoutSeconds` config key
+  (`ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`) is normalized for apps to pass
+  through. See
+  [ArlenData](ARLEN_DATA.md#connection-pool-acquire-timeout).
 - Security: the `storage` module no longer signs upload and download tokens
   with a built-in default key when `storageModule.signingSecret` is unset
   (GHSA-cmxm-f294-r8qh). Set `ARLEN_STORAGE_SIGNING_SECRET` (new) or

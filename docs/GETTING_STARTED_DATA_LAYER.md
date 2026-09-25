@@ -177,6 +177,10 @@ Routing/liveness note:
 - `ALNMSSQL.connectionLivenessChecksEnabled = YES` enables the same
   checkout-time probe for pooled ODBC connections when transport support is
   present.
+- `ALNPg.acquireTimeout` / `ALNMSSQL.acquireTimeout` (seconds, default `0`)
+  make a borrower wait for a released connection instead of failing
+  immediately when the pool is full. See
+  [ArlenData](ARLEN_DATA.md#connection-pool-acquire-timeout).
 - DSN-gated live Pg/MSSQL data-layer tests now log explicit unsatisfied
   requirements when `ARLEN_PG_TEST_DSN` / `ARLEN_MSSQL_TEST_DSN` are absent,
   instead of passing silently via early return.

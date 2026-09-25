@@ -164,6 +164,7 @@
 
   NSDictionary *database = config[@"database"];
   XCTAssertEqual((NSInteger)8, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualWithAccuracy(0.0, [database[@"poolAcquireTimeoutSeconds"] doubleValue], 0.0001);
   XCTAssertEqualObjects(@"postgresql", database[@"adapter"]);
 
   NSDictionary *state = config[@"state"];
@@ -359,6 +360,7 @@
   setenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS", "3", 1);
   setenv("ARLEN_DATABASE_URL", "postgresql://localhost/arlen_test", 1);
   setenv("ARLEN_DB_POOL_SIZE", "11", 1);
+  setenv("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.5", 1);
   setenv("ARLEN_DB_ADAPTER", "gdl2", 1);
   setenv("ARLEN_SESSION_ENABLED", "1", 1);
   setenv("ARLEN_SESSION_SECRET", "super-secret", 1);
@@ -435,6 +437,7 @@
   unsetenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS");
   unsetenv("ARLEN_DATABASE_URL");
   unsetenv("ARLEN_DB_POOL_SIZE");
+  unsetenv("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS");
   unsetenv("ARLEN_DB_ADAPTER");
   unsetenv("ARLEN_SESSION_ENABLED");
   unsetenv("ARLEN_SESSION_SECRET");
@@ -513,6 +516,7 @@
   XCTAssertEqualObjects(@"postgresql://localhost/arlen_test",
                         database[@"connectionString"]);
   XCTAssertEqual((NSInteger)11, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualWithAccuracy(2.5, [database[@"poolAcquireTimeoutSeconds"] doubleValue], 0.0001);
   XCTAssertEqualObjects(@"gdl2", database[@"adapter"]);
 
   NSDictionary *session = config[@"session"];
