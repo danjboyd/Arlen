@@ -3,6 +3,7 @@
 #import <errno.h>
 #import <limits.h>
 #import <math.h>
+#import <stdlib.h>
 #import <string.h>
 
 #import "ALNMIMETypes.h"
@@ -319,6 +320,117 @@ void ALNFileResponseApplyStat(ALNResponse *response,
   response.fileBodyMTimeSeconds = (long long)fileStat->st_mtime;
   response.fileBodyMTimeNanoseconds = ALNFileResponseMTimeNanoseconds(fileStat);
   response.committed = YES;
+}
+
+static BOOL ALNStaticGlobMatches(const unichar *pattern, NSUInteger patternLength,
+                                 const unichar *path, NSUInteger pathLength) {
+  if (patternLength == 0) {
+    return pathLength == 0;
+  }
+  if (pattern[0] == '*') {
+    BOOL spansSegments = patternLength > 1 && pattern[1] == '*';
+    NSUInteger skip = spansSegments ? 2 : 1;
+    // `**/` also matches zero directories.
+    if (spansSegments && patternLength > 2 && pattern[2] == '/' &&
+        ALNStaticGlobMatches(pattern + 3, patternLength - 3, path, pathLength)) {
+      return YES;
+    }
+    for (NSUInteger consumed = 0; consumed <= pathLength; consumed++) {
+      if (ALNStaticGlobMatches(pattern + skip, patternLength - skip, path + consumed, pathLength - consumed)) {
+        return YES;
+      }
+      if (consumed < pathLength && !spansSegments && path[consumed] == '/') {
+        return NO;
+      }
+    }
+    return NO;
+  }
+  if (pathLength == 0) {
+    return NO;
+  }
+  if (pattern[0] == '?' ? path[0] == '/' : pattern[0] != path[0]) {
+    return NO;
+  }
+  return ALNStaticGlobMatches(pattern + 1, patternLength - 1, path + 1, pathLength - 1);
+}
+
+static NSUInteger ALNStaticGlobLiteralCount(NSString *pattern) {
+  NSUInteger count = 0;
+  for (NSUInteger idx = 0; idx < [pattern length]; idx++) {
+    unichar ch = [pattern characterAtIndex:idx];
+    if (ch != '*' && ch != '?') count++;
+  }
+  return count;
+}
+
+NSArray *ALNStaticCacheControlRules(id config, NSString **reason) {
+  if (config == nil) {
+    return @[];
+  }
+  NSDictionary *entries = nil;
+  if ([config isKindOfClass:[NSString class]]) {
+    entries = @{ @"default" : config };
+  } else if ([config isKindOfClass:[NSDictionary class]]) {
+    entries = config;
+  } else {
+    if (reason != NULL) *reason = @"cacheControl must be a string or a dictionary";
+    return nil;
+  }
+  NSMutableArray *rules = [NSMutableArray array];
+  NSString *defaultValue = nil;
+  for (id key in entries) {
+    id value = entries[key];
+    NSString *pattern = [key isKindOfClass:[NSString class]]
+                            ? [key stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]
+                            : @"";
+    while ([pattern hasPrefix:@"/"]) pattern = [pattern substringFromIndex:1];
+    if ([pattern length] == 0 || ![value isKindOfClass:[NSString class]] || [(NSString *)value length] == 0 ||
+        !ALNFileResponseHeaderValueIsSafe(value)) {
+      if (reason != NULL) *reason = @"cacheControl entries need a nonempty pattern and a header-safe value";
+      return nil;
+    }
+    if ([pattern isEqualToString:@"default"]) {
+      defaultValue = value;
+      continue;
+    }
+    [rules addObject:@{ @"pattern" : pattern, @"value" : value }];
+  }
+  [rules sortUsingComparator:^NSComparisonResult(NSDictionary *lhs, NSDictionary *rhs) {
+    NSUInteger lhsLiterals = ALNStaticGlobLiteralCount(lhs[@"pattern"]);
+    NSUInteger rhsLiterals = ALNStaticGlobLiteralCount(rhs[@"pattern"]);
+    if (lhsLiterals != rhsLiterals) {
+      return lhsLiterals > rhsLiterals ? NSOrderedAscending : NSOrderedDescending;
+    }
+    return [lhs[@"pattern"] compare:rhs[@"pattern"]];
+  }];
+  if (defaultValue != nil) {
+    [rules addObject:@{ @"pattern" : @"**", @"value" : defaultValue }];
+  }
+  return rules;
+}
+
+NSString *ALNStaticCacheControlForPath(NSArray *rules, NSString *relativePath) {
+  NSString *path = [relativePath isKindOfClass:[NSString class]] ? relativePath : @"";
+  NSUInteger pathLength = [path length];
+  unichar *pathChars = malloc(sizeof(unichar) * (pathLength + 1));
+  if (pathChars == NULL) return nil;
+  [path getCharacters:pathChars range:NSMakeRange(0, pathLength)];
+  NSString *match = nil;
+  for (NSDictionary *rule in rules) {
+    NSString *pattern = rule[@"pattern"];
+    NSUInteger patternLength = [pattern length];
+    unichar *patternChars = malloc(sizeof(unichar) * (patternLength + 1));
+    if (patternChars == NULL) break;
+    [pattern getCharacters:patternChars range:NSMakeRange(0, patternLength)];
+    BOOL matched = ALNStaticGlobMatches(patternChars, patternLength, pathChars, pathLength);
+    free(patternChars);
+    if (matched) {
+      match = rule[@"value"];
+      break;
+    }
+  }
+  free(pathChars);
+  return match;
 }
 
 @implementation ALNFileResponse
