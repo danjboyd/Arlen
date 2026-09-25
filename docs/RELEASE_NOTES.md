@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- Single-page apps: a new top-level `spaFallback` serves the app shell for deep
+  links. It applies only when no route or built-in matched, the request is an
+  HTML navigation (a `GET`/`HEAD` whose `Accept` contains `text/html`), and the
+  path is outside `excludePrefixes` and has no file extension. The shell goes
+  through the app's middleware (security headers, session/CSRF) and is served
+  with `no-cache` and ETag/304. Apps can drop hand-written catch-all routes,
+  which also stopped the OpenAPI and `/arlen/live.js` built-ins from being
+  reached (GitHub issue 62). See
+  [Static files](STATIC_FILES.md#spa-history-fallback).
+
 - Static mounts accept `cacheControl`, either one value or glob patterns with a
   `default` (for example immutable caching for hashed `assets/*` and `no-cache`
   for `index.html`). The default `/static` mount reads the top-level

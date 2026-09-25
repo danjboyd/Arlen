@@ -34,6 +34,9 @@ apps need first.
   either one string or a glob dictionary (`ARLEN_STATIC_CACHE_CONTROL` supplies
   a single string); `staticMounts` entries take the same form as `cacheControl`
   (see [Static files](STATIC_FILES.md#cache-control))
+- `spaFallback`: optional single-page-app shell for unmatched HTML navigations
+  (`file`, `excludePrefixes`, `prefix`, `cacheControl`, `allowDottedPaths`; see
+  [Static files](STATIC_FILES.md#spa-history-fallback))
 - `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
   and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog
