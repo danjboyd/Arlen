@@ -2939,13 +2939,35 @@ static BOOL IsModuleInstalledAtAppRoot(NSString *appRoot, NSString *identifier, 
   return (ModuleLockEntryIndex(entries, identifier) >= 0);
 }
 
-static NSDictionary *ModuleLockEntryForDefinition(ALNModuleDefinition *definition, NSString *relativePath) {
-  return @{
+static NSDictionary *ModuleLockEntryForDefinition(ALNModuleDefinition *definition,
+                                                  NSString *relativePath,
+                                                  NSString *contentDigest) {
+  NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:@{
     @"identifier" : definition.identifier ?: @"",
     @"path" : relativePath ?: [NSString stringWithFormat:@"modules/%@", definition.identifier ?: @""],
     @"version" : definition.version ?: @"",
     @"enabled" : @(YES),
-  };
+  }];
+  if ([contentDigest length] > 0) {
+    entry[@"contentDigest"] = contentDigest;
+  }
+  return entry;
+}
+
+// Relative paths that are added, removed, or changed between two module trees.
+static NSArray<NSString *> *ModuleContentDifferences(NSDictionary<NSString *, NSString *> *sourceFiles,
+                                                     NSDictionary<NSString *, NSString *> *installedFiles) {
+  NSMutableSet<NSString *> *paths = [NSMutableSet setWithArray:[sourceFiles allKeys] ?: @[]];
+  [paths addObjectsFromArray:[installedFiles allKeys] ?: @[]];
+  NSMutableArray<NSString *> *differences = [NSMutableArray array];
+  for (NSString *path in paths) {
+    NSString *sourceDigest = sourceFiles[path];
+    NSString *installedDigest = installedFiles[path];
+    if (sourceDigest == nil || installedDigest == nil || ![sourceDigest isEqualToString:installedDigest]) {
+      [differences addObject:path];
+    }
+  }
+  return [differences sortedArrayUsingSelector:@selector(compare:)];
 }
 
 static NSString *ResolveModuleSourcePath(NSString *appRoot,
@@ -9535,6 +9557,22 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
   NSString *destinationPath = [appRoot stringByAppendingPathComponent:relativeInstallPath];
   NSInteger existingIndex = ModuleLockEntryIndex(entries, definition.identifier);
   NSString *status = @"ok";
+  NSString *reason = nil;
+
+  NSDictionary<NSString *, NSString *> *sourceFiles =
+      [ALNModuleSystem contentFileDigestsForModuleAtPath:sourcePath error:&error];
+  if (sourceFiles == nil) {
+    if (asJSON) {
+      return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
+                              @"module_source_unreadable",
+                              error.localizedDescription ?: @"failed reading module source",
+                              @"Inspect the source directory permissions and retry.",
+                              @"ls -la modules", 1);
+    }
+    fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+  NSString *sourceDigest = [ALNModuleSystem contentDigestForFileDigests:sourceFiles];
 
   if (upgradeMode && existingIndex < 0) {
     return asJSON ? EmitMachineError(@"module", @"upgrade",
@@ -9546,11 +9584,21 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
                                                                 sourcePath ?: @""], 1)
                   : 1;
   }
-  if (!upgradeMode && existingIndex >= 0) {
+  if (existingIndex >= 0) {
     NSDictionary *existing = entries[(NSUInteger)existingIndex];
-    if ([[Trimmed(existing[@"version"]) lowercaseString] isEqualToString:[[definition.version lowercaseString] copy]]) {
-      status = @"noop";
-    } else if (!force) {
+    BOOL sameVersion = [[Trimmed(existing[@"version"]) lowercaseString]
+        isEqualToString:[definition.version lowercaseString]];
+    NSDictionary<NSString *, NSString *> *installedFiles =
+        [ALNModuleSystem contentFileDigestsForModuleAtPath:destinationPath error:NULL] ?: @{};
+    NSString *installedDigest = [ALNModuleSystem contentDigestForFileDigests:installedFiles];
+    NSString *recordedDigest = Trimmed(existing[@"contentDigest"]);
+    BOOL contentMatches = [installedDigest isEqualToString:sourceDigest];
+    BOOL installedIsPristine = ([recordedDigest length] > 0 && [recordedDigest isEqualToString:installedDigest]);
+
+    if (force) {
+      status = upgradeMode ? @"updated" : @"replaced";
+      reason = @"forced";
+    } else if (!upgradeMode && !(sameVersion && contentMatches)) {
       return asJSON ? EmitMachineError(@"module", @"add",
                                        @"module_already_installed",
                                        [NSString stringWithFormat:@"module %@ is already installed", definition.identifier ?: @""],
@@ -9559,16 +9607,57 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
                                                                   definition.identifier ?: @"",
                                                                   sourcePath ?: @""], 1)
                     : 1;
-    } else {
-      status = @"replaced";
-    }
-  }
-  if (upgradeMode && existingIndex >= 0) {
-    NSDictionary *existing = entries[(NSUInteger)existingIndex];
-    if ([Trimmed(existing[@"version"]) isEqualToString:definition.version] && !force) {
+    } else if (sameVersion && contentMatches) {
       status = @"noop";
-    } else {
+    } else if (!sameVersion && ([recordedDigest length] == 0 || installedIsPristine)) {
       status = @"updated";
+      reason = @"version_changed";
+    } else if (installedIsPristine) {
+      status = @"updated";
+      reason = @"content_changed";
+    } else {
+      // Either the vendored copy was edited after install, or the lock predates
+      // contentDigest and a same-version copy cannot be told apart from an edit.
+      NSArray<NSString *> *differences = ModuleContentDifferences(sourceFiles, installedFiles);
+      NSString *message =
+          ([recordedDigest length] > 0)
+              ? [NSString stringWithFormat:@"module %@ at %@ was modified locally since it was installed",
+                                           definition.identifier ?: @"",
+                                           relativeInstallPath]
+              : [NSString stringWithFormat:@"module %@ %@ differs from --source and has no recorded contentDigest to show whether it was edited locally",
+                                           definition.identifier ?: @"",
+                                           definition.version ?: @""];
+      NSString *hint = @"Review the differing files, then re-run with --force to replace the vendored copy.";
+      NSString *example = [NSString stringWithFormat:@"arlen module upgrade %@ --source %@ --force --json",
+                                                     definition.identifier ?: @"",
+                                                     sourcePath ?: @""];
+      if (asJSON) {
+        PrintJSONPayload(stdout, @{
+          @"version" : AgentContractVersion(),
+          @"command" : @"module",
+          @"workflow" : @"upgrade",
+          @"status" : @"error",
+          @"error" : @{
+            @"code" : @"content_differs",
+            @"message" : message,
+            @"fixit" : @{
+              @"action" : hint,
+              @"example" : example,
+            },
+          },
+          @"module" : ModuleJSONDictionary(definition, relativeInstallPath, @"content_differs"),
+          @"locally_modified" : @([recordedDigest length] > 0),
+          @"differing_files" : differences,
+          @"exit_code" : @(1),
+        });
+        return 1;
+      }
+      fprintf(stderr, "arlen module: %s\n", [message UTF8String]);
+      for (NSString *path in differences) {
+        fprintf(stderr, "  differs: %s\n", [path UTF8String]);
+      }
+      fprintf(stderr, "%s\n  %s\n", [hint UTF8String], [example UTF8String]);
+      return 1;
     }
   }
 
@@ -9597,7 +9686,7 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
     }
   }
 
-  NSDictionary *lockEntry = ModuleLockEntryForDefinition(definition, relativeInstallPath);
+  NSDictionary *lockEntry = ModuleLockEntryForDefinition(definition, relativeInstallPath, sourceDigest);
   if (existingIndex >= 0) {
     entries[(NSUInteger)existingIndex] = lockEntry;
   } else {
@@ -9622,11 +9711,23 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
       @"workflow" : upgradeMode ? @"upgrade" : @"add",
       @"status" : status,
       @"module" : ModuleJSONDictionary(definition, relativeInstallPath, status),
+      @"contentDigest" : sourceDigest ?: @"",
     };
+    if ([reason length] > 0) {
+      NSMutableDictionary *withReason = [payload mutableCopy];
+      withReason[@"reason"] = reason;
+      payload = withReason;
+    }
     PrintJSONPayload(stdout, payload);
     return 0;
   }
 
+  if ([status isEqualToString:@"noop"]) {
+    fprintf(stdout, "Module %s at %s already matches the source\n",
+            [definition.identifier UTF8String],
+            [relativeInstallPath UTF8String]);
+    return 0;
+  }
   fprintf(stdout, "%s module %s at %s\n",
           upgradeMode ? "Upgraded" : "Installed",
           [definition.identifier UTF8String],
@@ -9787,6 +9888,63 @@ static int CommandModuleList(NSArray *args) {
   return 0;
 }
 
+// Warns when a vendored module no longer matches the framework checkout's copy,
+// e.g. after the framework pin moved but `module upgrade` was not re-run.
+static NSArray<NSDictionary *> *FrameworkModuleCopyDiagnostics(NSString *appRoot) {
+  NSString *frameworkRoot = EnvValue("ARLEN_FRAMEWORK_ROOT");
+  if ([frameworkRoot length] == 0) {
+    frameworkRoot = FindFrameworkRoot(appRoot);
+  }
+  if ([frameworkRoot length] == 0) {
+    frameworkRoot = FrameworkRootFromExecutablePath();
+  }
+  if ([frameworkRoot length] == 0) {
+    return @[];
+  }
+
+  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
+  NSArray<NSDictionary *> *records = [ALNModuleSystem installedModuleRecordsAtAppRoot:appRoot error:NULL] ?: @[];
+  for (NSDictionary *record in records) {
+    NSString *identifier = record[@"identifier"];
+    NSString *frameworkCopy =
+        [[frameworkRoot stringByAppendingPathComponent:@"modules"] stringByAppendingPathComponent:identifier];
+    NSString *installPath = [appRoot stringByAppendingPathComponent:record[@"path"]];
+    if ([[frameworkCopy stringByStandardizingPath] isEqualToString:[installPath stringByStandardizingPath]]) {
+      continue;
+    }
+    ALNModuleDefinition *frameworkDefinition = [ALNModuleSystem moduleDefinitionAtPath:frameworkCopy error:NULL];
+    if (frameworkDefinition == nil) {
+      continue;
+    }
+    NSString *frameworkDigest = [ALNModuleSystem contentDigestForModuleAtPath:frameworkCopy error:NULL];
+    NSString *installedDigest = [ALNModuleSystem contentDigestForModuleAtPath:installPath error:NULL];
+    if (frameworkDigest == nil || installedDigest == nil || [frameworkDigest isEqualToString:installedDigest]) {
+      continue;
+    }
+    NSString *installedVersion = record[@"version"] ?: @"";
+    NSString *message =
+        [installedVersion isEqualToString:frameworkDefinition.version]
+            ? [NSString stringWithFormat:@"module %@ differs from the framework copy at the same version %@",
+                                         identifier,
+                                         installedVersion]
+            : [NSString stringWithFormat:@"module %@ %@ differs from the framework copy (%@)",
+                                         identifier,
+                                         installedVersion,
+                                         frameworkDefinition.version ?: @""];
+    [diagnostics addObject:@{
+      @"status" : @"warning",
+      @"code" : @"module_framework_copy_differs",
+      @"module" : identifier ?: @"",
+      @"message" : message,
+      @"detail" : [NSString stringWithFormat:@"framework copy: %@; run `arlen module upgrade %@ --source %@`",
+                                             frameworkCopy,
+                                             identifier,
+                                             frameworkCopy],
+    }];
+  }
+  return diagnostics;
+}
+
 static int CommandModuleDoctor(NSArray *args) {
   BOOL asJSON = ArgsContainFlag(args, @"--json");
   NSString *environment = @"development";
@@ -9823,8 +9981,9 @@ static int CommandModuleDoctor(NSArray *args) {
                   : 1;
   }
 
-  NSArray<NSDictionary *> *diagnostics =
-      [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:rawConfig error:&error];
+  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray arrayWithArray:
+      [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:rawConfig error:&error] ?: @[]];
+  [diagnostics addObjectsFromArray:FrameworkModuleCopyDiagnostics(appRoot)];
   BOOL hasErrors = NO;
   for (NSDictionary *entry in diagnostics ?: @[]) {
     if ([entry[@"status"] isEqualToString:@"error"]) {

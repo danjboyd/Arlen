@@ -410,6 +410,10 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - installs a local vendored module into `modules/<identifier>`
 - updates `config/modules.plist` deterministically
 - `--source <path>` points at a module directory containing `module.plist`
+- records the installed tree's SHA-256 `contentDigest` alongside `version` in
+  the lock entry
+- re-running `add` for an installed module is a `noop` only when the vendored
+  files match the source; otherwise it fails with `module_already_installed`
 - `--force` replaces an existing install in place
 - `--json` emits machine-readable workflow output
 - first-party modules currently available in-tree:
@@ -433,6 +437,13 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- warns (without failing) about vendored module content:
+ - `module_locally_modified`: files differ from the recorded `contentDigest`
+ - `module_content_untracked`: the lock entry predates `contentDigest`
+ - `module_framework_copy_differs`: the vendored copy differs from
+   `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
+   framework checkout, or the running `arlen` binary's checkout), typically
+   after moving the framework pin without re-running `module upgrade`
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -449,7 +460,19 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 
 `arlen module upgrade <name> --source <path> [--force] [--json]`
 
-- replaces the vendored module files and updates the modules lock entry version metadata
+- compares file contents, not just `version`, and updates the lock entry's
+  `version` and `contentDigest`
+- `status: "noop"`: the vendored files already match `--source`
+- `status: "updated"` with `reason`:
+ - `version_changed`: the source declares a different version
+ - `content_changed`: same version, different sources, and the vendored copy
+   is unedited since install (it still matches the recorded `contentDigest`)
+ - `forced`: `--force` was passed
+- exits 1 with error code `content_differs` when the vendored copy was edited
+  locally (`locally_modified: true`), or when the files differ at the same
+  version and the lock has no `contentDigest` (`locally_modified: false`); the
+  JSON payload lists `differing_files`, and nothing is changed
+- `--force` replaces the vendored copy regardless
 
 `arlen module eject auth-ui [--force] [--json]`
 
