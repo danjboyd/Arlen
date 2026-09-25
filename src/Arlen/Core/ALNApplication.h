@@ -64,6 +64,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Normalized `spaFallback` descriptor (file, prefix, excludePrefixes, cacheControl,
 // allowDottedPaths), or nil when no fallback is configured.
 @property(nonatomic, copy, readonly, nullable) NSDictionary *spaFallback;
+// Security headers from `securityHeaders` config, empty when disabled. The HTTP
+// server applies them to static-mount responses, which bypass middleware.
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;

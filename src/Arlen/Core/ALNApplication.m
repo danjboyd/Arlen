@@ -645,6 +645,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
 @property(nonatomic, strong) ALNRoute *spaFallbackRoute;
 @property(nonatomic, strong) NSError *spaFallbackConfigError;
+@property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
@@ -5046,10 +5047,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
 - (void)registerBuiltInMiddlewares {
   NSDictionary *securityHeaders = ALNDictionaryConfigValue(self.config, @"securityHeaders");
   BOOL securityHeadersEnabled = ALNBoolConfigValue(securityHeaders[@"enabled"], YES);
+  self.baselineSecurityHeaders = @{};
   if (securityHeadersEnabled) {
     NSString *csp =
         ALNStringConfigValue(securityHeaders[@"contentSecurityPolicy"], @"default-src 'self'");
-    [self addMiddleware:[[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp]];
+    ALNSecurityHeadersMiddleware *middleware =
+        [[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp];
+    self.baselineSecurityHeaders = [middleware responseHeaders];
+    [self addMiddleware:middleware];
   }
 
   NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
@@ -5243,6 +5248,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
           ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, reservedBuiltInPath);
     }
     (void)ALNApplyBuiltInResponse(self, request, response, reservedBuiltInPath);
+    // Built-ins run before the middleware chain; apply the baseline headers here.
+    [response setHeadersIfMissing:self.baselineSecurityHeaders];
     ALNFinalizeResponse(self,
                         response,
                         trace,
@@ -5374,6 +5381,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
     }
+    // Route misses and route-miss built-ins never reach the middleware chain.
+    [response setHeadersIfMissing:self.baselineSecurityHeaders];
     ALNFinalizeResponse(self,
                         response,
                         trace,
