@@ -17,6 +17,14 @@
   auth module version is now `1.2.0` (GitHub issue 51). See
   [Auth Module](AUTH_MODULE.md).
 
+- CSRF: `csrf.exemptPathPrefixes` lets a mixed browser app serve bearer
+  clients, such as the MCP endpoint, on chosen paths without a CSRF token.
+  The exemption applies only to requests that carry no session cookie. Requests
+  with the session cookie still need a token, and exempt requests do not mint a
+  session. Invalid entries fail startup (error `339`) (GitHub issue 43). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf) and
+  [MCP Module](MCP_MODULE.md).
+
 - `headerValueForName:` on `ALNController` and `ALNContext` is now declared
   nonnull, matching what it returns: an absent header gives `@""`, as
   `ALNRequest` already documented. The empty-name case, which returned `nil`,
