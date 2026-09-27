@@ -278,6 +278,26 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqual(403, denied.statusCode);
   XCTAssertEqual(1u, Calls);
 }
+- (void)testMixedAppExemptsCookielessBearerClientsButKeepsCSRFForSessions_Issue43 {
+  [self configure:@{@"session":@{@"enabled":@YES, @"secret":@"mcp-test-session-secret-0123456789abcdef", @"secure":@NO},
+                    @"csrf":@{@"enabled":@YES, @"exemptPathPrefixes":@[@"/mcp"]}}];
+  [self.app registerRouteMethod:@"GET" path:@"/session-fixture" name:@"session_fixture" controllerClass:[MCPTestController class] action:@"sessionFixture"];
+  [self routeTool]; [self install];
+  // Bearer client, no cookie: no CSRF token needed, and no session is minted.
+  ALNResponse *bearer = [self send:@{@"jsonrpc":@"2.0", @"id":@7, @"method":@"tools/call", @"params":@{@"name":@"catalog.get", @"arguments":@{@"id":@"42"}}}
+                           headers:nil method:@"POST" path:@"/mcp"];
+  XCTAssertEqual(200, bearer.statusCode);
+  XCTAssertEqualObjects(@"reader", [self decode:bearer][@"result"][@"structuredContent"][@"subject"]);
+  XCTAssertNil([bearer headerForName:@"Set-Cookie"]);
+  // A request carrying the session cookie still needs the token on the exempt path.
+  ALNResponse *bootstrap = [self send:@{} headers:nil method:@"GET" path:@"/session-fixture"];
+  NSString *cookie = [[[bootstrap headerForName:@"Set-Cookie"] componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue(cookie.length > 0);
+  ALNResponse *denied = [self send:@{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"}
+                           headers:@{@"authorization":@"", @"cookie":cookie ?: @""} method:@"POST" path:@"/mcp"];
+  XCTAssertEqual(403, denied.statusCode);
+  XCTAssertEqual(1u, Calls);
+}
 - (void)testBodyMappingAndEnvelopeCompatibility {
   [self.app addMiddleware:[ALNResponseEnvelopeMiddleware new]];
   ALNRoute *route = [self.app registerRouteMethod:@"POST" path:@"/echo" name:@"echo" controllerClass:[MCPTestController class] action:@"body"];

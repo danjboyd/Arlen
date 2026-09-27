@@ -569,6 +569,27 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   return harness;
 }
 
+- (void)testCSRFExemptPathPrefixesSkipOnlyCookielessRequestsBelowThePrefix {
+  NSMutableDictionary *config = [[self sessionAndCSRFConfig] mutableCopy];
+  config[@"csrf"] = @{ @"enabled" : @(YES), @"exemptPathPrefixes" : @[ @"/submit/" ] };
+  ALNApplication *app = [self securityApplicationWithConfig:config
+                                                 submitPath:@"/submit"
+                                                 submitName:@"submit"
+                                               submitAction:@"submit"];
+  [app registerRouteMethod:@"POST" path:@"/submitted" name:@"submitted" controllerClass:[MiddlewareFormController class] action:@"submit"];
+
+  ALNWebTestHarness *cookieless = [ALNWebTestHarness harnessWithApplication:app];
+  ALNResponse *exempt = [cookieless dispatchMethod:@"POST" path:@"/submit"];
+  ALNAssertResponseStatus(exempt, 200);
+  XCTAssertNil([exempt headerForName:@"Set-Cookie"]);
+  // Prefixes match whole path segments only.
+  ALNAssertResponseStatus([cookieless dispatchMethod:@"POST" path:@"/submitted"], 403);
+
+  ALNWebTestHarness *withSession = [ALNWebTestHarness harnessWithApplication:app];
+  [withSession recycleCookiesFromResponse:[withSession dispatchMethod:@"GET" path:@"/form"]];
+  ALNAssertResponseStatus([withSession dispatchMethod:@"POST" path:@"/submit"], 403);
+}
+
 - (void)testCSRFRejectionReturnsJSONEnvelopeForJSONClients {
   ALNWebTestHarness *harness = [self csrfHarnessWithToken:NULL];
   ALNResponse *response = [harness dispatchMethod:@"POST"

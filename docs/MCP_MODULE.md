@@ -281,6 +281,20 @@ header does not automatically bypass an app's CSRF policy. The example uses a
 stateless bearer-only app with sessions/CSRF explicitly disabled. Do not disable
 CSRF globally in a mixed browser app merely to make an MCP client work.
 
+In a mixed app, list the MCP path in `csrf.exemptPathPrefixes` instead:
+
+```plist
+csrf = { enabled = YES; exemptPathPrefixes = ("/context/mcp"); };
+mcp = { enabled = YES; path = "/context/mcp"; };
+```
+
+Requests to that path that carry no session cookie (bearer clients) skip the
+CSRF check and do not get a session. A request that does carry the session
+cookie still needs its CSRF token, so browser sessions stay protected. Because
+the module is installed on the application itself, `mcp.oauth` publishes its
+protected-resource metadata at the root path RFC 9728 clients expect
+(`/.well-known/oauth-protected-resource/context/mcp`).
+
 Arlen's standard response-envelope middleware is disabled only in MCP protocol
 and private service contexts via `ALNResponseEnvelopeDisabledStashKey`. Ordinary
 route responses retain their envelopes and can be transformed. App-specific

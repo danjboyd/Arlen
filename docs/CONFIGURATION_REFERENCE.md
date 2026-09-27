@@ -203,6 +203,11 @@ CSRF config:
 - `csrf.enabled`
 - `csrf.headerName`
 - `csrf.queryParamName`
+- `csrf.exemptPathPrefixes`: optional array of literal absolute paths (not `/`).
+  Unsafe requests to a listed path, or below it, skip the check only when they
+  carry no session cookie, which suits bearer-authenticated API clients such as
+  MCP in a mixed browser app. Requests with the session cookie still need a
+  token. Invalid entries fail startup with error `339`.
 
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than

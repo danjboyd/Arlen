@@ -74,6 +74,7 @@ static void ALNCSRFRejectRequest(ALNContext *context) {
 @property(nonatomic, copy) NSString *headerName;
 @property(nonatomic, copy) NSString *queryParamName;
 @property(nonatomic, assign) BOOL allowQueryParamFallback;
+@property(nonatomic, copy) NSArray<NSString *> *exemptPathPrefixes;
 
 @end
 
@@ -89,6 +90,16 @@ static void ALNCSRFRejectRequest(ALNContext *context) {
 - (instancetype)initWithHeaderName:(NSString *)headerName
                     queryParamName:(NSString *)queryParamName
          allowQueryParamFallback:(BOOL)allowQueryParamFallback {
+  return [self initWithHeaderName:headerName
+                   queryParamName:queryParamName
+        allowQueryParamFallback:allowQueryParamFallback
+               exemptPathPrefixes:nil];
+}
+
+- (instancetype)initWithHeaderName:(NSString *)headerName
+                    queryParamName:(NSString *)queryParamName
+         allowQueryParamFallback:(BOOL)allowQueryParamFallback
+                exemptPathPrefixes:(NSArray<NSString *> *)exemptPathPrefixes {
   self = [super init];
   if (self) {
     NSString *resolvedHeader = [[headerName lowercaseString] copy];
@@ -102,12 +113,63 @@ static void ALNCSRFRejectRequest(ALNContext *context) {
       _queryParamName = @"csrf_token";
     }
     _allowQueryParamFallback = allowQueryParamFallback;
+    _exemptPathPrefixes = [[[self class] normalizedExemptPathPrefixes:exemptPathPrefixes problem:NULL] copy] ?: @[];
   }
   return self;
 }
 
++ (NSArray<NSString *> *)normalizedExemptPathPrefixes:(id)value problem:(NSString **)problem {
+  if (value == nil) {
+    return @[];
+  }
+  if (![value isKindOfClass:[NSArray class]]) {
+    if (problem != NULL) {
+      *problem = @"csrf.exemptPathPrefixes must be an array of paths";
+    }
+    return nil;
+  }
+  NSCharacterSet *allowed =
+      [NSCharacterSet characterSetWithCharactersInString:
+                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._-~"];
+  NSMutableArray<NSString *> *prefixes = [NSMutableArray array];
+  for (id entry in (NSArray *)value) {
+    NSString *path = [entry isKindOfClass:[NSString class]]
+                         ? [entry stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                         : nil;
+    while ([path length] > 1 && [path hasSuffix:@"/"]) {
+      path = [path substringToIndex:[path length] - 1];
+    }
+    NSArray *segments = [path componentsSeparatedByString:@"/"];
+    if (![path hasPrefix:@"/"] || [path isEqualToString:@"/"] || [path containsString:@"//"] ||
+        [segments containsObject:@"."] || [segments containsObject:@".."] ||
+        [path rangeOfCharacterFromSet:[allowed invertedSet]].location != NSNotFound) {
+      if (problem != NULL) {
+        *problem = @"csrf.exemptPathPrefixes entries must be literal non-root absolute paths";
+      }
+      return nil;
+    }
+    [prefixes addObject:path];
+  }
+  return prefixes;
+}
+
+- (BOOL)isExemptPath:(NSString *)path {
+  for (NSString *prefix in self.exemptPathPrefixes) {
+    if ([path isEqualToString:prefix] || [path hasPrefix:[prefix stringByAppendingString:@"/"]]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   (void)error;
+  // Checked before touching the session so an exempt request never mints a
+  // session (and its Set-Cookie) just to hold a token it will not use.
+  if ([self.exemptPathPrefixes count] > 0 && ![context.stash[ALNContextSessionHadCookieStashKey] boolValue] &&
+      [self isExemptPath:context.request.path ?: @""]) {
+    return YES;
+  }
   NSMutableDictionary *session = [context session];
 
   NSString *token = session[@"_csrf_token"];
