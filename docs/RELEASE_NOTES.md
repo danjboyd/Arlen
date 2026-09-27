@@ -2,6 +2,38 @@
 
 ## Upcoming Release Candidate
 
+- CSRF no longer starts a session on every request without a session cookie.
+  The middleware used to write a fresh token into the session up front, so every
+  cookieless request, `GET` and `HEAD` included, got a new signed-out session
+  cookie. When a browser sent such a request while signed in (for example a
+  service worker's fetch), the reply replaced the real session and signed the
+  user out. The token is now created when a request first reads it, and only
+  then is `Set-Cookie` sent (GitHub issue 86). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+
+- MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
+  in `config/app.plist` (as in the documented example) no longer crash startup
+  (`does not recognize unsignedIntegerValue`). Plist strings holding
+  decimal integers are accepted, and other values fail startup with an error
+  naming the key. Tool definitions' `minimumAuthAssuranceLevel` and
+  `maximumAuthenticationAgeSeconds` get the same checks. The module version is
+  now `1.0.1` (GitHub issue 42). See [MCP Module](MCP_MODULE.md).
+
+- Auth module `module-ui`: `auth.css` and `auth_totp_qr.js` are now also
+  served under the module's own prefix at `<paths.prefix>/assets/`, and pages
+  link them there, so sign-in pages keep their styling behind a reverse proxy
+  that only forwards `paths.prefix`. `/modules/auth/` still serves them. The
+  auth module version is now `1.2.0` (GitHub issue 51). See
+  [Auth Module](AUTH_MODULE.md).
+
+- CSRF: `csrf.exemptPathPrefixes` lets a mixed browser app serve bearer
+  clients, such as the MCP endpoint, on chosen paths without a CSRF token.
+  The exemption applies only to requests that carry no session cookie. Requests
+  with the session cookie still need a token, and exempt requests do not mint a
+  session. Invalid entries fail startup (error `339`) (GitHub issue 43). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf) and
+  [MCP Module](MCP_MODULE.md).
+
 - Large uploads: request bodies larger than `requestLimits.spoolThresholdBytes`
   (default 1 MiB) stream from the socket into a private temporary file under
   `requestLimits.spoolDirectory`, and `request.body` maps it, on both parser
