@@ -206,7 +206,8 @@ python3 tools/ci/check_module_versions.py --base origin/main
 
 Module versions first changed on 2026-09-25: `auth` and `storage` moved to
 `1.1.0` (OIDC providers; required storage signing secret), and `admin-ui`,
-`ops`, and `search` moved to `1.0.1`.
+`ops`, and `search` moved to `1.0.1`. `jobs` and `notifications` moved to
+`1.0.1` for app-root-relative module state paths (GitHub issue 76).
 
 ## MCP tools
 
