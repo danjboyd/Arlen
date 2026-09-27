@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- `/readyz` fails (`503`) while the running release has schema migrations that
+  are not applied, by default in `production`
+  (`observability.readinessRequiresMigrations`,
+  `ARLEN_READINESS_REQUIRES_MIGRATIONS`). The JSON payload's
+  `checks.schema_migrations` lists the pending versions. The check is read-only,
+  rechecks while not ready so `arlen migrate` restores readiness without a
+  restart, and `arlen deploy status` reports `not ready (N migrations pending)`
+  (GitHub issue 90). See [Deployment](DEPLOYMENT.md).
+
 - Deploy releases record their source revision: the app and framework git
   commits plus dirty flags, in `manifest.json` (`source_revision`) and
   `release.env` (`ARLEN_RELEASE_APP_GIT_SHA`, `ARLEN_RELEASE_APP_GIT_DIRTY`,

@@ -134,6 +134,9 @@ NS_ASSUME_NONNULL_BEGIN
 // The application root: config `appRoot` (set when config is loaded from an app
 // directory), else ARLEN_APP_ROOT, else the current directory.
 - (NSString *)appRootPath;
+// The /readyz schema_migrations result (see ALNMigrationStatus), cached as
+// described in docs/DEPLOYMENT.md.
+- (NSDictionary *)currentMigrationReadiness;
 // Resolves a relative path against -appRootPath; absolute paths are returned
 // standardized. Use this rather than the process working directory, which differs
 // between the server, workers and CLI delegates.

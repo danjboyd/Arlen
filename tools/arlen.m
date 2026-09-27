@@ -1293,12 +1293,47 @@ static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *hel
   int exitCode = 0;
   NSString *command = [NSString stringWithFormat:@"%@ --base-url %@", ShellQuote(scriptPath), ShellQuote(baseURL)];
   NSString *output = RunShellCaptureCommand(command, &exitCode);
-  return @{
+  NSMutableDictionary *probe = [@{
     @"status" : (exitCode == 0) ? @"ok" : @"error",
     @"base_url" : baseURL ?: @"",
     @"captured_output" : output ?: @"",
     @"exit_code" : @(exitCode),
-  };
+  } mutableCopy];
+  if (exitCode != 0) {
+    // Say why readiness failed when it is pending schema migrations (GitHub issue 90).
+    NSString *trimmedBase = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
+    int readyExit = 0;
+    NSString *readyBody = RunShellCaptureCommand(
+        [NSString stringWithFormat:@"curl -sS -H 'Accept: application/json' %@",
+                                   ShellQuote([trimmedBase stringByAppendingString:@"/readyz"])],
+        &readyExit);
+    NSDictionary *ready = JSONDictionaryFromString(readyBody);
+    NSDictionary *migrations = [ready[@"checks"][@"schema_migrations"] isKindOfClass:[NSDictionary class]]
+                                   ? ready[@"checks"][@"schema_migrations"]
+                                   : nil;
+    NSArray *pending = [migrations[@"pending"] isKindOfClass:[NSArray class]] ? migrations[@"pending"] : nil;
+    if (migrations != nil && ![migrations[@"ok"] boolValue]) {
+      probe[@"readiness"] = @"not_ready";
+      probe[@"pending_migrations"] = pending ?: @[];
+      if ([migrations[@"error"] isKindOfClass:[NSString class]]) {
+        probe[@"migration_error"] = migrations[@"error"];
+      }
+    }
+  }
+  return probe;
+}
+
+static NSString *DeployHealthProbeSummary(NSDictionary *healthProbe) {
+  NSString *status = [healthProbe[@"status"] description] ?: @"error";
+  NSArray *pending = [healthProbe[@"pending_migrations"] isKindOfClass:[NSArray class]] ? healthProbe[@"pending_migrations"] : nil;
+  if (pending != nil && [pending count] > 0) {
+    return [NSString stringWithFormat:@"not ready (%lu migration%s pending)", (unsigned long)[pending count],
+                                      [pending count] == 1 ? "" : "s"];
+  }
+  if ([healthProbe[@"migration_error"] isKindOfClass:[NSString class]]) {
+    return [NSString stringWithFormat:@"not ready (schema migrations unreadable: %@)", healthProbe[@"migration_error"]];
+  }
+  return status;
 }
 
 static NSDictionary *RunReleaseHealthProbeWithRetry(NSString *baseURL,
@@ -6830,7 +6865,7 @@ static int CommandDeploy(NSArray *args) {
                    ? [currentMigrationInventory[@"count"] description]
                    : @"0") UTF8String]);
     if ([baseURL length] > 0) {
-      fprintf(stdout, "Health probe: %s\n", [([healthProbe[@"status"] description] ?: @"error") UTF8String]);
+      fprintf(stdout, "Health probe: %s\n", [DeployHealthProbeSummary(healthProbe) UTF8String]);
     }
     return ([currentReleaseDir length] > 0) ? 0 : 1;
   }

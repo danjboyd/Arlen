@@ -1,5 +1,6 @@
 #import "ALNApplication.h"
 #import "ALNPositiveInteger.h"
+#import "ALNMigrationStatus.h"
 #import "ALNFileResponseInternal.h"
 #import <dispatch/dispatch.h>
 
@@ -632,6 +633,9 @@ static BOOL ALNInvokeRouteAction(id controller,
 
 @interface ALNApplication ()
 @property(nonatomic, strong) NSNumber *cachedLargestRouteMaxBodyBytes;
+@property(nonatomic, strong) NSLock *migrationReadinessLock;
+@property(nonatomic, copy) NSDictionary *migrationReadiness;
+@property(nonatomic, strong) NSDate *migrationReadinessCheckedAt;
 
 @property(nonatomic, strong, readwrite) ALNRouter *router;
 @property(nonatomic, copy, readwrite) NSDictionary *config;
@@ -1174,6 +1178,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _started = NO;
     _configuredRoutesLoaded = NO;
     _routeCompilationLock = [[NSLock alloc] init];
+    _migrationReadinessLock = [[NSLock alloc] init];
     _mutableDataverseClients = [NSMutableDictionary dictionary];
     _dataverseClientLock = [[NSLock alloc] init];
     ALNLogLevel defaultLogLevel =
@@ -3012,6 +3017,12 @@ static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
   return ALNBoolConfigValue(observability[@"readinessRequiresClusterQuorum"], NO);
 }
 
+static BOOL ALNReadinessRequiresMigrations(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"readinessRequiresMigrations"],
+                            [application.environment isEqualToString:@"production"]);
+}
+
 static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
   if (!application.clusterEnabled) {
     return @"single_node";
@@ -3212,7 +3223,8 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
                                                  BOOL ok,
                                                  BOOL startupReady,
                                                  BOOL readinessRequiresStartup,
-                                                 BOOL readinessRequiresClusterQuorum) {
+                                                 BOOL readinessRequiresClusterQuorum,
+                                                 NSDictionary *migrationCheck) {
   NSDictionary *metricsSnapshot = application.metricsEnabled ? [application.metrics snapshot] : @{};
   NSDictionary *gauges = [metricsSnapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
                              ? metricsSnapshot[@"gauges"]
@@ -3258,6 +3270,9 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
     @"observed_nodes" : quorumSummary[@"observed_nodes"] ?: @(application.clusterObservedNodes),
     @"expected_nodes" : quorumSummary[@"expected_nodes"] ?: @(application.clusterExpectedNodes),
   };
+  if (migrationCheck != nil) {
+    checks[@"schema_migrations"] = migrationCheck;
+  }
 
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"ok"] = @(ok);
@@ -3492,12 +3507,24 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
     NSString *signal = ALNHealthSignalNameForPath(healthPath);
     BOOL startupReady = application.isStarted;
     BOOL ready = YES;
+    NSDictionary *migrationCheck = nil;
     if ([signal isEqualToString:@"ready"]) {
       if (readinessRequiresStartup && !startupReady) {
         ready = NO;
       }
       if (ready && readinessRequiresClusterQuorum && application.clusterEnabled && !clusterQuorumMet) {
         ready = NO;
+      }
+      BOOL readinessRequiresMigrations = ALNReadinessRequiresMigrations(application);
+      if (readinessRequiresMigrations) {
+        NSMutableDictionary *check = [[application currentMigrationReadiness] mutableCopy];
+        check[@"required_for_readyz"] = @YES;
+        migrationCheck = check;
+        if (![check[@"ok"] boolValue]) {
+          ready = NO;
+        }
+      } else {
+        migrationCheck = @{ @"ok" : @YES, @"required_for_readyz" : @NO, @"checked" : @NO };
       }
     }
     response.statusCode = ready ? 200 : 503;
@@ -3509,7 +3536,8 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
                                                           ready,
                                                           startupReady,
                                                           readinessRequiresStartup,
-                                                          readinessRequiresClusterQuorum);
+                                                          readinessRequiresClusterQuorum,
+                                                          migrationCheck);
       NSError *jsonError = nil;
       BOOL ok = [response setJSONBody:payload options:0 error:&jsonError];
       if (!ok) {
@@ -4525,6 +4553,35 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
   return route.maxBodyBytes > 0 ? route.maxBodyBytes : [self defaultMaxBodyBytes];
+// /readyz schema_migrations state (GitHub issue 90). While anything is pending or
+// the database cannot be read, re-check at most every
+// observability.readinessMigrationRecheckSeconds (default 5), so `arlen migrate`
+// flips readiness without a restart. Once all are applied the result is kept:
+// only a new release adds migrations.
+- (NSDictionary *)currentMigrationReadiness {
+  NSLock *lock = self.migrationReadinessLock;
+  [lock lock];
+  @try {
+    NSDictionary *cached = self.migrationReadiness;
+    NSDate *checkedAt = self.migrationReadinessCheckedAt;
+    NSDictionary *observability = ALNObservabilityConfig(self);
+    id recheck = observability[@"readinessMigrationRecheckSeconds"];
+    NSTimeInterval interval = [recheck respondsToSelector:@selector(doubleValue)] ? [recheck doubleValue] : 5.0;
+    if (cached != nil && ([cached[@"ok"] boolValue] || [[NSDate date] timeIntervalSinceDate:checkedAt] < interval)) {
+      return cached;
+    }
+    NSDictionary *status = [ALNMigrationStatus statusAtAppRoot:[self appRootPath] config:self.config ?: @{}];
+    if (![status[@"ok"] boolValue]) {
+      NSArray *pending = [status[@"pending"] isKindOfClass:[NSArray class]] ? status[@"pending"] : @[];
+      [self.logger warn:@"readiness: schema migrations not applied"
+                 fields:@{ @"pending" : pending, @"error" : status[@"error"] ?: @"" }];
+    }
+    self.migrationReadiness = status;
+    self.migrationReadinessCheckedAt = [NSDate date];
+    return status;
+  } @finally {
+    [lock unlock];
+  }
 }
 
 - (NSDictionary *)mountedEntryForPath:(NSString *)requestPath
