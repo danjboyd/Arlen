@@ -209,6 +209,12 @@ CSRF config:
   MCP in a mixed browser app. Requests with the session cookie still need a
   token. Invalid entries fail startup with error `339`.
 
+The CSRF token is created the first time a request reads it
+(`-[ALNContext csrfToken]`, which form helpers and module pages call), and only
+then is a session started and a session cookie sent. Requests that never read a
+token, including cookieless `GET`/`HEAD` for static-ish routes, get no
+`Set-Cookie`, so they cannot replace a signed-in browser's session.
+
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.

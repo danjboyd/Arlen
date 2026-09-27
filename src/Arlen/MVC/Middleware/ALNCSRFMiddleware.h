@@ -7,6 +7,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// A new random CSRF token (what -[ALNContext csrfToken] stores on first read).
+FOUNDATION_EXPORT NSString *ALNCSRFGenerateToken(void);
+
 @interface ALNCSRFMiddleware : NSObject <ALNMiddleware>
 
 - (instancetype)initWithHeaderName:(nullable NSString *)headerName

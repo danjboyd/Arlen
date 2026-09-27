@@ -6,7 +6,7 @@
 #import "ALNResponse.h"
 #import "ALNSecurityPrimitives.h"
 
-static NSString *ALNCSRFTokenFromRandomBytes(void) {
+NSString *ALNCSRFGenerateToken(void) {
   uint32_t parts[2] = {0, 0};
   if (!ALNPlatformFillRandomBytes(parts, sizeof(parts))) {
     parts[0] = (uint32_t)[[NSProcessInfo processInfo] processIdentifier];
@@ -170,15 +170,17 @@ static void ALNCSRFRejectRequest(ALNContext *context) {
       [self isExemptPath:context.request.path ?: @""]) {
     return YES;
   }
-  NSMutableDictionary *session = [context session];
-
-  NSString *token = session[@"_csrf_token"];
+  // A token is minted only when the app reads one (-[ALNContext csrfToken]).
+  // Writing one here started a session, and sent Set-Cookie, on every
+  // cookieless request, which could overwrite a signed-in browser's session
+  // (GitHub issue 86).
+  context.stash[ALNContextCSRFLazyTokenStashKey] = @YES;
+  NSString *token = [context session][@"_csrf_token"];
   if (![token isKindOfClass:[NSString class]] || [token length] == 0) {
-    token = ALNCSRFTokenFromRandomBytes();
-    session[@"_csrf_token"] = token;
-    [context markSessionDirty];
+    token = nil;
+  } else {
+    context.stash[ALNContextCSRFTokenStashKey] = token;
   }
-  context.stash[ALNContextCSRFTokenStashKey] = token;
 
   if (ALNIsSafeMethod(context.request.method ?: @"GET")) {
     return YES;
