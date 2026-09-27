@@ -1,4 +1,5 @@
 #import "ALNApplication.h"
+#import "ALNPgEventStream.h"
 #import "ALNFileResponseInternal.h"
 #import <dispatch/dispatch.h>
 
@@ -1181,6 +1182,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     [self loadConfiguredStaticMounts];
     [self loadConfiguredSPAFallback];
     [self loadConfiguredPlugins];
+    [self loadConfiguredEventStreamAdapters];
     [self loadConfiguredModules];
   }
   return self;
@@ -5043,7 +5045,58 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+// eventStreams.store / eventStreams.broker (GitHub issue 48): PostgreSQL adapters
+// so durable streams replay and fan out across propane workers and hosts.
+- (void)loadConfiguredEventStreamAdapters {
+  NSDictionary *eventStreams = ALNDictionaryConfigValue(self.config, @"eventStreams");
+  NSDictionary *storeConfig = ALNDictionaryConfigValue(eventStreams, @"store");
+  NSDictionary *brokerConfig = ALNDictionaryConfigValue(eventStreams, @"broker");
+  NSString *(^connectionString)(NSDictionary *) = ^NSString *(NSDictionary *section) {
+    NSString *dsn = ALNStringConfigValue(section[@"connectionString"], @"");
+    const char *envDSN = getenv("ARLEN_DATABASE_URL");
+    if ([dsn length] == 0 && envDSN != NULL && envDSN[0] != '\0') {
+      dsn = [NSString stringWithUTF8String:envDSN];
+    }
+    if ([dsn length] == 0) {
+      dsn = ALNStringConfigValue(ALNDictionaryConfigValue(self.config, @"database")[@"connectionString"], @"");
+    }
+    return dsn;
+  };
+  NSError *error = nil;
+  if ([[ALNStringConfigValue(storeConfig[@"adapter"], @"") lowercaseString] isEqualToString:@"postgresql"]) {
+    id poolSize = storeConfig[@"maxConnections"];
+    ALNPgEventStreamStore *store =
+        [[ALNPgEventStreamStore alloc] initWithConnectionString:connectionString(storeConfig)
+                                                      tableName:ALNStringConfigValue(storeConfig[@"tableName"], @"")
+                                                 maxConnections:[poolSize respondsToSelector:@selector(unsignedIntegerValue)]
+                                                                    ? [poolSize unsignedIntegerValue]
+                                                                    : 4
+                                                          error:&error];
+    if (store != nil) {
+      self.eventStreamStore = store;
+    } else {
+      [self.logger warn:@"eventStreams.store disabled"
+                 fields:@{ @"error" : error.localizedDescription ?: @"invalid configuration" }];
+    }
+  }
+  if ([[ALNStringConfigValue(brokerConfig[@"adapter"], @"") lowercaseString] isEqualToString:@"postgresql"]) {
+    ALNPgEventStreamBroker *broker =
+        [[ALNPgEventStreamBroker alloc] initWithConnectionString:connectionString(brokerConfig)
+                                                   notifyChannel:ALNStringConfigValue(brokerConfig[@"channel"], @"")
+                                                           error:&error];
+    if (broker != nil) {
+      self.eventStreamBroker = broker;
+    } else {
+      [self.logger warn:@"eventStreams.broker disabled"
+                 fields:@{ @"error" : error.localizedDescription ?: @"invalid configuration" }];
+    }
+  }
+}
+
 - (void)shutdown {
+  if ([self.eventStreamBroker respondsToSelector:@selector(stop)]) {
+    [(id)self.eventStreamBroker stop];
+  }
   if (!self.isStarted) {
     return;
   }

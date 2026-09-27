@@ -99,6 +99,46 @@ static void ConfigureRealtime(ALNApplication *app) {
 The in-memory store and broker are useful for local development and focused
 tests. Production durability should come from a real store adapter.
 
+### PostgreSQL store and broker
+
+For production, and whenever the app runs under several `propane` workers or on
+more than one host, configure the first-party PostgreSQL adapters instead:
+
+```plist
+eventStreams = {
+  store = {
+    adapter = "postgresql";
+    // optional: connectionString (default ARLEN_DATABASE_URL, then
+    // database.connectionString), tableName (default arlen_event_stream_events),
+    // maxConnections (default 4)
+  };
+  broker = {
+    adapter = "postgresql";
+    // optional: connectionString, channel (NOTIFY channel, default arlen_event_streams)
+  };
+};
+```
+
+`ALNPgEventStreamStore` keeps events in one table, created on first use (key
+`(stream_id, sequence)`, with a unique index on idempotency keys). Each append
+runs in a transaction holding a per-stream advisory lock, so concurrent workers
+never assign the same sequence, and idempotency keys behave exactly as in the
+in-memory store: the same request returns the original event, and a different
+event under the same key fails with `ALNEventStreamErrorIdempotencyConflict`.
+Replay and `resync_required` therefore work the same on every worker and host.
+When all pooled connections are busy, an append waits up to 5 seconds for one.
+
+`ALNPgEventStreamBroker` delivers committed events to live subscribers in every
+process through PostgreSQL `LISTEN`/`NOTIFY`, using the same fanout as
+[live push](LIVE_UI.md#multiple-workers-and-hosts). Each process starts its
+listener with its first subscription. Delivery is at most once; a subscriber
+that misses events (for example during a listener reconnect) catches up through
+replay from its last cursor, which the store keeps durable.
+
+Both are also available in code: `[app setEventStreamStore:...]` with
+`initWithConnectionString:tableName:maxConnections:error:`, and
+`[app setEventStreamBroker:...]` with `initWithConnectionString:notifyChannel:error:`.
+
 ## Controller Helpers
 
 `ALNController` exposes the seam through one append path and three consumer
