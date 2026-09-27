@@ -619,6 +619,17 @@ Release metadata includes:
  `jobs-worker`, and the operability helper
 - release-relative manifest paths for all packaged runtime/helper entries
  (`ARLEN-BUG-017`)
+- the source revision (`source_revision` in `manifest.json`;
+ `ARLEN_RELEASE_APP_GIT_SHA`, `ARLEN_RELEASE_APP_GIT_DIRTY`,
+ `ARLEN_RELEASE_FRAMEWORK_GIT_SHA` and `ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY` in
+ `release.env`): the app and framework commits the release was built from.
+ The app is dirty when anything it packages (`config`, `public`, `templates`,
+ `modules`, `src`, `app_lite.m`, `db/migrations`) differs from that commit,
+ including untracked files there; build output elsewhere does not count. The
+ framework is dirty when tracked files have changes. Values are empty when a
+ root is not a git checkout. `deploy status` and `deploy releases` show the
+ short app SHA with `+dirty` when set, and `deploy push --require-clean`
+ refuses to build a dirty app
 
 ### 6.2 Activate a release
 

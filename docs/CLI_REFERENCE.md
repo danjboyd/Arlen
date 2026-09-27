@@ -345,6 +345,9 @@ Common options:
 - `--database-target <name>`: declared database target name (default `default`)
 - `--require-env-key <NAME>`: record a required environment key without storing its value in the release
 - `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
+- `--require-clean`: refuse to build when the app is not a git checkout or has
+  uncommitted changes in packaged paths (see [Deployment](DEPLOYMENT.md), release
+  metadata)
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override certification manifest path
 - `--json-performance-manifest <path>`: override JSON performance manifest path

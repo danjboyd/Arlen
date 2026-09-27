@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- Deploy releases record their source revision: the app and framework git
+  commits plus dirty flags, in `manifest.json` (`source_revision`) and
+  `release.env` (`ARLEN_RELEASE_APP_GIT_SHA`, `ARLEN_RELEASE_APP_GIT_DIRTY`,
+  `ARLEN_RELEASE_FRAMEWORK_GIT_SHA`, `ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY`). App
+  dirtiness covers only what the release packages, so untracked build output
+  does not count. `deploy status` and `deploy releases` show the short SHA with
+  `+dirty`, and `deploy push --require-clean` refuses a dirty app (GitHub
+  issue 89). See [Deployment](DEPLOYMENT.md).
+
 - MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
   in `config/app.plist` (as in the documented example) no longer crash startup
   (`does not recognize unsignedIntegerValue`). Plist strings holding

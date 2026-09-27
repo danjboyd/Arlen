@@ -40,10 +40,18 @@ def main() -> int:
     handoff = manifest.get("propane_handoff") or {}
     certification = manifest.get("certification") or {}
     json_performance = manifest.get("json_performance") or {}
+    source_revision = manifest.get("source_revision") or {}
+
+    def dirty_flag(value):
+        return "" if value is None else ("1" if value else "0")
 
     values = {
         "RELEASE_ID": manifest.get("release_id") or os.path.basename(release_dir),
         "RELEASE_CREATED_UTC": manifest.get("created_utc") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ARLEN_RELEASE_APP_GIT_SHA": source_revision.get("app_git_sha") or "",
+        "ARLEN_RELEASE_APP_GIT_DIRTY": dirty_flag(source_revision.get("app_git_dirty")),
+        "ARLEN_RELEASE_FRAMEWORK_GIT_SHA": source_revision.get("framework_git_sha") or "",
+        "ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY": dirty_flag(source_revision.get("framework_git_dirty")),
         "ARLEN_RELEASE_ENV_LAYOUT": "target-absolute",
         "ARLEN_RELEASE_ROOT": release_dir,
         "ARLEN_APP_ROOT": resolve_release_path(release_dir, paths.get("app_root"), "app"),
