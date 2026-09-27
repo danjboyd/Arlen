@@ -3520,6 +3520,65 @@
   }
 }
 
+// GitHub issue 64: bodies above spoolThresholdBytes stream to disk on both
+// parser backends, keep-alive framing holds, and aborts leave no files.
+- (void)testLargeBodiesSpoolToDiskAndCleanUpOnBothBackends {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-spool-app"];
+  NSString *spoolRoot = [self createTempDirectoryWithPrefix:@"arlen-spool-dir"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(spoolRoot);
+  if (!appRoot || !spoolRoot) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/spool_app.m"
+        encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    NSString *appConfig = [NSString stringWithFormat:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; "
+                           "csrf = { enabled = NO; }; requestLimits = { maxBodyBytes = 8388608; "
+                           "maxMultipartFileBytes = 8388608; spoolThresholdBytes = 65536; spoolDirectory = \"%@\"; }; }",
+                           spoolRoot];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:appConfig]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ ARLEN_TEST_SPOOL_DIR=%@",
+        [self shellQuoted:repoRoot], [self shellQuoted:appRoot], [self shellQuoted:spoolRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix] exitCode:&prepareCode];
+    XCTAssertEqual(prepareCode, 0, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+    for (NSString *backend in @[@"llhttp", @"legacy"]) {
+      int port = [self randomPort];
+      NSTask *server = [[NSTask alloc] init];
+      server.launchPath = @"/bin/bash";
+      server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
+          envPrefix, backend,
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = server.standardOutput;
+      [server launch];
+      @try {
+        BOOL ready = NO;
+        (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+        XCTAssertTrue(ready);
+        if (!ready) continue;
+        NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/multipart_spool_probe.py"
+            encoding:NSUTF8StringEncoding error:NULL];
+        script = [script stringByReplacingOccurrencesOfString:@"__PORT__" withString:[NSString stringWithFormat:@"%d", port]];
+        script = [script stringByReplacingOccurrencesOfString:@"__SPOOL__"
+                                                   withString:[NSString stringWithFormat:@"'%@'", spoolRoot]];
+        int code = 0;
+        NSString *output = [self runPythonScript:script exitCode:&code];
+        XCTAssertEqual(code, 0, @"%@: %@", backend, output);
+        XCTAssertTrue([output containsString:@"multipart spool checks passed"], @"%@: %@", backend, output);
+      } @finally {
+        XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:spoolRoot error:NULL];
+  }
+}
+
 - (void)testMultipartDocumentedPlistLimitsKeepServerAlive {
   NSString *binary = [[[NSFileManager defaultManager] currentDirectoryPath]
       stringByAppendingPathComponent:@"build/boomhauer"];

@@ -1,22 +1,98 @@
 #import "ALNMultipart.h"
 #import "ALNPositiveInteger.h"
+#include <errno.h>
+#include <stdio.h>
 #include <string.h>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 NSString *const ALNMultipartErrorDomain = @"Arlen.HTTP.Multipart.Error";
+static NSString *const SpoolThresholdKey = @"spoolThresholdBytes";
+static NSString *const SpoolDirectoryKey = @"spoolDirectory";
+static const NSUInteger DefaultSpoolThreshold = 1048576;
 @interface ALNMultipartPart ()
 @property(nonatomic, copy, readwrite) NSString *fieldName;
 @property(nonatomic, copy, readwrite) NSString *originalFilename;
 @property(nonatomic, copy, readwrite) NSString *contentType;
 @property(nonatomic, copy, readwrite) NSData *data;
+// Spooled uploads keep their bytes in this file instead of `data`.
+@property(nonatomic, copy) NSString *backingPath;
+@property(nonatomic, assign) NSUInteger backingSize;
+@property(nonatomic, assign) BOOL backingMoved;
 @end
 @implementation ALNMultipartPart
-- (NSUInteger)size { return [self.data length]; }
+- (NSUInteger)size { return self.backingPath ? self.backingSize : [self.data length]; }
 - (NSString *)text { return [[NSString alloc] initWithData:self.data encoding:NSUTF8StringEncoding]; }
 @end
+
+static NSError *SpoolError(NSString *message, NSString *path) {
+  return [NSError errorWithDomain:ALNMultipartErrorDomain code:ALNMultipartErrorSpoolFailed
+                         userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"%@ (%@: %s)", message, path, strerror(errno)]}];
+}
+// Atomic replace within one filesystem. Returns NO with errno set; EXDEV means copy instead.
+static BOOL ReplaceFile(NSString *from, NSString *to) {
+#if defined(_WIN32)
+  if (MoveFileExW([from fileSystemRepresentation], [to fileSystemRepresentation], MOVEFILE_REPLACE_EXISTING)) return YES;
+  errno = (GetLastError() == ERROR_NOT_SAME_DEVICE) ? EXDEV : EIO;
+  return NO;
+#else
+  return rename([from fileSystemRepresentation], [to fileSystemRepresentation]) == 0;
+#endif
+}
+
 @implementation ALNUpload
+- (NSString *)temporaryFilePath { return self.backingMoved ? nil : self.backingPath; }
+- (NSData *)data {
+  if (!self.backingPath) return [super data];
+  return [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:NULL] ?: [NSData data];
+}
 - (BOOL)writeToFile:(NSString *)path error:(NSError **)error {
-  return [self.data writeToFile:path options:NSDataWritingAtomic error:error];
+  if (!self.backingPath) return [[super data] writeToFile:path options:NSDataWritingAtomic error:error];
+  if (!self.backingMoved) {
+    if (ReplaceFile(self.backingPath, path)) {
+      self.backingPath = path;
+      self.backingMoved = YES;
+      return YES;
+    }
+    if (errno != EXDEV) {
+      if (error) *error = SpoolError(@"Could not move spooled upload", path);
+      return NO;
+    }
+  }
+  // Across filesystems (or a second write): copy from the mapped file, never the heap.
+  NSData *mapped = [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:error];
+  if (!mapped || ![mapped writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
+  if (!self.backingMoved) {
+    [[NSFileManager defaultManager] removeItemAtPath:self.backingPath error:NULL];
+    self.backingPath = path;
+    self.backingMoved = YES;
+  }
+  return YES;
 }
 @end
+
+// Writes body[start, start+length) to a new 0600 file without copying it into another NSData.
+static NSString *SpoolRange(NSData *body, NSUInteger start, NSUInteger length, NSString *directory,
+                            NSUInteger index, NSError **error) {
+  NSString *path = [directory stringByAppendingPathComponent:[NSString stringWithFormat:@"part-%lu", (unsigned long)index]];
+  if (![[NSFileManager defaultManager] createFileAtPath:path contents:nil
+                                             attributes:@{NSFilePosixPermissions:@0600}]) {
+    if (error) *error = SpoolError(@"Could not create multipart spool file", path);
+    return nil;
+  }
+  FILE *file = fopen([path fileSystemRepresentation], "wb");
+  if (!file) {
+    if (error) *error = SpoolError(@"Could not open multipart spool file", path);
+    return nil;
+  }
+  BOOL ok = length == 0 || fwrite((const char *)body.bytes+start, 1, length, file) == length;
+  ok = (fclose(file) == 0) && ok;
+  if (!ok) {
+    if (error) *error = SpoolError(@"Could not write multipart spool file", path);
+    return nil;
+  }
+  return path;
+}
 
 static NSString *Trim(NSString *s) {
   return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -78,6 +154,22 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
 }
 + (NSArray *)parseBody:(NSData *)body contentType:(NSString *)contentType
                 limits:(NSDictionary *)limits error:(NSError **)error {
+  return [self parseBody:body contentType:contentType limits:limits spool:NO spoolDirectory:NULL error:error];
+}
++ (NSArray *)parseBody:(NSData *)body contentType:(NSString *)contentType
+                limits:(NSDictionary *)limits spoolDirectory:(NSString **)spoolDirectory error:(NSError **)error {
+  NSString *created = nil;
+  NSArray *parts = [self parseBody:body contentType:contentType limits:limits spool:YES spoolDirectory:&created error:error];
+  if (!parts && created) {
+    // Atomic failure: no partial results, and no spool files left behind.
+    [[NSFileManager defaultManager] removeItemAtPath:created error:NULL];
+    created = nil;
+  }
+  if (spoolDirectory) *spoolDirectory = created;
+  return parts;
+}
++ (NSArray *)parseBody:(NSData *)body contentType:(NSString *)contentType
+                limits:(NSDictionary *)limits spool:(BOOL)spool spoolDirectory:(NSString **)created error:(NSError **)error {
   if (error) *error = nil;
   if (limits != nil && ![limits isKindOfClass:[NSDictionary class]])
     return Failure(error, ALNMultipartErrorLimitExceeded, @"Multipart limits must be a dictionary");
@@ -93,6 +185,24 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
   }
   if (body.length > [policy[@"maxBodyBytes"] unsignedLongLongValue])
     return Failure(error, ALNMultipartErrorLimitExceeded, @"Multipart request body limit exceeded");
+  NSUInteger spoolThreshold = DefaultSpoolThreshold;
+  NSString *spoolParent = NSTemporaryDirectory();
+  if (spool) {
+    if (limits[SpoolThresholdKey]) {
+      NSNumber *value = ALNPositiveInteger(limits[SpoolThresholdKey]);
+      if (value == nil)
+        return Failure(error, ALNMultipartErrorLimitExceeded, @"requestLimits.spoolThresholdBytes must be a positive integer in range");
+      spoolThreshold = [value unsignedIntegerValue];
+    }
+    if (limits[SpoolDirectoryKey]) {
+      BOOL isDirectory = NO;
+      id value = limits[SpoolDirectoryKey];
+      if (![value isKindOfClass:[NSString class]] || ![value isAbsolutePath] ||
+          ![[NSFileManager defaultManager] fileExistsAtPath:value isDirectory:&isDirectory] || !isDirectory)
+        return Failure(error, ALNMultipartErrorSpoolFailed, @"requestLimits.spoolDirectory must be an existing absolute directory");
+      spoolParent = value;
+    }
+  }
   NSString *kind = nil;
   NSDictionary *params = Parameters(contentType, &kind);
   NSString *boundary = params[@"boundary"];
@@ -167,7 +277,24 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
     part.fieldName = attributes[@"name"];
     part.originalFilename = attributes[@"filename"];
     part.contentType = values[@"content-type"] ?: @"";
-    part.data = [body subdataWithRange:NSMakeRange(start, length)];
+    if (file && spool && length > spoolThreshold) {
+      if (*created == nil) {
+        NSString *directory = [spoolParent stringByAppendingPathComponent:
+            [@"arlen-upload-" stringByAppendingString:[[NSUUID UUID] UUIDString]]];
+        if (![[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:NO
+                                                        attributes:@{NSFilePosixPermissions:@0700} error:NULL]) {
+          if (error) *error = SpoolError(@"Could not create multipart spool directory", directory);
+          return nil;
+        }
+        *created = directory;
+      }
+      part.backingPath = SpoolRange(body, start, length, *created, parts.count, error);
+      if (!part.backingPath) return nil;
+      part.backingSize = length;
+      part.data = [NSData data];
+    } else {
+      part.data = [body subdataWithRange:NSMakeRange(start, length)];
+    }
     if (!file && part.text == nil) return Failure(error, ALNMultipartErrorMalformed, @"Multipart text fields must be UTF-8");
     [parts addObject:part];
     pos = next.location+delimiter.length;

@@ -5,6 +5,12 @@
 
 HTTP request/response and server runtime primitives.
 
+## Properties
+
+| Property | Type | Attributes | Purpose |
+| --- | --- | --- | --- |
+| `temporaryFilePath` | `NSString *` | `nonatomic, copy, readonly, nullable` | Public `temporaryFilePath` property available on `ALNUpload`. |
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |

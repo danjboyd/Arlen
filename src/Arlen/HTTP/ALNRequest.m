@@ -490,6 +490,8 @@ static llhttp_settings_t gALNLLHTTPSettings;
 static pthread_once_t gALNLLHTTPSettingsOnce = PTHREAD_ONCE_INIT;
 static llhttp_settings_t gALNLLHTTPStreamingSettings;
 static pthread_once_t gALNLLHTTPStreamingSettingsOnce = PTHREAD_ONCE_INIT;
+static llhttp_settings_t gALNLLHTTPHeadOnlySettings;
+static pthread_once_t gALNLLHTTPHeadOnlySettingsOnce = PTHREAD_ONCE_INIT;
 static pthread_key_t gALNLLHTTPStateKey;
 static pthread_once_t gALNLLHTTPStateKeyOnce = PTHREAD_ONCE_INIT;
 
@@ -964,6 +966,30 @@ static void ALNLLHTTPInitializeStreamingSettings(void) {
 static const llhttp_settings_t *ALNLLHTTPStreamingSettings(void) {
   pthread_once(&gALNLLHTTPStreamingSettingsOnce, ALNLLHTTPInitializeStreamingSettings);
   return &gALNLLHTTPStreamingSettings;
+}
+
+// Head-only parse for spooled bodies: returning 1 from on_headers_complete tells
+// llhttp the message has no body, so the same parser validates the head and the
+// server supplies the body from its spool file.
+static int ALNLLHTTPOnHeadersCompleteSkipBody(llhttp_t *parser) {
+  int result = ALNLLHTTPOnHeadersComplete(parser);
+  return result == 0 ? 1 : result;
+}
+
+static void ALNLLHTTPInitializeHeadOnlySettings(void) {
+  llhttp_settings_init(&gALNLLHTTPHeadOnlySettings);
+  gALNLLHTTPHeadOnlySettings.on_url = ALNLLHTTPOnURL;
+  gALNLLHTTPHeadOnlySettings.on_header_field = ALNLLHTTPOnHeaderField;
+  gALNLLHTTPHeadOnlySettings.on_header_value = ALNLLHTTPOnHeaderValue;
+  gALNLLHTTPHeadOnlySettings.on_header_value_complete = ALNLLHTTPOnHeaderValueComplete;
+  gALNLLHTTPHeadOnlySettings.on_headers_complete = ALNLLHTTPOnHeadersCompleteSkipBody;
+  gALNLLHTTPHeadOnlySettings.on_body = ALNLLHTTPOnBody;
+  gALNLLHTTPHeadOnlySettings.on_message_complete = ALNLLHTTPOnMessageCompletePause;
+}
+
+static const llhttp_settings_t *ALNLLHTTPHeadOnlySettings(void) {
+  pthread_once(&gALNLLHTTPHeadOnlySettingsOnce, ALNLLHTTPInitializeHeadOnlySettings);
+  return &gALNLLHTTPHeadOnlySettings;
 }
 
 static void ALNLLHTTPThreadStateRelease(void *value) {
@@ -1449,6 +1475,24 @@ static ALNRequest *ALNRequestFromBufferedDataLLHTTP(NSData *data,
   return ALNBuildRequestFromLLHTTPState(data, &parser, state, error);
 }
 
+static ALNRequest *ALNRequestFromHeadDataLLHTTP(NSData *head, NSError **error) {
+  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
+  llhttp_t parser;
+  llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPHeadOnlySettings());
+  parser.data = (__bridge void *)state;
+  state->_sourceData = head;
+  const char *bytes = (const char *)[head bytes];
+  llhttp_errno_t parseError = llhttp_execute(&parser, bytes, (size_t)[head length]);
+  if (parseError == HPE_PAUSED && state->_messageComplete) {
+    return ALNBuildRequestFromLLHTTPState(head, &parser, state, error);
+  }
+  if (error != NULL) {
+    *error = (parseError != HPE_OK) ? ALNLLHTTPParseErrorForState(state, &parser, parseError)
+                                    : ALNRequestError(2, @"Incomplete request head");
+  }
+  return nil;
+}
+
 static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   NSError *parseError = nil;
   ALNRequest *request = ALNRequestFromRawDataLLHTTPOnce(data, &parseError);
@@ -1490,6 +1534,8 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, copy) NSArray *cachedMultipartParts;
 @property(nonatomic, copy) NSDictionary *cachedMultipartLimits;
 @property(nonatomic, strong) NSError *cachedMultipartError;
+@property(nonatomic, copy) NSString *multipartSpoolDirectory;
+@property(nonatomic, copy) NSString *bodySpoolPath;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
 @property(nonatomic, strong) NSMutableDictionary *cachedQueryValueLookups;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
@@ -1597,6 +1643,52 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 #endif
 
 @implementation ALNRequest
+
+- (void)dealloc {
+  [self removeTemporaryFiles];
+}
+
+- (void)removeMultipartSpool {
+  NSString *directory = self.multipartSpoolDirectory;
+  if (directory != nil) {
+    self.multipartSpoolDirectory = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+  }
+}
+
+- (void)removeTemporaryFiles {
+  [self removeMultipartSpool];
+  // The mapping in `body` stays valid after the unlink on POSIX systems.
+  NSString *bodyPath = self.bodySpoolPath;
+  if (bodyPath != nil) {
+    self.bodySpoolPath = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:bodyPath error:NULL];
+  }
+}
+
++ (ALNRequest *)requestFromHeadData:(NSData *)head
+                            backend:(ALNHTTPParserBackend)backend
+                              error:(NSError **)error {
+#if ARLEN_ENABLE_LLHTTP
+  if (backend != ALNHTTPParserBackendLegacy) {
+    return ALNRequestFromHeadDataLLHTTP(head ?: [NSData data], error);
+  }
+#endif
+  (void)backend;
+  return ALNRequestFromRawDataLegacy(head ?: [NSData data], error);
+}
+
+- (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
+  NSData *mapped = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+  if (mapped == nil) {
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    return NO;
+  }
+  _body = mapped;
+  self.bodySpoolPath = path;
+  self.cachedFormParams = nil;
+  return YES;
+}
 
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path
@@ -1801,7 +1893,12 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   NSDictionary *policy = limits ?: [ALNMultipart defaultLimits];
   if (!self.cachedMultipartParts || ![self.cachedMultipartLimits isEqual:policy]) {
     NSError *failure = nil;
-    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy error:&failure];
+    // A re-parse replaces the parts, so drop the files behind the previous ones.
+    [self removeMultipartSpool];
+    NSString *spoolDirectory = nil;
+    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy
+                              spoolDirectory:&spoolDirectory error:&failure];
+    self.multipartSpoolDirectory = spoolDirectory;
     self.cachedMultipartParts = parts ?: @[];
     self.cachedMultipartLimits = policy;
     self.cachedMultipartError = failure;

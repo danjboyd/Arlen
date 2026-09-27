@@ -51,7 +51,7 @@
     NSString *path = [root stringByAppendingPathComponent:@"config/app.plist"];
     for (NSString *key in @[@"maxBodyBytes", @"maxHeaderBytes", @"maxRequestLineBytes",
                            @"maxMultipartParts", @"maxMultipartFieldBytes",
-                           @"maxMultipartFileBytes", @"maxMultipartHeaderBytes"]) {
+                           @"maxMultipartFileBytes", @"maxMultipartHeaderBytes", @"spoolThresholdBytes"]) {
       for (NSString *bad in @[@"0", @"-1", @"junk", @"16parts", @"1.5",
                              @"18446744073709551616", @"()", @"{}"] ) {
         XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
@@ -62,6 +62,17 @@
         XCTAssertTrue([error.localizedDescription containsString:key], @"%@", error);
       }
     }
+    for (NSString *bad in @[@"relative/spool", @"()", @"{}"]) {
+      XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
+          @"{ requestLimits = { spoolDirectory = %@; }; }", bad]]));
+      NSError *error = nil;
+      XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error], @"%@", bad);
+      XCTAssertTrue([error.localizedDescription containsString:@"spoolDirectory"], @"%@", error);
+    }
+    XCTAssertTrue([self writeFile:path content:@"{ requestLimits = { spoolThresholdBytes = \"4096\"; spoolDirectory = \"/var/spool/arlen\"; }; }"]);
+    NSDictionary *spoolConfig = [ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:NULL];
+    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolThresholdBytes"], @4096);
+    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolDirectory"], @"/var/spool/arlen");
     XCTAssertTrue([self writeFile:path content:@"{ requestLimits = invalid; }"]);
     NSError *error = nil;
     XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);

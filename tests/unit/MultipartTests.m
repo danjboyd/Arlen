@@ -188,4 +188,99 @@
   app = [[ALNApplication alloc] initWithConfig:@{}];
   XCTAssertEqual([app dispatchRequest:[self request:[NSData data]]].statusCode, 400);
 }
+// GitHub issue 64: file parts above requestLimits.spoolThresholdBytes live in a
+// private temp file, never in an NSData copy of the body.
+- (NSString *)spoolParent {
+  NSString *parent = [NSTemporaryDirectory() stringByAppendingPathComponent:
+      [@"arlen-spool-test-" stringByAppendingString:[NSUUID UUID].UUIDString]];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:NULL]);
+  return parent;
+}
+- (NSArray *)entriesIn:(NSString *)directory {
+  return [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL] ?: @[];
+}
+- (void)testLargeFilePartsSpoolToPrivateFilesAndMoveOnWrite_Issue64 {
+  NSString *parent = [self spoolParent];
+  NSString *destination = [parent stringByAppendingPathComponent:@"kept.bin"];
+  @try {
+    NSDictionary *limits = @{@"spoolThresholdBytes":@"8", @"spoolDirectory":parent};
+    NSString *spooledPath = nil;
+    @autoreleasepool {
+      ALNRequest *request = [self request:self.body];
+      NSError *error = nil;
+      XCTAssertTrue([request parseMultipartFormWithLimits:limits error:&error], @"%@", error);
+      ALNUpload *upload = [request uploadsForName:@"doc"][0];
+      spooledPath = upload.temporaryFilePath;
+      XCTAssertNotNil(spooledPath);
+      XCTAssertTrue([spooledPath hasPrefix:parent]);
+      NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:spooledPath error:NULL];
+      XCTAssertEqual(0600, [attributes[NSFilePosixPermissions] intValue]);
+      XCTAssertEqual(0700, [[[NSFileManager defaultManager] attributesOfItemAtPath:[spooledPath stringByDeletingLastPathComponent]
+                                                                             error:NULL][NSFilePosixPermissions] intValue]);
+      XCTAssertEqualObjects(upload.data, self.binary);
+      XCTAssertEqual(upload.size, self.binary.length);
+      // Small uploads and text fields stay in memory.
+      XCTAssertNil(request.uploads[1].temporaryFilePath);
+      XCTAssertEqualObjects(request.formValues[@"tag"], (@[@"one", @""]));
+
+      XCTAssertTrue([upload writeToFile:destination error:&error], @"%@", error);
+      XCTAssertNil(upload.temporaryFilePath);
+      XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:spooledPath]);
+      XCTAssertEqualObjects([NSData dataWithContentsOfFile:destination], self.binary);
+      XCTAssertEqualObjects(upload.data, self.binary);
+      NSString *copy = [parent stringByAppendingPathComponent:@"copy.bin"];
+      XCTAssertTrue([upload writeToFile:copy error:&error], @"%@", error);
+      XCTAssertEqualObjects([NSData dataWithContentsOfFile:copy], self.binary);
+      XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:destination]);
+    }
+    // The request is gone: its spool directory went with it; moved files stay.
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:[spooledPath stringByDeletingLastPathComponent]]);
+    XCTAssertEqualObjects([NSData dataWithContentsOfFile:destination], self.binary);
+  } @finally { [[NSFileManager defaultManager] removeItemAtPath:parent error:NULL]; }
+}
+- (void)testSpoolFilesAreRemovedExplicitlyOnReparseAndOnFailure_Issue64 {
+  NSString *parent = [self spoolParent];
+  @try {
+    NSDictionary *limits = @{@"spoolThresholdBytes":@8, @"spoolDirectory":parent};
+    ALNRequest *request = [self request:self.body];
+    XCTAssertTrue([request parseMultipartFormWithLimits:limits error:NULL]);
+    XCTAssertEqual(1u, [self entriesIn:parent].count);
+    [request removeTemporaryFiles];
+    [request removeTemporaryFiles];
+    XCTAssertEqual(0u, [self entriesIn:parent].count);
+
+    XCTAssertTrue([request parseMultipartFormWithLimits:limits error:NULL]);
+    NSMutableDictionary *other = [limits mutableCopy];
+    other[@"maxMultipartParts"] = @64;
+    XCTAssertTrue([request parseMultipartFormWithLimits:other error:NULL]);
+    XCTAssertEqual(1u, [self entriesIn:parent].count, @"re-parse must not leak the previous spool");
+
+    // The spooled part is written before the truncation is found; nothing may remain.
+    NSMutableData *truncated = [[self.body subdataWithRange:NSMakeRange(0, self.body.length - 30)] mutableCopy];
+    ALNRequest *broken = [self request:truncated];
+    NSError *error = nil;
+    XCTAssertFalse([broken parseMultipartFormWithLimits:limits error:&error]);
+    XCTAssertEqual(error.code, ALNMultipartErrorTruncated);
+    XCTAssertEqual(1u, [self entriesIn:parent].count);
+    XCTAssertEqual(broken.uploads.count, 0u);
+  } @finally { [[NSFileManager defaultManager] removeItemAtPath:parent error:NULL]; }
+}
+- (void)testSpoolSettingsAreValidated_Issue64 {
+  NSError *error = nil;
+  ALNRequest *request = [self request:self.body];
+  XCTAssertFalse([request parseMultipartFormWithLimits:@{@"spoolThresholdBytes":@"lots"} error:&error]);
+  XCTAssertEqual(error.code, ALNMultipartErrorLimitExceeded);
+  for (id directory in @[@"relative/dir", @"/nonexistent/arlen-spool", @42]) {
+    request = [self request:self.body];
+    XCTAssertFalse([request parseMultipartFormWithLimits:@{@"spoolDirectory":directory} error:&error], @"%@", directory);
+    XCTAssertEqual(error.code, ALNMultipartErrorSpoolFailed);
+  }
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{@"requestLimits":@{@"spoolDirectory":@"/nonexistent/arlen-spool"}}];
+  XCTAssertEqual([app dispatchRequest:[self request:self.body]].statusCode, 500);
+  // The non-spooling parser entrypoint keeps everything in memory.
+  NSArray *parts = [ALNMultipart parseBody:self.body contentType:@"multipart/form-data; boundary=Aa"
+                                    limits:@{@"spoolThresholdBytes":@1} error:&error];
+  XCTAssertNil([parts[2] temporaryFilePath]);
+  XCTAssertEqualObjects([parts[2] data], self.binary);
+}
 @end
