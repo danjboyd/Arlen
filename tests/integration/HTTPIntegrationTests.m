@@ -3641,6 +3641,74 @@
   }
 }
 
+// GitHub issue 67 / ARLEN-BUG-024: 2,000 file responses (renderFileAtPath: full,
+// range, 304 and HEAD, plus a static mount) leave the worker's descriptor count
+// and its /dev/null descriptors where they started, in both dispatch modes.
+- (void)testFileResponsesKeepWorkerDescriptorsStable_Issue67 {
+  if (![[NSFileManager defaultManager] fileExistsAtPath:@"/proc/self/fd"]) {
+    return;  // Linux /proc required.
+  }
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-fd-stability"];
+  XCTAssertNotNil(appRoot);
+  if (!appRoot) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/file_response_app.m"
+        encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    NSMutableData *media = [NSMutableData dataWithLength:262144];
+    XCTAssertTrue([media writeToFile:[appRoot stringByAppendingPathComponent:@"media/voice.mp3"] atomically:YES] ||
+                  ([[NSFileManager defaultManager] createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"media"]
+                                             withIntermediateDirectories:YES attributes:nil error:NULL] &&
+                   [media writeToFile:[appRoot stringByAppendingPathComponent:@"media/voice.mp3"] atomically:YES]));
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[appRoot stringByAppendingPathComponent:@"public"]
+                                            withIntermediateDirectories:YES attributes:nil error:NULL]);
+    XCTAssertTrue([media writeToFile:[appRoot stringByAppendingPathComponent:@"public/photo.bin"] atomically:YES]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ ARLEN_TEST_MEDIA_FILE=%@",
+        [self shellQuoted:repoRoot], [self shellQuoted:appRoot],
+        [self shellQuoted:[appRoot stringByAppendingPathComponent:@"media/voice.mp3"]]];
+    for (NSString *dispatchMode in @[ @"concurrent", @"serialized" ]) {
+      NSString *appConfig = [NSString stringWithFormat:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; "
+                             "requestDispatchMode = \"%@\"; csrf = { enabled = NO; }; "
+                             "staticMounts = ({ prefix = \"/static\"; directory = \"public\"; allowExtensions = (\"bin\"); }); }",
+                             dispatchMode];
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:appConfig]);
+      int prepareCode = 0;
+      NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:
+          @"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix] exitCode:&prepareCode];
+      XCTAssertEqual(prepareCode, 0, @"%@", prepareOutput);
+      if (prepareCode != 0) return;
+      int port = [self randomPort];
+      NSTask *server = [[NSTask alloc] init];
+      server.launchPath = @"/bin/bash";
+      server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = server.standardOutput;
+      [server launch];
+      @try {
+        BOOL ready = NO;
+        (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+        XCTAssertTrue(ready);
+        if (!ready) continue;
+        NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/fd_stability_probe.py"
+            encoding:NSUTF8StringEncoding error:NULL];
+        script = [script stringByReplacingOccurrencesOfString:@"__PORT__" withString:[NSString stringWithFormat:@"%d", port]];
+        script = [script stringByReplacingOccurrencesOfString:@"__PID__"
+                                                   withString:[NSString stringWithFormat:@"%d", server.processIdentifier]];
+        int code = 0;
+        NSString *output = [self runPythonScript:script exitCode:&code];
+        XCTAssertEqual(code, 0, @"%@: %@", dispatchMode, output);
+        XCTAssertTrue([output containsString:@"fd stability checks passed"], @"%@: %@", dispatchMode, output);
+      } @finally {
+        XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 - (void)testMultipartDocumentedPlistLimitsKeepServerAlive {
   NSString *binary = [[[NSFileManager defaultManager] currentDirectoryPath]
       stringByAppendingPathComponent:@"build/boomhauer"];
