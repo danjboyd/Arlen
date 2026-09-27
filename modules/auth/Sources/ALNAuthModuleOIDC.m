@@ -15,6 +15,15 @@ static BOOL OURL(NSString *value, NSArray *hosts) {
       !url.user.length && !url.password.length && !url.fragment.length &&
       (!hosts || [hosts containsObject:url.host.lowercaseString]);
 }
+// Loopback redirect URIs (RFC 8252 section 7.3) are a development convenience only.
+static BOOL OLoopbackHTTPURL(NSString *value) {
+  NSURL *url = [NSURL URLWithString:OS(value)];
+  NSString *host = url.host.lowercaseString;
+  return [url.scheme.lowercaseString isEqual:@"http"] &&
+      ([host isEqual:@"localhost"] || [host isEqual:@"127.0.0.1"] || [host isEqual:@"::1"] ||
+       [host isEqual:@"[::1]"]) &&
+      !url.user.length && !url.password.length && !url.fragment.length;
+}
 static BOOL OStrings(id values) {
   if (![values isKindOfClass:[NSArray class]] || ![values count]) return NO;
   for (id value in values) if (!OS(value).length) return NO;
@@ -30,6 +39,13 @@ static BOOL OStrings(id values) {
 - (instancetype)initWithIdentifier:(NSString *)identifier configuration:(NSDictionary *)configuration
                          resolver:(id<ALNAuthProviderSessionResolver>)resolver
                         transport:(id<ALNAuthModuleOIDCTransport>)transport error:(NSError **)error {
+  return [self initWithIdentifier:identifier configuration:configuration resolver:resolver
+                        transport:transport allowLoopbackHTTPRedirect:NO error:error];
+}
+- (instancetype)initWithIdentifier:(NSString *)identifier configuration:(NSDictionary *)configuration
+                         resolver:(id<ALNAuthProviderSessionResolver>)resolver
+                        transport:(id<ALNAuthModuleOIDCTransport>)transport
+        allowLoopbackHTTPRedirect:(BOOL)allowLoopbackHTTPRedirect error:(NSError **)error {
   if (!(self = [super init])) return nil;
   NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:
       @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"] invertedSet];
@@ -42,9 +58,13 @@ static BOOL OStrings(id values) {
   NSArray *hosts = config[@"endpointAllowedHosts"] ?: (host ? @[host] : @[]);
   NSArray *jwksHosts = config[@"jwksAllowedHosts"] ?: hosts;
   if (!OStrings(hosts) || !OStrings(jwksHosts) || !OURL(config[@"issuer"], nil) ||
-      !OURL(config[@"discoveryURL"], hosts) || !OURL(config[@"redirectURI"], nil) ||
+      !OURL(config[@"discoveryURL"], hosts) ||
+      !(OURL(config[@"redirectURI"], nil) ||
+        (allowLoopbackHTTPRedirect && OLoopbackHTTPURL(config[@"redirectURI"]))) ||
       !OS(config[@"clientID"]).length) {
-    OFail(error, @"OIDC requires HTTPS issuer/discovery/redirect URLs, allowed hosts, and clientID"); return nil;
+    OFail(error, allowLoopbackHTTPRedirect
+                     ? @"OIDC requires HTTPS issuer/discovery URLs, an HTTPS or loopback http redirect URL, allowed hosts, and clientID"
+                     : @"OIDC requires HTTPS issuer/discovery/redirect URLs, allowed hosts, and clientID"); return nil;
   }
   NSArray *scopes = config[@"scopes"] ?: @[ @"openid", @"profile", @"email" ];
   if (!OStrings(scopes) || ![scopes containsObject:@"openid"]) {

@@ -4,6 +4,7 @@
 #import "ALNJSONSerialization.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNSecurityPrimitives.h"
 
 #import <openssl/evp.h>
 #import <openssl/hmac.h>
@@ -14,25 +15,6 @@ static NSString *const ALNSessionLegacyVersion = @"v2";
 static NSString *const ALNSessionNeedsRefreshStashKey = @"aln.session.needs_refresh";
 static NSString *const ALNSessionEncryptionLabel = @"arlen.session.enc.v1";
 static NSString *const ALNSessionSignatureLabel = @"arlen.session.sig.v1";
-
-static NSData *ALNHMACSHA256(NSData *input, NSData *key) {
-  if ([input length] == 0 || [key length] == 0) {
-    return nil;
-  }
-  unsigned int digestLength = 0;
-  unsigned char digest[EVP_MAX_MD_SIZE];
-  unsigned char *hmacResult = HMAC(EVP_sha256(),
-                                   [key bytes],
-                                   (int)[key length],
-                                   [input bytes],
-                                   (size_t)[input length],
-                                   digest,
-                                   &digestLength);
-  if (hmacResult == NULL || digestLength == 0) {
-    return nil;
-  }
-  return [NSData dataWithBytes:digest length:(NSUInteger)digestLength];
-}
 
 static NSString *ALNBase64URLFromData(NSData *data) {
   NSString *base64 = [data base64EncodedStringWithOptions:0];
@@ -57,24 +39,6 @@ static NSData *ALNDataFromBase64URL(NSString *value) {
   return [[NSData alloc] initWithBase64EncodedString:base64 options:0];
 }
 
-static BOOL ALNConstantTimeDataEqual(NSData *lhs, NSData *rhs) {
-  if (![lhs isKindOfClass:[NSData class]] || ![rhs isKindOfClass:[NSData class]]) {
-    return NO;
-  }
-
-  NSUInteger lhsLength = [lhs length];
-  NSUInteger rhsLength = [rhs length];
-  const unsigned char *lhsBytes = [lhs bytes];
-  const unsigned char *rhsBytes = [rhs bytes];
-  NSUInteger maxLength = (lhsLength > rhsLength) ? lhsLength : rhsLength;
-  unsigned char diff = (unsigned char)(lhsLength ^ rhsLength);
-  for (NSUInteger idx = 0; idx < maxLength; idx++) {
-    unsigned char lhsByte = (idx < lhsLength) ? lhsBytes[idx] : 0;
-    unsigned char rhsByte = (idx < rhsLength) ? rhsBytes[idx] : 0;
-    diff |= (unsigned char)(lhsByte ^ rhsByte);
-  }
-  return (diff == 0);
-}
 
 static NSData *ALNRandomData(NSUInteger length) {
   if (length == 0) {
@@ -290,7 +254,7 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
   NSData *expectedSignatureData = ALNDataFromBase64URL(expectedSignature);
   NSData *providedSignatureData = ALNDataFromBase64URL(parts[2]);
   if ([expectedSignatureData length] == 0 || [providedSignatureData length] == 0 ||
-      !ALNConstantTimeDataEqual(expectedSignatureData, providedSignatureData)) {
+      !ALNConstantTimeDataEquals(expectedSignatureData, providedSignatureData)) {
     return nil;
   }
 
@@ -318,7 +282,7 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
   NSData *expectedSignatureData = ALNDataFromBase64URL(expectedSignature);
   NSData *providedSignatureData = ALNDataFromBase64URL(parts[3]);
   if ([expectedSignatureData length] == 0 || [providedSignatureData length] == 0 ||
-      !ALNConstantTimeDataEqual(expectedSignatureData, providedSignatureData)) {
+      !ALNConstantTimeDataEquals(expectedSignatureData, providedSignatureData)) {
     return nil;
   }
 

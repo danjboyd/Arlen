@@ -16,6 +16,15 @@ NS_ASSUME_NONNULL_BEGIN
                                  resolver:(id<ALNAuthProviderSessionResolver>)resolver
                                 transport:(nullable id<ALNAuthModuleOIDCTransport>)transport
                                     error:(NSError *_Nullable *_Nullable)error;
+/// allowLoopbackHTTPRedirect permits an http://localhost, http://127.0.0.1 or
+/// http://[::1] redirectURI. The auth module enables it only in development and
+/// test. Issuer, discovery, token and JWKS endpoints are always HTTPS-only.
+- (nullable instancetype)initWithIdentifier:(NSString *)identifier
+                            configuration:(NSDictionary *)configuration
+                                 resolver:(id<ALNAuthProviderSessionResolver>)resolver
+                                transport:(nullable id<ALNAuthModuleOIDCTransport>)transport
+                allowLoopbackHTTPRedirect:(BOOL)allowLoopbackHTTPRedirect
+                                    error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)beginLoginWithError:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)completeLoginWithParameters:(NSDictionary *)parameters
                                        callbackState:(NSDictionary *)state
