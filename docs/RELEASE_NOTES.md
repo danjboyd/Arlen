@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- App request tests: `ALNTestClient` builds an app from its config with its own
+  routes and dispatches requests in process, with a cookie jar, automatic CSRF,
+  session access and `signInAsSubject:`. `arlen test --app` builds and runs an
+  app's `tests/**/*.m`, `arlen generate test <Name> --request` scaffolds a
+  request test, and new full and lite apps ship a passing one. App code needs no
+  changes: the test build captures route registration from the app's `main`
+  (GitHub issue 65). See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
+
 - MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
   in `config/app.plist` (as in the documented example) no longer crash startup
   (`does not recognize unsignedIntegerValue`). Plist strings holding

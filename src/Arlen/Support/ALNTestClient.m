@@ -11,6 +11,10 @@
 static NSString *const ALNTestClientErrorDomain = @"Arlen.TestClient.Error";
 static ALNAppMainFunction gALNTestClientAppMain = NULL;
 
+void ALNTestClientSetAppMain(ALNAppMainFunction appMain) {
+  gALNTestClientAppMain = appMain;
+}
+
 static NSError *ALNTestClientError(NSInteger code, NSString *message) {
   return [NSError errorWithDomain:ALNTestClientErrorDomain
                              code:code
@@ -61,7 +65,7 @@ static BOOL ALNTestClientIsSafeMethod(NSString *method) {
 @implementation ALNTestClient
 
 + (void)setAppMain:(ALNAppMainFunction)appMain {
-  gALNTestClientAppMain = appMain;
+  ALNTestClientSetAppMain(appMain);
 }
 
 + (instancetype)clientWithEnvironment:(NSString *)environment

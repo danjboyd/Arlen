@@ -10,6 +10,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Plain C so the test bundle's load-time constructor can call it before any
+// Objective-C messaging is safe. Same effect as +[ALNTestClient setAppMain:].
+FOUNDATION_EXPORT void ALNTestClientSetAppMain(ALNAppMainFunction _Nullable appMain);
+
 // In-process request client for app tests (docs/TESTING_WORKFLOW.md). It builds the
 // app from its config directory, registers the app's own routes, and dispatches
 // requests without a socket. Cookies persist across requests like a browser jar.

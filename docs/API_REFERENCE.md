@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `91`
-- Symbols: `158`
-- Public methods: `1061`
-- Public properties: `481`
+- Public headers: `92`
+- Symbols: `160`
+- Public methods: `1080`
+- Public properties: `485`
 
 ## API Surface Boundary
 
@@ -204,9 +204,11 @@ python3 tools/docs/generate_api_reference.py
 - [ALNRealtimeSubscription](api/ALNRealtimeSubscription.md): Subscription token returned by realtime hub subscribe calls and used for unsubscribe operations.
 - [ALNRecoveryCodes](api/ALNRecoveryCodes.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNRedisCacheAdapter](api/ALNRedisCacheAdapter.md): Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics.
+- [ALNResponse](api/ALNResponse.md): Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes.
 - [ALNRetryingAttachmentAdapter](api/ALNRetryingAttachmentAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
 - [ALNRetryingMailAdapter](api/ALNRetryingMailAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
 - [ALNTOTP](api/ALNTOTP.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
+- [ALNTestClient](api/ALNTestClient.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNWebAuthn](api/ALNWebAuthn.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNWebhookAdapter](api/ALNWebhookAdapter.md): Protocol contract for `ALNWebhookAdapter` adapter implementations.
 
@@ -302,4 +304,5 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNRecoveryCodes.h`
 - `src/Arlen/Support/ALNServices.h`
 - `src/Arlen/Support/ALNTOTP.h`
+- `src/Arlen/Support/ALNTestClient.h`
 - `src/Arlen/Support/ALNWebAuthn.h`

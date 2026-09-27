@@ -76,7 +76,8 @@ Generator behavior:
 - `endpoint`: same controller output with endpoint-oriented defaults (`--route` required)
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
-- `test`: `tests/<Name>Tests.m`
+- `test`: `tests/<Name>Tests.m`; a placeholder XCTest, or with `--request` an
+  `ALNTestClient` request test that GETs `--route` (default `/`) and expects `200`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
@@ -778,6 +779,23 @@ forms are inspected from the same effective route table.
 Run framework tests.
 
 - default: equivalent to `--all`
+
+### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
+
+Build and run the current app's own XCTest tests (`tests/**/*.m`), in process,
+through `tools/run_app_tests.sh`:
+
+- builds the app as `boomhauer` does, then `boomhauer --build-tests` links the
+  app's objects and tests into `.boomhauer/build/tests/AppTests.xctest`
+- the file defining `main` is recompiled with `main` renamed so the test client
+  can capture the app's route registration; app code needs no changes
+- runs the framework's vendored `xctest` (built on first use), else `xctest`
+  from `PATH`, with an isolated GNUstep defaults home under `.boomhauer/test-home`
+- `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`
+- exit status is the runner's: non-zero when any test fails
+- GNUstep on Linux only for now
+
+See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 ### `arlen perf`
 
