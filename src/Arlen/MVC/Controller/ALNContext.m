@@ -1,4 +1,5 @@
 #import "ALNContext.h"
+#import "ALNCSRFMiddleware.h"
 
 #import "ALNRequest.h"
 #import "ALNResponse.h"
@@ -13,6 +14,7 @@ NSString *const ALNContextSessionStashKey = @"aln.session";
 NSString *const ALNContextSessionDirtyStashKey = @"aln.session.dirty";
 NSString *const ALNContextSessionHadCookieStashKey = @"aln.session.had_cookie";
 NSString *const ALNContextCSRFTokenStashKey = @"aln.csrf.token";
+NSString *const ALNContextCSRFLazyTokenStashKey = @"aln.csrf.lazy_token";
 NSString *const ALNContextValidationErrorsStashKey = @"aln.validation.errors";
 NSString *const ALNContextEOCStrictLocalsStashKey = @"aln.eoc.strict_locals";
 NSString *const ALNContextEOCStrictStringifyStashKey = @"aln.eoc.strict_stringify";
@@ -215,7 +217,15 @@ static BOOL ALNETagListMatches(NSString *ifNoneMatchHeader, NSString *etag) {
     self.stash[ALNContextCSRFTokenStashKey] = sessionToken;
     return sessionToken;
   }
-  return nil;
+  // Only a page that actually renders a token starts a session (GitHub issue 86).
+  if (![self.stash[ALNContextCSRFLazyTokenStashKey] boolValue]) {
+    return nil;
+  }
+  NSString *minted = ALNCSRFGenerateToken();
+  [self session][@"_csrf_token"] = minted;
+  [self markSessionDirty];
+  self.stash[ALNContextCSRFTokenStashKey] = minted;
+  return minted;
 }
 
 - (NSDictionary *)allParams {

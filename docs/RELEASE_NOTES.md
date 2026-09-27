@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- CSRF no longer starts a session on every request without a session cookie.
+  The middleware used to write a fresh token into the session up front, so every
+  cookieless request, `GET` and `HEAD` included, got a new signed-out session
+  cookie. When a browser sent such a request while signed in (for example a
+  service worker's fetch), the reply replaced the real session and signed the
+  user out. The token is now created when a request first reads it, and only
+  then is `Set-Cookie` sent (GitHub issue 86). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+
 - MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
   in `config/app.plist` (as in the documented example) no longer crash startup
   (`does not recognize unsignedIntegerValue`). Plist strings holding

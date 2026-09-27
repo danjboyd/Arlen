@@ -19,6 +19,9 @@ extern NSString *const ALNContextSessionStashKey;
 extern NSString *const ALNContextSessionDirtyStashKey;
 extern NSString *const ALNContextSessionHadCookieStashKey;
 extern NSString *const ALNContextCSRFTokenStashKey;
+// Set (@YES) by ALNCSRFMiddleware. While set, -csrfToken mints and stores a token
+// on first read, so a session is only created when a page actually needs one.
+extern NSString *const ALNContextCSRFLazyTokenStashKey;
 extern NSString *const ALNContextValidationErrorsStashKey;
 extern NSString *const ALNContextEOCStrictLocalsStashKey;
 extern NSString *const ALNContextEOCStrictStringifyStashKey;
