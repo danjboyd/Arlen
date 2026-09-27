@@ -65,6 +65,19 @@ Generated apps start with:
 Raise these only for real application needs. The defaults are intentionally
 bounded.
 
+Instead of raising `maxBodyBytes` for the whole app, give only the routes that
+need it a larger limit, either `route.maxBodyBytes` in code or `maxBodyBytes` on
+a plist route. The server finds the route from the request line and applies its
+limit to `Content-Length` as soon as the head is parsed: a larger body gets `413`
+before any of it is read. Routes without an override keep `requestLimits.maxBodyBytes`,
+which can also be lower than the default. No middleware or controller runs
+before this check or before the body is read; route matching is the only input.
+On a route with an override, multipart parsing uses that limit for the whole body
+and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
+stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)). Request bodies
+with `Transfer-Encoding: chunked` are not supported and are rejected with `400`
+without reading the body; clients must send `Content-Length`.
+
 ## 4. Database
 
 The scaffold includes:
@@ -390,6 +403,8 @@ Optional route fields:
 - `formats`: accepted route formats
 - `guardAction`: guard action name without a trailing colon
 - `policies`: named route policies from `security.routePolicies`
+- `maxBodyBytes`: request body limit for this route (positive integer; see
+  [Request Limits](#3-request-limits)); invalid values fail with `invalid_max_body_bytes`
 
 Configured routes are loaded during application startup after normal app and
 module route registration. Invalid configured routes fail startup with

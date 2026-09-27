@@ -1,4 +1,5 @@
 #import "ALNApplication.h"
+#import "ALNPositiveInteger.h"
 #import "ALNFileResponseInternal.h"
 #import <dispatch/dispatch.h>
 
@@ -630,6 +631,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 }
 
 @interface ALNApplication ()
+@property(nonatomic, strong) NSNumber *cachedLargestRouteMaxBodyBytes;
 
 @property(nonatomic, strong, readwrite) ALNRouter *router;
 @property(nonatomic, copy, readwrite) NSDictionary *config;
@@ -2049,6 +2051,7 @@ static NSArray *ALNAllowedRouteConfigKeys(void) {
     @"formats",
     @"guardAction",
     @"policies",
+    @"maxBodyBytes",
   ];
 }
 
@@ -2227,6 +2230,17 @@ static NSDictionary *ALNValidatedConfiguredRouteRecord(NSDictionary *entry,
     }
   }
 
+  NSNumber *maxBodyBytes = nil;
+  if (entry[@"maxBodyBytes"] != nil) {
+    maxBodyBytes = ALNPositiveInteger(entry[@"maxBodyBytes"]);
+    if (maxBodyBytes == nil) {
+      [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".maxBodyBytes"],
+                                             @"invalid_max_body_bytes",
+                                             @"maxBodyBytes must be a positive integer",
+                                             @{})];
+    }
+  }
+
   Class controllerClass = nil;
   if (controllerName != nil) {
     controllerClass = NSClassFromString(controllerName);
@@ -2258,6 +2272,9 @@ static NSDictionary *ALNValidatedConfiguredRouteRecord(NSDictionary *entry,
   }
   if ([policies count] > 0) {
     record[@"policies"] = policies;
+  }
+  if (maxBodyBytes != nil) {
+    record[@"maxBodyBytes"] = maxBodyBytes;
   }
   return [record copy];
 }
@@ -4288,6 +4305,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                          action:record[@"action"]
                                        policies:record[@"policies"]];
     route.source = @"plist";
+    route.maxBodyBytes = [record[@"maxBodyBytes"] unsignedIntegerValue];
   }
 
   self.configuredRoutesLoaded = YES;
@@ -4423,6 +4441,80 @@ static void ALNFinalizeResponse(ALNApplication *application,
                  }];
     }
   }
+}
+
+- (NSUInteger)defaultMaxBodyBytes {
+  NSDictionary *limits = [self.config[@"requestLimits"] isKindOfClass:[NSDictionary class]]
+                             ? self.config[@"requestLimits"]
+                             : @{};
+  id value = limits[@"maxBodyBytes"];
+  return [value respondsToSelector:@selector(unsignedIntegerValue)] && [value unsignedIntegerValue] > 0
+             ? [value unsignedIntegerValue]
+             : 1048576;
+}
+
+- (NSUInteger)largestRouteMaxBodyBytes {
+  // Routes are fixed once started; the server asks on every connection.
+  NSNumber *cached = self.cachedLargestRouteMaxBodyBytes;
+  if (cached != nil) {
+    return [cached unsignedIntegerValue];
+  }
+  NSUInteger largest = 0;
+  for (ALNRoute *route in [self.router allRoutes]) {
+    largest = MAX(largest, route.maxBodyBytes);
+  }
+  for (NSDictionary *entry in self.mutableMounts) {
+    ALNApplication *child = entry[@"application"];
+    if ([child isKindOfClass:[ALNApplication class]]) {
+      largest = MAX(largest, [child largestRouteMaxBodyBytes]);
+    }
+  }
+  if (self.isStarted) {
+    self.cachedLargestRouteMaxBodyBytes = @(largest);
+  }
+  return largest;
+}
+
+- (NSDictionary *)requestLimitsForRequest:(ALNRequest *)request {
+  NSDictionary *base = [self.config[@"requestLimits"] isKindOfClass:[NSDictionary class]]
+                           ? self.config[@"requestLimits"]
+                           : @{};
+  if ([self largestRouteMaxBodyBytes] == 0 || [request.body length] == 0) {
+    return base;
+  }
+  NSUInteger routeLimit = [self maxBodyBytesForMethod:request.method path:request.path];
+  if (routeLimit == [self defaultMaxBodyBytes]) {
+    return base;
+  }
+  // A route override is the whole body budget: multipart parsing uses it as the
+  // body cap and lets one file part use all of it.
+  NSMutableDictionary *limits = [base mutableCopy];
+  limits[@"maxBodyBytes"] = @(routeLimit);
+  NSUInteger fileLimit = [limits[@"maxMultipartFileBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
+                             ? [limits[@"maxMultipartFileBytes"] unsignedIntegerValue]
+                             : 1048576;
+  limits[@"maxMultipartFileBytes"] = @(MAX(fileLimit, routeLimit));
+  return limits;
+}
+
+- (NSUInteger)maxBodyBytesForMethod:(NSString *)method path:(NSString *)path {
+  NSString *requestPath = [path length] > 0 ? path : @"/";
+  NSString *rewritten = nil;
+  NSDictionary *mounted = [self mountedEntryForPath:requestPath rewrittenPath:&rewritten];
+  ALNApplication *child = mounted[@"application"];
+  if ([child isKindOfClass:[ALNApplication class]] && [rewritten length] > 0) {
+    return [child maxBodyBytesForMethod:method path:rewritten];
+  }
+  NSString *upperMethod = [method length] > 0 ? [method uppercaseString] : @"GET";
+  ALNRoute *route = [self.router matchMethod:upperMethod path:requestPath format:nil params:NULL];
+  if (route == nil) {
+    NSString *stripped = nil;
+    (void)ALNExtractPathFormat(requestPath, &stripped);
+    if ([stripped length] > 0 && ![stripped isEqualToString:requestPath]) {
+      route = [self.router matchMethod:upperMethod path:stripped format:nil params:NULL];
+    }
+  }
+  return route.maxBodyBytes > 0 ? route.maxBodyBytes : [self defaultMaxBodyBytes];
 }
 
 - (NSDictionary *)mountedEntryForPath:(NSString *)requestPath
@@ -5150,7 +5242,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(ALNRoute *)requiredRoute {
   NSError *multipartError = nil;
-  if (![request parseMultipartFormWithLimits:self.config[@"requestLimits"] error:&multipartError]) {
+  if (![request parseMultipartFormWithLimits:[self requestLimitsForRequest:request] error:&multipartError]) {
     ALNResponse *rejected = [[ALNResponse alloc] init];
     rejected.statusCode = multipartError.code == ALNMultipartErrorLimitExceeded ? 413
                           : multipartError.code == ALNMultipartErrorSpoolFailed ? 500

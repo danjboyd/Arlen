@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- Per-route body limits: `route.maxBodyBytes` (or `maxBodyBytes` on a plist
+  route) overrides `requestLimits.maxBodyBytes` for that route. The server
+  resolves the route from the request line and answers `413` before reading any
+  of an oversized body, so an app can keep a small global limit and allow large
+  uploads on a few routes. Multipart parsing on such a route uses the route
+  limit. Measured with 8 concurrent 20 MiB uploads, anonymous memory grew about
+  4 MiB, because bodies and parts live in spool files. Chunked request bodies
+  remain unsupported (`400`) (GitHub issue 87). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#3-request-limits).
+
 - Large uploads: request bodies larger than `requestLimits.spoolThresholdBytes`
   (default 1 MiB) stream from the socket into a private temporary file under
   `requestLimits.spoolDirectory`, and `request.body` maps it, on both parser

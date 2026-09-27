@@ -3579,6 +3579,68 @@
   }
 }
 
+// GitHub issue 87: per-route body limits enforced before the body is read,
+// large uploads spooled with bounded heap, and cleanup on every exit path.
+- (void)testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-body-limits-app"];
+  NSString *spoolRoot = [self createTempDirectoryWithPrefix:@"arlen-body-limits-spool"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(spoolRoot);
+  if (!appRoot || !spoolRoot) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/body_limits_app.m"
+        encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    NSString *appConfig = [NSString stringWithFormat:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; "
+                           "connectionTimeoutSeconds = 2; csrf = { enabled = NO; }; requestLimits = { "
+                           "maxBodyBytes = 65536; maxMultipartFileBytes = 65536; spoolThresholdBytes = 1048576; "
+                           "spoolDirectory = \"%@\"; }; }", spoolRoot];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:appConfig]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+        [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix] exitCode:&prepareCode];
+    XCTAssertEqual(prepareCode, 0, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+    for (NSString *backend in @[@"llhttp", @"legacy"]) {
+      int port = [self randomPort];
+      NSTask *server = [[NSTask alloc] init];
+      server.launchPath = @"/bin/bash";
+      // exec: the task's pid is the server's, so the probe can read its memory.
+      server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ exec %@ --port %d",
+          envPrefix, backend,
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = server.standardOutput;
+      [server launch];
+      @try {
+        BOOL ready = NO;
+        (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+        XCTAssertTrue(ready);
+        if (!ready) continue;
+        NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/body_limits_probe.py"
+            encoding:NSUTF8StringEncoding error:NULL];
+        script = [script stringByReplacingOccurrencesOfString:@"__PORT__" withString:[NSString stringWithFormat:@"%d", port]];
+        script = [script stringByReplacingOccurrencesOfString:@"__PID__"
+                                                   withString:[NSString stringWithFormat:@"%d", server.processIdentifier]];
+        script = [script stringByReplacingOccurrencesOfString:@"__SPOOL__"
+                                                   withString:[NSString stringWithFormat:@"'%@'", spoolRoot]];
+        int code = 0;
+        NSString *output = [self runPythonScript:script exitCode:&code];
+        XCTAssertEqual(code, 0, @"%@: %@", backend, output);
+        XCTAssertTrue([output containsString:@"body limit checks passed"], @"%@: %@", backend, output);
+      } @finally {
+        XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:spoolRoot error:NULL];
+  }
+}
+
 - (void)testMultipartDocumentedPlistLimitsKeepServerAlive {
   NSString *binary = [[[NSFileManager defaultManager] currentDirectoryPath]
       stringByAppendingPathComponent:@"build/boomhauer"];

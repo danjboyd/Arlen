@@ -11,8 +11,8 @@ python3 tools/docs/generate_api_reference.py
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `91`
 - Symbols: `158`
-- Public methods: `1065`
-- Public properties: `482`
+- Public methods: `1068`
+- Public properties: `483`
 
 ## API Surface Boundary
 
