@@ -3725,15 +3725,22 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         }
 
         ALNResponse *response = nil;
-        if (self.serializeRequestDispatch) {
-          [self.requestDispatchLock lock];
-          @try {
+        @try {
+          if (self.serializeRequestDispatch) {
+            [self.requestDispatchLock lock];
+            @try {
+              response = [self.application dispatchRequest:request];
+            } @finally {
+              [self.requestDispatchLock unlock];
+            }
+          } else {
             response = [self.application dispatchRequest:request];
-          } @finally {
-            [self.requestDispatchLock unlock];
           }
-        } else {
-          response = [self.application dispatchRequest:request];
+        } @finally {
+          // Spooled bodies and uploads end with the handler. Do not rely on
+          // dealloc: a handler exception unwinds ARC frames without releasing
+          // them, which leaked the request and its spool files.
+          [request removeTemporaryFiles];
         }
 
         NSString *webSocketMode = [self webSocketModeFromResponse:response];

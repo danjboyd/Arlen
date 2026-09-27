@@ -88,9 +88,9 @@ for multipart (body file plus part files).
 
 A spooled upload reports its file through `temporaryFilePath`, and its `data`
 maps that file on each access rather than holding the bytes. Spool files belong
-to the request: they are removed when the request is deallocated (after the
-response or on an exception), or earlier through
-`-[ALNRequest removeTemporaryFiles]`. A body file for a client that disconnects
+to the request: the server removes them as soon as the handler returns or raises,
+and a request that is deallocated removes any that remain; code can also call
+`-[ALNRequest removeTemporaryFiles]` earlier. A body file for a client that disconnects
 mid-upload is removed before any request exists. Move or copy an upload before the request
 ends; do not hand `temporaryFilePath` to work that outlives it. Failed parses
 expose no partial parts and leave no spool files. If spooling itself fails (for
