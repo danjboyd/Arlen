@@ -4,6 +4,7 @@
 #import "ALNAuthSession.h"
 #import "ALNConfig.h"
 #import "ALNContext.h"
+#import "ALNJSONSerialization.h"
 #import "ALNPerf.h"
 #import "ALNRequest.h"
 #import "ALNSessionMiddleware.h"
@@ -157,7 +158,7 @@ static BOOL ALNTestClientIsSafeMethod(NSString *method) {
 }
 
 - (ALNResponse *)post:(NSString *)path JSON:(id)object {
-  NSData *body = (object != nil) ? [NSJSONSerialization dataWithJSONObject:object options:0 error:NULL] : nil;
+  NSData *body = (object != nil) ? [ALNJSONSerialization dataWithJSONObject:object options:0 error:NULL] : nil;
   return [self requestWithMethod:@"POST"
                             path:path
                            query:nil
@@ -381,7 +382,7 @@ static BOOL ALNTestClientIsSafeMethod(NSString *method) {
   if ([data length] == 0) {
     return nil;
   }
-  return [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  return [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
 }
 
 @end
