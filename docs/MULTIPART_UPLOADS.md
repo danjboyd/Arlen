@@ -36,8 +36,8 @@ Set these keys in the application's `requestLimits` configuration dictionary:
 | `maxMultipartFieldBytes` | 65,536 | Bytes in each text field before UTF-8 decoding |
 | `maxMultipartFileBytes` | 1,048,576 | Bytes in each uploaded file |
 | `maxMultipartHeaderBytes` | 16,384 | Per-part header bytes, excluding the terminating CRLF CRLF |
-| `spoolThresholdBytes` | 1,048,576 | File parts larger than this are spooled to a temporary file |
-| `spoolDirectory` | system temp directory | Absolute, existing directory for spooled uploads |
+| `spoolThresholdBytes` | 1,048,576 | Request bodies and file parts larger than this are spooled to temporary files |
+| `spoolDirectory` | system temp directory | Absolute, existing directory for spooled bodies and uploads |
 
 For example, in `config/app.plist`:
 
@@ -66,20 +66,32 @@ raise `maxMultipartFileBytes` to the desired file cap (for example `104857600`
 for a 100 MiB file with room for fields and framing). Raising the request cap
 does not automatically raise per-file or per-field caps.
 
-The server buffers the full request body before multipart parsing. Text fields
-and file parts up to `spoolThresholdBytes` are copied into immutable `NSData`.
-Larger file parts are written straight from the body into a private temporary
-file instead (a `0700` `arlen-upload-*` directory under `spoolDirectory`, one
-`0600` file per part), so each large upload no longer occupies memory twice.
-Budget memory for the connection buffer, request body, small part copies,
-decoding, and simultaneous requests. Part limits apply during parsing after body
-receipt; the transport enforces the total request cap while receiving.
+A request whose `Content-Length` is at most `spoolThresholdBytes` is buffered in
+memory as before. A larger body is streamed from the socket into a private
+`0600` `arlen-body-*` file under `spoolDirectory` as it arrives, and
+`request.body` maps that file instead of holding the bytes on the heap. This
+applies to any request body, not only multipart, on both HTTP parser backends.
+The total body cap (`maxBodyBytes`) is checked against `Content-Length` before
+anything is read or written.
+
+During multipart parsing, text fields and file parts up to `spoolThresholdBytes`
+are copied into immutable `NSData`. Larger file parts are written into a private
+temporary file instead (a `0700` `arlen-upload-*` directory under
+`spoolDirectory`, one `0600` file per part). With the default limits
+(`maxBodyBytes` and `spoolThresholdBytes` both 1 MiB) nothing is spooled; raise
+`maxBodyBytes` and `maxMultipartFileBytes` for large uploads and both kinds of
+spooling take effect. Budget memory for the connection buffer, bodies up to the
+threshold, small part copies, decoding, and simultaneous requests. Part limits
+apply during parsing after body receipt. Keep `spoolDirectory` on a filesystem
+with room for `maxBodyBytes` times the number of concurrent uploads, twice over
+for multipart (body file plus part files).
 
 A spooled upload reports its file through `temporaryFilePath`, and its `data`
-maps that file on each access rather than holding the bytes. The spool directory
-belongs to the request: it is removed when the request is deallocated (after the
-response, on an exception, or when the client disconnects), or earlier through
-`-[ALNRequest removeTemporaryFiles]`. Move or copy an upload before the request
+maps that file on each access rather than holding the bytes. Spool files belong
+to the request: they are removed when the request is deallocated (after the
+response or on an exception), or earlier through
+`-[ALNRequest removeTemporaryFiles]`. A body file for a client that disconnects
+mid-upload is removed before any request exists. Move or copy an upload before the request
 ends; do not hand `temporaryFilePath` to work that outlives it. Failed parses
 expose no partial parts and leave no spool files. If spooling itself fails (for
 example a missing `spoolDirectory` or a full disk), the request gets a `500`.

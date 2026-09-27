@@ -2,14 +2,15 @@
 
 ## Upcoming Release Candidate
 
-- Multipart uploads: file parts larger than `requestLimits.spoolThresholdBytes`
-  (default 1 MiB) are written to a private temporary file under
-  `requestLimits.spoolDirectory` instead of being copied into `NSData`, so a
-  large upload no longer sits in worker memory twice. `ALNUpload` exposes
-  `temporaryFilePath`, `data` maps the file, and `writeToFile:error:` moves it.
-  Spool files are removed when the request ends, including on exceptions and
-  client disconnects. The request body itself is still buffered in memory
-  (GitHub issue 64, part 1). See [Multipart Uploads](MULTIPART_UPLOADS.md).
+- Large uploads: request bodies larger than `requestLimits.spoolThresholdBytes`
+  (default 1 MiB) stream from the socket into a private temporary file under
+  `requestLimits.spoolDirectory`, and `request.body` maps it, on both parser
+  backends. Multipart file parts above the same threshold are written to their
+  own temporary files instead of being copied into `NSData`: `ALNUpload`
+  exposes `temporaryFilePath`, `data` maps the file, and `writeToFile:error:`
+  moves it. Spool files are removed when the request ends, including on
+  exceptions and client disconnects. With the default limits nothing is
+  spooled (GitHub issue 64). See [Multipart Uploads](MULTIPART_UPLOADS.md).
 
 - `headerValueForName:` on `ALNController` and `ALNContext` is now declared
   nonnull, matching what it returns: an absent header gives `@""`, as

@@ -56,6 +56,10 @@ typedef struct {
   NSUInteger maxRequestLineBytes;
   NSUInteger maxHeaderBytes;
   NSUInteger maxBodyBytes;
+  // Bodies larger than this stream to a file instead of the connection buffer.
+  NSUInteger spoolThresholdBytes;
+  // Owned by the application config, which outlives every connection.
+  __unsafe_unretained NSString *spoolDirectory;
 } ALNRequestLimits;
 
 typedef struct {
@@ -480,6 +484,8 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   out.maxRequestLineBytes = ALNConfigUInt(limits, @"maxRequestLineBytes", 4096);
   out.maxHeaderBytes = ALNConfigUInt(limits, @"maxHeaderBytes", 32768);
   out.maxBodyBytes = ALNConfigUInt(limits, @"maxBodyBytes", 1048576);
+  out.spoolThresholdBytes = ALNConfigUInt(limits, @"spoolThresholdBytes", 1048576);
+  out.spoolDirectory = [limits[@"spoolDirectory"] isKindOfClass:[NSString class]] ? limits[@"spoolDirectory"] : nil;
   return out;
 }
 
@@ -1823,10 +1829,86 @@ static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
   return YES;
 }
 
+// Streams a Content-Length body larger than limits.spoolThresholdBytes into a
+// private file instead of the connection buffer (GitHub issue 64). `headerBytes`
+// of complete head are buffered, possibly followed by some body. Reads never
+// exceed the declared length, so a pipelined next request stays on the socket.
+// The returned request owns the file; every failure removes it.
+static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
+                                         ALNRequestLimits limits,
+                                         ALNHTTPParserBackend backend,
+                                         size_t headerBytes,
+                                         NSUInteger contentLength,
+                                         NSInteger *statusCode,
+                                         ALNConnectionReadState *readState) {
+  NSString *directory = [limits.spoolDirectory length] > 0 ? limits.spoolDirectory : NSTemporaryDirectory();
+  NSString *path = [directory stringByAppendingPathComponent:
+      [@"arlen-body-" stringByAppendingString:[[NSUUID UUID] UUIDString]]];
+  NSData *head = [NSData dataWithBytes:readState->bytes length:headerBytes];
+  size_t buffered = MIN(readState->length - headerBytes, (size_t)contentLength);
+  FILE *file = NULL;
+  NSInteger failure = 503;
+  ALNRequest *request = nil;
+  @try {
+    if ([[NSFileManager defaultManager] createFileAtPath:path contents:nil
+                                              attributes:@{NSFilePosixPermissions : @0600}]) {
+      file = fopen([path fileSystemRepresentation], "wb");
+    }
+    failure = (file == NULL) ? 503 : 0;
+    if (failure == 0 && buffered > 0 && fwrite(readState->bytes + headerBytes, 1, buffered, file) != buffered) {
+      failure = 503;
+    }
+    ALNConnectionReadStateConsumePrefix(readState, headerBytes + buffered);
+    NSUInteger remaining = contentLength - buffered;
+    char chunk[65536];
+    while (failure == 0 && remaining > 0) {
+      ssize_t readBytes = ALNRecvWithFaults(clientFd, chunk, MIN(sizeof(chunk), remaining), 0);
+      if (readBytes < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        failure = (errno == EAGAIN || errno == EWOULDBLOCK) ? 408 : 400;
+      } else if (readBytes == 0) {
+        failure = 400;  // client went away mid-body
+      } else if (fwrite(chunk, 1, (size_t)readBytes, file) != (size_t)readBytes) {
+        failure = 503;
+      } else {
+        remaining -= (NSUInteger)readBytes;
+      }
+    }
+    if (file != NULL && fclose(file) != 0 && failure == 0) {
+      failure = 503;
+    }
+    file = NULL;
+    if (failure == 0) {
+      request = [ALNRequest requestFromHeadData:head backend:backend error:NULL];
+      if (request == nil) {
+        failure = 400;
+      } else if (![request adoptSpooledBodyAtPath:path error:NULL]) {
+        request = nil;
+        failure = 503;
+      }
+    }
+  } @finally {
+    // Also runs when an exception unwinds through here: never leave a spool file behind.
+    if (file != NULL) {
+      fclose(file);
+    }
+    if (request == nil) {
+      [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    }
+  }
+  if (statusCode != NULL) {
+    *statusCode = failure;
+  }
+  return request;
+}
+
 static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
-                                            ALNConnectionReadState *readState) {
+                                            ALNConnectionReadState *readState,
+                                            ALNRequest **spooledRequest) {
   if (statusCode != NULL) {
     *statusCode = 0;
   }
@@ -1868,6 +1950,15 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
       } else {
         readState->scanOffset = readState->length;
       }
+    }
+
+    if (readState->metadataReady && spooledRequest != NULL &&
+        (NSUInteger)readState->metadata.contentLength > limits.spoolThresholdBytes) {
+      *spooledRequest = ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLegacy,
+                                              readState->metadata.headerBytes,
+                                              (NSUInteger)readState->metadata.contentLength,
+                                              statusCode, readState);
+      return nil;
     }
 
     if (readState->metadataReady) {
@@ -1981,6 +2072,20 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
       return nil;
     }
 
+    // llhttp counts content_length down as it parses body bytes, so take the
+    // declared length from the head itself.
+    if (headersComplete && request == nil && requestError == nil) {
+      size_t separatorLocation = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+      ALNRequestHeadMetadata head;
+      memset(&head, 0, sizeof(head));
+      if (separatorLocation != SIZE_MAX && separatorLocation + 4 <= limits.maxHeaderBytes &&
+          ALNParseRequestHeadMetadataBytes(readState->bytes, separatorLocation + 4, limits, &head) &&
+          head.contentLength > 0 && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
+        return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
+                                     (NSUInteger)head.contentLength, statusCode, readState);
+      }
+    }
+
     if (!headersComplete) {
       if (readState->length > limits.maxHeaderBytes) {
         if (statusCode != NULL) {
@@ -2087,7 +2192,14 @@ static ALNRequest *ALNReadHTTPRequest(ALNSocketHandle clientFd,
   }
 
   NSInteger readStatus = 0;
-  NSData *rawRequest = ALNReadHTTPRequestDataLegacy(clientFd, limits, &readStatus, readState);
+  ALNRequest *spooledRequest = nil;
+  NSData *rawRequest = ALNReadHTTPRequestDataLegacy(clientFd, limits, &readStatus, readState, &spooledRequest);
+  if (spooledRequest != nil) {
+    if (statusCode != NULL) {
+      *statusCode = 0;
+    }
+    return spooledRequest;
+  }
   if (rawRequest == nil) {
     if (statusCode != NULL) {
       *statusCode = readStatus;

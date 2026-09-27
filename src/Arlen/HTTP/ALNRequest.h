@@ -39,6 +39,15 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 // Removes spooled upload files (see ALNUpload temporaryFilePath). Runs automatically
 // when the request is deallocated; safe to call more than once.
 - (void)removeTemporaryFiles;
+
+// Server internals for request bodies spooled to disk (requestLimits.spoolThresholdBytes).
+// Parses a complete request head (through CRLF CRLF) with the given backend and
+// no body, then `adoptSpooledBodyAtPath:` maps the spooled file as `body`. The
+// request owns the file and removes it with its other temporary files.
++ (nullable ALNRequest *)requestFromHeadData:(NSData *)head
+                                     backend:(ALNHTTPParserBackend)backend
+                                       error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError *_Nullable *_Nullable)error;
 @property(nonatomic, copy, readonly) NSDictionary *cookies;
 @property(nonatomic, copy) NSDictionary *routeParams;
 @property(nonatomic, copy) NSString *remoteAddress;

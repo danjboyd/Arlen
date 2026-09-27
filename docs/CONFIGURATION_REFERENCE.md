@@ -518,7 +518,7 @@ For serialized request runtimes, configure `refreshOnRequest: false` and
 wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
 framework tests require no tenant or public deployment.
 
-Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). File parts larger than `spoolThresholdBytes` (1048576) are spooled to a private temporary file under `spoolDirectory` (an absolute path; default the system temp directory). All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
+Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). Request bodies and multipart file parts larger than `spoolThresholdBytes` (1048576) are spooled to private temporary files under `spoolDirectory` (an absolute path; default the system temp directory) instead of memory. All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
 
 ## Auth Module OIDC Providers
 
