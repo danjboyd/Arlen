@@ -1136,6 +1136,94 @@
   }
 }
 
+// GitHub issue 89: releases record the app and framework commits they were built
+// from, with a dirty flag scoped to what the release packages.
+- (void)testReleasesRecordSourceRevisionAndRequireCleanRefusesDirtyTrees_Issue89 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-revision-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-revision-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    int code = 0;
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && git init -q && git add -A && "
+                                                   "git -c user.email=t@example.test -c user.name=Test commit -q -m init && "
+                                                   "git rev-parse HEAD",
+                                                  appRoot]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *appSHA = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *frameworkSHA = [[self runShellCapture:[NSString stringWithFormat:@"git -C %@ rev-parse HEAD", repoRoot]
+                                           exitCode:&code]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    output = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    NSString *arlen = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen", appRoot, repoRoot, repoRoot];
+    NSString *(^deploy)(NSString *, NSString *, int *) = ^NSString *(NSString *step, NSString *extra, int *exitCode) {
+      return [self runShellCapture:[NSString stringWithFormat:@"%@ deploy %@ --app-root %@ --releases-dir %@ %@ "
+                                                               "--allow-missing-certification",
+                                                              arlen, step, appRoot, releasesDir, extra]
+                          exitCode:exitCode];
+    };
+
+    // Build output left untracked in the app (.boomhauer/) does not make a release dirty.
+    output = deploy(@"push", @"--release-id rev-clean --require-clean --json", &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    NSDictionary *revision = [self parseJSONDictionaryFromOutput:output context:@"push clean"][@"manifest"][@"source_revision"];
+    XCTAssertEqualObjects(appSHA, revision[@"app_git_sha"]);
+    XCTAssertEqualObjects(@NO, revision[@"app_git_dirty"]);
+    XCTAssertEqualObjects(frameworkSHA, revision[@"framework_git_sha"]);
+    output = deploy(@"release", @"--release-id rev-clean --json", &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *releaseEnv = [NSString stringWithContentsOfFile:[releasesDir stringByAppendingPathComponent:@"rev-clean/metadata/release.env"]
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    NSString *shaLine = [NSString stringWithFormat:@"ARLEN_RELEASE_APP_GIT_SHA=%@\n", appSHA];
+    XCTAssertTrue([releaseEnv containsString:shaLine], @"%@", releaseEnv);
+    XCTAssertTrue([releaseEnv containsString:@"ARLEN_RELEASE_APP_GIT_DIRTY=0\n"], @"%@", releaseEnv);
+    NSString *frameworkLine = [NSString stringWithFormat:@"ARLEN_RELEASE_FRAMEWORK_GIT_SHA=%@\n", frameworkSHA];
+    XCTAssertTrue([releaseEnv containsString:frameworkLine], @"%@", releaseEnv);
+
+    // An uncommitted change in a packaged path marks the release dirty; --require-clean refuses it.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3001;\n}\n"]);
+    output = deploy(@"push", @"--release-id rev-dirty-refused --require-clean 2>&1", &code);
+    XCTAssertNotEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"uncommitted changes"], @"%@", output);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:[releasesDir stringByAppendingPathComponent:@"rev-dirty-refused"]]);
+    output = deploy(@"push", @"--release-id rev-dirty --json", &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    NSDictionary *dirtyPayload = [self parseJSONDictionaryFromOutput:output context:@"push dirty"];
+    XCTAssertEqualObjects(@YES, dirtyPayload[@"manifest"][@"source_revision"][@"app_git_dirty"]);
+
+    NSString *shortSHA = [appSHA substringToIndex:7];
+    output = deploy(@"releases", @"", &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *cleanLine = [NSString stringWithFormat:@"- rev-clean [active] %@ ", shortSHA];
+    NSString *dirtyLine = [NSString stringWithFormat:@"- rev-dirty [previous] %@+dirty ", shortSHA];
+    XCTAssertTrue([output containsString:cleanLine], @"%@", output);
+    XCTAssertTrue([output containsString:dirtyLine], @"%@", output);
+    output = deploy(@"status", @"", &code);
+    NSString *statusLine = [NSString stringWithFormat:@"Active release: rev-clean (%@)", shortSHA];
+    XCTAssertTrue([output containsString:statusLine], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:NULL];
+  }
+}
+
 - (void)testArlenDeployPushAndReleaseCommandsBuildManifestAndActivateCurrent {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-cli-app"];

@@ -2135,6 +2135,22 @@ static NSDictionary *CreateRemoteDeployTargetLayout(NSDictionary *target) {
   return RunSSHCommandForTarget(target, script);
 }
 
+// "abc1234", "abc1234+dirty", or "" when the release recorded no git revision
+// (GitHub issue 89).
+static NSDictionary *SourceRevisionFromManifest(NSDictionary *manifest) {
+  NSDictionary *revision =
+      [manifest[@"source_revision"] isKindOfClass:[NSDictionary class]] ? manifest[@"source_revision"] : @{};
+  NSString *sha = [revision[@"app_git_sha"] isKindOfClass:[NSString class]] ? revision[@"app_git_sha"] : @"";
+  BOOL dirty = [revision[@"app_git_dirty"] isKindOfClass:[NSNumber class]] && [revision[@"app_git_dirty"] boolValue];
+  NSString *label = @"";
+  if ([sha length] > 0) {
+    label = [[sha substringToIndex:MIN((NSUInteger)7, [sha length])] stringByAppendingString:dirty ? @"+dirty" : @""];
+  }
+  NSMutableDictionary *out = [revision mutableCopy] ?: [NSMutableDictionary dictionary];
+  out[@"label"] = label;
+  return out;
+}
+
 static NSDictionary *ReleaseInventoryItem(NSString *releaseID,
                                           NSString *releaseDir,
                                           NSString *state,
@@ -2149,6 +2165,7 @@ static NSDictionary *ReleaseInventoryItem(NSString *releaseID,
     @"path" : releaseDir ?: @"",
     @"manifest_path" : manifestPath ?: @"",
     @"manifest_version" : manifest[@"version"] ?: @"",
+    @"source_revision" : SourceRevisionFromManifest(manifest),
     @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
     @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
   };
@@ -5572,6 +5589,7 @@ static int CommandDeploy(NSArray *args) {
   NSTimeInterval healthStartupIntervalSeconds = 1.0;
   NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
+  BOOL requireClean = NO;
   BOOL allowRemoteRebuild = NO;
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
@@ -5930,6 +5948,8 @@ static int CommandDeploy(NSArray *args) {
       allowMissingCertification = YES;
     } else if ([arg isEqualToString:@"--allow-remote-rebuild"]) {
       allowRemoteRebuild = YES;
+    } else if ([arg isEqualToString:@"--require-clean"]) {
+      requireClean = YES;
     } else if ([arg isEqualToString:@"--json"]) {
       asJSON = YES;
     } else if ([arg isEqualToString:@"--skip-migrate"]) {
@@ -6344,6 +6364,9 @@ static int CommandDeploy(NSArray *args) {
                                 : @[]) {
     AppendShellOption(buildCommand, @"--pre-package-command", command);
   }
+  if (requireClean) {
+    [buildCommand appendString:@" --require-clean"];
+  }
 
   if (remoteTargetEnabled && ![subcommand isEqualToString:@"dryrun"] && ![subcommand isEqualToString:@"releases"]) {
     NSDictionary *localBuildPayload = nil;
@@ -6674,9 +6697,13 @@ static int CommandDeploy(NSArray *args) {
 
     fprintf(stdout, "Available releases (%s): %lu\n", [inventorySource UTF8String], (unsigned long)[releaseItems count]);
     for (NSDictionary *item in releaseItems) {
-      fprintf(stdout, "- %s [%s] %s\n",
+      NSString *revision = [item[@"source_revision"] isKindOfClass:[NSDictionary class]]
+                               ? [item[@"source_revision"][@"label"] description]
+                               : @"";
+      fprintf(stdout, "- %s [%s]%s %s\n",
               [[item[@"id"] description] UTF8String],
               [[item[@"state"] description] UTF8String],
+              [revision length] > 0 ? [[NSString stringWithFormat:@" %@", revision] UTF8String] : "",
               [[item[@"path"] description] UTF8String]);
     }
     return 0;
@@ -6766,6 +6793,7 @@ static int CommandDeploy(NSArray *args) {
         @"previous_release_dir" : previousReleaseDir ?: @"",
         @"manifest_path" : currentManifestPath ?: @"",
         @"manifest" : currentManifest ?: @{},
+        @"source_revision" : SourceRevisionFromManifest(currentManifest ?: @{}),
         @"deployment" : currentDeployment ?: @{},
         @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
         @"health_contract" : currentHealthContract ?: @{},
@@ -6788,7 +6816,9 @@ static int CommandDeploy(NSArray *args) {
       return ([currentReleaseDir length] > 0) ? 0 : 1;
     }
 
-    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    NSString *activeRevision = [SourceRevisionFromManifest(currentManifest)[@"label"] description];
+    fprintf(stdout, "Active release: %s%s\n", [(currentReleaseID ?: @"(none)") UTF8String],
+            [activeRevision length] > 0 ? [[NSString stringWithFormat:@" (%@)", activeRevision] UTF8String] : "");
     fprintf(stdout, "Previous release: %s\n", [(previousReleaseID ?: @"(none)") UTF8String]);
     fprintf(stdout, "Release dir: %s\n", [(currentReleaseDir ?: @"(none)") UTF8String]);
     fprintf(stdout, "Profile: %s -> %s\n",
@@ -7135,7 +7165,9 @@ static int CommandDeploy(NSArray *args) {
       PrintJSONPayload(stdout, payload);
       return ([currentReleaseDir length] > 0) ? 0 : 1;
     }
-    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    NSString *activeRevision = [SourceRevisionFromManifest(currentManifest)[@"label"] description];
+    fprintf(stdout, "Active release: %s%s\n", [(currentReleaseID ?: @"(none)") UTF8String],
+            [activeRevision length] > 0 ? [[NSString stringWithFormat:@" (%@)", activeRevision] UTF8String] : "");
     fprintf(stdout, "Manifest: %s\n", [[payload[@"manifest_path"] description] UTF8String]);
     fprintf(stdout, "Release README: %s\n", [[payload[@"release_readme_path"] description] UTF8String]);
     fprintf(stdout, "Release env: %s\n", [[payload[@"release_env_path"] description] UTF8String]);

@@ -46,6 +46,8 @@ Options:
   --pre-package-command <cmd>
                            Shell command run in the app root before packaging
                            (repeatable, in order; a failure aborts the build)
+  --require-clean          Refuse to build when the app's packaged paths have
+                           uncommitted changes (or the app is not a git checkout)
   --dry-run                Validate inputs and emit planned release metadata only
   --json                   Emit machine-readable workflow payloads
   --help                   Show this help
@@ -222,6 +224,7 @@ json_performance_bundle_manifest=""
 dry_run=0
 shared_paths=()
 pre_package_commands=()
+require_clean=0
 output_json=0
 local_profile=""
 target_profile=""
@@ -456,6 +459,10 @@ while [[ $# -gt 0 ]]; do
         2
       pre_package_commands+=("$2")
       shift 2
+      ;;
+    --require-clean)
+      require_clean=1
+      shift
       ;;
     --dry-run)
       dry_run=1
@@ -699,6 +706,42 @@ for shared_path in "${shared_paths[@]}"; do
   fi
 done
 
+# Source revision (GitHub issue 89): which commit a release was built from, and
+# whether what it packages differs from that commit. Only the packaged app paths
+# count as dirty, so untracked build output (.boomhauer/, build/) does not. Empty
+# values mean the root is not a git checkout.
+git_head_sha() {
+  if git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$1" rev-parse HEAD 2>/dev/null || true
+  fi
+}
+app_git_sha="$(git_head_sha "$app_root")"
+framework_git_sha="$(git_head_sha "$framework_root")"
+app_git_dirty=""
+framework_git_dirty=""
+if [[ -n "$app_git_sha" ]]; then
+  app_git_dirty=0
+  if [[ -n "$(git -C "$app_root" status --porcelain --untracked-files=normal -- \
+                config public templates modules src app_lite.m db/migrations 2>/dev/null)" ]]; then
+    app_git_dirty=1
+  fi
+fi
+if [[ -n "$framework_git_sha" ]]; then
+  framework_git_dirty=0
+  if [[ -n "$(git -C "$framework_root" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    framework_git_dirty=1
+  fi
+fi
+if [[ "$require_clean" == "1" && ( -z "$app_git_sha" || "$app_git_dirty" == "1" ) ]]; then
+  emit_error \
+    "source_not_clean" \
+    "$( [[ -z "$app_git_sha" ]] && echo "--require-clean needs the app to be a git checkout: $app_root" \
+         || echo "--require-clean: the app has uncommitted changes in packaged paths (config, public, templates, modules, src, app_lite.m, db/migrations)" )" \
+    "Commit or stash the changes (git -C <app-root> status), or drop --require-clean." \
+    "git -C /path/to/app status --short" \
+    1
+fi
+
 if [[ "$dry_run" == "1" ]]; then
   if [[ "$output_json" != "1" ]]; then
     for command in "${pre_package_commands[@]}"; do
@@ -817,6 +860,10 @@ fi
 cat >"$release_dir/metadata/release.env" <<EOF
 RELEASE_ID=$release_id
 RELEASE_CREATED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+ARLEN_RELEASE_APP_GIT_SHA=$app_git_sha
+ARLEN_RELEASE_APP_GIT_DIRTY=$app_git_dirty
+ARLEN_RELEASE_FRAMEWORK_GIT_SHA=$framework_git_sha
+ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY=$framework_git_dirty
 ARLEN_RELEASE_ENV_LAYOUT=release-relative
 ARLEN_RELEASE_ROOT=.
 ARLEN_APP_ROOT=app
@@ -853,6 +900,8 @@ if [[ ${#required_env_keys[@]} -gt 0 ]]; then
   printf -v required_env_keys_blob '%s\n' "${required_env_keys[@]}"
 fi
 
+ARLEN_RELEASE_APP_GIT_SHA="$app_git_sha" ARLEN_RELEASE_APP_GIT_DIRTY="$app_git_dirty" \
+ARLEN_RELEASE_FRAMEWORK_GIT_SHA="$framework_git_sha" ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY="$framework_git_dirty" \
 python3 - "$release_dir" "$release_id" "$app_root" "$framework_root" "$certification_status" \
   "$certification_bundle_manifest" "$json_performance_status" "$json_performance_bundle_manifest" \
   "$packaged_runtime_binary" "$packaged_framework_boomhauer" "$packaged_arlen_binary" \
@@ -914,9 +963,19 @@ if os.path.isdir(migrations_dir):
                 migration_files.append(os.path.relpath(path, release_dir).replace(os.sep, "/"))
     migration_files.sort()
 
+def env_dirty(name):
+    value = os.environ.get(name, "")
+    return None if value == "" else value == "1"
+
 manifest = {
     "version": "phase32-deploy-manifest-v1",
     "release_id": release_id,
+    "source_revision": {
+        "app_git_sha": os.environ.get("ARLEN_RELEASE_APP_GIT_SHA", ""),
+        "app_git_dirty": env_dirty("ARLEN_RELEASE_APP_GIT_DIRTY"),
+        "framework_git_sha": os.environ.get("ARLEN_RELEASE_FRAMEWORK_GIT_SHA", ""),
+        "framework_git_dirty": env_dirty("ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY"),
+    },
     "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     # ARLEN-BUG-017: shipped manifests must stay valid after moving the release
     # to a different host/path, so portable metadata stays release-relative.
