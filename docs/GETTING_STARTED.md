@@ -142,6 +142,17 @@ From app root:
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 
+New apps ship a request test (`tests/HomeControllerTests.m`, or
+`tests/HomeTests.m` in lite mode). Run it, and any tests you add, with:
+
+```bash
+/path/to/Arlen/bin/arlen test --app
+/path/to/Arlen/bin/arlen generate test Hello --request --route /hello
+```
+
+See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
+`ALNTestClient` API.
+
 ## 7. Choose the Next Guide
 
 For login/logout flows that issue multiple cookies, see

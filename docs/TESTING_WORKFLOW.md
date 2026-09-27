@@ -1,7 +1,68 @@
 # Testing Workflow
 
 This guide describes the fastest path from a bug report to a permanent Arlen
-regression test.
+regression test. For testing your own app, start with
+[App request tests](#app-request-tests).
+
+## App request tests
+
+Apps test their routes in process with `ALNTestClient`: it loads the app's
+`config/` for an environment (default `test`), registers the app's own routes,
+and dispatches requests without a socket. New apps ship one such test; run all
+of `tests/**/*.m` with `arlen test --app` (see
+[CLI Reference](CLI_REFERENCE.md) (`arlen test --app`)).
+
+```objc
+#import <XCTest/XCTest.h>
+#import "ALNTestClient.h"
+
+@interface ProjectsTests : XCTestCase
+@property(nonatomic, strong) ALNTestClient *client;
+@end
+
+@implementation ProjectsTests
+- (void)setUp {
+  [super setUp];
+  NSError *error = nil;
+  self.client = [ALNTestClient clientWithEnvironment:@"test"
+                                     configOverrides:@{ @"database" : @{ @"connectionString" : @"" } }
+                                               error:&error];
+  XCTAssertNotNil(self.client, @"%@", error);
+}
+
+- (void)testCreatingAProjectRequiresSignIn {
+  XCTAssertEqual(401, [self.client post:@"/api/projects" JSON:@{ @"name" : @"Atlas" }].statusCode);
+  XCTAssertTrue([self.client signInAsSubject:@"user-1" roles:@[ @"editor" ] scopes:nil error:NULL]);
+  ALNResponse *created = [self.client post:@"/api/projects" JSON:@{ @"name" : @"Atlas" }];
+  XCTAssertEqual(201, created.statusCode, @"%@", [created bodyText]);
+  XCTAssertEqualObjects(@"Atlas", [created JSONObject][@"name"]);
+}
+@end
+```
+
+- Requests: `get:`, `get:query:headers:`, `post:form:`, `post:JSON:`,
+  `post:multipartFields:files:` (files are `@{ @"name", @"filename", @"data",
+  @"contentType" }`), and `requestWithMethod:path:query:headers:body:`.
+- Responses are `ALNResponse`; `bodyText` and `JSONObject` read the body.
+- Cookies persist across requests. `session` decodes the sealed session,
+  `updateSession:error:` edits it, and `signInAsSubject:roles:scopes:error:`
+  establishes an authenticated session the way `ALNAuthSession` does after a
+  login. `clearCookies` signs out.
+- With CSRF enabled, unsafe requests get the app's CSRF header automatically
+  (`csrfToken` creates the session token if needed). Set `automaticCSRF = NO`
+  to test rejection.
+- `configOverrides` is merged over the loaded config after normalization, so
+  use final types (`NSNumber`, not plist strings).
+- Tests call the app's own controllers, templates and modules, so anything they
+  touch (a database, for example) must be available in the `test` environment.
+
+Route capture needs no app changes: the test build recompiles the file that
+defines `main` with `main` renamed, and `ALNCaptureRouteRegistration` runs it
+with `ALNRunAppMain` in capture mode, which records the route callback and
+returns before loading config or starting a server. To test an app built some
+other way, pass `registerRoutes:` to
+`clientWithAppRoot:environment:configOverrides:registerRoutes:error:`, or wrap
+an `ALNApplication` with `initWithApplication:error:`.
 
 ## Merge-Gate Validation
 

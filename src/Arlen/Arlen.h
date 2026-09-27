@@ -75,6 +75,7 @@
 #import "Support/ALNRealtime.h"
 #import "Support/ALNServices.h"
 #import "Support/ALNPostgresJobAdapter.h"
+#import "Support/ALNTestClient.h"
 #import "ALNAuthModule.h"
 #import "ALNAdminUIModule.h"
 #import "ALNJobsModule.h"
