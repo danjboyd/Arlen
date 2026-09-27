@@ -1849,6 +1849,211 @@
   }
 }
 
+- (void)testRemoteDeployDelegateSourcesTargetGNUstepScript_Issue71 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-gnustep-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-gnustep-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh.sh"];
+    NSString *mockSSHLog = [workRoot stringByAppendingPathComponent:@"mock-ssh.log"];
+    NSString *fakeGNUstep = [workRoot stringByAppendingPathComponent:@"GNUstep.sh"];
+    NSString *marker = [workRoot stringByAppendingPathComponent:@"sourced.marker"];
+    NSString *gnuHome = [workRoot stringByAppendingPathComponent:@"gnu-home"];
+    XCTAssertTrue([[NSFileManager defaultManager]
+        createDirectoryAtPath:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults/.lck"]
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:NULL]);
+    NSString *arlenEnv = [NSString stringWithFormat:@"HOME=%@ GNUSTEP_USER_DIR=%@ GNUSTEP_USER_ROOT=%@ GNUSTEP_USER_DEFAULTS_DIR=%@",
+                                                    [self shellQuoted:gnuHome],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults"]]];
+    XCTAssertTrue([self writeFile:mockSSH
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "while [[ \"$#\" -gt 0 && \"$1\" == -* ]]; do shift; done\n"
+                                  "host=\"$1\"\n"
+                                  "shift\n"
+                                  "printf 'host=%s command=%s\\n' \"$host\" \"$*\" >> \"$ARLEN_MOCK_SSH_LOG\"\n"
+                                  "exec bash -lc \"$*\"\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:mockSSH]);
+    NSString *fakeGNUstepContent = [NSString stringWithFormat:@"printf sourced > %@\n", [self shellQuoted:marker]];
+    XCTAssertTrue([self writeFile:fakeGNUstep content:fakeGNUstepContent]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *missingScript = [workRoot stringByAppendingPathComponent:@"absent/GNUstep.sh"];
+    NSArray *cases = @[
+      @{ @"runtime" : [NSString stringWithFormat:@"gnustepScript = \"%@\"; requiresEnvWrapper = YES;", fakeGNUstep],
+         @"sourced" : @YES, @"prelude" : @YES, @"missing" : @NO },
+      @{ @"runtime" : [NSString stringWithFormat:@"gnustepScript = \"%@\"; requiresEnvWrapper = YES;", missingScript],
+         @"sourced" : @NO, @"prelude" : @YES, @"missing" : @YES },
+      @{ @"runtime" : [NSString stringWithFormat:@"gnustepScript = \"%@\"; requiresEnvWrapper = NO;", fakeGNUstep],
+         @"sourced" : @NO, @"prelude" : @NO, @"missing" : @NO },
+    ];
+    for (NSDictionary *testCase in cases) {
+      [[NSFileManager defaultManager] removeItemAtPath:marker error:NULL];
+      [[NSFileManager defaultManager] removeItemAtPath:mockSSHLog error:NULL];
+      NSString *deployConfig = [NSString stringWithFormat:
+          @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = { production = {"
+           " host = \"myapp.example.test\"; releasePath = \"%@\"; profile = \"linux-x86_64-gnustep-clang\";"
+           " runtimeStrategy = \"system\"; runtimeAction = \"none\"; environment = \"production\";"
+           " runtime = { %@ };"
+           " transport = { sshHost = \"mock-target\"; sshCommand = \"%@\"; }; }; }; }; }\n",
+          [workRoot stringByAppendingPathComponent:@"remote-host/myapp"], testCase[@"runtime"], mockSSH];
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"] content:deployConfig]);
+      for (NSString *subcommand in @[ @"status", @"doctor" ]) {
+        [[NSFileManager defaultManager] removeItemAtPath:marker error:NULL];
+        NSString *output = [self runShellCapture:[NSString stringWithFormat:
+            @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ ARLEN_MOCK_SSH_LOG=%@ %@/build/arlen deploy %@ production --app-root %@ 2>&1",
+            appRoot, arlenEnv, repoRoot, mockSSHLog, repoRoot, subcommand, appRoot]
+                                       exitCode:&code];
+        // No release was pushed, so the remote binary is absent and the delegate fails after the prelude.
+        XCTAssertNotEqual(0, code, @"%@", output);
+        NSString *log = [NSString stringWithContentsOfFile:mockSSHLog encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+        BOOL sourced = [[NSFileManager defaultManager] fileExistsAtPath:marker];
+        XCTAssertEqual([testCase[@"sourced"] boolValue], sourced, @"%@ %@ %@", subcommand, testCase, output);
+        XCTAssertEqual([testCase[@"prelude"] boolValue], [log containsString:@"ARLEN_REMOTE_GNUSTEP_SCRIPT="],
+                       @"%@ %@ %@", subcommand, testCase, log);
+        XCTAssertEqual([testCase[@"missing"] boolValue], [output containsString:@"missing GNUstep.sh"],
+                       @"%@ %@ %@", subcommand, testCase, output);
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testRemotePushChecksReleaseLayoutOnTheHostNotLocally_Issue69 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-layout-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-layout-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    // The release path only exists "on the host": the mock SSH maps it to remoteRoot.
+    NSString *remoteRoot = [workRoot stringByAppendingPathComponent:@"host-fs"];
+    NSString *remoteReleasePath = @"/arlen-mock-remote/myapp";
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:remoteReleasePath]);
+    NSString *mockSSH = [workRoot stringByAppendingPathComponent:@"mock-ssh.sh"];
+    NSString *gnuHome = [workRoot stringByAppendingPathComponent:@"gnu-home"];
+    XCTAssertTrue([[NSFileManager defaultManager]
+        createDirectoryAtPath:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults/.lck"]
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:NULL]);
+    NSString *arlenEnv = [NSString stringWithFormat:@"HOME=%@ GNUSTEP_USER_DIR=%@ GNUSTEP_USER_ROOT=%@ GNUSTEP_USER_DEFAULTS_DIR=%@ ARLEN_MOCK_REMOTE_ROOT=%@",
+                                                    [self shellQuoted:gnuHome],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep"]],
+                                                    [self shellQuoted:[gnuHome stringByAppendingPathComponent:@"GNUstep/Defaults"]],
+                                                    [self shellQuoted:remoteRoot]];
+    XCTAssertTrue([self writeFile:mockSSH
+                          content:@"#!/usr/bin/env bash\n"
+                                  "set -euo pipefail\n"
+                                  "if [[ -n \"${ARLEN_MOCK_SSH_FAIL:-}\" ]]; then echo 'ssh: connect to host mock-target: Connection refused' >&2; exit 255; fi\n"
+                                  "while [[ \"$#\" -gt 0 && \"$1\" == -* ]]; do shift; done\n"
+                                  "shift\n"
+                                  "remote_command=\"$*\"\n"
+                                  "remote_command=\"${remote_command//\\/arlen-mock-remote/$ARLEN_MOCK_REMOTE_ROOT}\"\n"
+                                  "exec bash -lc \"$remote_command\"\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:mockSSH]);
+    NSString *deployConfig = [NSString stringWithFormat:
+        @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = {"
+         " production = { host = \"myapp.example.test\"; releasePath = \"%@\"; profile = \"linux-x86_64-gnustep-clang\";"
+         "   runtimeStrategy = \"system\"; runtimeAction = \"none\"; environment = \"production\";"
+         "   transport = { sshHost = \"mock-target\"; sshCommand = \"%@\"; }; };"
+         " localonly = { host = \"localhost\"; releasePath = \"%@\"; profile = \"linux-x86_64-gnustep-clang\";"
+         "   runtimeStrategy = \"system\"; runtimeAction = \"none\"; environment = \"production\"; };"
+         " }; }; }\n",
+        remoteReleasePath, mockSSH, [workRoot stringByAppendingPathComponent:@"local-target"]];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"] content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    NSString *arlen = [NSString stringWithFormat:@"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen",
+                                                 appRoot, arlenEnv, repoRoot, repoRoot];
+
+    // 1. Remote layout missing: not initialized, naming the host paths.
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ deploy push production --app-root %@ --release-id layout-1 --allow-missing-certification --json", arlen, appRoot]
+                                    exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    NSDictionary *payload = [self parseJSONDictionaryFromOutput:output context:@"push before layout"];
+    XCTAssertEqualObjects(@"deploy_target_not_initialized", payload[@"error"][@"code"]);
+    XCTAssertTrue([payload[@"missing_paths"] containsObject:@"/arlen-mock-remote/myapp/releases"], @"%@", payload);
+    XCTAssertTrue([payload[@"error"][@"fixit"][@"example"] containsString:@"--remote"], @"%@", payload);
+
+    // 2. SSH unreachable: a transport error, not "not initialized".
+    output = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ deploy push production --app-root %@ --release-id layout-1 --allow-missing-certification --json",
+        [arlen stringByReplacingOccurrencesOfString:@"&& " withString:@"&& ARLEN_MOCK_SSH_FAIL=1 "], appRoot]
+                          exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    payload = [self parseJSONDictionaryFromOutput:output context:@"push unreachable"];
+    XCTAssertEqualObjects(@"deploy_target_transport_failed", payload[@"error"][@"code"], @"%@", payload);
+
+    // 3. init --remote creates the layout on the host only.
+    output = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ deploy init production --remote --app-root %@ --json", arlen, appRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionaryFromOutput:output context:@"init --remote"];
+    XCTAssertEqualObjects(@"remote", payload[@"layout_location"]);
+    BOOL isDirectory = NO;
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[remoteRoot stringByAppendingPathComponent:@"myapp/shared"]
+                                                       isDirectory:&isDirectory] && isDirectory);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:remoteReleasePath]);
+
+    // 4. With the local generated artifacts deleted, push regenerates them and proceeds.
+    [[NSFileManager defaultManager] removeItemAtPath:[appRoot stringByAppendingPathComponent:@"build/deploy"] error:NULL];
+    output = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ deploy push production --app-root %@ --release-id layout-1 --allow-missing-certification --json", arlen, appRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionaryFromOutput:output context:@"push after remote init"];
+    XCTAssertEqualObjects(@"ok", payload[@"status"], @"%@", payload);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:
+                      [remoteRoot stringByAppendingPathComponent:@"myapp/releases/layout-1"]]);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:
+                      [appRoot stringByAppendingPathComponent:@"build/deploy/targets/production/bin"]]);
+
+    // 5. --remote is only meaningful for SSH targets.
+    output = [self runShellCapture:[NSString stringWithFormat:
+        @"%@ deploy init localonly --remote --app-root %@ --json", arlen, appRoot] exitCode:&code];
+    XCTAssertEqual(2, code, @"%@", output);
+    payload = [self parseJSONDictionaryFromOutput:output context:@"init --remote local target"];
+    XCTAssertEqualObjects(@"deploy_init_remote_requires_ssh_target", payload[@"error"][@"code"], @"%@", payload);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testArlenDeployReleaseAndStatusOperateAgainstRemoteNamedTargetOverSSH {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-ssh-app"];

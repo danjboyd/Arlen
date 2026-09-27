@@ -3,7 +3,10 @@
 Arlen's HTTP server serves configured static mounts before application dispatch.
 With `serveStatic = YES`, the default `/static/` mount serves the application's
 `public/` directory. Custom mounts retain their configured extension allowlists.
-Static responses do not pass through application response middleware.
+Static responses do not pass through application response middleware, but
+they do carry the app's security headers (`securityHeaders`, including the
+CSP), as described in
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
 
 ## Content types
 
@@ -27,6 +30,41 @@ mimeTypes = {
 ```
 
 Values that contain control characters or lack a `/` are ignored.
+
+## Cache-Control
+
+Static responses send no `Cache-Control` header unless one is configured. Each
+entry in `staticMounts` accepts `cacheControl`, either as one value for every
+file or as a dictionary of glob patterns. For a Vite or webpack build with
+hashed asset filenames:
+
+```plist
+staticMounts = ({
+  prefix = "/app";
+  directory = "public/app";
+  cacheControl = {
+    "assets/*" = "public, max-age=31536000, immutable";
+    default = "no-cache";
+  };
+});
+```
+
+- Patterns match the served file's path relative to the mount directory. A
+  directory request matches as its `index.html`.
+- `*` and `?` match within one path segment. `**` spans segments, and `**/`
+  also matches zero directories.
+- When several patterns match, the one with the most literal characters wins;
+  ties go to the lexically smaller pattern. `default` applies when nothing else
+  matches. If there is no `default` and no match, no header is sent.
+- The header is sent on 200, 206 and 304 responses.
+- Invalid values (non-strings, control characters) skip the mount with a
+  warning, the same as other invalid mount entries.
+
+The default `/static` mount from `serveStatic = YES` takes the same forms from
+the top-level `staticCacheControl` key, or from a single value in
+`ARLEN_STATIC_CACHE_CONTROL`. Code that mounts directories itself can pass
+`options:@{ @"cacheControl" : ... }` to
+`-mountStaticDirectory:atPrefix:allowExtensions:options:`.
 
 ## Validators and conditional requests
 
@@ -126,12 +164,69 @@ A missing or non-regular file renders a 404, and the method returns `NO`.
   stored content hash. A bare value is quoted. A strong caller-supplied ETag can
   satisfy `If-Range`, which the weak metadata ETag never can.
 - `ALNFileResponseMIMETypesOption` overrides the app's `mimeTypes` for one call.
-- HEAD needs a route of its own (`HEAD` or `ANY`), because routes do not fall
-  back from HEAD to GET.
+- A `GET` route also answers `HEAD`; the body is omitted and the headers are
+  the same.
 
 Code that builds a response outside a controller can call
 `+[ALNFileResponse prepareResponse:forRequest:filePath:contentType:options:]`
 directly.
+
+## SPA history fallback
+
+A single-page app owns client-side URLs such as `/explorers/3/map`. When the
+browser reloads one of them, the server must answer with the app shell. Configure
+`spaFallback` instead of writing a catch-all route:
+
+```plist
+staticMounts = ({ prefix = "/assets"; directory = "public/app/assets"; });
+spaFallback = {
+  file = "public/app/index.html";              // relative to the app root, or absolute
+  excludePrefixes = ("/api", "/auth", "/media");
+  // prefix = "/app";                          // limit the fallback to one subtree (default "/")
+  // cacheControl = "no-cache";                // default
+  // allowDottedPaths = NO;                    // default
+};
+```
+
+The shell is served only when **all** of the following hold. Every other request
+gets exactly the 404 it gets today.
+
+- No route matched, and no built-in endpoint handled the request. Built-ins
+  include `/openapi.json`, the OpenAPI docs pages and `/arlen/live.js`.
+- The method is `GET` or `HEAD`.
+- The path is under `prefix` and not under any `excludePrefixes` entry. Both
+  match on segment boundaries: `/api` covers `/api/x`, but not `/apiary`.
+- The request is an HTML navigation. `Accept` must contain `text/html`; a bare
+  `*/*` (the `fetch()` and `curl` default) does not qualify. JSON-preferring
+  requests and `apiOnly` apps never get the shell.
+- The last path segment has no `.`, unless `allowDottedPaths = YES`. A missing
+  `/assets/app-3f9a.js` therefore stays a 404 instead of returning HTML.
+
+The shell is dispatched like a route (`arlen_spa_fallback`, handled by
+`ALNSPAFallbackController`), so the app's middleware applies. It gets security
+headers, the session and CSRF cookies, and rate limits. It is served with
+ETag/304 and HEAD support and `Cache-Control: no-cache`, so a redeploy is picked
+up on the next navigation. The status is always 200; the SPA renders its own
+not-found view.
+
+Precedence, from first to last:
+
+1. static mounts (each owns its prefix, including 404s for missing files)
+2. mounted child applications
+3. `/healthz`, `/readyz`, `/livez`, `/metrics` and `/clusterz`
+4. routes, including an app's own `/*path` wildcard, which therefore replaces
+   the fallback (startup logs a warning)
+5. route-miss built-ins
+6. the SPA fallback
+7. 404
+
+Put hashed assets on a static mount; with `cacheControl` they can be cached
+immutably.
+
+A missing shell file logs a warning at startup rather than failing, because a
+frontend dev server may be serving the app. Requests then get a 404 until the
+build exists. Invalid values fail `startWithError:`. Code can configure the same
+behavior with `-[ALNApplication setSPAFallbackFile:options:error:]`.
 
 ## Verification
 
@@ -146,6 +241,7 @@ source tools/source_gnustep_env.sh
 make boomhauer
 make test-integration-filter TEST=HTTPIntegrationTests
 make test-unit-filter TEST=FileResponseTests
+make test-unit-filter TEST=SPAFallbackTests
 ```
 
 The existing Linux quality gate runs these integration tests. Downstream apps

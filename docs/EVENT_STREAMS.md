@@ -120,7 +120,7 @@ Append example:
       [self appendEventStreamEvent:@{
         @"event_type" : @"message_created",
         @"payload" : @{ @"body" : body },
-        @"idempotency_key" : [self headerValueForName:@"Idempotency-Key"] ?: @""
+        @"idempotency_key" : [self headerValueForName:@"Idempotency-Key"]
       }
                         toStream:@"ownerconnect:conversation:123"
                            error:&error];

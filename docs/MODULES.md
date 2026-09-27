@@ -38,7 +38,8 @@ its public assets.
 What `module add` does:
 
 - vendors the module into `modules/<identifier>/`
-- updates `config/modules.plist`
+- updates `config/modules.plist`, including a `contentDigest` of the installed
+  files
 - preserves deterministic app-local ownership of the installed files
 
 Current first-party modules in-tree:
@@ -68,6 +69,8 @@ Use these commands early:
 - compatibility
 - required config keys
 - public mount precedence
+- vendored files that were edited locally, lack a recorded `contentDigest`, or
+  differ from the framework checkout's copy of the module (warnings)
 
 ## 4. Run Module Migrations
 
@@ -103,6 +106,22 @@ Override rule:
 
 Use `module upgrade` when you want to replace the vendored files with a newer
 source tree and update the lock metadata in `config/modules.plist`.
+
+Re-run it for every installed module whenever you move your framework pin.
+First-party module sources can change without a `version` bump, so `upgrade`
+compares file contents:
+
+- files already match the source: `noop`
+- the vendored copy is unedited since install: it is replaced (`updated`)
+- the vendored copy was edited locally, or the lock predates `contentDigest`:
+  the command exits 1 with `content_differs` and lists the differing files;
+  review them, then re-run with `--force`
+
+Before Arlen recorded `contentDigest`, `module upgrade` reported `noop` whenever
+the version matched, even when the module sources had changed. Apps that
+vendored modules and upgraded that way may still carry old module code; run
+`module doctor` from the app with `ARLEN_FRAMEWORK_ROOT` pointing at your
+framework checkout to find them.
 
 ## 7. Eject App-Owned Auth UI
 
@@ -168,6 +187,27 @@ Use a plugin when you need:
 - `docs/STORAGE_MODULE.md`
 - `docs/OPS_MODULE.md`
 - `docs/SEARCH_MODULE.md`
+
+## First-party module versions
+
+Each first-party module's `version` changes whenever its files change, so the
+version in `config/modules.plist` tells you which module code an app vendors:
+
+- patch (`1.0.1`): internal fixes with no configuration or API change
+- minor (`1.1.0`): new features, security fixes, or new required configuration
+- major (`2.0.0`): removed or incompatible APIs
+
+CI enforces this with `tools/ci/check_module_versions.py`. Framework
+contributors can run it locally before opening a PR:
+
+```bash
+python3 tools/ci/check_module_versions.py --base origin/main
+```
+
+Module versions first changed on 2026-09-25: `auth` and `storage` moved to
+`1.1.0` (OIDC providers; required storage signing secret), and `admin-ui`,
+`ops`, and `search` moved to `1.0.1`. `jobs` and `notifications` moved to
+`1.0.1` for app-root-relative module state paths (GitHub issue 76).
 
 ## MCP tools
 

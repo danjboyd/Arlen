@@ -334,6 +334,81 @@ worker. Do not put the secret into the plist. The auth module's existing
 The resolver may use a separate application-owned person store; OIDC does not
 create or link an `auth_users` row automatically.
 
+### Google preset
+
+`preset = "google"` fills in Google's issuer, discovery URL, scopes, client
+authentication method and button label. It also derives the allowed hosts from
+Google's endpoints: `accounts.google.com` and `oauth2.googleapis.com` for
+endpoints, and `www.googleapis.com` for JWKS. A hand-written Google config needs
+those hosts listed explicitly; the preset makes that unnecessary.
+
+```plist
+authModule = {
+  providers = {
+    google = {
+      enabled = YES;
+      preset = "google";
+      clientID = "<CLIENT_ID>.apps.googleusercontent.com";
+      clientSecretEnvironmentKey = "ARLEN_AUTH_GOOGLE_CLIENT_SECRET";
+      redirectURI = "https://app.example.com/auth/provider/google/callback";
+    };
+  };
+  hooks = { providerSessionResolverClass = "AppIdentityResolver"; };
+};
+```
+
+`enabled = YES` is still required. Any key set explicitly overrides the preset.
+The auth module currently supports only the `google` preset. The other
+`ALNAuthProviderPresets` entries need a tenant-specific issuer (Microsoft,
+Okta, Auth0), are not OIDC (GitHub), or need a client authentication method
+the module does not implement (Apple), so the module rejects them at startup.
+For Entra, use the explicit configuration above.
+
+### Admission policy
+
+Small private apps often only need "these people may sign in". An optional
+per-provider `admission` dictionary provides that without a custom resolver.
+It is checked after ID-token verification and before the resolver runs:
+
+```plist
+google = {
+  enabled = YES;
+  preset = "google";
+  /* ... */
+  admission = {
+    allowedEmails = ("parent@example.com", "kid@example.com");
+    allowedEmailsEnvironmentKey = "APP_ALLOWED_EMAILS";  // optional comma-separated list
+    allowedDomains = ("example.com");
+    requireHostedDomain = NO;
+    rejectionMessage = "This site is for family members only.";
+  };
+};
+```
+
+- `allowedEmails`, and addresses from `allowedEmailsEnvironmentKey`, are matched
+  case-insensitively against the verified `email` claim.
+- `allowedDomains` matches the email's domain exactly; subdomains do not match.
+  When the ID token carries Google's `hd` (hosted domain) claim, `hd` must also
+  be listed. `requireHostedDomain = YES` additionally requires `hd` to be
+  present, which excludes consumer Google accounts created with a work address.
+- If any list is configured, the address must be provider-verified
+  (`email_verified` true). `requireVerifiedEmail = YES` imposes that requirement
+  on its own, without lists.
+- Unknown keys and malformed values fail at startup. Entries must be plain
+  `name@domain.tld` addresses and dotted domain names, not patterns. A missing
+  or empty `allowedEmailsEnvironmentKey` variable also fails startup.
+
+Rejected logins never reach the resolver or create a session. JSON callbacks
+return `403` with `{"status":"error","code":"admission_denied","message":...}`.
+Browser callbacks redirect to the module's login page, which shows
+`rejectionMessage` (default "This account is not permitted to sign in."). If a
+[failure redirect](#failure-redirect) is configured, they go there with
+`error=admission_denied` instead.
+
+Admission only decides who may sign in. It does not link identities: accounts
+are still keyed on the verified provider subject, the resolver still decides
+membership and roles, and email is never a fallback match.
+
 For the example above, the module registers:
 
 - `GET /context/auth/provider/entra/login`
@@ -346,8 +421,54 @@ login route. API login returns `authorize_url`; browser login redirects there.
 A successful browser callback redirects to a local `return_to` path or the
 module's `defaultRedirect`. External `return_to` URLs are ignored. JSON callbacks
 return session metadata and `redirect_to`, without provider tokens. Failed
-callbacks return 401 with a generic message; provider setup/network failures
+callbacks return 401 with a generic message (403 `admission_denied` for an
+admission-policy rejection); provider setup/network failures
 at login return 502. Disabled providers have no routes or login buttons.
+
+### Failure redirect
+
+By default a rejected browser callback answers `401` with a small JSON body.
+SPA and headless apps can instead send people to their own page. Set
+`authModule.failureRedirect`, or `failureRedirect` on a provider (which wins),
+to a local absolute path:
+
+```plist
+authModule = {
+  failureRedirect = "/sign-in";
+  providers = { google = { /* ... */ failureRedirect = "/family/sign-in"; }; };
+};
+```
+
+A failed browser callback then redirects with `302` to
+`<failureRedirect>?error=<code>&provider=<identifier>`, or with `&` if the path
+already has a query string. The JSON API callback (`<apiPrefix>/provider/...`)
+never redirects. It keeps its `401` and adds the same `code` field. The value
+must be a local path: a scheme, a leading `//`, a backslash, a fragment or
+whitespace fails configuration at startup.
+
+| `error` code | Meaning |
+| --- | --- |
+| `rejected` | The resolver returned nil, or the verified subject/tenant was not accepted. |
+| `admission_denied` | The provider's `admission` policy refused the identity. |
+| `expired_state` | The login state was missing, expired, or did not match. |
+| `provider_error` | The provider returned an error, such as `access_denied`. |
+| `verification_failed` | Token or ID-token checks failed (signature, issuer, audience, nonce). |
+| `provider_unavailable` | Discovery, token or JWKS requests failed, or the client secret is missing. |
+
+A resolver can supply a more specific code by setting
+`ALNAuthModuleOIDCFailureCodeKey` in the `userInfo` of the NSError it returns.
+The code must be lowercase letters, digits or underscores, at most 64
+characters; otherwise `rejected` is used.
+
+```objc
+if (invite == nil) {
+  if (error) *error = [NSError errorWithDomain:@"App" code:1
+                                      userInfo:@{ ALNAuthModuleOIDCFailureCodeKey : @"not_invited" }];
+  return nil;
+}
+```
+
+Codes never include provider messages or claim values.
 
 ### Application Identity Resolver
 

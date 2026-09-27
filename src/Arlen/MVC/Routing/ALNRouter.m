@@ -320,6 +320,19 @@ static NSArray *ALNStaticCandidatesForPath(NSDictionary *index,
   if (params != NULL) {
     *params = nil;
   }
+  ALNRoute *match = [self matchNormalizedMethod:requestMethod path:normalizedPath format:format params:params];
+  // RFC 9110 section 9.3.2: HEAD is answered by the GET route when no HEAD or ANY
+  // route matches. The HTTP server omits the body for HEAD responses.
+  if (match == nil && [requestMethod isEqualToString:@"HEAD"]) {
+    match = [self matchNormalizedMethod:@"GET" path:normalizedPath format:format params:params];
+  }
+  return match;
+}
+
+- (ALNRoute *)matchNormalizedMethod:(NSString *)requestMethod
+                               path:(NSString *)normalizedPath
+                             format:(NSString *)format
+                             params:(NSDictionary **)params {
 
   NSArray *staticMethodCandidates =
       ALNStaticCandidatesForPath(self.staticRoutesByMethodAndPath, requestMethod, normalizedPath);

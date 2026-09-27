@@ -30,6 +30,13 @@ apps need first.
 - `logFormat`: `text` or `json`
 - `serveStatic`: serve files from `public/`
 - `staticAllowExtensions`: extensions Arlen may serve from `public/`
+- `staticCacheControl`: optional `Cache-Control` for the default `/static` mount,
+  either one string or a glob dictionary (`ARLEN_STATIC_CACHE_CONTROL` supplies
+  a single string); `staticMounts` entries take the same form as `cacheControl`
+  (see [Static files](STATIC_FILES.md#cache-control))
+- `spaFallback`: optional single-page-app shell for unmatched HTML navigations
+  (`file`, `excludePrefixes`, `prefix`, `cacheControl`, `allowDottedPaths`; see
+  [Static files](STATIC_FILES.md#spa-history-fallback))
 - `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
   and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog
@@ -227,7 +234,9 @@ Security headers:
 - `securityHeaders.contentSecurityPolicy`
 
 Many apps can keep the generated security-header defaults and only tighten the
-CSP later as the frontend becomes more specific.
+CSP later as the frontend becomes more specific. The headers cover every response, including static
+files, 404s and built-in endpoints, not only routed ones (see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers)).
 
 ## 6.1 Route Policies
 
@@ -368,7 +377,8 @@ security = {
 Required route fields:
 
 - `method`: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
-  `OPTIONS`, or `ANY`
+  `OPTIONS`, or `ANY`. `GET` routes also answer `HEAD` unless a `HEAD` or `ANY`
+  route matches first.
 - `path`: absolute route path beginning with `/`
 - `controller`: Objective-C controller class name
 - `action`: action name without a trailing colon
@@ -530,6 +540,9 @@ underscores, or hyphens; `stub` is reserved.
 | `endpointAllowedHosts` | Lowercase host allowlist for discovery/authorization/token endpoints; defaults to issuer host. |
 | `jwksAllowedHosts` | Lowercase JWKS host allowlist; defaults to endpoint allowlist. |
 | `ctaLabel` | Login button text; defaults to `Continue with <identifier>`. |
+| `preset` | Optional. `google` fills in `type`, `issuer`, `discoveryURL`, `scopes`, `tokenEndpointAuthMethod`, `ctaLabel`, and endpoint/JWKS allowed hosts derived from the preset's endpoints. Explicit keys win. Unknown or unsupported presets fail startup. |
+| `failureRedirect` | Optional local path for failed browser callbacks; overrides `authModule.failureRedirect`. Receives `?error=<code>&provider=<identifier>`. See [Auth Module](AUTH_MODULE.md#failure-redirect). |
+| `admission` | Optional sign-in allowlist, checked after ID-token verification and before the resolver: `requireVerifiedEmail`, `allowedEmails`, `allowedEmailsEnvironmentKey`, `allowedDomains`, `requireHostedDomain`, `rejectionMessage`. See [Auth Module](AUTH_MODULE.md#admission-policy). |
 
 `authModule.hooks.providerSessionResolverClass` is required for real providers.
 Its class implements `ALNAuthProviderSessionResolver` and decides whether a

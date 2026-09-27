@@ -152,9 +152,11 @@ Named targets:
 
 - requires a named target from `config/deploy.plist`
 - creates deterministic Linux/Debian-style host scaffolding for that target
-- runs against the local filesystem; it does not SSH to `transport.sshHost`
-- for remote targets, run it on the target host or against an intentionally
- mounted/staged representation of that host layout before remote push/release
+- by default runs against the local filesystem; it does not SSH to
+ `transport.sshHost`
+- `--remote` (SSH targets only): creates the release/shared/log/tmp layout on
+ the target host over SSH with `mkdir -p`, and writes the generated artifacts
+ locally. Alternatively, run `arlen deploy init <target>` on the host itself.
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
@@ -164,6 +166,9 @@ Named targets:
 - honors target runtime metadata:
  - `runtime.gnustepScript`
  - `runtime.requiresEnvWrapper`
+ - for SSH targets, remote `release`/`status`/`doctor`/`logs`/`rollback` also
+ source `runtime.gnustepScript` before running the packaged `arlen` when
+ `runtime.requiresEnvWrapper` is on
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
 `arlen deploy target sample`
@@ -191,9 +196,12 @@ Named targets:
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
-- when `[target]` has SSH transport metadata, fails before build/upload with
- `deploy_target_not_initialized` until `arlen deploy init <target>` has
- generated the target host artifacts
+- when `[target]` has SSH transport metadata, checks the release layout on the
+ host over SSH and fails before build/upload with
+ `deploy_target_not_initialized` (naming the missing host paths) until it
+ exists (`arlen deploy init <target> --remote`). Missing local generated
+ artifacts are regenerated automatically. If SSH is unreachable it fails with
+ `deploy_target_transport_failed`.
 - when `[target]` has SSH transport metadata, stages the local release under
  `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
  target release path over SSH/tar streaming
@@ -239,9 +247,8 @@ Named targets:
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
-- when `[target]` has SSH transport metadata, fails before build/upload or
- activation with `deploy_target_not_initialized` until
- `arlen deploy init <target>` has generated the target host artifacts
+- when `[target]` has SSH transport metadata, runs the same host layout check
+ as `deploy push` before build/upload or activation
 - when `[target]` has SSH transport metadata:
  - builds or reuses the local staged release
  - uploads it to the remote target
@@ -410,6 +417,10 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - installs a local vendored module into `modules/<identifier>`
 - updates `config/modules.plist` deterministically
 - `--source <path>` points at a module directory containing `module.plist`
+- records the installed tree's SHA-256 `contentDigest` alongside `version` in
+  the lock entry
+- re-running `add` for an installed module is a `noop` only when the vendored
+  files match the source; otherwise it fails with `module_already_installed`
 - `--force` replaces an existing install in place
 - `--json` emits machine-readable workflow output
 - first-party modules currently available in-tree:
@@ -433,6 +444,13 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- warns (without failing) about vendored module content:
+ - `module_locally_modified`: files differ from the recorded `contentDigest`
+ - `module_content_untracked`: the lock entry predates `contentDigest`
+ - `module_framework_copy_differs`: the vendored copy differs from
+   `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
+   framework checkout, or the running `arlen` binary's checkout), typically
+   after moving the framework pin without re-running `module upgrade`
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -449,7 +467,19 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 
 `arlen module upgrade <name> --source <path> [--force] [--json]`
 
-- replaces the vendored module files and updates the modules lock entry version metadata
+- compares file contents, not just `version`, and updates the lock entry's
+  `version` and `contentDigest`
+- `status: "noop"`: the vendored files already match `--source`
+- `status: "updated"` with `reason`:
+ - `version_changed`: the source declares a different version
+ - `content_changed`: same version, different sources, and the vendored copy
+   is unedited since install (it still matches the recorded `contentDigest`)
+ - `forced`: `--force` was passed
+- exits 1 with error code `content_differs` when the vendored copy was edited
+  locally (`locally_modified: true`), or when the files differ at the same
+  version and the lock has no `contentDigest` (`locally_modified: false`); the
+  JSON payload lists `differing_files`, and nothing is changed
+- `--force` replaces the vendored copy regardless
 
 `arlen module eject auth-ui [--force] [--json]`
 

@@ -69,6 +69,11 @@ extern NSString *const ALNModuleSystemFrameworkVersion;
                            error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSArray<NSDictionary *> *)installedModuleRecordsAtAppRoot:(NSString *)appRoot
                                                                 error:(NSError *_Nullable *_Nullable)error;
++ (nullable NSDictionary<NSString *, NSString *> *)contentFileDigestsForModuleAtPath:(NSString *)moduleRoot
+                                                                              error:(NSError *_Nullable *_Nullable)error;
++ (NSString *)contentDigestForFileDigests:(NSDictionary<NSString *, NSString *> *)fileDigests;
++ (nullable NSString *)contentDigestForModuleAtPath:(NSString *)moduleRoot
+                                              error:(NSError *_Nullable *_Nullable)error;
 + (nullable ALNModuleDefinition *)moduleDefinitionAtPath:(NSString *)moduleRoot
                                                    error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSArray<ALNModuleDefinition *> *)moduleDefinitionsAtAppRoot:(NSString *)appRoot

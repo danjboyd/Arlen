@@ -79,15 +79,15 @@ static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictio
     if ([configured hasPrefix:@"/"]) {
       return configured;
     }
-    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-    return [cwd stringByAppendingPathComponent:configured];
+    // Relative paths belong to the app, not the process working directory, so the
+    // server and `arlen jobs worker` (which runs from the framework root) agree.
+    return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = SMLowerTrimmedString(application.environment);
   if ([environment isEqualToString:@"test"]) {
     return @"";
   }
-  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-  return [cwd stringByAppendingPathComponent:
+  return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/storage-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
 }
@@ -1992,7 +1992,8 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (id)apiUpload:(ALNContext *)ctx {
   (void)ctx;
-  NSString *token = [self headerValueForName:@"x-upload-token"] ?: [self queryValueForName:@"token"] ?: @"";
+  // Upload tokens are accepted only in the header; query strings end up in logs.
+  NSString *token = [self headerValueForName:@"x-upload-token"];
   NSError *error = nil;
   NSDictionary *object = [self.runtime storeUploadData:self.context.request.body ?: [NSData data]
                                     forUploadSessionID:[self stringParamForName:@"sessionID"] ?: @""

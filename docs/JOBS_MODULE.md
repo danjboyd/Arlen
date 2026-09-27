@@ -47,6 +47,14 @@ jobsModule = {
 };
 ```
 
+Relative `persistence.path` values, and the default
+`var/module_state/<module>-<environment>.plist`, resolve against the
+application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
+`ARLEN_APP_ROOT`) rather than the process working directory. The HTTP server,
+`arlen jobs worker` and other CLI delegates therefore share one state file.
+Production deployments should still use absolute paths under the release's
+`shared/` directory.
+
 Path overrides live under `jobsModule.paths.*`. Keep `apiPrefix` relative, such as
 `"api"`, when you want the module API under `/jobs/api`. Setting `apiPrefix` to an
 absolute path such as `"/api"` bypasses the jobs prefix and can collide with other

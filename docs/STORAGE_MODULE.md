@@ -37,6 +37,14 @@ storageModule = {
 };
 ```
 
+Relative `persistence.path` values, and the default
+`var/module_state/<module>-<environment>.plist`, resolve against the
+application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
+`ARLEN_APP_ROOT`) rather than the process working directory. The HTTP server,
+`arlen jobs worker` and other CLI delegates therefore share one state file.
+Production deployments should still use absolute paths under the release's
+`shared/` directory.
+
 Runtime access is available through `ALNStorageModuleRuntime`.
 
 ## Collection Metadata

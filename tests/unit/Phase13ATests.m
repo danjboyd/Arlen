@@ -249,4 +249,76 @@
   }
 }
 
+- (void)testContentDigestTracksFileContentsAndPaths {
+  NSString *root = [self createTempDirectoryWithPrefix:@"phase13a-digest"];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  @try {
+    NSString *moduleRoot = [root stringByAppendingPathComponent:@"alpha"];
+    XCTAssertTrue([self writeFile:[moduleRoot stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{ identifier = \"alpha\"; version = \"1.0.0\"; }\n"]);
+    XCTAssertTrue([self writeFile:[moduleRoot stringByAppendingPathComponent:@"Sources/Alpha.m"]
+                          content:@"// v1\n"]);
+
+    NSError *error = nil;
+    NSDictionary<NSString *, NSString *> *files =
+        [ALNModuleSystem contentFileDigestsForModuleAtPath:moduleRoot error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects((@[ @"Sources/Alpha.m", @"module.plist" ]),
+                          [[files allKeys] sortedArrayUsingSelector:@selector(compare:)]);
+
+    NSString *original = [ALNModuleSystem contentDigestForModuleAtPath:moduleRoot error:&error];
+    XCTAssertTrue([original hasPrefix:@"sha256:"]);
+    XCTAssertEqualObjects(original, [ALNModuleSystem contentDigestForModuleAtPath:moduleRoot error:NULL]);
+
+    XCTAssertTrue([self writeFile:[moduleRoot stringByAppendingPathComponent:@".DS_Store"] content:@"noise\n"]);
+    XCTAssertEqualObjects(original, [ALNModuleSystem contentDigestForModuleAtPath:moduleRoot error:NULL]);
+
+    XCTAssertTrue([self writeFile:[moduleRoot stringByAppendingPathComponent:@"Sources/Alpha.m"]
+                          content:@"// v2\n"]);
+    NSString *changed = [ALNModuleSystem contentDigestForModuleAtPath:moduleRoot error:NULL];
+    XCTAssertNotEqualObjects(original, changed);
+
+    XCTAssertTrue([[NSFileManager defaultManager] moveItemAtPath:[moduleRoot stringByAppendingPathComponent:@"Sources/Alpha.m"]
+                                                          toPath:[moduleRoot stringByAppendingPathComponent:@"Sources/Beta.m"]
+                                                           error:NULL]);
+    XCTAssertNotEqualObjects(changed, [ALNModuleSystem contentDigestForModuleAtPath:moduleRoot error:NULL]);
+
+    XCTAssertNil([ALNModuleSystem contentDigestForModuleAtPath:[root stringByAppendingPathComponent:@"missing"]
+                                                         error:&error]);
+    XCTAssertNotNil(error);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
+  }
+}
+
+- (void)testModulesLockPreservesContentDigest {
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13a-lock-digest"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSError *error = nil;
+    NSDictionary *document = @{
+      @"modules" : @[
+        @{ @"identifier" : @"alpha", @"version" : @"1.0.0", @"contentDigest" : @"sha256:abc" },
+        @{ @"identifier" : @"beta", @"version" : @"1.0.0" },
+      ]
+    };
+    BOOL written = [ALNModuleSystem writeModulesLockDocument:document appRoot:appRoot error:&error];
+    XCTAssertTrue(written, @"%@", error);
+    NSArray<NSDictionary *> *records = [ALNModuleSystem installedModuleRecordsAtAppRoot:appRoot error:&error];
+    XCTAssertEqual((NSUInteger)2, [records count]);
+    XCTAssertEqualObjects(@"sha256:abc", records[0][@"contentDigest"]);
+    XCTAssertEqualObjects(@"", records[1][@"contentDigest"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 @end

@@ -1485,4 +1485,64 @@
   XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase9i"]);
 }
 
+- (void)testModuleVersionCheckRequiresBumpWhenModuleSourcesChange {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *checker = [repoRoot stringByAppendingPathComponent:@"tools/ci/check_module_versions.py"];
+  NSString *work = [self createTempDirectoryWithPrefix:@"module-version-policy"];
+  XCTAssertNotNil(work);
+  if (work == nil) {
+    return;
+  }
+
+  @try {
+    NSString *manifest = [work stringByAppendingPathComponent:@"modules/alpha/module.plist"];
+    NSString *source = [work stringByAppendingPathComponent:@"modules/alpha/Sources/Alpha.m"];
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 1.0.0\"; } );\n}\n"]);
+    XCTAssertTrue([self writeFile:source content:@"// v1\n"]);
+
+    int code = 0;
+    NSString *git = [NSString stringWithFormat:@"cd %@ && git -c user.name=t -c user.email=t@example.invalid",
+                                               [self shellQuoted:work]];
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && git init -q && %@ add -A && %@ commit -qm base && git tag base",
+        [self shellQuoted:work], git, git]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *check = [NSString stringWithFormat:@"python3 %@ --repo-root %@ --base base 2>&1",
+                                                 [self shellQuoted:checker],
+                                                 [self shellQuoted:work]];
+
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    XCTAssertTrue([self writeFile:source content:@"// v2\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"modules/alpha: files changed (Sources/Alpha.m)"], @"%@", output);
+
+    // A dependency constraint is not the module's own version.
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 2.0.0\"; } );\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.1\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 2.0.0\"; } );\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    // New modules need no bump.
+    XCTAssertTrue([self writeFile:[work stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"1.0.0\";\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:work error:nil];
+  }
+}
+
 @end

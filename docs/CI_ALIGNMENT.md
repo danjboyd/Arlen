@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-09-21
+Last updated: 2026-09-25
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -252,6 +252,17 @@ compilation with incompatible-property/nullability warnings as errors, and typed
 accessor, lifecycle, dirty-tracking and relationship-state regressions. This adds
 coverage within the existing required job; branch-protection check names do not
 change.
+
+## First-party module version policy
+
+The existing `linux-quality / quality-gate` job first runs
+`tools/ci/check_module_versions.py` against the pull request base (or, on
+pushes to `main`, the previous `main` commit). It fails when files under
+`modules/<name>/` changed but the top-level `version` in that module's
+`module.plist` did not increase. `arlen module upgrade` and apps' lock metadata
+depend on module versions (issue #54). The job's checkout uses
+`fetch-depth: 0` so the merge base is available. The check adds coverage
+within the existing required job; branch-protection check names do not change.
 
 ## Quoted ORM identifier persistence coverage
 

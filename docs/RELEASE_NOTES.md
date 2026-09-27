@@ -2,6 +2,95 @@
 
 ## Upcoming Release Candidate
 
+- `headerValueForName:` on `ALNController` and `ALNContext` is now declared
+  nonnull, matching what it returns: an absent header gives `@""`, as
+  `ALNRequest` already documented. The empty-name case, which returned `nil`,
+  now also returns `@""`. Code that checked `== nil` or relied on `?:` to fall
+  back never saw a missing header; test `length == 0` instead. The storage
+  module's upload endpoint had such a fallback to a `?token=` query parameter
+  that could never trigger; it was removed, and tokens remain header-only
+  (GitHub issue 80).
+
+- Modules: relative jobs, storage, notifications and search persistence paths,
+  including the `var/module_state/...` defaults, now resolve against the
+  application root instead of the process working directory.
+  `arlen jobs worker` runs from the framework root, so it had been reading and
+  writing scheduler state under the framework checkout, separately from the
+  server. Adds `-[ALNApplication appRootPath]` and `-pathRelativeToAppRoot:`
+  (GitHub issue 76).
+
+- Deploy: `deploy push` and `deploy release` for SSH targets no longer look for
+  the host's release layout on the operator's machine. They check it on the
+  host over SSH and report the missing host paths (`deploy_target_not_initialized`),
+  or fail with `deploy_target_transport_failed` when SSH is unreachable.
+  Missing local generated artifacts are regenerated automatically. The new
+  `arlen deploy init <target> --remote` creates the layout on the host over
+  SSH. There is no longer any need to mirror the host path locally (GitHub
+  issue 69).
+
+- Deploy: remote `arlen deploy release|status|doctor|logs|rollback` on SSH
+  targets now sources `runtime.gnustepScript` before running the packaged
+  `arlen` when `runtime.requiresEnvWrapper` is on. Before this, hosts whose
+  GNUstep libraries are not on the loader path failed with
+  `libgnustep-base.so: cannot open shared object file`. A configured script
+  that is missing on the host fails clearly with `missing GNUstep.sh: <path>`
+  (GitHub issue 71).
+
+- Routing: `HEAD` requests now fall back to the matching `GET` route when no
+  `HEAD` or `ANY` route matches (RFC 9110 section 9.3.2). They return the same
+  status and headers, including `Content-Length`, without a body. Before this,
+  `curl -I`, uptime checks and link unfurlers got a 404 for any `GET`-only
+  route. Explicit `HEAD` routes still take precedence (GitHub issue 68).
+
+- Security: static-mount responses, route-miss 404s and built-in endpoints
+  (OpenAPI docs pages, `/healthz`, `/arlen/live.js`) did not carry the
+  configured security headers, because they are produced outside the
+  middleware chain. HTML served from a static mount had no CSP or
+  `X-Frame-Options`, and static assets had no `nosniff`. These responses now
+  get the same headers as routed responses, without overriding headers
+  already set. `securityHeaders.enabled = NO` still disables them everywhere
+  (GitHub issue 81). See
+  [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
+- Single-page apps: a new top-level `spaFallback` serves the app shell for deep
+  links. It applies only when no route or built-in matched, the request is an
+  HTML navigation (a `GET`/`HEAD` whose `Accept` contains `text/html`), and the
+  path is outside `excludePrefixes` and has no file extension. The shell goes
+  through the app's middleware (security headers, session/CSRF) and is served
+  with `no-cache` and ETag/304. Apps can drop hand-written catch-all routes,
+  which also stopped the OpenAPI and `/arlen/live.js` built-ins from being
+  reached (GitHub issue 62). See
+  [Static files](STATIC_FILES.md#spa-history-fallback).
+
+- Static mounts accept `cacheControl`, either one value or glob patterns with a
+  `default` (for example immutable caching for hashed `assets/*` and `no-cache`
+  for `index.html`). The default `/static` mount reads the top-level
+  `staticCacheControl` or `ARLEN_STATIC_CACHE_CONTROL`. Static responses
+  previously sent no `Cache-Control` at all (GitHub issue 62, Cache-Control
+  part). See [Static files](STATIC_FILES.md#cache-control).
+
+- Auth module OIDC: `authModule.failureRedirect`, or a provider's own
+  `failureRedirect`, sends failed browser callbacks to a local page with
+  `?error=<code>&provider=<identifier>` instead of a raw 401 JSON body. The
+  stable codes are `rejected`, `admission_denied`, `expired_state`,
+  `provider_error`, `verification_failed` and `provider_unavailable`, and a
+  resolver can supply its own through `ALNAuthModuleOIDCFailureCodeKey`. The
+  JSON API callback keeps its 401 and now includes `code`. External redirect
+  targets fail at startup (GitHub issue 75). See
+  [Auth Module](AUTH_MODULE.md#failure-redirect).
+
+- Auth module OIDC: `preset = "google"` expands into Google's issuer, discovery
+  URL, scopes and client authentication method. The endpoint and JWKS allowed
+  hosts are now derived from the preset's endpoints, so they no longer have to
+  be listed by hand. Explicit keys override the preset, and unknown or
+  unsupported presets fail at startup (GitHub issue 60). See
+  [Auth Module](AUTH_MODULE.md#google-preset).
+- Auth module OIDC: an optional per-provider `admission` policy restricts
+  sign-in to verified allowlisted emails, domains (honoring Google's `hd`
+  claim), or an environment-supplied email list. It runs before the resolver
+  and never links identities (GitHub issue 61). See
+  [Auth Module](AUTH_MODULE.md#admission-policy).
+
 - CSRF: rejected requests from JSON clients (JSON `Accept`, `/api` paths, or
   `apiOnly`) now receive the structured error envelope with code `csrf_invalid`
   instead of a plain-text body. Other clients still get the plain-text 403.
