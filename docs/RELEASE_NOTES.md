@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
+  in `config/app.plist` (as in the documented example) no longer crash startup
+  (`does not recognize unsignedIntegerValue`). Plist strings holding
+  decimal integers are accepted, and other values fail startup with an error
+  naming the key. Tool definitions' `minimumAuthAssuranceLevel` and
+  `maximumAuthenticationAgeSeconds` get the same checks. The module version is
+  now `1.0.1` (GitHub issue 42). See [MCP Module](MCP_MODULE.md).
+
 - Auth module `module-ui`: `auth.css` and `auth_totp_qr.js` are now also
   served under the module's own prefix at `<paths.prefix>/assets/`, and pages
   link them there, so sign-in pages keep their styling behind a reverse proxy

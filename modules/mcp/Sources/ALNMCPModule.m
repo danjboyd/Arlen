@@ -10,12 +10,24 @@
 #import "ALNRouter.h"
 #import "ALNRateLimitMiddleware.h"
 #import "ALNResponseEnvelopeMiddleware.h"
+#import "ALNPositiveInteger.h"
 
 static NSString *const Version = @"2025-11-25";
 static NSString *const ModuleKey = @"Arlen.MCP.module";
 static BOOL Dict(id v) { return [v isKindOfClass:[NSDictionary class]]; }
 static BOOL String(id v) { return [v isKindOfClass:[NSString class]]; }
 static BOOL Bool(id v) { return [v isKindOfClass:[NSNumber class]] && (strcmp([v objCType], @encode(BOOL)) == 0); }
+// Old-style plists deliver bare numbers as strings; accept either, reject anything else.
+static BOOL ConfigInteger(id value, NSUInteger fallback, NSUInteger *out) {
+  if (!value) { *out = fallback; return YES; }
+  if (([value isKindOfClass:[NSNumber class]] && !Bool(value) && [value isEqual:@0]) ||
+      ([value isKindOfClass:[NSString class]] && [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] isEqual:@"0"])) {
+    *out = 0; return YES;
+  }
+  NSNumber *number = Bool(value) ? nil : ALNPositiveInteger(value);
+  if (!number) return NO;
+  *out = [number unsignedIntegerValue]; return YES;
+}
 static NSData *JSON(id v) { return [ALNJSONSerialization isValidJSONObject:v] ? [ALNJSONSerialization dataWithJSONObject:v options:0 error:NULL] : nil; }
 static NSDictionary *ToolError(NSString *message) {
   return @{ @"isError": @YES, @"content": @[@{@"type": @"text", @"text": message}] };
@@ -128,10 +140,13 @@ static NSString *Encode(NSString *value) {
     if (![values isKindOfClass:[NSArray class]]) return ALNMCPFail(error, @"MCP access settings must be string arrays");
     for (id value in values) if (!String(value) || ![value length]) return ALNMCPFail(error, @"MCP access settings require nonempty strings");
   }
-  self.maxBytes = config[@"maxOutputBytes"] ? [config[@"maxOutputBytes"] unsignedIntegerValue] : 262144;
-  if (self.maxBytes < 1024 || self.maxBytes > 16777216) return ALNMCPFail(error, @"maxOutputBytes must be 1024..16777216");
-  NSUInteger requests = config[@"requestsPerMinute"] ? [config[@"requestsPerMinute"] unsignedIntegerValue] : 120;
-  if (!requests || requests > 100000) return ALNMCPFail(error, @"requestsPerMinute must be 1..100000");
+  NSUInteger maxBytes = 0;
+  if (!ConfigInteger(config[@"maxOutputBytes"], 262144, &maxBytes) || maxBytes < 1024 || maxBytes > 16777216)
+    return ALNMCPFail(error, @"mcp.maxOutputBytes must be an integer 1024..16777216");
+  self.maxBytes = maxBytes;
+  NSUInteger requests = 0;
+  if (!ConfigInteger(config[@"requestsPerMinute"], 120, &requests) || !requests || requests > 100000)
+    return ALNMCPFail(error, @"mcp.requestsPerMinute must be an integer 1..100000");
   self.limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:requests windowSeconds:60];
   if (config[@"providerClass"]) {
     Class cls = String(config[@"providerClass"]) ? NSClassFromString(config[@"providerClass"]) : Nil;
@@ -176,8 +191,13 @@ static NSString *Encode(NSString *value) {
     route.requiredScopes = entry.definition[@"requiredScopes"] ?: @[];
     route.requiredRoles = entry.definition[@"requiredRoles"] ?: @[];
     route.policyNames = entry.definition[@"policies"] ?: @[];
-    route.minimumAuthAssuranceLevel = [entry.definition[@"minimumAuthAssuranceLevel"] unsignedIntegerValue];
-    route.maximumAuthenticationAgeSeconds = [entry.definition[@"maximumAuthenticationAgeSeconds"] unsignedIntegerValue];
+    NSUInteger assurance = 0, maxAge = 0;
+    if (!ConfigInteger(entry.definition[@"minimumAuthAssuranceLevel"], 0, &assurance))
+      return ALNMCPFail(error, @"Custom tool minimumAuthAssuranceLevel must be a nonnegative integer");
+    if (!ConfigInteger(entry.definition[@"maximumAuthenticationAgeSeconds"], 0, &maxAge))
+      return ALNMCPFail(error, @"Custom tool maximumAuthenticationAgeSeconds must be a nonnegative integer");
+    route.minimumAuthAssuranceLevel = assurance;
+    route.maximumAuthenticationAgeSeconds = maxAge;
     entry.route = route;
   }
   self.installed = YES;
