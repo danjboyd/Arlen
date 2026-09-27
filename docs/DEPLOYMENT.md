@@ -356,6 +356,16 @@ This is the boundary between responsibilities:
 The deploy product should not become a second process manager. It hands off to
 `propane` through the packaged metadata and environment contract.
 
+Long-lived `propane` workers: if a worker's open descriptors climb (for example
+`/dev/null` descriptors left by app code that launches `NSTask`s without closing
+their handles), file responses eventually fail with GNUstep pipe-creation errors.
+Raising `LimitNOFILE` only delays that. Set the `workerFDRetirePercent` propane
+accessory (for example `90`) so an affected worker is recycled on its own, and use
+`tools/ops/sample_fd_targets.py` and `ARLEN_FD_DELTA_DEBUG=1` to find the source;
+see [propane FD-pressure accessories](PROPANE.md#fd-pressure-propane-accessories).
+Arlen's own file-response paths are covered by a regression test that serves
+2,000 file responses and requires a flat descriptor count (GitHub issue 67).
+
 ## 5. Built-In Health Contract
 
 Arlen reserves its built-in operability endpoints ahead of app route dispatch:
