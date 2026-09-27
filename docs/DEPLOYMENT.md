@@ -384,6 +384,29 @@ Cluster quorum readiness mode:
 - in multi-node mode, `GET /readyz` returns deterministic `503 not_ready` when `cluster.observedNodes < cluster.expectedNodes`
 - JSON readiness payload includes `checks.cluster_quorum` diagnostics (`ok`, `required_for_readyz`, `status`, `observed_nodes`, `expected_nodes`)
 
+Schema migration readiness (on by default in `production`):
+
+- `observability.readinessRequiresMigrations` (or `ARLEN_READINESS_REQUIRES_MIGRATIONS=0|1`)
+ defaults to `YES` in the `production` environment and `NO` elsewhere
+- `GET /readyz` returns `503 not_ready` while any migration shipped in the running
+ release is not recorded in `arlen_schema_migrations`: the app's `db/migrations`
+ and module migrations for the default database target, versioned as
+ `arlen migrate` / `arlen module migrate` record them
+- JSON readiness includes `checks.schema_migrations` (`ok`, `pending` versions,
+ `total`, `required_for_readyz`, and `error` when the database cannot be read)
+- the check only reads: it never creates the migrations table or applies anything
+- while not ready it re-queries at most every
+ `observability.readinessMigrationRecheckSeconds` (default `5`), so running
+ `arlen migrate` makes the app ready without a restart; once everything is
+ applied the result is cached
+- apps with no database configured (no `ARLEN_DATABASE_URL` and no
+ `database.connectionString`) skip the check
+- `arlen deploy status` prints `Health probe: not ready (N migrations pending)`
+- `/healthz` and `/livez` are unaffected, so a supervisor keeps the process up
+ while `/readyz` holds traffic back. `arlen deploy release` migrates before the
+ restart, so normal deploys are ready immediately; this catches restores, manual
+ starts and skipped steps
+
 Cluster status payload (`/clusterz`) includes distributed-runtime diagnostics:
 
 - `cluster.quorum` summary (`status`, `met`, observed/expected nodes)

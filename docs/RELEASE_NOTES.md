@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- `/readyz` fails (`503`) while the running release has schema migrations that
+  are not applied, by default in `production`
+  (`observability.readinessRequiresMigrations`,
+  `ARLEN_READINESS_REQUIRES_MIGRATIONS`). The JSON payload's
+  `checks.schema_migrations` lists the pending versions. The check is read-only,
+  rechecks while not ready so `arlen migrate` restores readiness without a
+  restart, and `arlen deploy status` reports `not ready (N migrations pending)`
+  (GitHub issue 90). See [Deployment](DEPLOYMENT.md).
+
 - MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
   in `config/app.plist` (as in the documented example) no longer crash startup
   (`does not recognize unsignedIntegerValue`). Plist strings holding

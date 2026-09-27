@@ -51,6 +51,13 @@ extern NSString *const ALNMigrationRunnerDefaultDatabaseTarget;
                  appliedFiles:(NSArray<NSString *> *_Nullable *_Nullable)appliedFiles
                         error:(NSError *_Nullable *_Nullable)error;
 
+// Read-only: the versions recorded for a database target. Unlike the pending
+// lookups above it never creates the migrations table, so it is safe for
+// readiness probes; a missing table is reported as an error.
++ (nullable NSSet<NSString *> *)appliedMigrationVersionsWithDatabase:(id<ALNDatabaseAdapter>)database
+                                                      databaseTarget:(nullable NSString *)databaseTarget
+                                                               error:(NSError *_Nullable *_Nullable)error;
+
 + (NSString *)versionForMigrationFile:(NSString *)filePath;
 + (NSString *)versionForMigrationFile:(NSString *)filePath
                      versionNamespace:(nullable NSString *)versionNamespace;
