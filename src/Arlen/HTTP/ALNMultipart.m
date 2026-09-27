@@ -44,7 +44,7 @@ static BOOL ReplaceFile(NSString *from, NSString *to) {
 - (NSString *)temporaryFilePath { return self.backingMoved ? nil : self.backingPath; }
 - (NSData *)data {
   if (!self.backingPath) return [super data];
-  return [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedIfSafe error:NULL] ?: [NSData data];
+  return [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:NULL] ?: [NSData data];
 }
 - (BOOL)writeToFile:(NSString *)path error:(NSError **)error {
   if (!self.backingPath) return [[super data] writeToFile:path options:NSDataWritingAtomic error:error];
@@ -60,7 +60,7 @@ static BOOL ReplaceFile(NSString *from, NSString *to) {
     }
   }
   // Across filesystems (or a second write): copy from the mapped file, never the heap.
-  NSData *mapped = [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedIfSafe error:error];
+  NSData *mapped = [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:error];
   if (!mapped || ![mapped writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
   if (!self.backingMoved) {
     [[NSFileManager defaultManager] removeItemAtPath:self.backingPath error:NULL];

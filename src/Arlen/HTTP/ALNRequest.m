@@ -1679,7 +1679,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 }
 
 - (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
-  NSData *mapped = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:error];
+  NSData *mapped = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
   if (mapped == nil) {
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
     return NO;
