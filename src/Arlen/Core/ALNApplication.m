@@ -4555,6 +4555,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
   return route.maxBodyBytes > 0 ? route.maxBodyBytes : [self defaultMaxBodyBytes];
+}
+
 // /readyz schema_migrations state (GitHub issue 90). While anything is pending or
 // the database cannot be read, re-check at most every
 // observability.readinessMigrationRecheckSeconds (default 5), so `arlen migrate`
