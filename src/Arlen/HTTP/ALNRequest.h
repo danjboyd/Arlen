@@ -36,6 +36,9 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 - (BOOL)parseMultipartFormWithLimits:(nullable NSDictionary *)limits
                              error:(NSError *_Nullable *_Nullable)error;
 - (NSArray<ALNUpload *> *)uploadsForName:(NSString *)name;
+// Removes spooled upload files (see ALNUpload temporaryFilePath). Runs automatically
+// when the request is deallocated; safe to call more than once.
+- (void)removeTemporaryFiles;
 @property(nonatomic, copy, readonly) NSDictionary *cookies;
 @property(nonatomic, copy) NSDictionary *routeParams;
 @property(nonatomic, copy) NSString *remoteAddress;

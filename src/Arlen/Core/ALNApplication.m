@@ -5152,7 +5152,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
   NSError *multipartError = nil;
   if (![request parseMultipartFormWithLimits:self.config[@"requestLimits"] error:&multipartError]) {
     ALNResponse *rejected = [[ALNResponse alloc] init];
-    rejected.statusCode = multipartError.code == ALNMultipartErrorLimitExceeded ? 413 : 400;
+    rejected.statusCode = multipartError.code == ALNMultipartErrorLimitExceeded ? 413
+                          : multipartError.code == ALNMultipartErrorSpoolFailed ? 500
+                                                                                  : 400;
     [rejected setTextBody:multipartError.localizedDescription];
     rejected.committed = YES;
     return rejected;

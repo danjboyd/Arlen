@@ -36,6 +36,8 @@ Set these keys in the application's `requestLimits` configuration dictionary:
 | `maxMultipartFieldBytes` | 65,536 | Bytes in each text field before UTF-8 decoding |
 | `maxMultipartFileBytes` | 1,048,576 | Bytes in each uploaded file |
 | `maxMultipartHeaderBytes` | 16,384 | Per-part header bytes, excluding the terminating CRLF CRLF |
+| `spoolThresholdBytes` | 1,048,576 | File parts larger than this are spooled to a temporary file |
+| `spoolDirectory` | system temp directory | Absolute, existing directory for spooled uploads |
 
 For example, in `config/app.plist`:
 
@@ -64,15 +66,28 @@ raise `maxMultipartFileBytes` to the desired file cap (for example `104857600`
 for a 100 MiB file with room for fields and framing). Raising the request cap
 does not automatically raise per-file or per-field caps.
 
-The server buffers the full request body before multipart parsing. File data
-is copied into immutable `NSData`; it is **not streamed or spooled to disk**.
-Budget memory for the connection buffer, request body, part copies, decoding,
-and simultaneous requests. Part limits apply during parsing after body receipt;
-the transport enforces the total request cap while receiving. Object ownership
-releases buffered data when requests/uploads are released. Failed parses expose
-no partial parts and create no temporary files; aborted connections likewise
-create no upload files. `writeToFile:error:` writes only to a caller-supplied
-path, atomically. The caller owns and removes that persisted file.
+The server buffers the full request body before multipart parsing. Text fields
+and file parts up to `spoolThresholdBytes` are copied into immutable `NSData`.
+Larger file parts are written straight from the body into a private temporary
+file instead (a `0700` `arlen-upload-*` directory under `spoolDirectory`, one
+`0600` file per part), so each large upload no longer occupies memory twice.
+Budget memory for the connection buffer, request body, small part copies,
+decoding, and simultaneous requests. Part limits apply during parsing after body
+receipt; the transport enforces the total request cap while receiving.
+
+A spooled upload reports its file through `temporaryFilePath`, and its `data`
+maps that file on each access rather than holding the bytes. The spool directory
+belongs to the request: it is removed when the request is deallocated (after the
+response, on an exception, or when the client disconnects), or earlier through
+`-[ALNRequest removeTemporaryFiles]`. Move or copy an upload before the request
+ends; do not hand `temporaryFilePath` to work that outlives it. Failed parses
+expose no partial parts and leave no spool files. If spooling itself fails (for
+example a missing `spoolDirectory` or a full disk), the request gets a `500`.
+
+`writeToFile:error:` writes only to a caller-supplied path, atomically. For a
+spooled upload the first write moves the file (a rename on the same filesystem,
+a copy from the mapped file otherwise); afterwards `data` reads from that path
+and further writes copy it. The caller owns and removes the persisted file.
 
 ## Parsing and errors
 

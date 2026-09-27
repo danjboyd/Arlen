@@ -1490,6 +1490,7 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, copy) NSArray *cachedMultipartParts;
 @property(nonatomic, copy) NSDictionary *cachedMultipartLimits;
 @property(nonatomic, strong) NSError *cachedMultipartError;
+@property(nonatomic, copy) NSString *multipartSpoolDirectory;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
 @property(nonatomic, strong) NSMutableDictionary *cachedQueryValueLookups;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
@@ -1597,6 +1598,18 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 #endif
 
 @implementation ALNRequest
+
+- (void)dealloc {
+  [self removeTemporaryFiles];
+}
+
+- (void)removeTemporaryFiles {
+  NSString *directory = self.multipartSpoolDirectory;
+  if (directory != nil) {
+    self.multipartSpoolDirectory = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+  }
+}
 
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path
@@ -1801,7 +1814,12 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   NSDictionary *policy = limits ?: [ALNMultipart defaultLimits];
   if (!self.cachedMultipartParts || ![self.cachedMultipartLimits isEqual:policy]) {
     NSError *failure = nil;
-    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy error:&failure];
+    // A re-parse replaces the parts, so drop the files behind the previous ones.
+    [self removeTemporaryFiles];
+    NSString *spoolDirectory = nil;
+    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy
+                              spoolDirectory:&spoolDirectory error:&failure];
+    self.multipartSpoolDirectory = spoolDirectory;
     self.cachedMultipartParts = parts ?: @[];
     self.cachedMultipartLimits = policy;
     self.cachedMultipartError = failure;

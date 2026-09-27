@@ -1404,6 +1404,29 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     }
     finalLimits[key] = value;
   }
+  if (finalLimits[@"spoolThresholdBytes"] != nil) {
+    NSNumber *value = ALNPositiveInteger(finalLimits[@"spoolThresholdBytes"]);
+    if (value == nil) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                                userInfo:@{NSLocalizedDescriptionKey :
+                                    @"requestLimits.spoolThresholdBytes must be a positive integer in range"}];
+      }
+      return nil;
+    }
+    finalLimits[@"spoolThresholdBytes"] = value;
+  }
+  // Existence is checked when a request spools: CLI tooling loads config off-host.
+  id spoolDirectory = finalLimits[@"spoolDirectory"];
+  if (spoolDirectory != nil &&
+      (![spoolDirectory isKindOfClass:[NSString class]] || ![spoolDirectory isAbsolutePath])) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                              userInfo:@{NSLocalizedDescriptionKey :
+                                  @"requestLimits.spoolDirectory must be an absolute path"}];
+    }
+    return nil;
+  }
   config[@"requestLimits"] = finalLimits;
 
   finalRuntimeLimits[@"maxConcurrentHTTPSessions"] =
