@@ -14,10 +14,20 @@ def spool_entries():
     return sorted(n for n in os.listdir(SPOOL) if n.startswith('arlen-'))
 
 def wait_until_empty(step, limit=15):
+    # Aborted connections can still be mid-read when the client has already
+    # closed, so the spool directory may be empty for a moment before a file
+    # appears. Require it to stay empty for a full second.
     started = time.time()
-    while spool_entries() and time.time() - started < limit:
+    quiet_since = None
+    while time.time() - started < limit:
+        if spool_entries():
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = time.time()
+        elif time.time() - quiet_since >= 1.0:
+            return
         time.sleep(0.05)
-    assert not spool_entries(), (step, round(time.time() - started, 2), spool_entries())
+    raise AssertionError((step, round(time.time() - started, 2), spool_entries()))
 
 def rss_anon_kib():
     with open('/proc/%d/status' % SERVER_PID) as status:
