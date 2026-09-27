@@ -2,6 +2,22 @@
 
 ## Upcoming Release Candidate
 
+- Live push and durable event streams across propane workers and hosts:
+  `realtime.fanout = { adapter = "postgresql"; }` gives `ALNRealtimeHub` a
+  PostgreSQL `LISTEN`/`NOTIFY` fanout, so `publishLive…onChannel:` reaches
+  websocket subscribers on every worker, not only the one that handled the
+  publishing request. `eventStreams.store` and `eventStreams.broker` with
+  `adapter = "postgresql"` add `ALNPgEventStreamStore` (per-stream advisory
+  locks, idempotency and replay identical to the in-memory store) and
+  `ALNPgEventStreamBroker`, so replay and `resync_required` hold across workers.
+  Live delivery is at most once; durable streams recover through replay. Without
+  a fanout, a worker running under several propane workers warns once when a
+  websocket channel opens. New public pieces: `ALNRealtimeFanout`,
+  `ALNPgRealtimeFanout`, `ALNPgConnection waitForNotificationsWithTimeout:error:`,
+  and `ALNEventEnvelope envelopeWithDictionary:` (GitHub issue 48). See
+  [Live UI](LIVE_UI.md#multiple-workers-and-hosts) and
+  [Durable Event Streams](EVENT_STREAMS.md#postgresql-store-and-broker).
+
 - `/readyz` fails (`503`) while the running release has schema migrations that
   are not applied, by default in `production`
   (`observability.readinessRequiresMigrations`,

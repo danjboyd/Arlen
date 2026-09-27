@@ -74,6 +74,13 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 
 - (void)close;
 
+// Returns PostgreSQL notifications for channels this connection has LISTENed on
+// (@{ channel, payload, pid }), waiting up to `timeout` seconds when none are
+// queued. An empty array means the timeout passed; nil means the connection
+// failed and should be reopened. Use a dedicated connection, not a pooled one.
+- (nullable NSArray<NSDictionary *> *)waitForNotificationsWithTimeout:(NSTimeInterval)timeout
+                                                                error:(NSError *_Nullable *_Nullable)error;
+
 - (BOOL)prepareStatementNamed:(NSString *)name
                           sql:(NSString *)sql
                parameterCount:(NSInteger)parameterCount

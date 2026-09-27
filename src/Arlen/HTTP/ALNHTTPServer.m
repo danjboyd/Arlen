@@ -50,6 +50,7 @@ typedef SSIZE_T ssize_t;
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
+#import "ALNPgRealtimeFanout.h"
 #import "Support/ALNJSONSerialization.h"
 
 typedef struct {
@@ -502,6 +503,61 @@ static ALNServerSocketTuning ALNTuningFromConfig(NSDictionary *config) {
   out.connectionTimeoutSeconds = ALNConfigUInt(config, @"connectionTimeoutSeconds", 30);
   out.enableReusePort = ALNConfigBool(config, @"enableReusePort", NO);
   return out;
+}
+
+// realtime.fanout (GitHub issue 48): cross-process fanout for ALNRealtimeHub so
+// live push reaches websocket subscribers on every propane worker.
+static id<ALNRealtimeFanout> ALNRealtimeFanoutFromConfig(NSDictionary *config, NSString **failure) {
+  NSDictionary *realtime = [config[@"realtime"] isKindOfClass:[NSDictionary class]] ? config[@"realtime"] : @{};
+  NSDictionary *fanout = [realtime[@"fanout"] isKindOfClass:[NSDictionary class]] ? realtime[@"fanout"] : nil;
+  NSString *adapter = [fanout[@"adapter"] isKindOfClass:[NSString class]] ? [fanout[@"adapter"] lowercaseString] : @"";
+  if ([adapter length] == 0 || [adapter isEqualToString:@"memory"]) {
+    return nil;
+  }
+  if (![adapter isEqualToString:@"postgresql"]) {
+    if (failure != NULL) *failure = [NSString stringWithFormat:@"unsupported realtime.fanout.adapter '%@'", adapter];
+    return nil;
+  }
+  NSString *dsn = [fanout[@"connectionString"] isKindOfClass:[NSString class]] ? fanout[@"connectionString"] : @"";
+  const char *envDSN = getenv("ARLEN_DATABASE_URL");
+  if ([dsn length] == 0 && envDSN != NULL && envDSN[0] != '\0') {
+    dsn = [NSString stringWithUTF8String:envDSN];
+  }
+  if ([dsn length] == 0) {
+    NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : @{};
+    dsn = [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : @"";
+  }
+  NSError *error = nil;
+  ALNPgRealtimeFanout *pgFanout =
+      [[ALNPgRealtimeFanout alloc] initWithConnectionString:dsn
+                                              notifyChannel:[fanout[@"channel"] isKindOfClass:[NSString class]] ? fanout[@"channel"] : nil
+                                                        hub:[ALNRealtimeHub sharedHub]
+                                                      error:&error];
+  if (pgFanout == nil) {
+    if (failure != NULL) *failure = error.localizedDescription ?: @"could not create the PostgreSQL realtime fanout";
+    return nil;
+  }
+  if (![pgFanout startWaitingUpTo:5.0]) {
+    fprintf(stderr, "arlen: realtime fanout not listening yet; it keeps retrying in the background\n");
+  }
+  return pgFanout;
+}
+
+// Once per process: a websocket channel under several propane workers (or a
+// multi-node cluster) without a fanout only sees publishes from its own worker.
+static void ALNWarnIfRealtimeIsWorkerLocal(void) {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    const char *workers = getenv("ARLEN_PROPANE_WORKERS");
+    const char *cluster = getenv("ARLEN_CLUSTER_ENABLED");
+    BOOL multiProcess = (workers != NULL && atoi(workers) > 1) || (cluster != NULL && atoi(cluster) == 1);
+    if (multiProcess && [ALNRealtimeHub sharedHub].fanout == nil) {
+      fprintf(stderr,
+              "arlen: warning: websocket channels are process-local; with multiple propane workers a publish only "
+              "reaches subscribers on the same worker. Configure realtime.fanout = { adapter = \"postgresql\"; } "
+              "(docs/LIVE_UI.md).\n");
+    }
+  });
 }
 
 static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
@@ -3865,6 +3921,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           }
 
           if ([webSocketMode isEqualToString:@"channel"]) {
+            ALNWarnIfRealtimeIsWorkerLocal();
             webSocketChannel = [self webSocketChannelFromResponse:response];
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
             NSString *rejectionReason = nil;
@@ -4098,6 +4155,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
                       maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
+    NSString *fanoutFailure = nil;
+    id<ALNRealtimeFanout> fanout = ALNRealtimeFanoutFromConfig(config, &fanoutFailure);
+    if ([fanoutFailure length] > 0) {
+      fprintf(stderr, "%s: realtime fanout disabled: %s\n", [self.serverName UTF8String], [fanoutFailure UTF8String]);
+    }
+    if (fanout != nil) {
+      [ALNRealtimeHub sharedHub].fanout = fanout;
+    }
 
     if (!ALNInitializeSocketLayer()) {
       fprintf(stderr, "%s: Winsock startup failed\n", [self.serverName UTF8String]);
@@ -4275,6 +4340,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     }
     self.serverSocketFD = ALNInvalidSocketHandle;
     [self requestStop];
+    [ALNRealtimeHub sharedHub].fanout = nil;
     [self.application shutdown];
   }
 

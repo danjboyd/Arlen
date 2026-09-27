@@ -49,6 +49,9 @@ typedef NS_ENUM(NSInteger, ALNEventStreamErrorCode) {
                            actor:(nullable NSDictionary *)actor
                         metadata:(nullable NSDictionary *)metadata;
 - (NSDictionary *)dictionaryRepresentation;
+// Inverse of dictionaryRepresentation (brokers that carry events between
+// processes); nil when required fields are missing.
++ (nullable instancetype)envelopeWithDictionary:(NSDictionary *)dictionary;
 
 @end
 
@@ -118,6 +121,16 @@ typedef NS_ENUM(NSInteger, ALNEventStreamErrorCode) {
 - (NSDictionary *)dictionaryRepresentation;
 
 @end
+
+// Shared by store adapters so every adapter validates and identifies events alike:
+// the normalized append material (event_type, payload, and optional
+// idempotency_key, actor, metadata), or nil with an ALNEventStreamErrorDomain error.
+FOUNDATION_EXPORT NSDictionary *_Nullable ALNEventStreamNormalizedAppendMaterial(NSDictionary *event,
+                                                                                 NSError *_Nullable *_Nullable error);
+FOUNDATION_EXPORT NSString *ALNEventStreamGeneratedEventID(void);
+FOUNDATION_EXPORT NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code,
+                                                   NSString *message,
+                                                   NSDictionary *_Nullable details);
 
 @protocol ALNEventStreamStore <NSObject>
 

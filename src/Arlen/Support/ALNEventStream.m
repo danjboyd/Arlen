@@ -97,6 +97,18 @@ static NSString *ALNGeneratedEventID(void) {
   return [NSString stringWithFormat:@"evt_%@", compact ?: @""];
 }
 
+NSDictionary *ALNEventStreamNormalizedAppendMaterial(NSDictionary *event, NSError **error) {
+  return ALNNormalizedEventMaterial(event, error);
+}
+
+NSString *ALNEventStreamGeneratedEventID(void) {
+  return ALNGeneratedEventID();
+}
+
+NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message, NSDictionary *details) {
+  return ALNEventStreamError(code, message, details ?: @{});
+}
+
 @implementation ALNEventStreamCursor
 
 - (instancetype)initWithStreamID:(NSString *)streamID sequence:(NSUInteger)sequence {
@@ -178,6 +190,30 @@ static NSString *ALNGeneratedEventID(void) {
     result[@"metadata"] = self.metadata;
   }
   return [result copy];
+}
+
++ (instancetype)envelopeWithDictionary:(NSDictionary *)dictionary {
+  if (![dictionary isKindOfClass:[NSDictionary class]]) {
+    return nil;
+  }
+  NSString *streamID = ALNEventStreamTrimmedString(dictionary[@"stream_id"]);
+  id sequence = dictionary[@"sequence"];
+  NSString *eventType = ALNEventStreamTrimmedString(dictionary[@"event_type"]);
+  NSDictionary *payload = [dictionary[@"payload"] isKindOfClass:[NSDictionary class]] ? dictionary[@"payload"] : nil;
+  if ([streamID length] == 0 || ![sequence respondsToSelector:@selector(unsignedIntegerValue)] ||
+      [eventType length] == 0 || payload == nil) {
+    return nil;
+  }
+  NSString *idempotencyKey = ALNEventStreamTrimmedString(dictionary[@"idempotency_key"]);
+  return [[self alloc] initWithStreamID:streamID
+                               sequence:[sequence unsignedIntegerValue]
+                                eventID:ALNEventStreamTrimmedString(dictionary[@"event_id"])
+                              eventType:eventType
+                             occurredAt:ALNEventStreamTrimmedString(dictionary[@"occurred_at"])
+                                payload:payload
+                         idempotencyKey:[idempotencyKey length] > 0 ? idempotencyKey : nil
+                                  actor:[dictionary[@"actor"] isKindOfClass:[NSDictionary class]] ? dictionary[@"actor"] : nil
+                               metadata:[dictionary[@"metadata"] isKindOfClass:[NSDictionary class]] ? dictionary[@"metadata"] : nil];
 }
 
 @end
