@@ -41,6 +41,11 @@ Options:
   --require-env-key <NAME>
                           Record a required environment key without storing its value
   --allow-remote-rebuild  Allow best-effort cross-profile source rebuild planning
+  --shared-path <path>     App-relative path to link from <release-path>/shared on
+                           activation (repeatable; recorded in metadata/shared_paths)
+  --pre-package-command <cmd>
+                           Shell command run in the app root before packaging
+                           (repeatable, in order; a failure aborts the build)
   --dry-run                Validate inputs and emit planned release metadata only
   --json                   Emit machine-readable workflow payloads
   --help                   Show this help
@@ -215,6 +220,8 @@ certification_bundle_manifest=""
 json_performance_status=""
 json_performance_bundle_manifest=""
 dry_run=0
+shared_paths=()
+pre_package_commands=()
 output_json=0
 local_profile=""
 target_profile=""
@@ -429,6 +436,26 @@ while [[ $# -gt 0 ]]; do
     --allow-remote-rebuild)
       allow_remote_rebuild=1
       shift
+      ;;
+    --shared-path)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--shared-path requires a value" \
+        "Pass an app-relative path such as storage/media after --shared-path." \
+        "tools/deploy/build_release.sh --shared-path storage/media --app-root /path/to/app" \
+        2
+      shared_paths+=("$2")
+      shift 2
+      ;;
+    --pre-package-command)
+      [[ $# -ge 2 ]] || emit_error \
+        "missing_option_value" \
+        "--pre-package-command requires a value" \
+        "Pass a shell command such as 'npm --prefix frontend ci' after --pre-package-command." \
+        "tools/deploy/build_release.sh --pre-package-command 'npm --prefix frontend run build' --app-root /path/to/app" \
+        2
+      pre_package_commands+=("$2")
+      shift 2
       ;;
     --dry-run)
       dry_run=1
@@ -659,7 +686,25 @@ if [[ -e "$release_dir" ]]; then
     1
 fi
 
+for shared_path in "${shared_paths[@]}"; do
+  # App-relative, no traversal: activation links <release>/app/<path> to shared/<path>.
+  if [[ -z "$shared_path" || "$shared_path" == /* || "/$shared_path/" == */../* || "/$shared_path/" == */./* ||
+        "$shared_path" == *//* ]]; then
+    emit_error \
+      "invalid_shared_path" \
+      "shared path must be a relative path inside the app without . or .. segments: $shared_path" \
+      "Use paths such as storage/media or log in sharedPaths." \
+      "sharedPaths = (\"storage/media\", \"log\");" \
+      2
+  fi
+done
+
 if [[ "$dry_run" == "1" ]]; then
+  if [[ "$output_json" != "1" ]]; then
+    for command in "${pre_package_commands[@]}"; do
+      echo "build_release.sh dry-run: would run pre-package command: $command"
+    done
+  fi
   if [[ "$output_json" == "1" ]]; then
     emit_success_json "planned" "$release_dir" "$releases_dir/latest-built" "$manifest_path"
   else
@@ -667,6 +712,36 @@ if [[ "$dry_run" == "1" ]]; then
   fi
   exit 0
 fi
+
+# Pre-package commands (for example a frontend build) run in the app root before
+# the app is compiled and copied, so their outputs are packaged (GitHub issue 66).
+# With --json, callers capture stdout and stderr together, so command output is
+# only reported (in the error payload) when a command fails.
+for command in "${pre_package_commands[@]}"; do
+  if [[ "$output_json" != "1" ]]; then
+    echo "build_release.sh: running pre-package command: $command" >&2
+  fi
+  command_log="$(mktemp)"
+  set +e
+  (cd "$app_root" && bash -c "$command") >"$command_log" 2>&1
+  command_status=$?
+  set -e
+  if [[ "$output_json" != "1" ]]; then
+    cat "$command_log" >&2
+  fi
+  if [[ $command_status -ne 0 ]]; then
+    command_tail="$(tail -n 40 "$command_log")"
+    rm -f "$command_log"
+    emit_error \
+      "pre_package_command_failed" \
+      "pre-package command failed with exit $command_status: $command
+$command_tail" \
+      "Fix the command (it runs from the app root) or remove it from prePackageCommands." \
+      "prePackageCommands = (\"npm --prefix frontend ci\", \"npm --prefix frontend run build\");" \
+      1
+  fi
+  rm -f "$command_log"
+done
 
 make -C "$framework_root" arlen boomhauer >/dev/null
 
@@ -676,6 +751,9 @@ if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || 
 fi
 
 mkdir -p "$release_dir/app" "$release_dir/framework" "$release_dir/metadata"
+if [[ ${#shared_paths[@]} -gt 0 ]]; then
+  printf '%s\n' "${shared_paths[@]}" >"$release_dir/metadata/shared_paths"
+fi
 
 # Package app payload.
 copy_path_if_exists "$app_root/config" "$release_dir/app/config"

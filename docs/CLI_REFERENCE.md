@@ -124,6 +124,8 @@ Named targets:
           requiredEnvironmentKeys = ("ARLEN_DATABASE_URL", "ARLEN_SESSION_SECRET");
         };
         init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        sharedPaths = ("storage/media");
+        prePackageCommands = ("npm --prefix frontend ci", "npm --prefix frontend run build");
         transport = {
           sshHost = "deploy@myapp.example.com";
           sshCommand = "ssh";
@@ -158,6 +160,8 @@ Named targets:
 - `--remote` (SSH targets only): creates the release/shared/log/tmp layout on
  the target host over SSH with `mkdir -p`, and writes the generated artifacts
  locally. Alternatively, run `arlen deploy init <target>` on the host itself.
+- also creates `shared/<path>` for each `sharedPaths` entry; activation links
+ them into every release (see [Deployment](DEPLOYMENT.md#43-project-deployment-configuration))
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
