@@ -200,6 +200,8 @@ Current shape:
           requiresEnvWrapper = YES;
         };
         init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        sharedPaths = ("storage/media", "public/uploads");
+        prePackageCommands = ("npm --prefix frontend ci", "npm --prefix frontend run build");
         transport = {
           sshHost = "deploy@app1.example.com";
           sshCommand = "ssh";
@@ -220,6 +222,24 @@ Arlen now resolves:
 - `arlen deploy doctor production`
 
 Explicit CLI flags still override the checked-in target fields.
+
+`sharedPaths` lists app-relative paths whose contents must outlive a release,
+such as user uploads. `deploy init` creates `<releasePath>/shared/<path>` for
+each one. On activation, each release gets `<release>/app/<path>` as a symlink to
+the shared directory, so files written through one release are still there
+after the next. If the shared directory is missing or empty, activation first
+moves whatever the release packaged at that path into it (packaged paths are
+`config/`, `public/`, `templates/`, `modules/`, `src/` and `db/migrations`); after
+that the shared copy wins. Paths must stay inside the app: absolute paths and
+`.`/`..` segments are rejected when the target loads. `deploy doctor` checks that
+each shared path exists and is writable by the user running it.
+
+`prePackageCommands` run in order from the app root with `bash -c` before the
+app is compiled and packaged, so their outputs (a built frontend in `public/`,
+for example) ship in the release. A command that exits non-zero aborts the build
+before any release directory is created, and `deploy push` reports its exit
+status and output (also in `--json` output). `deploy dryrun` lists the commands
+without running them.
 
 ### 4.4 Runtime Strategies
 

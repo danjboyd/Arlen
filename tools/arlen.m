@@ -1663,6 +1663,26 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     return nil;
   }
 
+  // sharedPaths (GitHub issue 66): app-relative paths linked from shared/ into
+  // every release on activation. Reject traversal instead of silently dropping.
+  NSArray<NSString *> *sharedPaths = OrderedStringArrayFromValue(rawTarget[@"sharedPaths"]);
+  for (NSString *sharedPath in sharedPaths) {
+    NSArray *segments = [sharedPath componentsSeparatedByString:@"/"];
+    if ([sharedPath hasPrefix:@"/"] || [segments containsObject:@".."] || [segments containsObject:@"."] ||
+        [segments containsObject:@""]) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:@"Arlen.Error"
+                                     code:44
+                                 userInfo:@{
+                                   NSLocalizedDescriptionKey :
+                                       [NSString stringWithFormat:@"deploy target '%@' sharedPaths entry '%@' must be a relative path inside the app without . or .. segments",
+                                                                  targetName ?: @"", sharedPath]
+                                 }];
+      }
+      return nil;
+    }
+  }
+
   NSString *serviceName = StringValueForDeployKey(rawTarget, @"service");
   if ([serviceName length] == 0) {
     serviceName = [NSString stringWithFormat:@"arlen@%@", targetName ?: @"app"];
@@ -1698,6 +1718,8 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"release_path" : releasePath ?: @"",
     @"releases_dir" : [releasesDir stringByStandardizingPath],
     @"shared_dir" : [[releasePath stringByAppendingPathComponent:@"shared"] stringByStandardizingPath],
+    @"shared_paths" : sharedPaths ?: @[],
+    @"pre_package_commands" : OrderedStringArrayFromValue(rawTarget[@"prePackageCommands"]),
     @"logs_dir" : [[releasePath stringByAppendingPathComponent:@"logs"] stringByStandardizingPath],
     @"tmp_dir" : [[releasePath stringByAppendingPathComponent:@"tmp"] stringByStandardizingPath],
     @"local_staging_releases_dir" : [[generatedDir stringByAppendingPathComponent:@"local-releases"] stringByStandardizingPath],
@@ -1795,6 +1817,24 @@ static NSArray<NSString *> *DeployTargetHostLayoutPaths(NSDictionary *target) {
     StringValueForDeployKey(target, @"logs_dir"),
     StringValueForDeployKey(target, @"tmp_dir"),
   ];
+}
+
+// A target's shared/ directory for activate_release.sh; empty when no target is
+// resolved (the script then uses <releases-dir>/../shared).
+static NSString *ActivateSharedDirOption(NSDictionary *target) {
+  NSString *sharedDir = StringValueForDeployKey(target, @"shared_dir");
+  return [sharedDir length] > 0 ? [NSString stringWithFormat:@" --shared-dir %@", ShellQuote(sharedDir)] : @"";
+}
+
+static NSArray<NSString *> *DeployTargetSharedPathDirectories(NSDictionary *target) {
+  NSString *sharedDir = StringValueForDeployKey(target, @"shared_dir");
+  NSMutableArray<NSString *> *directories = [NSMutableArray array];
+  for (NSString *sharedPath in [target[@"shared_paths"] isKindOfClass:[NSArray class]] ? target[@"shared_paths"] : @[]) {
+    if ([sharedDir length] > 0) {
+      [directories addObject:[sharedDir stringByAppendingPathComponent:sharedPath]];
+    }
+  }
+  return directories;
 }
 
 // Deterministic generated artifacts under build/deploy/targets/<target>/ on the
@@ -2082,7 +2122,8 @@ static NSArray<NSString *> *MissingRemoteDeployTargetPaths(NSDictionary *target,
 
 static NSDictionary *CreateRemoteDeployTargetLayout(NSDictionary *target) {
   NSMutableString *script = [NSMutableString stringWithString:@"set -eu && mkdir -p"];
-  for (NSString *path in DeployTargetHostLayoutPaths(target)) {
+  for (NSString *path in [DeployTargetHostLayoutPaths(target) arrayByAddingObjectsFromArray:
+                                                                   DeployTargetSharedPathDirectories(target)]) {
     if ([path length] > 0) {
       [script appendFormat:@" %@", ShellQuote(path)];
     }
@@ -2304,6 +2345,18 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForTargetHost(NSDictionary *ta
              [NSString stringWithFormat:@"%@ %@", [status isEqualToString:@"pass"] ? @"directory present:" : @"directory missing:",
                                         path ?: @""],
              @"Run `arlen deploy init <target>` on the target host to create the expected layout.");
+  }
+
+  for (NSString *sharedDirectory in DeployTargetSharedPathDirectories(target)) {
+    BOOL isDirectory = NO;
+    BOOL present = [fm fileExistsAtPath:sharedDirectory isDirectory:&isDirectory];
+    BOOL writable = present && [fm isWritableFileAtPath:sharedDirectory];
+    addCheck(@"target_shared_path", (present && writable) ? @"pass" : @"fail",
+             [NSString stringWithFormat:@"%@ %@",
+                                        !present ? @"shared path missing:"
+                                                 : (writable ? @"shared path writable:" : @"shared path not writable:"),
+                                        sharedDirectory],
+             @"Run `arlen deploy init <target>` on the host, and give the runtime user write access to shared paths.");
   }
 
   NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
@@ -6110,13 +6163,15 @@ static int CommandDeploy(NSArray *args) {
                                          @"arlen deploy init production --remote --json", 1)
                       : 1;
       }
-      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+      for (NSString *directory in [DeployTargetHostLayoutPaths(resolvedTarget)
+               arrayByAddingObjectsFromArray:DeployTargetSharedPathDirectories(resolvedTarget)]) {
         if ([directory length] > 0) {
           [createdDirectories addObject:directory];
         }
       }
     } else {
-      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+      for (NSString *directory in [DeployTargetHostLayoutPaths(resolvedTarget)
+               arrayByAddingObjectsFromArray:DeployTargetSharedPathDirectories(resolvedTarget)]) {
         if ([directory length] > 0 &&
             [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
           [createdDirectories addObject:directory];
@@ -6207,6 +6262,14 @@ static int CommandDeploy(NSArray *args) {
   }
   if (allowRemoteRebuild) {
     [buildCommand appendString:@" --allow-remote-rebuild"];
+  }
+  for (NSString *sharedPath in [resolvedTarget[@"shared_paths"] isKindOfClass:[NSArray class]] ? resolvedTarget[@"shared_paths"] : @[]) {
+    AppendShellOption(buildCommand, @"--shared-path", sharedPath);
+  }
+  for (NSString *command in [resolvedTarget[@"pre_package_commands"] isKindOfClass:[NSArray class]]
+                                ? resolvedTarget[@"pre_package_commands"]
+                                : @[]) {
+    AppendShellOption(buildCommand, @"--pre-package-command", command);
   }
 
   if (remoteTargetEnabled && ![subcommand isEqualToString:@"dryrun"] && ![subcommand isEqualToString:@"releases"]) {
@@ -6557,10 +6620,21 @@ static int CommandDeploy(NSArray *args) {
       NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &exitCode);
       NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
       if (exitCode != 0 || buildPayload == nil) {
+        // Surface build_release's own error (for example a failed pre-package
+        // command with its output) instead of only a generic failure.
+        NSDictionary *buildError = [buildPayload[@"error"] isKindOfClass:[NSDictionary class]] ? buildPayload[@"error"] : nil;
+        NSDictionary *buildFixit = [buildError[@"fixit"] isKindOfClass:[NSDictionary class]] ? buildError[@"fixit"] : nil;
+        NSString *buildMessage = [buildError[@"message"] isKindOfClass:[NSString class]] ? buildError[@"message"] : nil;
+        NSString *buildAction = [buildFixit[@"action"] isKindOfClass:[NSString class]] ? buildFixit[@"action"] : nil;
+        NSString *buildExample = [buildFixit[@"example"] isKindOfClass:[NSString class]] ? buildFixit[@"example"] : nil;
         return EmitMachineError(@"deploy", workflow, @"deploy_push_failed",
-                                @"arlen deploy push failed",
-                                @"Inspect the underlying build_release output and fix the first reported issue.",
-                                @"arlen deploy push --json --skip-release-certification", exitCode ?: 1);
+                                [buildMessage length] > 0
+                                    ? [NSString stringWithFormat:@"arlen deploy push failed: %@", buildMessage]
+                                    : @"arlen deploy push failed",
+                                [buildAction length] > 0 ? buildAction
+                                                         : @"Inspect the underlying build_release output and fix the first reported issue.",
+                                [buildExample length] > 0 ? buildExample : @"arlen deploy push --json --skip-release-certification",
+                                exitCode ?: 1);
       }
       NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
       NSDictionary *payload = @{
@@ -7188,8 +7262,9 @@ static int CommandDeploy(NSArray *args) {
   }
 
   NSString *activateCommand =
-      [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
-                                 ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(releaseID)];
+      [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@%@",
+                                 ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(releaseID),
+                                 ActivateSharedDirOption(resolvedTarget)];
   int activateExitCode = 0;
   NSString *activateOutput = RunShellCaptureCommand(activateCommand, &activateExitCode);
   if (activateExitCode != 0) {
@@ -7257,8 +7332,9 @@ static int CommandDeploy(NSArray *args) {
       NSString *activeReleaseIDAfterFailure = releaseID ?: @"";
       if ([rollbackActivationID length] > 0) {
         NSString *rollbackActivationCommand =
-            [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
-                                       ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackActivationID)];
+            [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@%@",
+                                       ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackActivationID),
+                                       ActivateSharedDirOption(resolvedTarget)];
         rollbackActivationOutput = RunShellCaptureCommand(rollbackActivationCommand, &rollbackActivationExitCode);
         deploymentState = (rollbackActivationExitCode == 0) ? @"activation_failed" : @"stale_runtime";
         activeReleaseIDAfterFailure = (rollbackActivationExitCode == 0) ? rollbackActivationID : (releaseID ?: @"");

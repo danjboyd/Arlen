@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- Deploy targets accept `sharedPaths` (app-relative paths such as uploads that
+  `deploy init` creates under `shared/` and every release links to, so their
+  files survive the next release) and `prePackageCommands` (for example
+  `npm --prefix frontend run build`, run from the app root before packaging; a
+  failure aborts the build and reports the command's output). `deploy doctor`
+  checks that shared paths exist and are writable. `deploy push --json` now
+  carries the build script's own error message (GitHub issue 66). See
+  [Deployment](DEPLOYMENT.md).
+
 - MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
   in `config/app.plist` (as in the documented example) no longer crash startup
   (`does not recognize unsignedIntegerValue`). Plist strings holding

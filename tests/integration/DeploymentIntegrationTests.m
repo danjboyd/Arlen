@@ -1736,6 +1736,124 @@
   }
 }
 
+// GitHub issue 66: sharedPaths are linked from shared/ into every release and
+// survive the next release; prePackageCommands run before packaging, and a
+// failing one aborts the build with its output.
+- (void)testSharedPathsSurviveReleasesAndPrePackageCommandsGateTheBuild_Issue66 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-shared-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-shared-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"host/myapp"];
+    NSString *(^deployConfig)(NSString *, NSString *) = ^NSString *(NSString *sharedPaths, NSString *hook) {
+      return [NSString stringWithFormat:
+                           @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = { production = {\n"
+                            "  host = \"localhost\"; releasePath = \"%@\"; profile = \"linux-x86_64-gnustep-clang\";\n"
+                            "  runtimeStrategy = \"system\"; runtimeAction = \"none\"; environment = \"production\";\n"
+                            "  sharedPaths = (%@);\n"
+                            "  prePackageCommands = (\"%@\");\n"
+                            "}; }; }; }\n",
+                           releasePath, sharedPaths, hook];
+    };
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig(@"\"storage/media\", \"public/uploads\"",
+                                               @"mkdir -p public && echo built-by-hook > public/built.txt")]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    // Packaged content at a shared path seeds shared/ on first activation.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"public/uploads/.keep"] content:@"seed\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    int code = 0;
+    NSString *output = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *arlen = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen",
+                                                 appRoot, repoRoot, repoRoot];
+
+    output = [self runShellCapture:[NSString stringWithFormat:@"%@ deploy init production --json", arlen] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *shared = [releasePath stringByAppendingPathComponent:@"shared"];
+    BOOL isDirectory = NO;
+    XCTAssertTrue([fm fileExistsAtPath:[shared stringByAppendingPathComponent:@"storage/media"] isDirectory:&isDirectory] &&
+                  isDirectory);
+
+    NSString *current = [releasePath stringByAppendingPathComponent:@"releases/current/app"];
+    for (NSString *releaseID in @[ @"shared-rel-1", @"shared-rel-2" ]) {
+      for (NSString *step in @[ @"push", @"release" ]) {
+        output = [self runShellCapture:[NSString stringWithFormat:
+                                                     @"%@ deploy %@ production --release-id %@ --allow-missing-certification --json",
+                                                     arlen, step, releaseID]
+                              exitCode:&code];
+        XCTAssertEqual(0, code, @"%@ %@: %@", step, releaseID, output);
+      }
+      NSString *media = [current stringByAppendingPathComponent:@"storage/media"];
+      NSDictionary *attributes = [fm attributesOfItemAtPath:media error:NULL];
+      XCTAssertEqualObjects(NSFileTypeSymbolicLink, attributes[NSFileType], @"%@", releaseID);
+      XCTAssertEqualObjects([shared stringByAppendingPathComponent:@"storage/media"],
+                            [fm pathContentOfSymbolicLinkAtPath:media]);
+      XCTAssertEqualObjects(@"built-by-hook\n",
+                            [NSString stringWithContentsOfFile:[current stringByAppendingPathComponent:@"public/built.txt"]
+                                                      encoding:NSUTF8StringEncoding
+                                                         error:NULL]);
+      if ([releaseID isEqualToString:@"shared-rel-1"]) {
+        XCTAssertTrue([self writeFile:[media stringByAppendingPathComponent:@"photo.jpg"] content:@"uploaded\n"]);
+      }
+    }
+    // The upload written through release 1 is still there under release 2.
+    XCTAssertEqualObjects(@"uploaded\n",
+                          [NSString stringWithContentsOfFile:[current stringByAppendingPathComponent:@"storage/media/photo.jpg"]
+                                                    encoding:NSUTF8StringEncoding
+                                                       error:NULL]);
+    XCTAssertTrue([fm fileExistsAtPath:[shared stringByAppendingPathComponent:@"public/uploads/.keep"]]);
+
+    output = [self runShellCapture:[NSString stringWithFormat:@"%@ deploy doctor production --json", arlen] exitCode:&code];
+    NSDictionary *doctor = [self parseJSONDictionaryFromOutput:output context:@"deploy doctor"];
+    NSUInteger sharedChecks = 0;
+    for (NSDictionary *check in doctor[@"checks"]) {
+      if ([check[@"id"] isEqual:@"target_shared_path"]) {
+        XCTAssertEqualObjects(@"pass", check[@"status"], @"%@", check);
+        sharedChecks++;
+      }
+    }
+    XCTAssertEqual((NSUInteger)2, sharedChecks, @"%@", output);
+
+    // A failing pre-package command aborts packaging, reports its output, builds nothing.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig(@"\"storage/media\"",
+                                               @"echo compiling frontend; echo npm ERR! missing script >&2; exit 3")]);
+    output = [self runShellCapture:[NSString stringWithFormat:
+                                                 @"%@ deploy push production --release-id shared-rel-3 --allow-missing-certification --json",
+                                                 arlen]
+                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", output);
+    NSDictionary *failure = [self parseJSONDictionaryFromOutput:output context:@"failing pre-package"];
+    NSString *message = failure[@"error"][@"message"];
+    XCTAssertTrue([message containsString:@"pre-package command failed with exit 3"], @"%@", failure);
+    XCTAssertTrue([message containsString:@"npm ERR! missing script"], @"%@", failure);
+    XCTAssertFalse([fm fileExistsAtPath:[releasePath stringByAppendingPathComponent:@"releases/shared-rel-3"]]);
+
+    // Paths that escape the app are rejected when the target loads.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
+                          content:deployConfig(@"\"../outside\"", @"true")]);
+    output = [self runShellCapture:[NSString stringWithFormat:@"%@ deploy dryrun production --allow-missing-certification --json", arlen]
+                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"sharedPaths entry '../outside'"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:NULL];
+  }
+}
+
 - (void)testArlenNewDeploySampleAndCompletionFoundation {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-phase36-sample-completion"];
