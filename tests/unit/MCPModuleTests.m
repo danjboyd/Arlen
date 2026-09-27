@@ -278,6 +278,26 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqual(403, denied.statusCode);
   XCTAssertEqual(1u, Calls);
 }
+- (void)testMixedAppExemptsCookielessBearerClientsButKeepsCSRFForSessions_Issue43 {
+  [self configure:@{@"session":@{@"enabled":@YES, @"secret":@"mcp-test-session-secret-0123456789abcdef", @"secure":@NO},
+                    @"csrf":@{@"enabled":@YES, @"exemptPathPrefixes":@[@"/mcp"]}}];
+  [self.app registerRouteMethod:@"GET" path:@"/session-fixture" name:@"session_fixture" controllerClass:[MCPTestController class] action:@"sessionFixture"];
+  [self routeTool]; [self install];
+  // Bearer client, no cookie: no CSRF token needed, and no session is minted.
+  ALNResponse *bearer = [self send:@{@"jsonrpc":@"2.0", @"id":@7, @"method":@"tools/call", @"params":@{@"name":@"catalog.get", @"arguments":@{@"id":@"42"}}}
+                           headers:nil method:@"POST" path:@"/mcp"];
+  XCTAssertEqual(200, bearer.statusCode);
+  XCTAssertEqualObjects(@"reader", [self decode:bearer][@"result"][@"structuredContent"][@"subject"]);
+  XCTAssertNil([bearer headerForName:@"Set-Cookie"]);
+  // A request carrying the session cookie still needs the token on the exempt path.
+  ALNResponse *bootstrap = [self send:@{} headers:nil method:@"GET" path:@"/session-fixture"];
+  NSString *cookie = [[[bootstrap headerForName:@"Set-Cookie"] componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue(cookie.length > 0);
+  ALNResponse *denied = [self send:@{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"}
+                           headers:@{@"authorization":@"", @"cookie":cookie ?: @""} method:@"POST" path:@"/mcp"];
+  XCTAssertEqual(403, denied.statusCode);
+  XCTAssertEqual(1u, Calls);
+}
 - (void)testBodyMappingAndEnvelopeCompatibility {
   [self.app addMiddleware:[ALNResponseEnvelopeMiddleware new]];
   ALNRoute *route = [self.app registerRouteMethod:@"POST" path:@"/echo" name:@"echo" controllerClass:[MCPTestController class] action:@"body"];
@@ -306,6 +326,36 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqual(0u, Calls);
   ALNResponse *limited = [self send:@{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"} headers:nil method:@"POST" path:@"/mcp"];
   XCTAssertEqual(429, limited.statusCode);
+}
+- (void)testPlistNumericConfigIsNormalizedAndInvalidValuesNameTheKey_Issue42 {
+  // GNUstep's old-style plist parser delivers bare numbers as NSString.
+  NSDictionary *parsed = [@"{ mcp = { enabled = YES; path = \"/mcp\"; maxOutputBytes = 262144; requestsPerMinute = 1; }; }" propertyList];
+  XCTAssertTrue([parsed[@"mcp"][@"requestsPerMinute"] isKindOfClass:[NSString class]]);
+  [self configure:parsed];
+  [self.module registerTool:@{@"name":@"assurance", @"annotations":Annotations(), @"minimumAuthAssuranceLevel":@"2"}
+      handler:^NSDictionary *(NSDictionary *args, ALNContext *ctx, NSError **error) { Calls++; return @{@"structuredContent":@{}}; } error:NULL];
+  [self install];
+  XCTAssertEqualObjects(@YES, [self call:@"assurance" arguments:@{} headers:nil][@"result"][@"isError"]);
+  XCTAssertEqual(0u, Calls);
+  ALNResponse *limited = [self send:@{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"} headers:nil method:@"POST" path:@"/mcp"];
+  XCTAssertEqual(429, limited.statusCode);
+
+  NSArray *invalid = @[
+    @[@"maxOutputBytes", @"lots"], @[@"maxOutputBytes", @"1024.5"], @[@"maxOutputBytes", @"512"], @[@"maxOutputBytes", @YES],
+    @[@"requestsPerMinute", @"0"], @[@"requestsPerMinute", @"-5"], @[@"requestsPerMinute", @[@120]],
+  ];
+  for (NSArray *pair in invalid) {
+    [self configure:@{@"mcp":@{@"enabled":@YES, pair[0]:pair[1]}}];
+    NSError *error = nil;
+    XCTAssertFalse([self.module registerWithApplication:self.app error:&error], @"%@", pair);
+    XCTAssertTrue([[error localizedDescription] containsString:[@"mcp." stringByAppendingString:pair[0]]], @"%@ %@", pair, error);
+  }
+  [self configure:@{}];
+  [self.module registerTool:@{@"name":@"bad.assurance", @"annotations":Annotations(), @"minimumAuthAssuranceLevel":@"high"}
+      handler:^NSDictionary *(NSDictionary *args, ALNContext *ctx, NSError **error) { return @{}; } error:NULL];
+  NSError *error = nil;
+  XCTAssertFalse([self.module registerWithApplication:self.app error:&error]);
+  XCTAssertTrue([[error localizedDescription] containsString:@"minimumAuthAssuranceLevel"], @"%@", error);
 }
 - (void)testOuterIdentityCannotSubstituteForInnerAuthentication {
   self.auth.endpointOnly = YES;

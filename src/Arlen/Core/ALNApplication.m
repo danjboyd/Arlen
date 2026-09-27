@@ -1930,6 +1930,16 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
         @"missing_session_dependency",
         securityProfile);
   }
+  NSString *exemptProblem = nil;
+  if (csrfEnabled &&
+      [ALNCSRFMiddleware normalizedExemptPathPrefixes:csrf[@"exemptPathPrefixes"] problem:&exemptProblem] == nil) {
+    return ALNSecurityConfigValidationError(
+        339,
+        [NSString stringWithFormat:@"Invalid security configuration: %@", exemptProblem],
+        @"csrf.exemptPathPrefixes",
+        @"invalid_path_prefix",
+        securityProfile);
+  }
 
   BOOL authEnabled = ALNBoolConfigValue(auth[@"enabled"], NO);
   NSString *authBearerSecret = ALNTrimmedStringConfigValue(auth[@"bearerSecret"]);
@@ -5225,7 +5235,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
           ALNBoolConfigValue(csrf[@"allowQueryParamFallback"], NO);
       [self addMiddleware:[[ALNCSRFMiddleware alloc] initWithHeaderName:headerName
                                                          queryParamName:queryParam
-                                              allowQueryParamFallback:allowQueryParamFallback]];
+                                              allowQueryParamFallback:allowQueryParamFallback
+                                                     exemptPathPrefixes:csrf[@"exemptPathPrefixes"]]];
     }
   }
 

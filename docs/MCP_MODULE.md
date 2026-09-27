@@ -281,6 +281,20 @@ header does not automatically bypass an app's CSRF policy. The example uses a
 stateless bearer-only app with sessions/CSRF explicitly disabled. Do not disable
 CSRF globally in a mixed browser app merely to make an MCP client work.
 
+In a mixed app, list the MCP path in `csrf.exemptPathPrefixes` instead:
+
+```plist
+csrf = { enabled = YES; exemptPathPrefixes = ("/context/mcp"); };
+mcp = { enabled = YES; path = "/context/mcp"; };
+```
+
+Requests to that path that carry no session cookie (bearer clients) skip the
+CSRF check and do not get a session. A request that does carry the session
+cookie still needs its CSRF token, so browser sessions stay protected. Because
+the module is installed on the application itself, `mcp.oauth` publishes its
+protected-resource metadata at the root path RFC 9728 clients expect
+(`/.well-known/oauth-protected-resource/context/mcp`).
+
 Arlen's standard response-envelope middleware is disabled only in MCP protocol
 and private service contexts via `ALNResponseEnvelopeDisabledStashKey`. Ordinary
 route responses retain their envelopes and can be transformed. App-specific
@@ -304,7 +318,10 @@ values, not wildcards. Bind development to loopback. Deploy behind TLS with
 explicit Host/Origin allowlists and trusted-proxy settings as described in
 [Deployment](DEPLOYMENT.md). Do not cache MCP responses. The module applies an
 Arlen rate limiter to the MCP endpoint (120 requests/minute per peer by default,
-`requestsPerMinute` range 1–100000); app limits also apply. Multi-worker/global
+`requestsPerMinute` range 1–100000); app limits also apply.
+`maxOutputBytes` and `requestsPerMinute` accept bare or quoted decimal
+integers from plist config as well as numbers; any other value fails startup
+with an error naming the key. Multi-worker/global
 quotas require an ingress/shared limiter. Set HTTP request limits and service
 backend deadlines. Synchronous handlers are not forcibly interrupted on client
 disconnect or timeout. No MCP session storage is required across propane workers;

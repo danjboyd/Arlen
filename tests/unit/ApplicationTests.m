@@ -2235,6 +2235,21 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertTrue([startError.localizedDescription containsString:@"csrf.enabled requires session.enabled"]);
 }
 
+- (void)testStartRejectsInvalidCSRFExemptPathPrefixes {
+  for (id prefixes in @[ @[ @"/" ], @[ @"mcp" ], @[ @"/a//b" ], @[ @"/a/../b" ], @[ @"/mcp*" ], @[ @42 ], @"/mcp" ]) {
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : @"test",
+      @"logFormat" : @"json",
+      @"session" : @{ @"enabled" : @(YES), @"secret" : @"unit-test-secret-value-0123456789abcdef" },
+      @"csrf" : @{ @"enabled" : @(YES), @"exemptPathPrefixes" : prefixes },
+    }];
+    NSError *startError = nil;
+    XCTAssertFalse([app startWithError:&startError], @"%@", prefixes);
+    XCTAssertEqual((NSInteger)339, startError.code, @"%@", prefixes);
+    XCTAssertTrue([startError.localizedDescription containsString:@"csrf.exemptPathPrefixes"], @"%@", startError);
+  }
+}
+
 - (void)testStartFailsFastWhenSessionSecretIsWeak {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

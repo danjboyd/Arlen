@@ -109,10 +109,11 @@
   ALNApplication *app = [self applicationWithFallback:nil config:nil];
   ALNResponse *response = [self app:app method:@"GET" path:@"/explorers/3/map" headers:[self html]];
   [self assertShell:response];
-  // Middleware ran: security headers and a session cookie (carrying the CSRF token).
+  // Middleware ran (security headers). The shell reads no CSRF token, so no session
+  // is started: a cookieless shell reply must not replace a signed-in session (issue 86).
   XCTAssertNotNil([response headerForName:@"Content-Security-Policy"]);
   XCTAssertNotNil([response headerForName:@"X-Frame-Options"]);
-  XCTAssertTrue([[response headerForName:@"Set-Cookie"] length] > 0);
+  XCTAssertNil([response headerForName:@"Set-Cookie"]);
   [self assertShell:[self app:app method:@"GET" path:@"/" headers:[self html]]];
 }
 

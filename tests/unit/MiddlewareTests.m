@@ -534,6 +534,57 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   XCTAssertEqualObjects(@"submitted\n", ALNTestStringFromResponse(submitResponse));
 }
 
+// GitHub issue 86: a cookieless request that never reads a CSRF token must not
+// start a session. A Set-Cookie on such a reply (a service worker's fetch, say)
+// replaced a signed-in browser's session and signed the user out.
+- (void)testCSRFDoesNotStartASessionUntilATokenIsRead_Issue86 {
+  ALNApplication *app = [self securityApplicationWithConfig:[self sessionAndCSRFConfig]
+                                                 submitPath:@"/submit"
+                                                 submitName:@"submit"
+                                               submitAction:@"submit"];
+  [app registerRouteMethod:@"GET" path:@"/plain" name:@"plain" controllerClass:[MiddlewareFormController class] action:@"submit"];
+  [app registerRouteMethod:@"HEAD" path:@"/plain" name:@"plain_head" controllerClass:[MiddlewareFormController class] action:@"submit"];
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithApplication:app];
+
+  for (NSString *method in @[ @"GET", @"HEAD" ]) {
+    ALNResponse *plain = [harness dispatchMethod:method path:@"/plain"];
+    ALNAssertResponseStatus(plain, 200);
+    XCTAssertNil([plain headerForName:@"Set-Cookie"], @"%@", method);
+  }
+  // Rejected unsafe requests do not mint a session either.
+  ALNResponse *rejected = [harness dispatchMethod:@"POST" path:@"/submit"];
+  ALNAssertResponseStatus(rejected, 403);
+  XCTAssertNil([rejected headerForName:@"Set-Cookie"]);
+
+  // A page that renders the token starts the session, and the token then works.
+  ALNResponse *form = [harness dispatchMethod:@"GET" path:@"/form"];
+  XCTAssertTrue([[form headerForName:@"Set-Cookie"] containsString:@"arlen_session="]);
+  NSString *token = [self jsonFromResponse:form][@"csrf"];
+  XCTAssertTrue([token length] > 0);
+  [harness recycleCookiesFromResponse:form];
+  // An established session keeps its token; reading it again does not rotate it.
+  XCTAssertEqualObjects(token, [self jsonFromResponse:[harness dispatchMethod:@"GET" path:@"/form"]][@"csrf"]);
+  ALNResponse *submitted = [harness dispatchMethod:@"POST"
+                                              path:@"/submit"
+                                       queryString:@""
+                                           headers:@{ @"x-csrf-token" : token ?: @"" }
+                                              body:nil];
+  ALNAssertResponseStatus(submitted, 200);
+}
+
+- (void)testCSRFTokenIsNotMintedWhenCSRFIsDisabled_Issue86 {
+  NSMutableDictionary *config = [[self sessionAndCSRFConfig] mutableCopy];
+  config[@"csrf"] = @{ @"enabled" : @(NO) };
+  ALNApplication *app = [self securityApplicationWithConfig:config
+                                                 submitPath:@"/submit"
+                                                 submitName:@"submit"
+                                               submitAction:@"submit"];
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithApplication:app];
+  ALNResponse *form = [harness dispatchMethod:@"GET" path:@"/form"];
+  XCTAssertEqualObjects(@"", [self jsonFromResponse:form][@"csrf"]);
+  XCTAssertNil([form headerForName:@"Set-Cookie"]);
+}
+
 - (void)testCSRFMiddlewareRejectsMissingToken {
   ALNApplication *app = [self securityApplicationWithConfig:@{
     @"environment" : @"test",
@@ -567,6 +618,27 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
     *token = [self jsonFromResponse:formResponse][@"csrf"];
   }
   return harness;
+}
+
+- (void)testCSRFExemptPathPrefixesSkipOnlyCookielessRequestsBelowThePrefix {
+  NSMutableDictionary *config = [[self sessionAndCSRFConfig] mutableCopy];
+  config[@"csrf"] = @{ @"enabled" : @(YES), @"exemptPathPrefixes" : @[ @"/submit/" ] };
+  ALNApplication *app = [self securityApplicationWithConfig:config
+                                                 submitPath:@"/submit"
+                                                 submitName:@"submit"
+                                               submitAction:@"submit"];
+  [app registerRouteMethod:@"POST" path:@"/submitted" name:@"submitted" controllerClass:[MiddlewareFormController class] action:@"submit"];
+
+  ALNWebTestHarness *cookieless = [ALNWebTestHarness harnessWithApplication:app];
+  ALNResponse *exempt = [cookieless dispatchMethod:@"POST" path:@"/submit"];
+  ALNAssertResponseStatus(exempt, 200);
+  XCTAssertNil([exempt headerForName:@"Set-Cookie"]);
+  // Prefixes match whole path segments only.
+  ALNAssertResponseStatus([cookieless dispatchMethod:@"POST" path:@"/submitted"], 403);
+
+  ALNWebTestHarness *withSession = [ALNWebTestHarness harnessWithApplication:app];
+  [withSession recycleCookiesFromResponse:[withSession dispatchMethod:@"GET" path:@"/form"]];
+  ALNAssertResponseStatus([withSession dispatchMethod:@"POST" path:@"/submit"], 403);
 }
 
 - (void)testCSRFRejectionReturnsJSONEnvelopeForJSONClients {
