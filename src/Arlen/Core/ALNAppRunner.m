@@ -1,5 +1,7 @@
 #import "ALNAppRunner.h"
 
+#include <pthread.h>
+
 #import <float.h>
 #import <stdio.h>
 #import <stdlib.h>
@@ -114,8 +116,32 @@ static int ALNRunJobsWorker(ALNApplication *application,
   }
 }
 
+static pthread_mutex_t gALNRouteCaptureLock = PTHREAD_MUTEX_INITIALIZER;
+static BOOL gALNRouteCaptureActive = NO;
+static ALNRouteRegistrationCallback gALNCapturedRouteRegistration = NULL;
+
+ALNRouteRegistrationCallback ALNCaptureRouteRegistration(ALNAppMainFunction appMain) {
+  if (appMain == NULL) {
+    return NULL;
+  }
+  pthread_mutex_lock(&gALNRouteCaptureLock);
+  gALNRouteCaptureActive = YES;
+  gALNCapturedRouteRegistration = NULL;
+  const char *argv[] = { "arlen-app-test", NULL };
+  (void)appMain(1, argv);
+  ALNRouteRegistrationCallback captured = gALNCapturedRouteRegistration;
+  gALNRouteCaptureActive = NO;
+  gALNCapturedRouteRegistration = NULL;
+  pthread_mutex_unlock(&gALNRouteCaptureLock);
+  return captured;
+}
+
 int ALNRunAppMain(int argc, const char * _Nonnull const * _Nonnull argv,
                   ALNRouteRegistrationCallback registerRoutes) {
+  if (gALNRouteCaptureActive) {
+    gALNCapturedRouteRegistration = registerRoutes;
+    return 0;
+  }
   int portOverride = 0;
   NSString *host = nil;
   NSString *environment = @"development";

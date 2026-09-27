@@ -100,7 +100,7 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
 
 @interface ALNSessionMiddleware ()
 
-@property(nonatomic, copy) NSString *cookieName;
+@property(nonatomic, copy, readwrite) NSString *cookieName;
 @property(nonatomic, assign) NSUInteger maxAgeSeconds;
 @property(nonatomic, assign) BOOL secure;
 @property(nonatomic, copy) NSString *sameSite;
@@ -318,6 +318,12 @@ static NSData *ALNAES256CTRTransform(NSData *input, NSData *key, NSData *iv, BOO
     *requiresRefresh = YES;
   }
   return session;
+}
+
+- (NSDictionary *)sessionDictionaryFromCookieValue:(NSString *)value {
+  BOOL requiresRefresh = NO;
+  NSMutableDictionary *session = [self decodeSessionToken:value requiresRefresh:&requiresRefresh];
+  return [session copy];
 }
 
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
