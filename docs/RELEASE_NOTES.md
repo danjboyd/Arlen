@@ -2,6 +2,17 @@
 
 ## Upcoming Release Candidate
 
+- Live push across propane workers: `realtime.fanout = { adapter = "postgresql"; }`
+  gives `ALNRealtimeHub` a PostgreSQL `LISTEN`/`NOTIFY` fanout, so
+  `publishLive…onChannel:` reaches websocket subscribers on every worker and
+  host, not only the worker that handled the publishing request. Large payloads
+  go through `arlen_realtime_payloads`; delivery is at most once. Without a
+  fanout, a worker running under several propane workers now warns once when a
+  websocket channel opens. `ALNRealtimeFanout` is the pluggable backend protocol,
+  and `ALNPgConnection` gains `waitForNotificationsWithTimeout:error:` (GitHub
+  issue 48, part 1; durable event-stream brokers follow). See
+  [Live UI](LIVE_UI.md#multiple-workers-and-hosts).
+
 - CSRF no longer starts a session on every request without a session cookie.
   The middleware used to write a fresh token into the session up front, so every
   cookieless request, `GET` and `HEAD` included, got a new signed-out session

@@ -14,6 +14,7 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <poll.h>
 #endif
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
@@ -52,6 +53,13 @@ NSString *const ALNPgQueryEventSQLKey = @"sql";
 
 typedef struct pg_conn PGconn;
 typedef struct pg_result PGresult;
+// Layout-compatible with libpq's PGnotify (libpq-fe.h is not included).
+typedef struct ALNPGnotify {
+  char *relname;
+  int be_pid;
+  char *extra;
+  struct ALNPGnotify *next;
+} ALNPGnotify;
 typedef unsigned int ALNOid;
 
 typedef enum {
@@ -100,6 +108,10 @@ static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
+static int (*ALNPQconsumeInput)(PGconn *conn) = NULL;
+static ALNPGnotify *(*ALNPQnotifies)(PGconn *conn) = NULL;
+static int (*ALNPQsocket)(const PGconn *conn) = NULL;
+static void (*ALNPQfreemem)(void *ptr) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
 static void (*ALNPQfinish)(PGconn *conn) = NULL;
 static char *(*ALNPQerrorMessage)(const PGconn *conn) = NULL;
@@ -287,6 +299,12 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
+    // LISTEN/NOTIFY support (waitForNotificationsWithTimeout:); optional so a
+    // minimal libpq still serves ordinary queries.
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQconsumeInput, handle, "PQconsumeInput");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQnotifies, handle, "PQnotifies");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQsocket, handle, "PQsocket");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQfreemem, handle, "PQfreemem");
 
     if (!ok) {
       gLibpqLoadError =
@@ -1860,6 +1878,64 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 - (void)dealloc {
   [self close];
+}
+
+- (NSArray<NSDictionary *> *)drainNotifications {
+  NSMutableArray<NSDictionary *> *notifications = [NSMutableArray array];
+  ALNPGnotify *notify = NULL;
+  while ((notify = ALNPQnotifies(_conn)) != NULL) {
+    NSString *channel = notify->relname != NULL ? [NSString stringWithUTF8String:notify->relname] : @"";
+    NSString *payload = notify->extra != NULL ? [NSString stringWithUTF8String:notify->extra] : @"";
+    [notifications addObject:@{ @"channel" : channel ?: @"", @"payload" : payload ?: @"", @"pid" : @(notify->be_pid) }];
+    ALNPQfreemem(notify);
+  }
+  return notifications;
+}
+
+- (NSArray<NSDictionary *> *)waitForNotificationsWithTimeout:(NSTimeInterval)timeout error:(NSError **)error {
+  NSError *openError = [self checkOpenError];
+  if (openError != nil) {
+    if (error != NULL) *error = openError;
+    return nil;
+  }
+  if (ALNPQconsumeInput == NULL || ALNPQnotifies == NULL || ALNPQsocket == NULL || ALNPQfreemem == NULL) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed, @"libpq lacks LISTEN/NOTIFY support", nil, nil);
+    }
+    return nil;
+  }
+  NSArray<NSDictionary *> *queued = [self drainNotifications];
+  if ([queued count] > 0) {
+    return queued;
+  }
+  int socketFD = ALNPQsocket(_conn);
+  if (socketFD < 0) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed, @"PostgreSQL connection has no socket", nil, nil);
+    }
+    return nil;
+  }
+#if defined(_WIN32)
+  fd_set readable;
+  FD_ZERO(&readable);
+  FD_SET((SOCKET)socketFD, &readable);
+  struct timeval wait = { (long)timeout, (long)((timeout - floor(timeout)) * 1000000.0) };
+  (void)select(0, &readable, NULL, NULL, &wait);
+#else
+  struct pollfd pollDescriptor = { .fd = socketFD, .events = POLLIN, .revents = 0 };
+  (void)poll(&pollDescriptor, 1, (int)MAX(0.0, timeout * 1000.0));
+#endif
+  if (ALNPQconsumeInput(_conn) != 1) {
+    const char *message = ALNPQerrorMessage(_conn);
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed,
+                              @"lost PostgreSQL connection while waiting for notifications",
+                              message != NULL ? [NSString stringWithUTF8String:message] : nil,
+                              nil);
+    }
+    return nil;
+  }
+  return [self drainNotifications];
 }
 
 - (void)close {

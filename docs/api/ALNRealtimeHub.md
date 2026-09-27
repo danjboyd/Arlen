@@ -13,6 +13,12 @@ NSUInteger delivered = [hub publishMessage:@"status:ok" onChannel:@"system"];
 NSLog(@"delivered to %lu subscribers", (unsigned long)delivered);
 ```
 
+## Properties
+
+| Property | Type | Attributes | Purpose |
+| --- | --- | --- | --- |
+| `fanout` | `id<ALNRealtimeFanout>` | `nonatomic, strong, nullable` | Public `fanout` property available on `ALNRealtimeHub`. |
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |
@@ -23,6 +29,7 @@ NSLog(@"delivered to %lu subscribers", (unsigned long)delivered);
 | `subscribeChannel:subscriber:rejectionReason:` | `- (nullable ALNRealtimeSubscription *) subscribeChannel:(NSString *)channel subscriber:(id<ALNRealtimeSubscriber>)subscriber rejectionReason:(NSString * _Nullable * _Nullable)rejectionReason;` | Register a subscriber for channel messages. | Capture the returned value and propagate errors/validation as needed. |
 | `unsubscribe:` | `- (void)unsubscribe:(nullable ALNRealtimeSubscription *)subscription;` | Unsubscribe a prior realtime subscription. | Call for side effects; this method does not return a value. |
 | `publishMessage:onChannel:` | `- (NSUInteger)publishMessage:(NSString *)message onChannel:(NSString *)channel;` | Publish message to all subscribers for a channel. | Capture the returned value and propagate errors/validation as needed. |
+| `deliverRemoteMessage:onChannel:` | `- (NSUInteger)deliverRemoteMessage:(NSString *)message onChannel:(NSString *)channel;` | Perform `deliver remote message` for `ALNRealtimeHub`. | Capture the returned value and propagate errors/validation as needed. |
 | `subscriberCountForChannel:` | `- (NSUInteger)subscriberCountForChannel:(NSString *)channel;` | Return current subscriber count for a channel. | Capture the returned value and propagate errors/validation as needed. |
 | `metricsSnapshot` | `- (NSDictionary *)metricsSnapshot;` | Perform `metrics snapshot` for `ALNRealtimeHub`. | Read this value when you need current runtime/request state. |
 | `reset` | `- (void)reset;` | Reset state to a clean baseline for testing or maintenance. | Call for side effects; this method does not return a value. |

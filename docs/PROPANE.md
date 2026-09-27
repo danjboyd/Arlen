@@ -18,6 +18,10 @@ plus a database-backed user lookup, SQLite or file-backed state for a
 single-host pilot, PostgreSQL for multi-worker and multi-host production, and
 durable first-party adapters where available.
 
+Websocket live push (`ALNRealtimeHub`) is process-local too: configure
+`realtime.fanout = { adapter = "postgresql"; }` so a publish on one worker reaches
+subscribers on every worker. See [Live UI](LIVE_UI.md#multiple-workers-and-hosts).
+
 Do not rely on sticky sessions as the default correctness model for normal HTTP
 apps. Sticky routing can be useful operationally, but Arlen's production state
 contract is that user, role, scenario, workflow, and other mutable domain data

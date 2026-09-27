@@ -10,9 +10,9 @@ python3 tools/docs/generate_api_reference.py
 
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `91`
-- Symbols: `158`
-- Public methods: `1063`
-- Public properties: `481`
+- Symbols: `159`
+- Public methods: `1067`
+- Public properties: `482`
 
 ## API Surface Boundary
 
@@ -199,6 +199,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNPasswordHash](api/ALNPasswordHash.md): Argon2id password hashing helpers that emit PHC strings, verify candidate passwords, and report when stored hashes should be rehashed.
 - [ALNPerfTrace](api/ALNPerfTrace.md): Per-request performance stage recorder used for internal timing diagnostics and perf event export.
 - [ALNPostgresJobAdapter](api/ALNPostgresJobAdapter.md): PostgreSQL durable queue with transactional enqueue, fenced renewable leases, retained results, replay, and shared queue controls. See docs/DURABLE_JOBS.md.
+- [ALNRealtimeFanout](api/ALNRealtimeFanout.md): Protocol contract exported as part of the `ALNRealtimeFanout` API surface.
 - [ALNRealtimeHub](api/ALNRealtimeHub.md): In-process pub/sub hub used for websocket channel fanout and simple realtime event routing.
 - [ALNRealtimeSubscriber](api/ALNRealtimeSubscriber.md): Realtime callback protocol implemented by websocket/session subscribers.
 - [ALNRealtimeSubscription](api/ALNRealtimeSubscription.md): Subscription token returned by realtime hub subscribe calls and used for unsubscribe operations.
