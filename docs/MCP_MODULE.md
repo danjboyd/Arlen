@@ -318,7 +318,10 @@ values, not wildcards. Bind development to loopback. Deploy behind TLS with
 explicit Host/Origin allowlists and trusted-proxy settings as described in
 [Deployment](DEPLOYMENT.md). Do not cache MCP responses. The module applies an
 Arlen rate limiter to the MCP endpoint (120 requests/minute per peer by default,
-`requestsPerMinute` range 1–100000); app limits also apply. Multi-worker/global
+`requestsPerMinute` range 1–100000); app limits also apply.
+`maxOutputBytes` and `requestsPerMinute` accept bare or quoted decimal
+integers from plist config as well as numbers; any other value fails startup
+with an error naming the key. Multi-worker/global
 quotas require an ingress/shared limiter. Set HTTP request limits and service
 backend deadlines. Synchronous handlers are not forcibly interrupted on client
 disconnect or timeout. No MCP session storage is required across propane workers;

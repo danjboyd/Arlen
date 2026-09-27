@@ -673,6 +673,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *uiMode;
 @property(nonatomic, copy, readwrite) NSString *layoutTemplate;
 @property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
+@property(nonatomic, copy, readwrite) NSString *uiAssetPrefix;
+- (void)mountUIAssetsForApplication:(ALNApplication *)application;
 @property(nonatomic, assign, readwrite) BOOL smsEnabled;
 @property(nonatomic, assign) BOOL smsAllowEnrollment;
 @property(nonatomic, assign) BOOL smsAllowChallenge;
@@ -1038,6 +1040,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.moduleConfig = [moduleConfig isKindOfClass:[NSDictionary class]] ? moduleConfig : @{};
   NSDictionary *paths = [self.moduleConfig[@"paths"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"paths"] : @{};
   self.prefix = AMPathJoin(AMTrimmedString(paths[@"prefix"]), @"");
+  self.uiAssetPrefix = @"/modules/auth";
   self.apiPrefix = AMConfiguredPath(self.moduleConfig, @"apiPrefix", @"api");
   self.loginPath = AMConfiguredPath(self.moduleConfig, @"login", @"login");
   self.registerPath = AMConfiguredPath(self.moduleConfig, @"register", @"register");
@@ -1467,7 +1470,28 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
     return [NSString stringWithFormat:@"/%@/%@", self.generatedPagePrefix ?: @"auth", normalized];
   }
-  return [NSString stringWithFormat:@"/modules/auth/%@", normalized];
+  return [NSString stringWithFormat:@"%@/%@", self.uiAssetPrefix ?: @"/modules/auth", normalized];
+}
+
+// The framework mounts Resources/Public at /modules/auth, outside paths.prefix, so
+// an app behind a path-scoped proxy cannot reach it. Serve the same directory
+// under the module's own prefix too and link pages there; /modules/auth keeps working.
+- (void)mountUIAssetsForApplication:(ALNApplication *)application {
+  NSDictionary *moduleMount = nil;
+  for (NSDictionary *mount in application.staticMounts) {
+    if ([mount[@"prefix"] isEqual:@"/modules/auth"]) {
+      moduleMount = mount;
+    }
+  }
+  NSString *directory = moduleMount[@"directory"];
+  if ([directory length] == 0) {
+    return;
+  }
+  NSString *prefix = [self.prefix length] > 0 && ![self.prefix isEqualToString:@"/"] ? self.prefix : @"/auth";
+  NSString *assetPrefix = AMPathJoin(prefix, @"assets");
+  if ([application mountStaticDirectory:directory atPrefix:assetPrefix allowExtensions:moduleMount[@"allowExtensions"]]) {
+    self.uiAssetPrefix = assetPrefix;
+  }
 }
 
 - (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
@@ -4522,6 +4546,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
 
+  if (![runtime isHeadlessUIMode] &&
+      ![[runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    [runtime mountUIAssetsForApplication:application];
+  }
   if (![runtime isHeadlessUIMode]) {
     [application registerRouteMethod:@"GET"
                                 path:runtime.loginPath

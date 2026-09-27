@@ -102,6 +102,9 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *uiMode;
 @property(nonatomic, copy, readonly) NSString *layoutTemplate;
 @property(nonatomic, copy, readonly) NSString *generatedPagePrefix;
+// URL prefix for module-ui assets (auth.css, auth_totp_qr.js): `<paths.prefix>/assets`
+// once registration mounts them there, else the framework's `/modules/auth` mount.
+@property(nonatomic, copy, readonly) NSString *uiAssetPrefix;
 @property(nonatomic, assign, readonly) BOOL smsEnabled;
 
 + (instancetype)sharedRuntime;

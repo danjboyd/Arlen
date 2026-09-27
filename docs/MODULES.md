@@ -208,6 +208,8 @@ Module versions first changed on 2026-09-25: `auth` and `storage` moved to
 `1.1.0` (OIDC providers; required storage signing secret), and `admin-ui`,
 `ops`, and `search` moved to `1.0.1`. `jobs` and `notifications` moved to
 `1.0.1` for app-root-relative module state paths (GitHub issue 76).
+`auth` moved to `1.2.0` to serve its UI assets under `paths.prefix` (GitHub
+issue 51).
 
 ## MCP tools
 
