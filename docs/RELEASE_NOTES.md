@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- MCP module: `maxOutputBytes` and `requestsPerMinute` written as bare numbers
+  in `config/app.plist` (as in the documented example) no longer crash startup
+  (`does not recognize unsignedIntegerValue`). Plist strings holding
+  decimal integers are accepted, and other values fail startup with an error
+  naming the key. Tool definitions' `minimumAuthAssuranceLevel` and
+  `maximumAuthenticationAgeSeconds` get the same checks. The module version is
+  now `1.0.1` (GitHub issue 42). See [MCP Module](MCP_MODULE.md).
+
 - `headerValueForName:` on `ALNController` and `ALNContext` is now declared
   nonnull, matching what it returns: an absent header gives `@""`, as
   `ALNRequest` already documented. The empty-name case, which returned `nil`,
