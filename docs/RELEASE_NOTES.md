@@ -10,6 +10,13 @@
   `maximumAuthenticationAgeSeconds` get the same checks. The module version is
   now `1.0.1` (GitHub issue 42). See [MCP Module](MCP_MODULE.md).
 
+- Auth module `module-ui`: `auth.css` and `auth_totp_qr.js` are now also
+  served under the module's own prefix at `<paths.prefix>/assets/`, and pages
+  link them there, so sign-in pages keep their styling behind a reverse proxy
+  that only forwards `paths.prefix`. `/modules/auth/` still serves them. The
+  auth module version is now `1.2.0` (GitHub issue 51). See
+  [Auth Module](AUTH_MODULE.md).
+
 - `headerValueForName:` on `ALNController` and `ALNContext` is now declared
   nonnull, matching what it returns: an absent header gives `@""`, as
   `ALNRequest` already documented. The empty-name case, which returned `nil`,

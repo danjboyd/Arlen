@@ -133,6 +133,12 @@ Config semantics:
 - `ui.contextClass`
   - optional Objective-C hook class for page-level layout and context injection
 
+In `module-ui`, the stock stylesheet and TOTP QR script are served under the
+module's own prefix at `<paths.prefix>/assets/` (default `/auth/assets/`), and
+pages link them there. An app mounted behind a path-scoped reverse proxy that
+only forwards `paths.prefix` therefore gets styled pages without extra config.
+The files are also still served at `/modules/auth/`.
+
 Session payloads expose both `ui_mode` and `login_providers`, so app-owned or
 SPA clients can discover the active presentation mode and provider affordances
 without hard-coding them.
