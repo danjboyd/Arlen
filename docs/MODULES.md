@@ -210,6 +210,9 @@ Module versions first changed on 2026-09-25: `auth` and `storage` moved to
 `1.0.1` for app-root-relative module state paths (GitHub issue 76).
 `auth` moved to `1.2.0` to serve its UI assets under `paths.prefix` (GitHub
 issue 51).
+`auth` moved to `1.3.0` to keep post-login `return_to` redirects on the app's
+origin (a security fix; cross-origin returns now go through the session policy
+hook).
 
 ## MCP tools
 
