@@ -368,12 +368,19 @@ causing SSH to treat `-oBatchMode=yes` as the config-file path.
 
 ## ISSUE-004: Production workers leak `/dev/null` file descriptors until file responses fail
 
-- Status: `open`
-- Priority: `critical`
+- Status: `hardened upstream; awaiting downstream revalidation`
+- Priority: `high`
 - Tracking ID: `ARLEN-BUG-024`
 - Discovered: `2026-04-27`
 - Reported by: `StateCompulsoryPoolingAPI`
-- Last updated: `2026-09-25`
+- Last updated: `2026-09-30`
+- Resolution: no Arlen-side leak has been reproduced; the likely opener is
+  downstream app code (see Current assessment). Arlen now guards against
+  regressions with descriptor-stability tests and documents the propane
+  FD-pressure safety net and triage tools in `docs/DEPLOYMENT.md`.
+- Verification:
+  - `HTTPIntegrationTests::testFileResponsesKeepWorkerDescriptorsStable_Issue67`
+  - `FileDescriptorStabilityTests::testDataverseCurlTransportReleasesItsDescriptors`
 - GitHub tracking issue: `danjboyd/Arlen#67`
 - Target follow-up: Phase 38
 - Reconciliation note:
@@ -483,7 +490,13 @@ showed real descriptor exhaustion over uptime. Phase 38 therefore added:
 - `make ci-phase38-fd-regression` for an opt-in Arlen-only FD drift evidence
   lane under `build/release_confidence/phase38/fd_regression`
 
-The focused fix remains blocked until a leaking path is reproduced or captured
+2026-09-30: `HTTPIntegrationTests::testFileResponsesKeepWorkerDescriptorsStable_Issue67`
+now runs in the default integration suite. In both dispatch modes it serves
+2,000 file responses (full, range, `304`, `HEAD`, and a static mount) and
+requires a flat total and `/dev/null` descriptor count, so any future
+per-response leak in the Arlen file-send path fails CI.
+
+Any further Arlen fix is blocked until a leaking path is reproduced or captured
 from production-safe diagnostics.
 
 ## ISSUE-003: File streaming responses sent successful headers with no body

@@ -102,7 +102,10 @@ Current shipped scope for that seam:
 Current non-goals still remain:
 
 - conversation/presence/read-cursor semantics
-- broker-backed multi-node fanout without an explicit adapter
+- broker-backed multi-node fanout without an explicit adapter (the first-party
+  PostgreSQL store and broker, `eventStreams.store`/`eventStreams.broker`, cover
+  multi-worker and multi-host deployments; see
+  [Durable Event Streams](EVENT_STREAMS.md#postgresql-store-and-broker))
 - React-specific helpers as part of the first shipping slice
 
 See [Durable Event Streams](EVENT_STREAMS.md) for app-author usage and the

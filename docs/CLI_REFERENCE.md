@@ -76,7 +76,8 @@ Generator behavior:
 - `endpoint`: same controller output with endpoint-oriented defaults (`--route` required)
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
-- `test`: `tests/<Name>Tests.m`
+- `test`: `tests/<Name>Tests.m`; a placeholder XCTest, or with `--request` an
+  `ALNTestClient` request test that GETs `--route` (default `/`) and expects `200`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
@@ -123,6 +124,8 @@ Named targets:
           requiredEnvironmentKeys = ("ARLEN_DATABASE_URL", "ARLEN_SESSION_SECRET");
         };
         init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        sharedPaths = ("storage/media");
+        prePackageCommands = ("npm --prefix frontend ci", "npm --prefix frontend run build");
         transport = {
           sshHost = "deploy@myapp.example.com";
           sshCommand = "ssh";
@@ -157,6 +160,8 @@ Named targets:
 - `--remote` (SSH targets only): creates the release/shared/log/tmp layout on
  the target host over SSH with `mkdir -p`, and writes the generated artifacts
  locally. Alternatively, run `arlen deploy init <target>` on the host itself.
+- also creates `shared/<path>` for each `sharedPaths` entry; activation links
+ them into every release (see [Deployment](DEPLOYMENT.md#43-project-deployment-configuration))
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
@@ -345,6 +350,9 @@ Common options:
 - `--database-target <name>`: declared database target name (default `default`)
 - `--require-env-key <NAME>`: record a required environment key without storing its value in the release
 - `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
+- `--require-clean`: refuse to build when the app is not a git checkout or has
+  uncommitted changes in packaged paths (see [Deployment](DEPLOYMENT.md), release
+  metadata)
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override certification manifest path
 - `--json-performance-manifest <path>`: override JSON performance manifest path
@@ -778,6 +786,23 @@ forms are inspected from the same effective route table.
 Run framework tests.
 
 - default: equivalent to `--all`
+
+### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
+
+Build and run the current app's own XCTest tests (`tests/**/*.m`), in process,
+through `tools/run_app_tests.sh`:
+
+- builds the app as `boomhauer` does, then `boomhauer --build-tests` links the
+  app's objects and tests into `.boomhauer/build/tests/AppTests.xctest`
+- the file defining `main` is recompiled with `main` renamed so the test client
+  can capture the app's route registration; app code needs no changes
+- runs the framework's vendored `xctest` (built on first use), else `xctest`
+  from `PATH`, with an isolated GNUstep defaults home under `.boomhauer/test-home`
+- `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`
+- exit status is the runner's: non-zero when any test fails
+- GNUstep on Linux only for now
+
+See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 ### `arlen perf`
 

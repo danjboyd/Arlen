@@ -50,6 +50,7 @@ typedef SSIZE_T ssize_t;
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
+#import "ALNPgRealtimeFanout.h"
 #import "Support/ALNJSONSerialization.h"
 
 typedef struct {
@@ -60,6 +61,11 @@ typedef struct {
   NSUInteger spoolThresholdBytes;
   // Owned by the application config, which outlives every connection.
   __unsafe_unretained NSString *spoolDirectory;
+  // Per-route body limits (GitHub issue 87). When active, maxBodyBytes is the
+  // largest of the default and every route override (the header-stage ceiling),
+  // and each request's own limit comes from its route before any body is read.
+  BOOL routeBodyLimitsActive;
+  __unsafe_unretained ALNApplication *application;
 } ALNRequestLimits;
 
 typedef struct {
@@ -486,6 +492,8 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   out.maxBodyBytes = ALNConfigUInt(limits, @"maxBodyBytes", 1048576);
   out.spoolThresholdBytes = ALNConfigUInt(limits, @"spoolThresholdBytes", 1048576);
   out.spoolDirectory = [limits[@"spoolDirectory"] isKindOfClass:[NSString class]] ? limits[@"spoolDirectory"] : nil;
+  out.routeBodyLimitsActive = NO;
+  out.application = nil;
   return out;
 }
 
@@ -495,6 +503,61 @@ static ALNServerSocketTuning ALNTuningFromConfig(NSDictionary *config) {
   out.connectionTimeoutSeconds = ALNConfigUInt(config, @"connectionTimeoutSeconds", 30);
   out.enableReusePort = ALNConfigBool(config, @"enableReusePort", NO);
   return out;
+}
+
+// realtime.fanout (GitHub issue 48): cross-process fanout for ALNRealtimeHub so
+// live push reaches websocket subscribers on every propane worker.
+static id<ALNRealtimeFanout> ALNRealtimeFanoutFromConfig(NSDictionary *config, NSString **failure) {
+  NSDictionary *realtime = [config[@"realtime"] isKindOfClass:[NSDictionary class]] ? config[@"realtime"] : @{};
+  NSDictionary *fanout = [realtime[@"fanout"] isKindOfClass:[NSDictionary class]] ? realtime[@"fanout"] : nil;
+  NSString *adapter = [fanout[@"adapter"] isKindOfClass:[NSString class]] ? [fanout[@"adapter"] lowercaseString] : @"";
+  if ([adapter length] == 0 || [adapter isEqualToString:@"memory"]) {
+    return nil;
+  }
+  if (![adapter isEqualToString:@"postgresql"]) {
+    if (failure != NULL) *failure = [NSString stringWithFormat:@"unsupported realtime.fanout.adapter '%@'", adapter];
+    return nil;
+  }
+  NSString *dsn = [fanout[@"connectionString"] isKindOfClass:[NSString class]] ? fanout[@"connectionString"] : @"";
+  const char *envDSN = getenv("ARLEN_DATABASE_URL");
+  if ([dsn length] == 0 && envDSN != NULL && envDSN[0] != '\0') {
+    dsn = [NSString stringWithUTF8String:envDSN];
+  }
+  if ([dsn length] == 0) {
+    NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : @{};
+    dsn = [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : @"";
+  }
+  NSError *error = nil;
+  ALNPgRealtimeFanout *pgFanout =
+      [[ALNPgRealtimeFanout alloc] initWithConnectionString:dsn
+                                              notifyChannel:[fanout[@"channel"] isKindOfClass:[NSString class]] ? fanout[@"channel"] : nil
+                                                        hub:[ALNRealtimeHub sharedHub]
+                                                      error:&error];
+  if (pgFanout == nil) {
+    if (failure != NULL) *failure = error.localizedDescription ?: @"could not create the PostgreSQL realtime fanout";
+    return nil;
+  }
+  if (![pgFanout startWaitingUpTo:5.0]) {
+    fprintf(stderr, "arlen: realtime fanout not listening yet; it keeps retrying in the background\n");
+  }
+  return pgFanout;
+}
+
+// Once per process: a websocket channel under several propane workers (or a
+// multi-node cluster) without a fanout only sees publishes from its own worker.
+static void ALNWarnIfRealtimeIsWorkerLocal(void) {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    const char *workers = getenv("ARLEN_PROPANE_WORKERS");
+    const char *cluster = getenv("ARLEN_CLUSTER_ENABLED");
+    BOOL multiProcess = (workers != NULL && atoi(workers) > 1) || (cluster != NULL && atoi(cluster) == 1);
+    if (multiProcess && [ALNRealtimeHub sharedHub].fanout == nil) {
+      fprintf(stderr,
+              "arlen: warning: websocket channels are process-local; with multiple propane workers a publish only "
+              "reaches subscribers on the same worker. Configure realtime.fanout = { adapter = \"postgresql\"; } "
+              "(docs/LIVE_UI.md).\n");
+    }
+  });
 }
 
 static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
@@ -1834,6 +1897,48 @@ static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
 // of complete head are buffered, possibly followed by some body. Reads never
 // exceed the declared length, so a pipelined next request stays on the socket.
 // The returned request owns the file; every failure removes it.
+// The body limit for the request whose head is buffered: its route's
+// maxBodyBytes, or the server default. Only the route table is consulted; no
+// middleware or controller runs before the body is read.
+static NSUInteger ALNRequestBodyLimit(ALNRequestLimits limits, const uint8_t *bytes, size_t headerBytes) {
+  if (!limits.routeBodyLimitsActive || limits.application == nil || bytes == NULL) {
+    return limits.maxBodyBytes;
+  }
+  size_t lineEnd = 0;
+  while (lineEnd < headerBytes && bytes[lineEnd] != '\r' && bytes[lineEnd] != '\n') {
+    lineEnd++;
+  }
+  size_t methodEnd = 0;
+  while (methodEnd < lineEnd && bytes[methodEnd] != ' ') {
+    methodEnd++;
+  }
+  size_t targetStart = methodEnd + 1;
+  size_t targetEnd = targetStart;
+  while (targetEnd < lineEnd && bytes[targetEnd] != ' ' && bytes[targetEnd] != '?' && bytes[targetEnd] != '#') {
+    targetEnd++;
+  }
+  if (methodEnd == 0 || targetStart >= lineEnd || targetEnd <= targetStart) {
+    return limits.maxBodyBytes;
+  }
+  NSString *method = [[NSString alloc] initWithBytes:bytes length:methodEnd encoding:NSASCIIStringEncoding];
+  NSString *target = [[NSString alloc] initWithBytes:bytes + targetStart
+                                              length:targetEnd - targetStart
+                                            encoding:NSUTF8StringEncoding];
+  if (![target hasPrefix:@"/"]) {
+    // absolute-form (http://host/path): keep the path.
+    NSRange scheme = [target rangeOfString:@"://"];
+    NSRange slash = (scheme.location == NSNotFound)
+                        ? NSMakeRange(NSNotFound, 0)
+                        : [target rangeOfString:@"/" options:0
+                                          range:NSMakeRange(NSMaxRange(scheme), [target length] - NSMaxRange(scheme))];
+    target = (slash.location == NSNotFound) ? @"/" : [target substringFromIndex:slash.location];
+  }
+  if ([method length] == 0 || [target length] == 0) {
+    return limits.maxBodyBytes;
+  }
+  return [limits.application maxBodyBytesForMethod:method path:target];
+}
+
 static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
                                          ALNRequestLimits limits,
                                          ALNHTTPParserBackend backend,
@@ -1950,6 +2055,15 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
       } else {
         readState->scanOffset = readState->length;
       }
+    }
+
+    if (readState->metadataReady && limits.routeBodyLimitsActive && readState->metadata.contentLength > 0 &&
+        (NSUInteger)readState->metadata.contentLength >
+            ALNRequestBodyLimit(limits, readState->bytes, readState->metadata.headerBytes)) {
+      if (statusCode != NULL) {
+        *statusCode = 413;
+      }
+      return nil;
     }
 
     if (readState->metadataReady && spooledRequest != NULL &&
@@ -2074,15 +2188,24 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
 
     // llhttp counts content_length down as it parses body bytes, so take the
     // declared length from the head itself.
-    if (headersComplete && request == nil && requestError == nil) {
+    if (headersComplete && requestError == nil && (request == nil || limits.routeBodyLimitsActive)) {
       size_t separatorLocation = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
       ALNRequestHeadMetadata head;
       memset(&head, 0, sizeof(head));
       if (separatorLocation != SIZE_MAX && separatorLocation + 4 <= limits.maxHeaderBytes &&
           ALNParseRequestHeadMetadataBytes(readState->bytes, separatorLocation + 4, limits, &head) &&
-          head.contentLength > 0 && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
-        return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
-                                     (NSUInteger)head.contentLength, statusCode, readState);
+          head.contentLength > 0) {
+        if (limits.routeBodyLimitsActive &&
+            (NSUInteger)head.contentLength > ALNRequestBodyLimit(limits, readState->bytes, separatorLocation + 4)) {
+          if (statusCode != NULL) {
+            *statusCode = 413;
+          }
+          return nil;
+        }
+        if (request == nil && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
+          return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
+                                       (NSUInteger)head.contentLength, statusCode, readState);
+        }
       }
     }
 
@@ -3627,6 +3750,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
+  NSUInteger largestRouteBodyLimit = [self.application largestRouteMaxBodyBytes];
+  if (largestRouteBodyLimit > 0) {
+    limits.routeBodyLimitsActive = YES;
+    limits.application = self.application;
+    limits.maxBodyBytes = MAX(limits.maxBodyBytes, largestRouteBodyLimit);
+  }
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
   NSString *connectionRemoteAddress = ALNRemoteAddressForClient(clientFd) ?: @"";
@@ -3683,7 +3812,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
                                     [request.method isEqualToString:@"HEAD"];
         BOOL handledStatic = NO;
-        BOOL multipartValid = [request parseMultipartFormWithLimits:self.application.config[@"requestLimits"] error:NULL];
+        BOOL multipartValid = [request parseMultipartFormWithLimits:[self.application requestLimitsForRequest:request] error:NULL];
         if (supportsStaticMethod && multipartValid) {
           NSArray *staticMounts = [self effectiveStaticMounts];
           NSDictionary *staticMIMETypes =
@@ -3792,6 +3921,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           }
 
           if ([webSocketMode isEqualToString:@"channel"]) {
+            ALNWarnIfRealtimeIsWorkerLocal();
             webSocketChannel = [self webSocketChannelFromResponse:response];
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
             NSString *rejectionReason = nil;
@@ -4025,6 +4155,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
                       maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
+    NSString *fanoutFailure = nil;
+    id<ALNRealtimeFanout> fanout = ALNRealtimeFanoutFromConfig(config, &fanoutFailure);
+    if ([fanoutFailure length] > 0) {
+      fprintf(stderr, "%s: realtime fanout disabled: %s\n", [self.serverName UTF8String], [fanoutFailure UTF8String]);
+    }
+    if (fanout != nil) {
+      [ALNRealtimeHub sharedHub].fanout = fanout;
+    }
 
     if (!ALNInitializeSocketLayer()) {
       fprintf(stderr, "%s: Winsock startup failed\n", [self.serverName UTF8String]);
@@ -4202,6 +4340,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     }
     self.serverSocketFD = ALNInvalidSocketHandle;
     [self requestStop];
+    [ALNRealtimeHub sharedHub].fanout = nil;
     [self.application shutdown];
   }
 

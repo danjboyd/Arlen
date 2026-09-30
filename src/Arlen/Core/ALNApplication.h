@@ -134,6 +134,9 @@ NS_ASSUME_NONNULL_BEGIN
 // The application root: config `appRoot` (set when config is loaded from an app
 // directory), else ARLEN_APP_ROOT, else the current directory.
 - (NSString *)appRootPath;
+// The /readyz schema_migrations result (see ALNMigrationStatus), cached as
+// described in docs/DEPLOYMENT.md.
+- (NSDictionary *)currentMigrationReadiness;
 // Resolves a relative path against -appRootPath; absolute paths are returned
 // standardized. Use this rather than the process working directory, which differs
 // between the server, workers and CLI delegates.
@@ -206,6 +209,15 @@ NS_ASSUME_NONNULL_BEGIN
                         pretty:(BOOL)pretty
                          error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)startWithError:(NSError *_Nullable *_Nullable)error;
+// Body limit for a request, from the matching route's maxBodyBytes (mounted
+// applications included) or else requestLimits.maxBodyBytes. The HTTP server
+// calls this after the head is parsed and before any body is read.
+- (NSUInteger)maxBodyBytesForMethod:(NSString *)method path:(NSString *)path;
+// Largest route override (0 when no route sets maxBodyBytes).
+- (NSUInteger)largestRouteMaxBodyBytes;
+// requestLimits for this request: the configured limits, with maxBodyBytes (and
+// at least as much maxMultipartFileBytes) taken from the route's override.
+- (NSDictionary *)requestLimitsForRequest:(ALNRequest *)request;
 - (void)shutdown;
 
 @end

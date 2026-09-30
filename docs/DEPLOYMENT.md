@@ -200,6 +200,8 @@ Current shape:
           requiresEnvWrapper = YES;
         };
         init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        sharedPaths = ("storage/media", "public/uploads");
+        prePackageCommands = ("npm --prefix frontend ci", "npm --prefix frontend run build");
         transport = {
           sshHost = "deploy@app1.example.com";
           sshCommand = "ssh";
@@ -220,6 +222,24 @@ Arlen now resolves:
 - `arlen deploy doctor production`
 
 Explicit CLI flags still override the checked-in target fields.
+
+`sharedPaths` lists app-relative paths whose contents must outlive a release,
+such as user uploads. `deploy init` creates `<releasePath>/shared/<path>` for
+each one. On activation, each release gets `<release>/app/<path>` as a symlink to
+the shared directory, so files written through one release are still there
+after the next. If the shared directory is missing or empty, activation first
+moves whatever the release packaged at that path into it (packaged paths are
+`config/`, `public/`, `templates/`, `modules/`, `src/` and `db/migrations`); after
+that the shared copy wins. Paths must stay inside the app: absolute paths and
+`.`/`..` segments are rejected when the target loads. `deploy doctor` checks that
+each shared path exists and is writable by the user running it.
+
+`prePackageCommands` run in order from the app root with `bash -c` before the
+app is compiled and packaged, so their outputs (a built frontend in `public/`,
+for example) ship in the release. A command that exits non-zero aborts the build
+before any release directory is created, and `deploy push` reports its exit
+status and output (also in `--json` output). `deploy dryrun` lists the commands
+without running them.
 
 ### 4.4 Runtime Strategies
 
@@ -356,6 +376,16 @@ This is the boundary between responsibilities:
 The deploy product should not become a second process manager. It hands off to
 `propane` through the packaged metadata and environment contract.
 
+Long-lived `propane` workers: if a worker's open descriptors climb (for example
+`/dev/null` descriptors left by app code that launches `NSTask`s without closing
+their handles), file responses eventually fail with GNUstep pipe-creation errors.
+Raising `LimitNOFILE` only delays that. Set the `workerFDRetirePercent` propane
+accessory (for example `90`) so an affected worker is recycled on its own, and use
+`tools/ops/sample_fd_targets.py` and `ARLEN_FD_DELTA_DEBUG=1` to find the source;
+see [propane FD-pressure accessories](PROPANE.md#fd-pressure-propane-accessories).
+Arlen's own file-response paths are covered by a regression test that serves
+2,000 file responses and requires a flat descriptor count (GitHub issue 67).
+
 ## 5. Built-In Health Contract
 
 Arlen reserves its built-in operability endpoints ahead of app route dispatch:
@@ -383,6 +413,29 @@ Cluster quorum readiness mode:
 - set `observability.readinessRequiresClusterQuorum = YES` (or `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM=1`)
 - in multi-node mode, `GET /readyz` returns deterministic `503 not_ready` when `cluster.observedNodes < cluster.expectedNodes`
 - JSON readiness payload includes `checks.cluster_quorum` diagnostics (`ok`, `required_for_readyz`, `status`, `observed_nodes`, `expected_nodes`)
+
+Schema migration readiness (on by default in `production`):
+
+- `observability.readinessRequiresMigrations` (or `ARLEN_READINESS_REQUIRES_MIGRATIONS=0|1`)
+ defaults to `YES` in the `production` environment and `NO` elsewhere
+- `GET /readyz` returns `503 not_ready` while any migration shipped in the running
+ release is not recorded in `arlen_schema_migrations`: the app's `db/migrations`
+ and module migrations for the default database target, versioned as
+ `arlen migrate` / `arlen module migrate` record them
+- JSON readiness includes `checks.schema_migrations` (`ok`, `pending` versions,
+ `total`, `required_for_readyz`, and `error` when the database cannot be read)
+- the check only reads: it never creates the migrations table or applies anything
+- while not ready it re-queries at most every
+ `observability.readinessMigrationRecheckSeconds` (default `5`), so running
+ `arlen migrate` makes the app ready without a restart; once everything is
+ applied the result is cached
+- apps with no database configured (no `ARLEN_DATABASE_URL` and no
+ `database.connectionString`) skip the check
+- `arlen deploy status` prints `Health probe: not ready (N migrations pending)`
+- `/healthz` and `/livez` are unaffected, so a supervisor keeps the process up
+ while `/readyz` holds traffic back. `arlen deploy release` migrates before the
+ restart, so normal deploys are ready immediately; this catches restores, manual
+ starts and skipped steps
 
 Cluster status payload (`/clusterz`) includes distributed-runtime diagnostics:
 
@@ -619,6 +672,17 @@ Release metadata includes:
  `jobs-worker`, and the operability helper
 - release-relative manifest paths for all packaged runtime/helper entries
  (`ARLEN-BUG-017`)
+- the source revision (`source_revision` in `manifest.json`;
+ `ARLEN_RELEASE_APP_GIT_SHA`, `ARLEN_RELEASE_APP_GIT_DIRTY`,
+ `ARLEN_RELEASE_FRAMEWORK_GIT_SHA` and `ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY` in
+ `release.env`): the app and framework commits the release was built from.
+ The app is dirty when anything it packages (`config`, `public`, `templates`,
+ `modules`, `src`, `app_lite.m`, `db/migrations`) differs from that commit,
+ including untracked files there; build output elsewhere does not count. The
+ framework is dirty when tracked files have changes. Values are empty when a
+ root is not a git checkout. `deploy status` and `deploy releases` show the
+ short app SHA with `+dirty` when set, and `deploy push --require-clean`
+ refuses to build a dirty app
 
 ### 6.2 Activate a release
 

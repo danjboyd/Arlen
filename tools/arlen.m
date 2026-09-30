@@ -36,7 +36,7 @@ static void PrintUsage(void) {
           "  typed-sql-codegen [--input-dir <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]\n"
           "  typescript-codegen [--orm-input <path>] [--openapi-input <path>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--database <target>] [--package-name <name>] [--target <models|validators|query|client|react|meta|all>] [--force]\n"
           "  routes\n"
-          "  test [--unit|--integration|--all]\n"
+          "  test [--unit|--integration|--all] | test --app [--only Class[/method]] [--skip Class[/method]]\n"
           "  perf\n"
           "  check [--dry-run] [--json]\n"
           "  build [--dry-run] [--json]\n"
@@ -58,6 +58,10 @@ static void PrintGenerateUsage(void) {
           "  --action <name>\n"
           "  --template [<logical_template>]\n"
           "  --api\n"
+          "\n"
+          "Generator options (test):\n"
+          "  --request              ALNTestClient request test (default: placeholder XCTest)\n"
+          "  --route <path>         path the request test fetches (default /)\n"
           "\n"
           "Generator options (plugin):\n"
           "  --preset <generic|redis-cache|queue-jobs|smtp-mail>\n"
@@ -1289,12 +1293,47 @@ static NSDictionary *RunDeployHealthProbe(NSString *frameworkRoot, NSString *hel
   int exitCode = 0;
   NSString *command = [NSString stringWithFormat:@"%@ --base-url %@", ShellQuote(scriptPath), ShellQuote(baseURL)];
   NSString *output = RunShellCaptureCommand(command, &exitCode);
-  return @{
+  NSMutableDictionary *probe = [@{
     @"status" : (exitCode == 0) ? @"ok" : @"error",
     @"base_url" : baseURL ?: @"",
     @"captured_output" : output ?: @"",
     @"exit_code" : @(exitCode),
-  };
+  } mutableCopy];
+  if (exitCode != 0) {
+    // Say why readiness failed when it is pending schema migrations (GitHub issue 90).
+    NSString *trimmedBase = [baseURL hasSuffix:@"/"] ? [baseURL substringToIndex:[baseURL length] - 1] : baseURL;
+    int readyExit = 0;
+    NSString *readyBody = RunShellCaptureCommand(
+        [NSString stringWithFormat:@"curl -sS -H 'Accept: application/json' %@",
+                                   ShellQuote([trimmedBase stringByAppendingString:@"/readyz"])],
+        &readyExit);
+    NSDictionary *ready = JSONDictionaryFromString(readyBody);
+    NSDictionary *migrations = [ready[@"checks"][@"schema_migrations"] isKindOfClass:[NSDictionary class]]
+                                   ? ready[@"checks"][@"schema_migrations"]
+                                   : nil;
+    NSArray *pending = [migrations[@"pending"] isKindOfClass:[NSArray class]] ? migrations[@"pending"] : nil;
+    if (migrations != nil && ![migrations[@"ok"] boolValue]) {
+      probe[@"readiness"] = @"not_ready";
+      probe[@"pending_migrations"] = pending ?: @[];
+      if ([migrations[@"error"] isKindOfClass:[NSString class]]) {
+        probe[@"migration_error"] = migrations[@"error"];
+      }
+    }
+  }
+  return probe;
+}
+
+static NSString *DeployHealthProbeSummary(NSDictionary *healthProbe) {
+  NSString *status = [healthProbe[@"status"] description] ?: @"error";
+  NSArray *pending = [healthProbe[@"pending_migrations"] isKindOfClass:[NSArray class]] ? healthProbe[@"pending_migrations"] : nil;
+  if (pending != nil && [pending count] > 0) {
+    return [NSString stringWithFormat:@"not ready (%lu migration%s pending)", (unsigned long)[pending count],
+                                      [pending count] == 1 ? "" : "s"];
+  }
+  if ([healthProbe[@"migration_error"] isKindOfClass:[NSString class]]) {
+    return [NSString stringWithFormat:@"not ready (schema migrations unreadable: %@)", healthProbe[@"migration_error"]];
+  }
+  return status;
 }
 
 static NSDictionary *RunReleaseHealthProbeWithRetry(NSString *baseURL,
@@ -1663,6 +1702,26 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     return nil;
   }
 
+  // sharedPaths (GitHub issue 66): app-relative paths linked from shared/ into
+  // every release on activation. Reject traversal instead of silently dropping.
+  NSArray<NSString *> *sharedPaths = OrderedStringArrayFromValue(rawTarget[@"sharedPaths"]);
+  for (NSString *sharedPath in sharedPaths) {
+    NSArray *segments = [sharedPath componentsSeparatedByString:@"/"];
+    if ([sharedPath hasPrefix:@"/"] || [segments containsObject:@".."] || [segments containsObject:@"."] ||
+        [segments containsObject:@""]) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:@"Arlen.Error"
+                                     code:44
+                                 userInfo:@{
+                                   NSLocalizedDescriptionKey :
+                                       [NSString stringWithFormat:@"deploy target '%@' sharedPaths entry '%@' must be a relative path inside the app without . or .. segments",
+                                                                  targetName ?: @"", sharedPath]
+                                 }];
+      }
+      return nil;
+    }
+  }
+
   NSString *serviceName = StringValueForDeployKey(rawTarget, @"service");
   if ([serviceName length] == 0) {
     serviceName = [NSString stringWithFormat:@"arlen@%@", targetName ?: @"app"];
@@ -1698,6 +1757,8 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"release_path" : releasePath ?: @"",
     @"releases_dir" : [releasesDir stringByStandardizingPath],
     @"shared_dir" : [[releasePath stringByAppendingPathComponent:@"shared"] stringByStandardizingPath],
+    @"shared_paths" : sharedPaths ?: @[],
+    @"pre_package_commands" : OrderedStringArrayFromValue(rawTarget[@"prePackageCommands"]),
     @"logs_dir" : [[releasePath stringByAppendingPathComponent:@"logs"] stringByStandardizingPath],
     @"tmp_dir" : [[releasePath stringByAppendingPathComponent:@"tmp"] stringByStandardizingPath],
     @"local_staging_releases_dir" : [[generatedDir stringByAppendingPathComponent:@"local-releases"] stringByStandardizingPath],
@@ -1795,6 +1856,24 @@ static NSArray<NSString *> *DeployTargetHostLayoutPaths(NSDictionary *target) {
     StringValueForDeployKey(target, @"logs_dir"),
     StringValueForDeployKey(target, @"tmp_dir"),
   ];
+}
+
+// A target's shared/ directory for activate_release.sh; empty when no target is
+// resolved (the script then uses <releases-dir>/../shared).
+static NSString *ActivateSharedDirOption(NSDictionary *target) {
+  NSString *sharedDir = StringValueForDeployKey(target, @"shared_dir");
+  return [sharedDir length] > 0 ? [NSString stringWithFormat:@" --shared-dir %@", ShellQuote(sharedDir)] : @"";
+}
+
+static NSArray<NSString *> *DeployTargetSharedPathDirectories(NSDictionary *target) {
+  NSString *sharedDir = StringValueForDeployKey(target, @"shared_dir");
+  NSMutableArray<NSString *> *directories = [NSMutableArray array];
+  for (NSString *sharedPath in [target[@"shared_paths"] isKindOfClass:[NSArray class]] ? target[@"shared_paths"] : @[]) {
+    if ([sharedDir length] > 0) {
+      [directories addObject:[sharedDir stringByAppendingPathComponent:sharedPath]];
+    }
+  }
+  return directories;
 }
 
 // Deterministic generated artifacts under build/deploy/targets/<target>/ on the
@@ -2082,12 +2161,29 @@ static NSArray<NSString *> *MissingRemoteDeployTargetPaths(NSDictionary *target,
 
 static NSDictionary *CreateRemoteDeployTargetLayout(NSDictionary *target) {
   NSMutableString *script = [NSMutableString stringWithString:@"set -eu && mkdir -p"];
-  for (NSString *path in DeployTargetHostLayoutPaths(target)) {
+  for (NSString *path in [DeployTargetHostLayoutPaths(target) arrayByAddingObjectsFromArray:
+                                                                   DeployTargetSharedPathDirectories(target)]) {
     if ([path length] > 0) {
       [script appendFormat:@" %@", ShellQuote(path)];
     }
   }
   return RunSSHCommandForTarget(target, script);
+}
+
+// "abc1234", "abc1234+dirty", or "" when the release recorded no git revision
+// (GitHub issue 89).
+static NSDictionary *SourceRevisionFromManifest(NSDictionary *manifest) {
+  NSDictionary *revision =
+      [manifest[@"source_revision"] isKindOfClass:[NSDictionary class]] ? manifest[@"source_revision"] : @{};
+  NSString *sha = [revision[@"app_git_sha"] isKindOfClass:[NSString class]] ? revision[@"app_git_sha"] : @"";
+  BOOL dirty = [revision[@"app_git_dirty"] isKindOfClass:[NSNumber class]] && [revision[@"app_git_dirty"] boolValue];
+  NSString *label = @"";
+  if ([sha length] > 0) {
+    label = [[sha substringToIndex:MIN((NSUInteger)7, [sha length])] stringByAppendingString:dirty ? @"+dirty" : @""];
+  }
+  NSMutableDictionary *out = [revision mutableCopy] ?: [NSMutableDictionary dictionary];
+  out[@"label"] = label;
+  return out;
 }
 
 static NSDictionary *ReleaseInventoryItem(NSString *releaseID,
@@ -2104,6 +2200,7 @@ static NSDictionary *ReleaseInventoryItem(NSString *releaseID,
     @"path" : releaseDir ?: @"",
     @"manifest_path" : manifestPath ?: @"",
     @"manifest_version" : manifest[@"version"] ?: @"",
+    @"source_revision" : SourceRevisionFromManifest(manifest),
     @"deployment" : DeploymentMetadataFromManifest(manifest, allowRemoteRebuild),
     @"propane_handoff" : PropaneHandoffFromManifest(manifest, releaseDir),
   };
@@ -2304,6 +2401,18 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForTargetHost(NSDictionary *ta
              [NSString stringWithFormat:@"%@ %@", [status isEqualToString:@"pass"] ? @"directory present:" : @"directory missing:",
                                         path ?: @""],
              @"Run `arlen deploy init <target>` on the target host to create the expected layout.");
+  }
+
+  for (NSString *sharedDirectory in DeployTargetSharedPathDirectories(target)) {
+    BOOL isDirectory = NO;
+    BOOL present = [fm fileExistsAtPath:sharedDirectory isDirectory:&isDirectory];
+    BOOL writable = present && [fm isWritableFileAtPath:sharedDirectory];
+    addCheck(@"target_shared_path", (present && writable) ? @"pass" : @"fail",
+             [NSString stringWithFormat:@"%@ %@",
+                                        !present ? @"shared path missing:"
+                                                 : (writable ? @"shared path writable:" : @"shared path not writable:"),
+                                        sharedDirectory],
+             @"Run `arlen deploy init <target>` on the host, and give the runtime user write access to shared paths.");
   }
 
   NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
@@ -2820,6 +2929,37 @@ static NSString *BoomhauerLaunchCommand(NSArray *serverArgs, NSString *framework
   NSString *suffix = ([parts count] > 0) ? [NSString stringWithFormat:@" %@", [parts componentsJoinedByString:@" "]] : @"";
   return [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ./build/boomhauer%@",
                                     ShellQuote(frameworkRoot), ShellQuote(appRoot), suffix];
+}
+
+// Request test for `arlen generate test --request` and new app templates (issue 65).
+static NSString *RequestTestSource(NSString *className, NSString *path, NSString *expectedBodyText) {
+  NSString *bodyAssertion =
+      ([expectedBodyText length] > 0)
+          ? [NSString stringWithFormat:@"  XCTAssertTrue([[response bodyText] containsString:@\"%@\"]);\n",
+                                       expectedBodyText]
+          : @"";
+  return [NSString stringWithFormat:
+                       @"#import <XCTest/XCTest.h>\n"
+                        "#import \"ALNTestClient.h\"\n\n"
+                        "// Run with `arlen test --app`. ALNTestClient builds this app from config/\n"
+                        "// (test environment) with its own routes and dispatches in process.\n"
+                        "@interface %@ : XCTestCase\n"
+                        "@property(nonatomic, strong) ALNTestClient *client;\n"
+                        "@end\n\n"
+                        "@implementation %@\n\n"
+                        "- (void)setUp {\n"
+                        "  [super setUp];\n"
+                        "  NSError *error = nil;\n"
+                        "  self.client = [ALNTestClient clientWithEnvironment:@\"test\" configOverrides:nil error:&error];\n"
+                        "  XCTAssertNotNil(self.client, @\"%%@\", error);\n"
+                        "}\n\n"
+                        "- (void)testGetReturnsOK {\n"
+                        "  ALNResponse *response = [self.client get:@\"%@\"];\n"
+                        "  XCTAssertEqual(200, response.statusCode, @\"%%@\", [response bodyText]);\n"
+                        "%@"
+                        "}\n\n"
+                        "@end\n",
+                       className, className, path, bodyAssertion];
 }
 
 static BOOL WriteTextFile(NSString *path, NSString *content, BOOL force, NSError **error) {
@@ -3392,7 +3532,7 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/development.plist"],
                            @"{\n  logFormat = \"text\";\n}\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/test.plist"],
-                           @"{\n  logFormat = \"json\";\n}\n", force, error);
+                           @"{\n  logFormat = \"json\";\n  logLevel = \"warn\";\n}\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/environments/production.plist"],
                            @"{\n  logFormat = \"json\";\n}\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/deploy.plist.example"],
@@ -3451,6 +3591,8 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "  }\n"
                             "}\n",
                            force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"tests/HomeControllerTests.m"],
+                           RequestTestSource(@"HomeControllerTests", @"/", @"Welcome to Arlen"), force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
                            @"# New Arlen App\n\n"
                             "Generated by arlen in full mode.\n\n"
@@ -3463,6 +3605,9 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "- `templates/layouts/main.html.eoc` owns the default app shell.\n"
                             "- `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc` show composition-first partials.\n"
                             "- `templates/index.html.eoc` renders the home page through `<%@ layout \"layouts/main\" %>`.\n\n"
+                            "## Test\n\n"
+                            "- `arlen test --app` builds `tests/**/*.m` and runs them in process with `ALNTestClient`.\n"
+                            "- `tests/HomeControllerTests.m` requests `/`; add more with `arlen generate test Name --request --route /path`.\n\n"
                             "## Deploy\n\n"
                             "Start from the commented sample target:\n\n"
                             "```sh\n"
@@ -3529,6 +3674,8 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
                             "  }\n"
                             "}\n",
                            force, error);
+  ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"tests/HomeTests.m"],
+                           RequestTestSource(@"HomeTests", @"/", @"hello from lite mode"), force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"templates/index.html.eoc"],
                            @"<h1>Lite App</h1>\n", force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"README.md"],
@@ -3540,6 +3687,8 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
                             "- or `/path/to/Arlen/bin/arlen boomhauer --port 3000`\n\n"
                             "- `app_lite.m` includes a single-file controller + server setup.\n"
                             "- You can split this into full mode structure later.\n\n"
+                            "## Test\n\n"
+                            "- `arlen test --app` builds `tests/**/*.m` and runs them in process with `ALNTestClient`.\n\n"
                             "## Deploy\n\n"
                             "Start from the commented sample target:\n\n"
                             "```sh\n"
@@ -4618,6 +4767,7 @@ static int CommandGenerate(NSArray *args) {
   NSString *templateOption = nil;
   BOOL templateRequested = NO;
   BOOL apiMode = NO;
+  BOOL requestTest = NO;
   NSString *presetOption = @"";
   BOOL presetExplicit = NO;
   NSMutableArray<NSString *> *generatedFiles = [NSMutableArray array];
@@ -4669,6 +4819,8 @@ static int CommandGenerate(NSArray *args) {
       if ((idx + 1) < [args count] && ![args[idx + 1] hasPrefix:@"--"]) {
         templateOption = args[++idx];
       }
+    } else if ([arg isEqualToString:@"--request"]) {
+      requestTest = YES;
     } else if ([arg isEqualToString:@"--api"]) {
       apiMode = YES;
     } else if ([arg isEqualToString:@"--preset"]) {
@@ -4895,7 +5047,9 @@ static int CommandGenerate(NSArray *args) {
   } else if ([type isEqualToString:@"test"]) {
     NSString *path =
         [root stringByAppendingPathComponent:[NSString stringWithFormat:@"tests/%@Tests.m", name]];
-    NSString *content = [NSString stringWithFormat:
+    NSString *content = requestTest
+        ? RequestTestSource([name stringByAppendingString:@"Tests"], [routePath length] > 0 ? routePath : @"/", nil)
+        : [NSString stringWithFormat:
                                       @"#import <XCTest/XCTest.h>\n\n"
                                        "@interface %@Tests : XCTestCase\n@end\n\n"
                                        "@implementation %@Tests\n"
@@ -5220,6 +5374,30 @@ static int CommandTest(NSArray *args) {
   if ([frameworkRoot length] == 0) {
     return 1;
   }
+  if ([args containsObject:@"--app"]) {
+    NSString *appRoot = [[[NSFileManager defaultManager] currentDirectoryPath] stringByStandardizingPath];
+    NSMutableArray *parts = [NSMutableArray arrayWithObjects:
+        ShellQuote([frameworkRoot stringByAppendingPathComponent:@"tools/run_app_tests.sh"]), nil];
+    for (NSUInteger idx = 0; idx < [args count]; idx++) {
+      NSString *arg = args[idx];
+      if ([arg isEqualToString:@"--app"]) {
+        continue;
+      }
+      if (([arg isEqualToString:@"--only"] || [arg isEqualToString:@"--skip"]) && idx + 1 < [args count]) {
+        [parts addObject:arg];
+        [parts addObject:ShellQuote(args[++idx])];
+        continue;
+      }
+      if ([arg isEqualToString:@"--app-root"] && idx + 1 < [args count]) {
+        appRoot = [args[++idx] stringByStandardizingPath];
+        continue;
+      }
+      fprintf(stderr, "arlen test --app: unsupported option %s\n", [arg UTF8String]);
+      return 2;
+    }
+    [parts insertObject:ShellQuote(appRoot) atIndex:1];
+    return RunShellCommand([parts componentsJoinedByString:@" "]);
+  }
   if ([args count] == 0 || [args containsObject:@"--all"]) {
     return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
   }
@@ -5446,6 +5624,7 @@ static int CommandDeploy(NSArray *args) {
   NSTimeInterval healthStartupIntervalSeconds = 1.0;
   NSString *logFilePath = nil;
   BOOL allowMissingCertification = NO;
+  BOOL requireClean = NO;
   BOOL allowRemoteRebuild = NO;
   BOOL asJSON = NO;
   BOOL skipMigrate = NO;
@@ -5804,6 +5983,8 @@ static int CommandDeploy(NSArray *args) {
       allowMissingCertification = YES;
     } else if ([arg isEqualToString:@"--allow-remote-rebuild"]) {
       allowRemoteRebuild = YES;
+    } else if ([arg isEqualToString:@"--require-clean"]) {
+      requireClean = YES;
     } else if ([arg isEqualToString:@"--json"]) {
       asJSON = YES;
     } else if ([arg isEqualToString:@"--skip-migrate"]) {
@@ -6110,13 +6291,15 @@ static int CommandDeploy(NSArray *args) {
                                          @"arlen deploy init production --remote --json", 1)
                       : 1;
       }
-      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+      for (NSString *directory in [DeployTargetHostLayoutPaths(resolvedTarget)
+               arrayByAddingObjectsFromArray:DeployTargetSharedPathDirectories(resolvedTarget)]) {
         if ([directory length] > 0) {
           [createdDirectories addObject:directory];
         }
       }
     } else {
-      for (NSString *directory in DeployTargetHostLayoutPaths(resolvedTarget)) {
+      for (NSString *directory in [DeployTargetHostLayoutPaths(resolvedTarget)
+               arrayByAddingObjectsFromArray:DeployTargetSharedPathDirectories(resolvedTarget)]) {
         if ([directory length] > 0 &&
             [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
           [createdDirectories addObject:directory];
@@ -6207,6 +6390,17 @@ static int CommandDeploy(NSArray *args) {
   }
   if (allowRemoteRebuild) {
     [buildCommand appendString:@" --allow-remote-rebuild"];
+  }
+  for (NSString *sharedPath in [resolvedTarget[@"shared_paths"] isKindOfClass:[NSArray class]] ? resolvedTarget[@"shared_paths"] : @[]) {
+    AppendShellOption(buildCommand, @"--shared-path", sharedPath);
+  }
+  for (NSString *command in [resolvedTarget[@"pre_package_commands"] isKindOfClass:[NSArray class]]
+                                ? resolvedTarget[@"pre_package_commands"]
+                                : @[]) {
+    AppendShellOption(buildCommand, @"--pre-package-command", command);
+  }
+  if (requireClean) {
+    [buildCommand appendString:@" --require-clean"];
   }
 
   if (remoteTargetEnabled && ![subcommand isEqualToString:@"dryrun"] && ![subcommand isEqualToString:@"releases"]) {
@@ -6538,9 +6732,13 @@ static int CommandDeploy(NSArray *args) {
 
     fprintf(stdout, "Available releases (%s): %lu\n", [inventorySource UTF8String], (unsigned long)[releaseItems count]);
     for (NSDictionary *item in releaseItems) {
-      fprintf(stdout, "- %s [%s] %s\n",
+      NSString *revision = [item[@"source_revision"] isKindOfClass:[NSDictionary class]]
+                               ? [item[@"source_revision"][@"label"] description]
+                               : @"";
+      fprintf(stdout, "- %s [%s]%s %s\n",
               [[item[@"id"] description] UTF8String],
               [[item[@"state"] description] UTF8String],
+              [revision length] > 0 ? [[NSString stringWithFormat:@" %@", revision] UTF8String] : "",
               [[item[@"path"] description] UTF8String]);
     }
     return 0;
@@ -6557,10 +6755,21 @@ static int CommandDeploy(NSArray *args) {
       NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &exitCode);
       NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
       if (exitCode != 0 || buildPayload == nil) {
+        // Surface build_release's own error (for example a failed pre-package
+        // command with its output) instead of only a generic failure.
+        NSDictionary *buildError = [buildPayload[@"error"] isKindOfClass:[NSDictionary class]] ? buildPayload[@"error"] : nil;
+        NSDictionary *buildFixit = [buildError[@"fixit"] isKindOfClass:[NSDictionary class]] ? buildError[@"fixit"] : nil;
+        NSString *buildMessage = [buildError[@"message"] isKindOfClass:[NSString class]] ? buildError[@"message"] : nil;
+        NSString *buildAction = [buildFixit[@"action"] isKindOfClass:[NSString class]] ? buildFixit[@"action"] : nil;
+        NSString *buildExample = [buildFixit[@"example"] isKindOfClass:[NSString class]] ? buildFixit[@"example"] : nil;
         return EmitMachineError(@"deploy", workflow, @"deploy_push_failed",
-                                @"arlen deploy push failed",
-                                @"Inspect the underlying build_release output and fix the first reported issue.",
-                                @"arlen deploy push --json --skip-release-certification", exitCode ?: 1);
+                                [buildMessage length] > 0
+                                    ? [NSString stringWithFormat:@"arlen deploy push failed: %@", buildMessage]
+                                    : @"arlen deploy push failed",
+                                [buildAction length] > 0 ? buildAction
+                                                         : @"Inspect the underlying build_release output and fix the first reported issue.",
+                                [buildExample length] > 0 ? buildExample : @"arlen deploy push --json --skip-release-certification",
+                                exitCode ?: 1);
       }
       NSDictionary *manifest = JSONDictionaryFromFile(manifestPath) ?: @{};
       NSDictionary *payload = @{
@@ -6619,6 +6828,7 @@ static int CommandDeploy(NSArray *args) {
         @"previous_release_dir" : previousReleaseDir ?: @"",
         @"manifest_path" : currentManifestPath ?: @"",
         @"manifest" : currentManifest ?: @{},
+        @"source_revision" : SourceRevisionFromManifest(currentManifest ?: @{}),
         @"deployment" : currentDeployment ?: @{},
         @"propane_handoff" : PropaneHandoffFromManifest(currentManifest, currentReleaseDir),
         @"health_contract" : currentHealthContract ?: @{},
@@ -6641,7 +6851,9 @@ static int CommandDeploy(NSArray *args) {
       return ([currentReleaseDir length] > 0) ? 0 : 1;
     }
 
-    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    NSString *activeRevision = [SourceRevisionFromManifest(currentManifest)[@"label"] description];
+    fprintf(stdout, "Active release: %s%s\n", [(currentReleaseID ?: @"(none)") UTF8String],
+            [activeRevision length] > 0 ? [[NSString stringWithFormat:@" (%@)", activeRevision] UTF8String] : "");
     fprintf(stdout, "Previous release: %s\n", [(previousReleaseID ?: @"(none)") UTF8String]);
     fprintf(stdout, "Release dir: %s\n", [(currentReleaseDir ?: @"(none)") UTF8String]);
     fprintf(stdout, "Profile: %s -> %s\n",
@@ -6653,7 +6865,7 @@ static int CommandDeploy(NSArray *args) {
                    ? [currentMigrationInventory[@"count"] description]
                    : @"0") UTF8String]);
     if ([baseURL length] > 0) {
-      fprintf(stdout, "Health probe: %s\n", [([healthProbe[@"status"] description] ?: @"error") UTF8String]);
+      fprintf(stdout, "Health probe: %s\n", [DeployHealthProbeSummary(healthProbe) UTF8String]);
     }
     return ([currentReleaseDir length] > 0) ? 0 : 1;
   }
@@ -6988,7 +7200,9 @@ static int CommandDeploy(NSArray *args) {
       PrintJSONPayload(stdout, payload);
       return ([currentReleaseDir length] > 0) ? 0 : 1;
     }
-    fprintf(stdout, "Active release: %s\n", [(currentReleaseID ?: @"(none)") UTF8String]);
+    NSString *activeRevision = [SourceRevisionFromManifest(currentManifest)[@"label"] description];
+    fprintf(stdout, "Active release: %s%s\n", [(currentReleaseID ?: @"(none)") UTF8String],
+            [activeRevision length] > 0 ? [[NSString stringWithFormat:@" (%@)", activeRevision] UTF8String] : "");
     fprintf(stdout, "Manifest: %s\n", [[payload[@"manifest_path"] description] UTF8String]);
     fprintf(stdout, "Release README: %s\n", [[payload[@"release_readme_path"] description] UTF8String]);
     fprintf(stdout, "Release env: %s\n", [[payload[@"release_env_path"] description] UTF8String]);
@@ -7188,8 +7402,9 @@ static int CommandDeploy(NSArray *args) {
   }
 
   NSString *activateCommand =
-      [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
-                                 ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(releaseID)];
+      [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@%@",
+                                 ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(releaseID),
+                                 ActivateSharedDirOption(resolvedTarget)];
   int activateExitCode = 0;
   NSString *activateOutput = RunShellCaptureCommand(activateCommand, &activateExitCode);
   if (activateExitCode != 0) {
@@ -7257,8 +7472,9 @@ static int CommandDeploy(NSArray *args) {
       NSString *activeReleaseIDAfterFailure = releaseID ?: @"";
       if ([rollbackActivationID length] > 0) {
         NSString *rollbackActivationCommand =
-            [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@",
-                                       ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackActivationID)];
+            [NSString stringWithFormat:@"%@/activate_release.sh --releases-dir %@ --release-id %@%@",
+                                       ShellQuote(scriptRoot), ShellQuote(releasesDir), ShellQuote(rollbackActivationID),
+                                       ActivateSharedDirOption(resolvedTarget)];
         rollbackActivationOutput = RunShellCaptureCommand(rollbackActivationCommand, &rollbackActivationExitCode);
         deploymentState = (rollbackActivationExitCode == 0) ? @"activation_failed" : @"stale_runtime";
         activeReleaseIDAfterFailure = (rollbackActivationExitCode == 0) ? rollbackActivationID : (releaseID ?: @"");

@@ -2,6 +2,57 @@
 
 ## Upcoming Release Candidate
 
+- Live push and durable event streams across propane workers and hosts:
+  `realtime.fanout = { adapter = "postgresql"; }` gives `ALNRealtimeHub` a
+  PostgreSQL `LISTEN`/`NOTIFY` fanout, so `publishLive…onChannel:` reaches
+  websocket subscribers on every worker, not only the one that handled the
+  publishing request. `eventStreams.store` and `eventStreams.broker` with
+  `adapter = "postgresql"` add `ALNPgEventStreamStore` (per-stream advisory
+  locks, idempotency and replay identical to the in-memory store) and
+  `ALNPgEventStreamBroker`, so replay and `resync_required` hold across workers.
+  Live delivery is at most once; durable streams recover through replay. Without
+  a fanout, a worker running under several propane workers warns once when a
+  websocket channel opens. New public pieces: `ALNRealtimeFanout`,
+  `ALNPgRealtimeFanout`, `ALNPgConnection waitForNotificationsWithTimeout:error:`,
+  and `ALNEventEnvelope envelopeWithDictionary:` (GitHub issue 48). See
+  [Live UI](LIVE_UI.md#multiple-workers-and-hosts) and
+  [Durable Event Streams](EVENT_STREAMS.md#postgresql-store-and-broker).
+
+- `/readyz` fails (`503`) while the running release has schema migrations that
+  are not applied, by default in `production`
+  (`observability.readinessRequiresMigrations`,
+  `ARLEN_READINESS_REQUIRES_MIGRATIONS`). The JSON payload's
+  `checks.schema_migrations` lists the pending versions. The check is read-only,
+  rechecks while not ready so `arlen migrate` restores readiness without a
+  restart, and `arlen deploy status` reports `not ready (N migrations pending)`
+  (GitHub issue 90). See [Deployment](DEPLOYMENT.md).
+
+- Deploy releases record their source revision: the app and framework git
+  commits plus dirty flags, in `manifest.json` (`source_revision`) and
+  `release.env` (`ARLEN_RELEASE_APP_GIT_SHA`, `ARLEN_RELEASE_APP_GIT_DIRTY`,
+  `ARLEN_RELEASE_FRAMEWORK_GIT_SHA`, `ARLEN_RELEASE_FRAMEWORK_GIT_DIRTY`). App
+  dirtiness covers only what the release packages, so untracked build output
+  does not count. `deploy status` and `deploy releases` show the short SHA with
+  `+dirty`, and `deploy push --require-clean` refuses a dirty app (GitHub
+  issue 89). See [Deployment](DEPLOYMENT.md).
+
+- Deploy targets accept `sharedPaths` (app-relative paths such as uploads that
+  `deploy init` creates under `shared/` and every release links to, so their
+  files survive the next release) and `prePackageCommands` (for example
+  `npm --prefix frontend run build`, run from the app root before packaging; a
+  failure aborts the build and reports the command's output). `deploy doctor`
+  checks that shared paths exist and are writable. `deploy push --json` now
+  carries the build script's own error message (GitHub issue 66). See
+  [Deployment](DEPLOYMENT.md).
+
+- App request tests: `ALNTestClient` builds an app from its config with its own
+  routes and dispatches requests in process, with a cookie jar, automatic CSRF,
+  session access and `signInAsSubject:`. `arlen test --app` builds and runs an
+  app's `tests/**/*.m`, `arlen generate test <Name> --request` scaffolds a
+  request test, and new full and lite apps ship a passing one. App code needs no
+  changes: the test build captures route registration from the app's `main`
+  (GitHub issue 65). See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
+
 - CSRF no longer starts a session on every request without a session cookie.
   The middleware used to write a fresh token into the session up front, so every
   cookieless request, `GET` and `HEAD` included, got a new signed-out session
@@ -33,6 +84,16 @@
   session. Invalid entries fail startup (error `339`) (GitHub issue 43). See
   [Configuration Reference](CONFIGURATION_REFERENCE.md#5-session-and-csrf) and
   [MCP Module](MCP_MODULE.md).
+
+- Per-route body limits: `route.maxBodyBytes` (or `maxBodyBytes` on a plist
+  route) overrides `requestLimits.maxBodyBytes` for that route. The server
+  resolves the route from the request line and answers `413` before reading any
+  of an oversized body, so an app can keep a small global limit and allow large
+  uploads on a few routes. Multipart parsing on such a route uses the route
+  limit. Measured with 8 concurrent 20 MiB uploads, anonymous memory grew about
+  4 MiB, because bodies and parts live in spool files. Chunked request bodies
+  remain unsupported (`400`) (GitHub issue 87). See
+  [Configuration Reference](CONFIGURATION_REFERENCE.md#3-request-limits).
 
 - Large uploads: request bodies larger than `requestLimits.spoolThresholdBytes`
   (default 1 MiB) stream from the socket into a private temporary file under

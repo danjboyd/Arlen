@@ -448,6 +448,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *readinessRequiresClusterQuorum =
       ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM",
                         "MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
+  NSString *readinessRequiresMigrations =
+      ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_MIGRATIONS", "MOJOOBJC_READINESS_REQUIRES_MIGRATIONS");
   NSString *metricsEnabled =
       ALNEnvValueCompat("ARLEN_METRICS_ENABLED", "MOJOOBJC_METRICS_ENABLED");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
@@ -900,6 +902,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (readinessRequiresClusterQuorumValue != nil) {
     observability[@"readinessRequiresClusterQuorum"] = readinessRequiresClusterQuorumValue;
   }
+  NSNumber *readinessRequiresMigrationsValue = ALNParseBooleanString(readinessRequiresMigrations);
+  if (readinessRequiresMigrationsValue != nil) {
+    observability[@"readinessRequiresMigrations"] = readinessRequiresMigrationsValue;
+  }
   NSNumber *metricsEnabledValue = ALNParseBooleanString(metricsEnabled);
   if (metricsEnabledValue != nil) {
     observability[@"metricsEnabled"] = metricsEnabledValue;
@@ -1309,6 +1315,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
+  // Pending schema migrations fail /readyz by default in production (GitHub issue 90).
+  if (finalObservability[@"readinessRequiresMigrations"] == nil) {
+    finalObservability[@"readinessRequiresMigrations"] = @([config[@"environment"] isEqual:@"production"]);
+  }
   if (finalObservability[@"metricsEnabled"] == nil) {
     finalObservability[@"metricsEnabled"] = @(YES);
   }
@@ -1592,6 +1602,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @([finalObservability[@"readinessRequiresStartup"] boolValue]);
   finalObservability[@"readinessRequiresClusterQuorum"] =
       @([finalObservability[@"readinessRequiresClusterQuorum"] boolValue]);
+  finalObservability[@"readinessRequiresMigrations"] =
+      @([finalObservability[@"readinessRequiresMigrations"] boolValue]);
   finalObservability[@"metricsEnabled"] =
       @([finalObservability[@"metricsEnabled"] boolValue]);
   config[@"observability"] = finalObservability;

@@ -61,7 +61,21 @@ server also applies `maxHeaderBytes` and `maxRequestLineBytes` to HTTP framing.
 `ARLEN_MAX_BODY_BYTES` overrides the total body limit; multipart-specific keys
 are configured in `requestLimits`.
 
-For requests up to 110 MiB, set `maxBodyBytes` to `115343360` and explicitly
+To allow large uploads on specific routes only, set `maxBodyBytes` on those
+routes and keep the global limit small:
+
+```objc
+ALNRoute *upload = [app registerRouteMethod:@"POST" path:@"/documents" name:@"documents_upload"
+                            controllerClass:[DocumentsController class] action:@"upload"];
+upload.maxBodyBytes = 115343360;  // 110 MiB; the rest of the app keeps requestLimits.maxBodyBytes
+```
+
+Other routes still get `413` for larger bodies, at the head, without reading
+them. On the upload route, multipart parsing uses the route limit as the body cap
+and lets a single file use all of it. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md#3-request-limits).
+
+For requests up to 110 MiB on every route, set `maxBodyBytes` to `115343360` and explicitly
 raise `maxMultipartFileBytes` to the desired file cap (for example `104857600`
 for a 100 MiB file with room for fields and framing). Raising the request cap
 does not automatically raise per-file or per-field caps.
