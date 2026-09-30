@@ -2,6 +2,18 @@
 
 ## Upcoming Release Candidate
 
+- Security: the auth module no longer redirects off-origin after sign-in.
+  `return_to` from the query string or a form field reached the post-login
+  `Location` header unvalidated, so a link such as
+  `/auth/login?return_to=https://evil.example/` sent a user who genuinely
+  signed in to another site. Every `return_to` read and the
+  `postLoginRedirectForContext:` sink now keep only a single-slash absolute
+  path and otherwise fall back to `defaultRedirect`. Behaviour change: apps
+  that relied on cross-origin `return_to` must return that URL from the
+  session policy hook's
+  `authModulePostLoginRedirectForContext:user:defaultRedirect:`, which is not
+  clamped. See [Auth Module](AUTH_MODULE.md#customization-hooks).
+
 - Live push and durable event streams across propane workers and hosts:
   `realtime.fanout = { adapter = "postgresql"; }` gives `ALNRealtimeHub` a
   PostgreSQL `LISTEN`/`NOTIFY` fanout, so `publishLive…onChannel:` reaches

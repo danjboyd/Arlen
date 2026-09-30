@@ -207,6 +207,15 @@ Use `authModule.hooks` for auth behavior and policy seams:
 - session policy
 - provider mapping
 
+Post-login redirects stay on the app's origin. Every route that accepts
+`return_to` (login, registration, MFA, recovery codes, SMS, and provider login)
+keeps it only when it is a single-slash absolute path such as `/dashboard?tab=2`.
+Absolute URLs, protocol-relative `//host` values, backslashes, and control
+characters are dropped, and the redirect falls back to `defaultRedirect`. An app
+that really needs a cross-origin return implements
+`authModulePostLoginRedirectForContext:user:defaultRedirect:` on its session
+policy hook, whose result is used as-is.
+
 Use `ALNAuthModuleUIContextHook` for page-level UI ownership in `module-ui`:
 
 ```objc
