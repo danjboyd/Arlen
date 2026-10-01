@@ -217,6 +217,8 @@ hook).
 (`authModule.paths.stepUp`, GitHub issue 97); `admin-ui`, `jobs`,
 `notifications`, `ops` and `search` moved to `1.0.2` and `storage` to `1.1.1` to
 send step-up there.
+`auth` moved to `1.5.0` for provider `assurance` mapping from `amr`/`acr`
+(GitHub issue 98).
 
 ## MCP tools
 

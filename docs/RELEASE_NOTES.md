@@ -2,6 +2,14 @@
 
 ## Upcoming Release Candidate
 
+- OIDC providers accept an `assurance` map from verified ID-token `amr` and
+  `acr` values to an assurance level, for example `amr = { mfa = 2; }`, so an
+  MFA sign-in at the identity provider reaches module surfaces that need level
+  2 without a hand-written resolver rule. Unmatched or absent claims give 1. A
+  resolver that returns `assuranceLevel` still wins, and sees the mapped level as
+  `assurance_level`. The auth module moves to `1.5.0` (GitHub issue 98). See
+  [Auth Module](AUTH_MODULE.md#provider-assurance-from-amr-and-acr).
+
 - Configurable step-up target for module surfaces: `authModule.paths.stepUp`
   (default: the TOTP page) is where the admin UI, jobs, notifications, ops,
   search and storage modules send a user who needs assurance level 2. Apps whose

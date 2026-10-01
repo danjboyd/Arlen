@@ -507,7 +507,7 @@ has passed signature, issuer, audience, expiry, nonce, and tenant checks.
   return @{
     @"subject": person[@"identifier"],
     @"roles": person[@"roles"] ?: @[],
-    @"assuranceLevel": @1,
+    // No assuranceLevel: the provider's `assurance` mapping (or 1) applies.
   };
 }
 @end
@@ -523,6 +523,38 @@ under `identity["claims"]`. Normal OIDC `sub` validation still applies when usin
 `oid` as the application principal. The resolver owns membership, roles, and any
 explicit account-linking decision; nil rejects login. Arlen does not infer MFA
 assurance from the fact that a provider was used.
+
+### Provider assurance from amr and acr
+
+Module surfaces such as the admin UI need assurance level 2. A provider sign-in
+gets level 1 unless something says it was multi-factor. Rather than reading
+`amr` in every resolver, map the verified ID-token claims on the provider:
+
+```plist
+providers = {
+  entra = {
+    /* ... */
+    assurance = {
+      amr = { mfa = 2; otp = 2; hwk = 2; };
+      acr = { "urn:example:loa:mfa" = 2; };
+    };
+  };
+};
+```
+
+- The session gets the highest level any `amr` value or the `acr` value maps
+  to, and 1 when none matches or the claims are absent. Matching is exact and
+  case-sensitive, and only the signature-checked ID token is read (never
+  userinfo).
+- Levels are 1 to 3. Unknown keys, empty maps and other level values are a
+  startup error.
+- The resolver sees the mapped level as `identity[@"assurance_level"]`. If it
+  returns its own `assuranceLevel`, that wins, so a resolver that hard-codes
+  `assuranceLevel` turns the mapping off. Leave it out to use the mapping.
+- Which claims a provider sends, and their values, is provider-specific; some
+  send neither by default. Check a real ID token before relying on a mapping.
+
+Without `assurance`, nothing changes: the resolver's level applies, or 1.
 
 OIDC sessions expose the application's subject and roles. The auth session API
 does not try to look up an external subject in its own user table. Stock local
@@ -549,11 +581,10 @@ query is kept (the redirect then appends with `&`). Absolute URLs are a
 configuration error. Provider login routes accept `prompt=login` and pass it to
 the identity provider; other `prompt` values are ignored.
 
-A provider sign-in sets the assurance level your resolver returns, so the
-resolver decides whether a fresh provider login satisfies step-up, for example
-by returning `assuranceLevel` 2 when the verified `amr` claim shows MFA.
-`prompt=login` asks the provider to re-authenticate; Arlen does not verify that
-it did.
+A fresh provider sign-in satisfies step-up only if it reaches assurance level 2,
+through the provider's [`assurance` mapping](#provider-assurance-from-amr-and-acr)
+or the level your resolver returns. `prompt=login` asks the provider to
+re-authenticate; Arlen does not verify that it did.
 
 ### Defaults and Upgrade Behavior
 

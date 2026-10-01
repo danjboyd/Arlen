@@ -832,4 +832,76 @@ static void RegisterOIDCLoginTemplates(void) {
   NSError *error = nil;
   XCTAssertNil([self failureApplicationWithModule:@{ @"failureRedirect": @42 } provider:nil error:&error]);
 }
+// GitHub issue 98: provider `assurance` maps verified amr/acr values to a level.
+- (ALNAuthModuleOIDC *)providerWithAssurance:(id)assurance resolver:(id<ALNAuthProviderSessionResolver>)resolver
+                                       error:(NSError **)error {
+  NSMutableDictionary *config = [[self config] mutableCopy];
+  config[@"assurance"] = assurance;
+  return [[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:config
+      resolver:resolver transport:[ModuleOIDCFixture new] error:error];
+}
+- (NSUInteger)sessionLevelWithAssurance:(NSDictionary *)assurance claims:(NSDictionary *)claims
+                               resolver:(id<ALNAuthProviderSessionResolver>)resolver {
+  ALNAuthModuleOIDC *provider = [self providerWithAssurance:assurance resolver:resolver error:NULL];
+  XCTAssertNotNil(provider, @"%@", assurance);
+  [OIDCFixture.claims removeObjectsForKeys:@[ @"amr", @"acr" ]];
+  [OIDCFixture.claims addEntriesFromDictionary:claims];
+  AdmissionResolverRejects = NO;
+  NSError *error = nil;
+  NSDictionary *result = [self complete:provider state:[self stateForProvider:provider] context:[self context] error:&error];
+  XCTAssertNotNil(result, @"%@ %@", claims, error);
+  return [result[@"session"][@"aal"] unsignedIntegerValue];
+}
+- (void)testAssuranceMapsVerifiedAMRAndACRToTheHighestLevel {
+  NSDictionary *assurance = @{ @"amr": @{ @"mfa": @2, @"otp": @"2", @"pwd": @1 },
+                               @"acr": @{ @"urn:example:loa:mfa": @2 } };
+  AdmissionOIDCResolver *resolver = [AdmissionOIDCResolver new];
+  XCTAssertEqual((NSUInteger)2, ([self sessionLevelWithAssurance:assurance claims:@{ @"amr": @[ @"pwd", @"mfa" ] } resolver:resolver]));
+  XCTAssertEqualObjects(@2, ResolvedIdentity[@"assurance_level"]);
+  XCTAssertEqual((NSUInteger)2, ([self sessionLevelWithAssurance:assurance claims:@{ @"amr": @[ @"otp" ] } resolver:resolver]));
+  XCTAssertEqual((NSUInteger)2, ([self sessionLevelWithAssurance:assurance claims:@{ @"acr": @"urn:example:loa:mfa" } resolver:resolver]));
+  // Unmapped, absent or malformed claims fall back to 1, never higher.
+  for (NSDictionary *claims in @[ @{}, @{ @"amr": @[ @"pwd" ] }, @{ @"amr": @[ @"MFA" ] }, @{ @"amr": @[ @2, [NSNull null] ] },
+                                  @{ @"acr": @"urn:example:loa:password" }, @{ @"acr": @[ @"urn:example:loa:mfa" ] } ]) {
+    XCTAssertEqual((NSUInteger)1, ([self sessionLevelWithAssurance:assurance claims:claims resolver:resolver]), @"%@", claims);
+    XCTAssertEqualObjects(@1, ResolvedIdentity[@"assurance_level"], @"%@", claims);
+  }
+}
+- (void)testResolverAssuranceLevelOverridesTheMapping {
+  // ModuleOIDCResolver returns assuranceLevel 1 explicitly.
+  NSDictionary *assurance = @{ @"amr": @{ @"mfa": @2 } };
+  XCTAssertEqual((NSUInteger)1, ([self sessionLevelWithAssurance:assurance claims:@{ @"amr": @[ @"mfa" ] }
+                                                         resolver:[ModuleOIDCResolver new]]));
+  XCTAssertEqualObjects(@2, ResolvedIdentity[@"assurance_level"]);
+}
+- (void)testWithoutAssuranceTheResolverAloneDecides {
+  // No mapping: an MFA amr does not raise the level of a resolver that sets none.
+  NSError *error = nil;
+  ALNAuthModuleOIDC *provider = [[ALNAuthModuleOIDC alloc] initWithIdentifier:@"entra" configuration:[self config]
+      resolver:[AdmissionOIDCResolver new] transport:[ModuleOIDCFixture new] error:&error];
+  XCTAssertNotNil(provider, @"%@", error);
+  AdmissionResolverRejects = NO;
+  OIDCFixture.claims[@"amr"] = @[ @"mfa" ];
+  NSDictionary *result = [self complete:provider state:[self stateForProvider:provider] context:[self context] error:&error];
+  XCTAssertNotNil(result, @"%@", error);
+  XCTAssertEqualObjects(@1, result[@"session"][@"aal"]);
+  XCTAssertNil(ResolvedIdentity[@"assurance_level"]);
+}
+- (void)testAssuranceConfigurationIsValidatedAtStartup {
+  NSArray *invalid = @[
+    @"mfa", @{}, @{ @"amrs": @{ @"mfa": @2 } }, @{ @"amr": @[ @"mfa" ] }, @{ @"amr": @{} },
+    @{ @"amr": @{ @"mfa": @0 } }, @{ @"amr": @{ @"mfa": @4 } }, @{ @"amr": @{ @"mfa": @"two" } },
+    @{ @"amr": @{ @"mfa": @YES } }, @{ @"amr": @{ @"mfa": @1.5 } }, @{ @"amr": @{ @"": @2 } },
+    @{ @"acr": @{ @"urn:x": @"02" } },
+  ];
+  for (id assurance in invalid) {
+    NSError *error = nil;
+    XCTAssertNil([self providerWithAssurance:assurance resolver:[ModuleOIDCResolver new] error:&error], @"%@", assurance);
+    XCTAssertTrue([error.localizedDescription containsString:@"assurance"], @"%@: %@", assurance, error);
+  }
+  NSError *error = nil;
+  NSDictionary *textLevels = @{ @"amr": @{ @"mfa": @"2" }, @"acr": @{ @"urn:x": @3 } };
+  ALNAuthModuleOIDC *provider = [self providerWithAssurance:textLevels resolver:[ModuleOIDCResolver new] error:&error];
+  XCTAssertNotNil(provider, @"%@", error);
+}
 @end
