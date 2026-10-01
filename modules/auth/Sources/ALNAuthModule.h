@@ -87,6 +87,12 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *changePasswordPath;
 @property(nonatomic, copy, readonly) NSString *mfaManagePath;
 @property(nonatomic, copy, readonly) NSString *totpPath;
+/// Where module surfaces send a user who needs higher assurance
+/// (`authModule.paths.stepUp`). Defaults to `totpPath`. Apps whose users sign in
+/// only through an identity provider point this at a provider login with
+/// `prompt=login`, so a step-up is a fresh sign-in rather than a TOTP page the
+/// user has no factor for.
+@property(nonatomic, copy, readonly) NSString *stepUpPath;
 @property(nonatomic, copy, readonly) NSString *totpVerifyPath;
 @property(nonatomic, copy, readonly) NSString *smsPath;
 @property(nonatomic, copy, readonly) NSString *smsStartPath;

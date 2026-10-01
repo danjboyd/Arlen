@@ -19,7 +19,9 @@ runtimes report `available: false` with `informational` status; they are not lin
 dependencies. Auth is also optional: without it, the application must supply
 authentication, operator/admin roles, and AAL2 through the framework auth context.
 Ops still enforces those checks, with `/auth/login` and `/auth/mfa/totp` as the
-default login and step-up destinations.
+default login and step-up destinations. With the auth module installed, step-up
+goes to `authModule.paths.stepUp` (see
+[Auth Module](AUTH_MODULE.md#step-up-for-provider-sign-in)).
 
 ## Surfaces
 

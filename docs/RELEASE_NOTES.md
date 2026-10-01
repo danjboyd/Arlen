@@ -2,6 +2,16 @@
 
 ## Upcoming Release Candidate
 
+- Configurable step-up target for module surfaces: `authModule.paths.stepUp`
+  (default: the TOTP page) is where the admin UI, jobs, notifications, ops,
+  search and storage modules send a user who needs assurance level 2. Apps whose
+  users sign in only through an identity provider can point it at the provider
+  login, for example `/auth/provider/entra/login?prompt=login`, instead of a
+  TOTP page those users have no factor for. Provider login routes now accept
+  `prompt=login`. The auth module moves to `1.4.0`; the six modules take patch
+  versions and fall back to the TOTP path with an older auth module (GitHub
+  issue 97). See [Auth Module](AUTH_MODULE.md#step-up-for-provider-sign-in).
+
 - HTTP status lines carry the right reason phrase for more codes: `401` (which
   previously went out as `401 OK`) and 17 others, including `202`, `303`, `307`,
   `308`, `409`, `410`, `415`, `501`, `502` and `504`. A status Arlen does not know

@@ -700,6 +700,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *changePasswordPath;
 @property(nonatomic, copy, readwrite) NSString *mfaManagePath;
 @property(nonatomic, copy, readwrite) NSString *totpPath;
+@property(nonatomic, copy, readwrite) NSString *stepUpPath;
 @property(nonatomic, copy, readwrite) NSString *totpVerifyPath;
 @property(nonatomic, copy, readwrite) NSString *smsPath;
 @property(nonatomic, copy, readwrite) NSString *smsStartPath;
@@ -1037,6 +1038,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _changePasswordPath = @"/auth/password/change";
     _mfaManagePath = @"/auth/mfa";
     _totpPath = @"/auth/mfa/totp";
+    _stepUpPath = @"/auth/mfa/totp";
     _totpVerifyPath = @"/auth/mfa/totp/verify";
     _smsPath = @"/auth/mfa/sms";
     _smsStartPath = @"/auth/mfa/sms/start";
@@ -1095,6 +1097,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.changePasswordPath = AMConfiguredPath(self.moduleConfig, @"changePassword", @"password/change");
   self.mfaManagePath = AMConfiguredPath(self.moduleConfig, @"mfa", @"mfa");
   self.totpPath = AMConfiguredPath(self.moduleConfig, @"totp", @"mfa/totp");
+  // The step-up target may carry a query (for example "?prompt=login"); the
+  // step-up redirect appends its own parameters with "&" in that case.
+  NSString *configuredStepUp = AMTrimmedString(paths[@"stepUp"]);
+  NSString *stepUpPath = ([configuredStepUp length] > 0)
+                             ? AMConfiguredPath(self.moduleConfig, @"stepUp", @"")
+                             : self.totpPath;
+  // A relative value is joined to the prefix like every other path, so an
+  // absolute URL would quietly become "/auth/https://..."; refuse it instead.
+  if ([configuredStepUp containsString:@"://"] || !AMIsLocalRedirectPath(stepUpPath)) {
+    if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                @"authModule.paths.stepUp must be a local absolute path", nil);
+    return NO;
+  }
+  self.stepUpPath = stepUpPath;
   self.totpVerifyPath = AMConfiguredPath(self.moduleConfig, @"totpVerify", @"mfa/totp/verify");
   self.smsPath = AMConfiguredPath(self.moduleConfig, @"sms", @"mfa/sms");
   self.smsStartPath = AMConfiguredPath(self.moduleConfig, @"smsStart", @"mfa/sms/start");
@@ -4391,7 +4407,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   ALNAuthModuleOIDC *provider = [self oidcProviderForContext:ctx];
   if (!provider) { [self setStatus:404]; return nil; }
   NSError *error = nil;
-  NSMutableDictionary *state = [[provider beginLoginWithError:&error] mutableCopy];
+  NSString *prompt = AMTrimmedString([self requestParameters][@"prompt"]);
+  NSMutableDictionary *state = [[provider beginLoginWithPrompt:prompt error:&error] mutableCopy];
   if (!state) { [self setStatus:502]; return @{ @"status": @"error", @"message": @"Provider login unavailable" }; }
   state[@"return_to"] = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSString *authorizeURL = state[@"authorizationURL"];

@@ -412,6 +412,33 @@ static void RegisterOIDCLoginTemplates(void) {
   XCTAssertEqual((NSInteger)401, replay.statusCode);
   XCTAssertEqual((NSUInteger)2, OIDCFixture.exchanges);
 }
+- (NSDictionary *)queryParametersOfURL:(NSString *)url {
+  NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+  for (NSURLQueryItem *item in [NSURLComponents componentsWithString:url].queryItems) parameters[item.name] = item.value ?: @"";
+  return parameters;
+}
+// GitHub issue 97: a step-up through the provider asks it to re-authenticate.
+- (void)testProviderLoginForwardsOnlyPromptLogin {
+  ALNAuthModuleOIDC *provider = [self provider];
+  NSError *error = nil;
+  NSDictionary *state = [provider beginLoginWithPrompt:@"login" error:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  XCTAssertEqualObjects(@"login", [self queryParametersOfURL:state[@"authorizationURL"]][@"prompt"]);
+  for (id prompt in @[ [NSNull null], @"none", @"consent", @"select_account", @"login consent", @"LOGIN" ]) {
+    state = [provider beginLoginWithPrompt:([prompt isKindOfClass:[NSString class]] ? prompt : nil) error:&error];
+    XCTAssertNotNil(state, @"%@", error);
+    XCTAssertNil([self queryParametersOfURL:state[@"authorizationURL"]][@"prompt"], @"%@", prompt);
+  }
+
+  ALNApplication *app = [self application];
+  ALNResponse *login = [self request:app method:@"GET" path:@"/context/auth/api/provider/entra/login"
+                               query:@"prompt=login&return_to=%2Fops" cookie:nil];
+  XCTAssertEqual((NSInteger)200, login.statusCode, @"%@", [self json:login]);
+  XCTAssertEqualObjects(@"login", [self queryParametersOfURL:[self json:login][@"authorize_url"]][@"prompt"]);
+  login = [self request:app method:@"GET" path:@"/context/auth/api/provider/entra/login" query:@"prompt=none" cookie:nil];
+  XCTAssertEqual((NSInteger)200, login.statusCode, @"%@", [self json:login]);
+  XCTAssertNil([self queryParametersOfURL:[self json:login][@"authorize_url"]][@"prompt"]);
+}
 - (void)testProviderDefaultsAndExplicitOptIns {
   ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} error:NULL]);

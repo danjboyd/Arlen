@@ -225,6 +225,30 @@ static NSDictionary *SMFormParametersFromBody(NSData *body) {
   return parameters;
 }
 
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol SMStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *SMStepUpPath(id runtime) {
+  id<SMStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *SMStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = SMStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
+}
+
 static NSString *SMPercentEncodedQueryComponent(NSString *value) {
   NSMutableCharacterSet *allowed = [[NSCharacterSet URLQueryAllowedCharacterSet] mutableCopy];
   [allowed removeCharactersInString:@"&=+"];
@@ -1824,9 +1848,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return NO;
   }
   if ([ctx authAssuranceLevel] < 2) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    SMPercentEncodedQueryComponent(returnTo)];
+    NSString *location = SMStepUpLocation(self.authRuntime, SMPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -2293,7 +2315,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     [application configureAuthAssuranceForRouteNamed:routeName
                            minimumAuthAssuranceLevel:2
                      maximumAuthenticationAgeSeconds:0
-                                          stepUpPath:[[ALNAuthModuleRuntime sharedRuntime] totpPath] ?: @"/auth/mfa/totp"
+                                          stepUpPath:SMStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                                error:NULL];
   }
   [application configureRouteNamed:@"storage_api_download"

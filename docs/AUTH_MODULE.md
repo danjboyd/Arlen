@@ -529,6 +529,32 @@ does not try to look up an external subject in its own user table. Stock local
 account/MFA management remains backed by the auth module's own user records;
 applications with external person stores own those account-management surfaces.
 
+### Step-up for provider sign-in
+
+Module surfaces (admin UI, jobs, notifications, ops, search, storage) send a
+user who needs assurance level 2 to `authModule.paths.stepUp`, adding
+`return_to` (and, from route-level checks, `reason`). It defaults to the TOTP
+page (`paths.totp`), which is right for local accounts. A user who signs in only
+through a provider has no TOTP factor there, so point step-up at the provider
+login and ask it to re-authenticate:
+
+```plist
+authModule = {
+  paths = { stepUp = "/auth/provider/entra/login?prompt=login"; };
+};
+```
+
+The value is a local path; a relative value is joined to `paths.prefix`, and a
+query is kept (the redirect then appends with `&`). Absolute URLs are a
+configuration error. Provider login routes accept `prompt=login` and pass it to
+the identity provider; other `prompt` values are ignored.
+
+A provider sign-in sets the assurance level your resolver returns, so the
+resolver decides whether a fresh provider login satisfies step-up, for example
+by returning `assuranceLevel` 2 when the verified `amr` claim shows MFA.
+`prompt=login` asks the provider to re-authenticate; Arlen does not verify that
+it did.
+
 ### Defaults and Upgrade Behavior
 
 When any real OIDC provider is enabled, local password login and the stub

@@ -272,8 +272,14 @@ static BOOL OStrings(id values) {
   return config;
 }
 - (NSDictionary *)beginLoginWithError:(NSError **)error {
-  NSDictionary *config = [self discoveredConfigurationWithError:error];
+  return [self beginLoginWithPrompt:nil error:error];
+}
+- (NSDictionary *)beginLoginWithPrompt:(NSString *)prompt error:(NSError **)error {
+  NSMutableDictionary *config = [[self discoveredConfigurationWithError:error] mutableCopy];
   if (!config) return nil;
+  // A fixed allowlist: the value comes from the request, and other prompts
+  // (none, consent, select_account) change the flow rather than force a sign-in.
+  if ([prompt isEqual:@"login"]) config[@"extraAuthorizationParameters"] = @{ @"prompt" : @"login" };
   NSMutableDictionary *state = [[ALNOIDCClient authorizationRequestForProviderConfiguration:config
       redirectURI:config[@"redirectURI"] scopes:config[@"scopes"] referenceDate:nil error:error] mutableCopy];
   state[@"provider"] = config[@"identifier"];
