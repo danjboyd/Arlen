@@ -125,8 +125,18 @@ static NSUInteger OAssuranceLevelValue(id value) {
   if ([value isKindOfClass:[NSString class]]) {
     return [@[ @"1", @"2", @"3" ] containsObject:value] ? (NSUInteger)[value integerValue] : 0;
   }
-  if (![value isKindOfClass:[NSNumber class]] || strcmp([value objCType], @encode(BOOL)) == 0 ||
-      [value doubleValue] != (double)[value integerValue]) {
+  if (![value isKindOfClass:[NSNumber class]] || [value doubleValue] != (double)[value integerValue]) {
+    return 0;
+  }
+  // Same boolean test as ALNJSONSerialization: on Apple arm64 BOOL encodes as
+  // "B" while @YES reports "c", so ask CoreFoundation there.
+#if defined(__APPLE__)
+  if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
+    return 0;
+  }
+#endif
+  const char *type = [value objCType];
+  if (type == NULL || strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0) {
     return 0;
   }
   return ([value integerValue] >= 1 && [value integerValue] <= 3) ? (NSUInteger)[value integerValue] : 0;
