@@ -1,6 +1,7 @@
 # HelpDesk feature requests — upstream assessment — 2026-09-18
 
-Status: assessed upstream; accepted in principle; not yet scheduled.
+Status (2026-10-01): `ARLEN-FR-008`, `-009`, `-010` and `-014` shipped; `ARLEN-FR-011`,
+`-012` and `-013` accepted and not started. See "Status update — 2026-10-01" below.
 Revised 2026-09-18 after `HelpDesk`'s reply — see "Revision 1" below. The FR-B scope
 recorded here was wrong as first written and is corrected in place.
 
@@ -30,13 +31,34 @@ deliberately **not** filed in `docs/internal/OPEN_ISSUES.md`, which is a bug reg
 
 | ID | Request | Origin | Upstream status |
 | --- | --- | --- | --- |
-| `ARLEN-FR-008` | Generic config-driven OIDC provider routes | FR-C | accepted; recommended first |
-| `ARLEN-FR-009` | Durable PostgreSQL `ALNEventStreamStore` | FR-B (prerequisite) | accepted; prerequisite for `ARLEN-FR-010` |
-| `ARLEN-FR-010` | `ALNPostgresEventStreamBroker` over `LISTEN`/`NOTIFY` | FR-B | accepted; must not ship before `ARLEN-FR-009` |
-| `ARLEN-FR-014` | Transport seam on `ALNRealtimeHub`, plus its Postgres adapter | FR-B reply | accepted; makes the documented Live UI push path multi-worker-correct |
+| `ARLEN-FR-008` | Generic config-driven OIDC provider routes | FR-C | shipped (GitHub issue 39, `a972993`) |
+| `ARLEN-FR-009` | Durable PostgreSQL `ALNEventStreamStore` | FR-B (prerequisite) | shipped (GitHub issue 48, `ad5a43f`) |
+| `ARLEN-FR-010` | `ALNPostgresEventStreamBroker` over `LISTEN`/`NOTIFY` | FR-B | shipped (GitHub issue 48, `ad5a43f`) |
+| `ARLEN-FR-014` | Transport seam on `ALNRealtimeHub`, plus its Postgres adapter | FR-B reply | shipped (GitHub issue 48, `fca18a1`) |
 | `ARLEN-FR-011` | Exported, documented outbound HTTP client | FR-A | accepted; scope carefully |
 | `ARLEN-FR-012` | Declarative `amr`/`acr` → assurance mapping | FR-D1 | accepted |
 | `ARLEN-FR-013` | Configurable step-up path for module surfaces | FR-D2 | accepted; re-prioritised upward |
+
+## Status update — 2026-10-01
+
+This record was written before most of it shipped; the table above is current.
+
+- `ARLEN-FR-008` shipped as the configurable OIDC providers for GitHub issue 39
+  (`a972993`, `docs/AUTH_MODULE.md` "Configurable OIDC Login"), not as the
+  `feat/auth-generic-oidc-provider-routes` branch, which is superseded. The
+  branch's single-tenant `/common/` issuer concern is covered differently: the
+  issuer must match exactly, and `tenantClaim` with `allowedTenants` pins the
+  signed-in tenant.
+- `ARLEN-FR-009`, `-010` and `-014` shipped together for GitHub issue 48:
+  `ALNPgEventStreamStore`, `ALNPgEventStreamBroker`, and the `ALNRealtimeHub`
+  fanout seam with `ALNPgRealtimeFanout` (`docs/LIVE_UI.md` "Multiple workers and
+  hosts"). The interim step-0 warnings (`docs/realtime-multiworker-warnings`) were
+  superseded by that section and a runtime warning.
+- `ARLEN-FR-011`, `-012` and `-013` are not started. Module step-up is still
+  hardcoded to the auth runtime's `totpPath` in `admin-ui`, `jobs`,
+  `notifications`, `ops` and `search`.
+- The post-login open redirect HelpDesk found while reviewing FR-C is fixed
+  (`9a2af7a`, auth module `1.3.0`).
 
 ## Verification of the report's premises
 
