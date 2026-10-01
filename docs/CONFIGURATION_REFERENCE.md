@@ -28,7 +28,9 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `serveStatic`: serve files from `public/`
+- `serveStatic`: serve files from `public/`, mounted under `/static/` — the
+  scaffold's own `public/health.txt` answers at `/static/health.txt`, not at
+  `/health.txt`
 - `staticAllowExtensions`: extensions Arlen may serve from `public/`
 - `staticCacheControl`: optional `Cache-Control` for the default `/static` mount,
   either one string or a glob dictionary (`ARLEN_STATIC_CACHE_CONTROL` supplies

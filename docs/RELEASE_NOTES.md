@@ -2,6 +2,12 @@
 
 ## Upcoming Release Candidate
 
+- HTTP status lines carry the right reason phrase for more codes: `401` (which
+  previously went out as `401 OK`) and 17 others, including `202`, `303`, `307`,
+  `308`, `409`, `410`, `415`, `501`, `502` and `504`. A status Arlen does not know
+  now gets an empty reason phrase, as RFC 9112 allows, instead of `OK`. Phrases
+  that were already correct are unchanged.
+
 - Security: the auth module no longer redirects off-origin after sign-in.
   `return_to` from the query string or a form field reached the post-login
   `Location` header unvalidated, so a link such as
