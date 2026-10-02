@@ -268,6 +268,30 @@ static NSDictionary *NMFormParametersFromBody(NSData *body) {
   return parameters;
 }
 
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol NMStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *NMStepUpPath(id runtime) {
+  id<NMStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *NMStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = NMStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
+}
+
 static NSString *NMPercentEncodedQueryComponent(NSString *value) {
   NSMutableCharacterSet *allowed = [[NSCharacterSet URLQueryAllowedCharacterSet] mutableCopy];
   [allowed removeCharactersInString:@"&=+"];
@@ -1815,9 +1839,7 @@ notificationIdentifier:(NSString *)identifier
     return NO;
   }
   if ([ctx authAssuranceLevel] < 2) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    NMPercentEncodedQueryComponent([self notificationsReturnPathForContext:ctx])];
+    NSString *location = NMStepUpLocation(self.authRuntime, NMPercentEncodedQueryComponent([self notificationsReturnPathForContext:ctx]));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -2526,7 +2548,7 @@ notificationIdentifier:(NSString *)identifier
     [application configureAuthAssuranceForRouteNamed:routeName
                            minimumAuthAssuranceLevel:2
                      maximumAuthenticationAgeSeconds:0
-                                          stepUpPath:[[ALNAuthModuleRuntime sharedRuntime] totpPath] ?: @"/auth/mfa/totp"
+                                          stepUpPath:NMStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                                error:NULL];
   }
 

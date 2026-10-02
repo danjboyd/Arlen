@@ -119,6 +119,70 @@ static NSDictionary *OAdmissionPolicy(id admission, NSError **error) {
                                                                   : @"This account is not permitted to sign in.",
   };
 }
+// 1-3 from an integer or, as text plists give it, the string "1", "2" or "3";
+// 0 for anything else, including booleans.
+static NSUInteger OAssuranceLevelValue(id value) {
+  if ([value isKindOfClass:[NSString class]]) {
+    return [@[ @"1", @"2", @"3" ] containsObject:value] ? (NSUInteger)[value integerValue] : 0;
+  }
+  if (![value isKindOfClass:[NSNumber class]] || [value doubleValue] != (double)[value integerValue]) {
+    return 0;
+  }
+  // Same boolean test as ALNJSONSerialization: on Apple arm64 BOOL encodes as
+  // "B" while @YES reports "c", so ask CoreFoundation there.
+#if defined(__APPLE__)
+  if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
+    return 0;
+  }
+#endif
+  const char *type = [value objCType];
+  if (type == NULL || strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0) {
+    return 0;
+  }
+  return ([value integerValue] >= 1 && [value integerValue] <= 3) ? (NSUInteger)[value integerValue] : 0;
+}
+// Provider `assurance`: verified `amr` values and `acr` values, each mapped to an
+// assurance level (1-3). Returns the normalized mapping, or nil with an error.
+static NSDictionary *OAssurancePolicy(id assurance, NSError **error) {
+  if (![assurance isKindOfClass:[NSDictionary class]]) {
+    OFail(error, @"OIDC assurance must be a dictionary"); return nil;
+  }
+  NSMutableDictionary *policy = [NSMutableDictionary dictionary];
+  for (id key in assurance) {
+    if (![key isEqual:@"amr"] && ![key isEqual:@"acr"]) {
+      OFail(error, [NSString stringWithFormat:@"OIDC assurance has unknown key %@", key]); return nil;
+    }
+    id values = assurance[key];
+    if (![values isKindOfClass:[NSDictionary class]] || [values count] == 0) {
+      OFail(error, [NSString stringWithFormat:@"OIDC assurance %@ must map claim values to levels", key]); return nil;
+    }
+    NSMutableDictionary *levels = [NSMutableDictionary dictionary];
+    for (id value in values) {
+      NSUInteger level = OAssuranceLevelValue(values[value]);
+      if (!OS(value).length || level == 0) {
+        OFail(error, [NSString stringWithFormat:@"OIDC assurance %@ values need a level from 1 to 3", key]); return nil;
+      }
+      levels[value] = @(level);
+    }
+    policy[key] = levels;
+  }
+  if (policy.count == 0) {
+    OFail(error, @"OIDC assurance needs amr or acr"); return nil;
+  }
+  return policy;
+}
+// The highest level any verified `amr` or `acr` value maps to; 1 when none does.
+static NSUInteger OAssuranceLevel(NSDictionary *policy, NSDictionary *claims) {
+  NSUInteger level = 1;
+  id amr = claims[@"amr"];
+  NSArray *methods = [amr isKindOfClass:[NSArray class]] ? amr : ([amr isKindOfClass:[NSString class]] ? @[ amr ] : @[]);
+  for (id method in methods) {
+    if ([method isKindOfClass:[NSString class]]) level = MAX(level, [policy[@"amr"][method] unsignedIntegerValue]);
+  }
+  id acr = claims[@"acr"];
+  if ([acr isKindOfClass:[NSString class]]) level = MAX(level, [policy[@"acr"][acr] unsignedIntegerValue]);
+  return level;
+}
 static BOOL OClaimTrue(id value) {
   if ([value isKindOfClass:[NSNumber class]]) return [value boolValue];
   return [OLower(value) isEqual:@"true"];
@@ -223,6 +287,11 @@ static BOOL OStrings(id values) {
     admission = OAdmissionPolicy(config[@"admission"], error);
     if (!admission) return nil;
   }
+  NSDictionary *assurance = nil;
+  if (config[@"assurance"]) {
+    assurance = OAssurancePolicy(config[@"assurance"], error);
+    if (!assurance) return nil;
+  }
   // Never copy arbitrary primitive overrides (HS256 secrets, audience, OAuth2 mode).
   NSMutableDictionary *safe = [NSMutableDictionary dictionary];
   for (NSString *key in @[ @"issuer", @"discoveryURL", @"redirectURI", @"clientID", @"subjectClaim",
@@ -237,6 +306,7 @@ static BOOL OStrings(id values) {
   safe[@"callbackMaxAgeSeconds"] = @300;
   safe[@"timeoutSeconds"] = @5;
   if (admission) safe[@"admission"] = admission;
+  if (assurance) safe[@"assurance"] = assurance;
   self.configuration = safe;
   self.resolver = resolver;
   self.transport = transport;
@@ -272,8 +342,14 @@ static BOOL OStrings(id values) {
   return config;
 }
 - (NSDictionary *)beginLoginWithError:(NSError **)error {
-  NSDictionary *config = [self discoveredConfigurationWithError:error];
+  return [self beginLoginWithPrompt:nil error:error];
+}
+- (NSDictionary *)beginLoginWithPrompt:(NSString *)prompt error:(NSError **)error {
+  NSMutableDictionary *config = [[self discoveredConfigurationWithError:error] mutableCopy];
   if (!config) return nil;
+  // A fixed allowlist: the value comes from the request, and other prompts
+  // (none, consent, select_account) change the flow rather than force a sign-in.
+  if ([prompt isEqual:@"login"]) config[@"extraAuthorizationParameters"] = @{ @"prompt" : @"login" };
   NSMutableDictionary *state = [[ALNOIDCClient authorizationRequestForProviderConfiguration:config
       redirectURI:config[@"redirectURI"] scopes:config[@"scopes"] referenceDate:nil error:error] mutableCopy];
   state[@"provider"] = config[@"identifier"];
@@ -375,12 +451,29 @@ static BOOL OStrings(id values) {
                                                    ALNAuthModuleOIDCFailureCodeKey: @"admission_denied"}];
     return nil;
   }
+  // The mapped level comes only from verified ID-token claims. The resolver sees it
+  // as assurance_level and can set its own assuranceLevel, which wins.
+  NSDictionary *assurance = self.configuration[@"assurance"];
+  NSUInteger mappedLevel = 0;
+  if (assurance) {
+    mappedLevel = OAssuranceLevel(assurance, [normalized[@"claims"] isKindOfClass:[NSDictionary class]] ? normalized[@"claims"] : @{});
+    NSMutableDictionary *withLevel = [normalized mutableCopy];
+    withLevel[@"assurance_level"] = @(mappedLevel);
+    normalized = withLevel;
+  }
   // Admission only gates sign-in; the application still decides membership, roles and
   // linking. No email fallback.
   NSDictionary *descriptor = [self.resolver resolveSessionDescriptorForNormalizedIdentity:normalized
                                                                    providerConfiguration:config error:&failure];
   if (![descriptor isKindOfClass:[NSDictionary class]]) {
     return OFailWithCode(error, failure, @"Resolver rejected the provider identity", @"rejected");
+  }
+  id resolvedLevel = descriptor[@"assuranceLevel"];
+  BOOL resolverSetLevel = [resolvedLevel respondsToSelector:@selector(integerValue)] && [resolvedLevel integerValue] > 0;
+  if (mappedLevel > 0 && !resolverSetLevel) {
+    NSMutableDictionary *withLevel = [descriptor mutableCopy];
+    withLevel[@"assuranceLevel"] = @(mappedLevel);
+    descriptor = withLevel;
   }
   return descriptor;
 }

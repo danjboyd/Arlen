@@ -213,6 +213,12 @@ issue 51).
 `auth` moved to `1.3.0` to keep post-login `return_to` redirects on the app's
 origin (a security fix; cross-origin returns now go through the session policy
 hook).
+`auth` moved to `1.4.0` for the configurable step-up target
+(`authModule.paths.stepUp`, GitHub issue 97); `admin-ui`, `jobs`,
+`notifications`, `ops` and `search` moved to `1.0.2` and `storage` to `1.1.1` to
+send step-up there.
+`auth` moved to `1.5.0` for provider `assurance` mapping from `amr`/`acr`
+(GitHub issue 98).
 
 ## MCP tools
 

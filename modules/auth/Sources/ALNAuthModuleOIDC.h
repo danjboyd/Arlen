@@ -38,6 +38,10 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleOIDCErrorCode) {
                 allowLoopbackHTTPRedirect:(BOOL)allowLoopbackHTTPRedirect
                                     error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)beginLoginWithError:(NSError *_Nullable *_Nullable)error;
+/// Same, sending `prompt` to the provider. Only `login` (re-authenticate) is
+/// accepted; any other value is ignored.
+- (nullable NSDictionary *)beginLoginWithPrompt:(nullable NSString *)prompt
+                                          error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)completeLoginWithParameters:(NSDictionary *)parameters
                                        callbackState:(NSDictionary *)state
                                              context:(ALNContext *)context

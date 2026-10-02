@@ -116,6 +116,30 @@ static NSDictionary *JMFormParametersFromBody(NSData *body) {
   return parameters;
 }
 
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol JMStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *JMStepUpPath(id runtime) {
+  id<JMStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *JMStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = JMStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
+}
+
 static NSString *JMPercentEncodedQueryComponent(NSString *value) {
   NSMutableCharacterSet *allowed = [[NSCharacterSet URLQueryAllowedCharacterSet] mutableCopy];
   [allowed removeCharactersInString:@"&=+"];
@@ -1699,9 +1723,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     return NO;
   }
   if ([ctx authAssuranceLevel] < 2) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    JMPercentEncodedQueryComponent(returnTo)];
+    NSString *location = JMStepUpLocation(self.authRuntime, JMPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -2083,7 +2105,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     [application configureAuthAssuranceForRouteNamed:routeName
                            minimumAuthAssuranceLevel:2
                      maximumAuthenticationAgeSeconds:0
-                                          stepUpPath:[authRuntime totpPath] ?: @"/auth/mfa/totp"
+                                          stepUpPath:JMStepUpPath(authRuntime)
                                                error:NULL];
   }
 

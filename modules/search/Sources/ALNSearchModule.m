@@ -528,6 +528,30 @@ static BOOL STWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
 }
 
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol STStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *STStepUpPath(id runtime) {
+  id<STStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *STStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = STStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
+}
+
 static NSString *STPercentEncodedQueryComponent(NSString *value) {
   NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
   NSMutableCharacterSet *blocked = [allowed mutableCopy];
@@ -6761,9 +6785,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     return NO;
   }
   if ([ctx authAssuranceLevel] < self.runtime.minimumAuthAssuranceLevel) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    STPercentEncodedQueryComponent(returnTo)];
+    NSString *location = STStepUpLocation(self.authRuntime, STPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -6788,7 +6810,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                            message:@"Additional authentication assurance is required"
                               meta:@{
                                 @"minimumAuthAssuranceLevel" : @(self.runtime.minimumAuthAssuranceLevel),
-                                @"stepUpPath" : [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
+                                @"stepUpPath" : STStepUpPath(self.authRuntime),
                               }];
     return NO;
   }

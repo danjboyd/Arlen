@@ -2,12 +2,15 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNApplication.h"
+#import "ALNAuthModule.h"
 #import "ALNContext.h"
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
 #import "ALNOpsModule.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNRoute.h"
+#import "ALNRouter.h"
 #import "ALNStorageModule.h"
 
 @interface Phase14GInjectedAuthMiddleware : NSObject <ALNMiddleware>
@@ -273,6 +276,56 @@
   XCTAssertNil(summary[@"automation"][@"openAPI"][@"paths"]);
   XCTAssertEqual((NSUInteger)2, [summary[@"notifications"][@"recentOutbox"] count]);
   XCTAssertEqual((NSUInteger)1, [summary[@"storage"][@"recentObjects"] count]);
+}
+
+// GitHub issue 97: module surfaces send step-up to authModule.paths.stepUp, which
+// may carry its own query, instead of always to the TOTP page.
+- (void)testModulesSendStepUpToTheConfiguredAuthPath {
+  NSString *stepUp = @"/auth/provider/entra/login?prompt=login";
+  ALNAuthModuleRuntime *authRuntime = [ALNAuthModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  XCTAssertTrue([authRuntime configureHooksWithModuleConfig:@{ @"paths" : @{ @"stepUp" : stepUp } } error:&error],
+                @"%@", error);
+  @try {
+    ALNApplication *app = [self application];
+    Phase14GInjectedAuthMiddleware *middleware = [[Phase14GInjectedAuthMiddleware alloc] init];
+    [app addMiddleware:middleware];
+    [self registerModulesForApplication:app];
+    middleware.subject = @"ops-user";
+    middleware.roles = @[ @"operator", @"admin" ];
+    middleware.assuranceLevel = 1;
+
+    ALNResponse *htmlRedirect =
+        [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/ops" headers:@{} body:nil]];
+    XCTAssertEqual((NSInteger)302, htmlRedirect.statusCode);
+    NSString *location = [htmlRedirect headerForName:@"Location"];
+    XCTAssertTrue([location hasPrefix:@"/auth/provider/entra/login?prompt=login&return_to="], @"%@", location);
+
+    ALNResponse *stepUpJSON =
+        [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                path:@"/ops/api/summary"
+                                             headers:@{ @"Accept" : @"application/json" }
+                                                body:nil]];
+    XCTAssertEqual((NSInteger)403, stepUpJSON.statusCode);
+    XCTAssertEqualObjects(stepUp, [self JSONObjectFromResponse:stepUpJSON][@"meta"][@"stepUpPath"]);
+
+    NSMutableSet *modulesWithStepUpRoutes = [NSMutableSet set];
+    for (ALNRoute *route in [app.router allRoutes]) {
+      if (route.minimumAuthAssuranceLevel < 2) {
+        continue;
+      }
+      XCTAssertEqualObjects(stepUp, route.stepUpPath, @"%@", route.name);
+      NSString *module = [[route.name componentsSeparatedByString:@"_"] firstObject];
+      if ([module length] > 0) {
+        [modulesWithStepUpRoutes addObject:module];
+      }
+    }
+    for (NSString *module in @[ @"jobs", @"notifications", @"storage" ]) {
+      XCTAssertTrue([modulesWithStepUpRoutes containsObject:module], @"%@ in %@", module, modulesWithStepUpRoutes);
+    }
+  } @finally {
+    [authRuntime configureHooksWithModuleConfig:@{} error:NULL];
+  }
 }
 
 - (void)testProtectedRoutesFailClosedForMissingRoleOrMissingStepUp {
