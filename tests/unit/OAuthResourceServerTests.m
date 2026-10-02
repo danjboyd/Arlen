@@ -381,8 +381,28 @@ static NSUInteger OAuthCalls;
   claims[@"aud"] = Audience;
   XCTAssertNil([self.server principalForAccessToken:[self token:claims] error:NULL]);
 }
+// GitHub issue 107: old-style plists deliver numbers and YES/NO as strings.
+- (void)testPlistStringNumbersAndBooleansAreAccepted {
+  NSMutableDictionary *config = [[self config] mutableCopy];
+  [config addEntriesFromDictionary:@{@"jwksMaxAgeSeconds":@"600", @"refreshCooldownSeconds":@" 45 ",
+    @"refreshOnRequest":@"NO", @"preflightOnStart":@"false", @"allowApplicationPermissions":@"YES"}];
+  NSError *error = nil;
+  ALNOAuthResourceServer *server = [[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:nil
+      authorizationPolicy:^BOOL(NSDictionary *p, ALNContext *c) { return YES; } error:&error];
+  XCTAssertNotNil(server, @"%@", error);
+  XCTAssertEqualObjects(@600, server.configuration[@"jwksMaxAgeSeconds"]);
+  XCTAssertEqualObjects(@45, server.configuration[@"refreshCooldownSeconds"]);
+  XCTAssertFalse([server.configuration[@"refreshOnRequest"] boolValue]);
+  XCTAssertFalse([server.configuration[@"preflightOnStart"] boolValue]);
+  XCTAssertTrue([server.configuration[@"allowApplicationPermissions"] boolValue]);
+  // A string YES still requires an explicit policy for application permissions.
+  config[@"allowApplicationPermissions"] = @"yes";
+  XCTAssertNil([[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:nil authorizationPolicy:nil error:&error]);
+  XCTAssertEqualObjects(@"Application permissions require an explicit authorization policy", error.localizedDescription);
+}
 - (void)testInvalidConfigurationFailsAtConstruction {
-  for (NSDictionary *override in @[@{@"issuer":@"http://insecure"}, @{@"resourceURL":@"https://mcp.example.test/research/mcp?evil=1"}, @{@"algorithms":@[@"HS256"]}, @{@"jwksMaxAgeSeconds":@0}, @{@"refreshCooldownSeconds":@0}, @{@"protectedPaths":@[]}, @{@"allowApplicationPermissions":@"yes"}]) {
+  for (NSDictionary *override in @[@{@"issuer":@"http://insecure"}, @{@"resourceURL":@"https://mcp.example.test/research/mcp?evil=1"}, @{@"algorithms":@[@"HS256"]}, @{@"jwksMaxAgeSeconds":@0}, @{@"refreshCooldownSeconds":@0}, @{@"protectedPaths":@[]}, @{@"allowApplicationPermissions":@"maybe"},
+                                     @{@"jwksMaxAgeSeconds":@"300s"}, @{@"jwksMaxAgeSeconds":@"10"}, @{@"refreshOnRequest":@"sometimes"}]) {
     NSMutableDictionary *config = [[self config] mutableCopy]; [config addEntriesFromDictionary:override];
     XCTAssertNil([[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:nil authorizationPolicy:nil error:NULL]);
   }

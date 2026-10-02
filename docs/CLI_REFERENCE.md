@@ -488,6 +488,12 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
   version and the lock has no `contentDigest` (`locally_modified: false`); the
   JSON payload lists `differing_files`, and nothing is changed
 - `--force` replaces the vendored copy regardless
+- keeps the app's settings in the lock entry, including `enabled = 0` for a
+  module the app loads itself; only `identifier`, `path`, `version` and
+  `contentDigest` change
+- stamps the copied files with the install time, so an incremental
+  `boomhauer` build recompiles them even when the source checkout is older than
+  the app's existing objects
 
 `arlen module eject auth-ui [--force] [--json]`
 
