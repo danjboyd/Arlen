@@ -98,7 +98,10 @@ ID-token profiles cannot substitute for access tokens.
 `permissionTypeClaim`, `delegatedPermissionValue`, and `applicationPermissionValue`
 (defaults: `idtyp`, `user`, `app`) to a trusted issuer's explicit claim contract.
 Unknown permission types fail closed. Entra has its own preset/profile: delegated
-tokens need nonempty `scp`; app-only tokens need `idtyp=app` and roles.
+tokens need nonempty `scp`; app-only tokens need `idtyp=app` and roles. Entra
+emits `idtyp` only when the API registration lists it as an optional
+access-token claim, which is off by default, so app-only tokens are rejected
+until it is added.
 Application access requires both `allowApplicationPermissions: true` and an
 explicit policy; the policy must allow the service principal/client and roles.
 Delegated scopes never authorize application-only access.
@@ -120,6 +123,14 @@ trusted cached keys remain usable during an outage; expired keys do not.
 There is no stale-on-error extension, persistent cache, or unbounded per-key
 negative cache. New keys can be temporarily rejected during cooldown. By default fetches are synchronous; allow for up to two fetch deadlines on a
 cold request. For serialized runtimes use the maintenance mode below.
+
+A rejected bearer token is logged once per request at WARN
+(`event=token.rejected`, `plugin=oauth-resource-server`) with a `reason` naming
+the failed check, for example `Access token audience mismatch` or `Entra app-only
+token lacks idtyp=app; ...`, plus `signature_verified`, `path` and `request_id`.
+`client_id` is included only when the signature verified. The token and other
+claim values are never logged, and a request with no `Authorization` header (the
+normal challenge) is not logged. Clients still receive only `invalid_token`.
 
 Arlen does not fetch refresh tokens, implement password handling, or issue
 OAuth credentials. Offline signature validation **does not immediately observe
