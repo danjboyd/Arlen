@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/danjboyd/Arlen/security/advisories/new
+    about: Report a security issue privately. Do not open a public issue.
+  - name: Documentation
+    url: https://github.com/danjboyd/Arlen/tree/main/docs
+    about: Browse Arlen's user-facing documentation before filing an issue.
