@@ -243,12 +243,18 @@ typedef struct {
   void *httpVersion;  // NSMutableString
   void *reasonPhrase; // NSMutableString
   BOOL hasReasonPhrase;
+  NSUInteger limit;   // 0 = unbounded
+  BOOL exceeded;
 } ALNSynchronousTransfer;
 
 static size_t ALNSynchronousWrite(char *bytes, size_t size, size_t count, void *context) {
   ALNSynchronousTransfer *transfer = context;
   if (size && count > NSUIntegerMax / size) return 0;
   NSMutableData *body = (__bridge NSMutableData *)transfer->body;
+  if (transfer->limit && size * count > transfer->limit - body.length) {
+    transfer->exceeded = YES;
+    return 0;
+  }
   [body appendBytes:bytes length:size * count];
   return size * count;
 }
@@ -280,6 +286,14 @@ static size_t ALNSynchronousHeader(char *bytes, size_t size, size_t count, void 
   NSCharacterSet *whitespace = [NSCharacterSet whitespaceCharacterSet];
   NSString *name = [[trimmed substringToIndex:separator.location] stringByTrimmingCharactersInSet:whitespace];
   NSString *value = [[trimmed substringFromIndex:separator.location + 1] stringByTrimmingCharactersInSet:whitespace];
+  if (transfer->limit && [name caseInsensitiveCompare:@"Content-Length"] == NSOrderedSame) {
+    long long declared = 0;
+    if ([[NSScanner scannerWithString:value] scanLongLong:&declared] && declared > 0 &&
+        (unsigned long long)declared > transfer->limit) {
+      transfer->exceeded = YES;
+      return 0;
+    }
+  }
   NSString *existingKey = nil;
   for (NSString *key in headers) {
     if ([key caseInsensitiveCompare:name] == NSOrderedSame) { existingKey = key; break; }
@@ -375,7 +389,7 @@ static CURLcode ALNSynchronousConfigure(CURL *curl, NSString *urlString, NSStrin
   return result;
 }
 
-static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRedirects,
+static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRedirects, NSUInteger maxBytes,
                                          NSURLResponse *__autoreleasing *response,
                                          NSString *__autoreleasing *receivedPhrase,
                                          NSError *__autoreleasing *error) {
@@ -393,7 +407,7 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
   NSMutableString *httpVersion = [NSMutableString string];
   NSMutableString *reasonPhrase = [NSMutableString string];
   ALNSynchronousTransfer transfer = {(__bridge void *)body, (__bridge void *)headers,
-      (__bridge void *)httpVersion, (__bridge void *)reasonPhrase, NO};
+      (__bridge void *)httpVersion, (__bridge void *)reasonPhrase, NO, maxBytes, NO};
   NSData *requestBody = ALNSynchronousRequestBody(request);
   NSString *method = [request.HTTPMethod length] > 0 ? [request.HTTPMethod uppercaseString] : @"GET";
   NSString *urlString = request.URL.absoluteString ?: @"";
@@ -448,6 +462,8 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
     if (response) *response = http;
     if (receivedPhrase) *receivedPhrase = transfer.hasReasonPhrase ? [reasonPhrase copy] : nil;
     resultData = [body copy];
+  } else if (error && transfer.exceeded) {
+    *error = ALNSynchronousURLError(NSURLErrorDataLengthExceedsMaximum, @"response exceeds size limit");
   } else if (error) {
     NSString *description = message[0] ? @(message) : @(curl_easy_strerror(result));
     *error = ALNSynchronousURLError(ALNSynchronousURLErrorCode(result), description);
@@ -515,7 +531,7 @@ ALNHTTPClientResult *ALNSynchronousHTTPResult(NSURLRequest *request, NSUInteger 
     hop.timeoutInterval = remaining;
     NSURLResponse *response = nil;
     NSString *phrase = nil;
-    NSData *body = ALNSynchronousCurlRequest(hop, 0, &response, &phrase, error);
+    NSData *body = ALNSynchronousCurlRequest(hop, 0, 0, &response, &phrase, error);
     if (!body) return nil;
     NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
     NSInteger status = http.statusCode;
@@ -559,6 +575,32 @@ ALNHTTPClientResult *ALNSynchronousHTTPResult(NSURLRequest *request, NSUInteger 
   }
 #else
   if (error) *error = ALNSynchronousURLError(NSURLErrorUnsupportedURL, @"HTTP result transport unavailable");
+  return nil;
+#endif
+}
+
+// Internal seams for ALNHTTPClient (not in the public header): a monotonic clock,
+// and one libcurl hop that never follows redirects and stops at maxBytes.
+NSTimeInterval ALNHTTPMonotonicNow(void) { return MetadataNow(); }
+
+NSData *ALNHTTPClientPerformHop(NSURLRequest *request, NSUInteger maxBytes, NSHTTPURLResponse **response,
+                                NSString **receivedPhrase, NSError **error) {
+#if defined(GNUSTEP) || defined(__APPLE__)
+  if (!ALNCurlGlobalReady() || (curl_version_info(CURLVERSION_NOW)->features &
+      (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) != (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"HTTP client transport requires TLS and asynchronous DNS");
+    return nil;
+  }
+  NSURLResponse *raw = nil;
+  NSString *phrase = nil;
+  NSError *failure = nil;
+  NSData *body = ALNSynchronousCurlRequest(request, 0, maxBytes, &raw, &phrase, &failure);
+  if (response) *response = (NSHTTPURLResponse *)raw;
+  if (receivedPhrase) *receivedPhrase = phrase;
+  if (error) *error = failure;
+  return body;
+#else
+  if (error) *error = ALNSynchronousURLError(NSURLErrorUnsupportedURL, @"HTTP client transport unavailable");
   return nil;
 #endif
 }
@@ -640,7 +682,7 @@ NSData *ALNSynchronousURLRequestFollowingRedirects(NSURLRequest *request, NSUInt
   }
   return resultData;
 #elif defined(GNUSTEP)
-  return ALNSynchronousCurlRequest(request, maxRedirects, response, NULL, error);
+  return ALNSynchronousCurlRequest(request, maxRedirects, 0, response, NULL, error);
 #else
   (void)maxRedirects;
   return [NSURLConnection sendSynchronousRequest:request returningResponse:response error:error];

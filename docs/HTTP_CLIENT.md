@@ -3,6 +3,62 @@
 Import `ALNHTTPCompat.h` (also included by `Arlen.h`). Run synchronous requests on
 a worker when blocking the caller would stall application request handling.
 
+## Calling third-party APIs: ALNHTTPClient
+
+For app code that calls vendor APIs, use `ALNHTTPClient` (`ALNHTTPClient.h`, also
+in `Arlen.h`). It refuses to talk to any host you did not list:
+
+```objc
+NSError *error = nil;
+ALNHTTPClient *client = [[ALNHTTPClient alloc] initWithConfiguration:@{
+  @"allowedHosts" : @[ @"api.vendor.example", @"hooks.vendor.example:8443" ],
+  @"timeoutSeconds" : @10,
+} error:&error];
+client.logger = application.logger; // optional
+
+ALNHTTPClientResult *result =
+    [client POSTJSONObject:@{ @"ticket" : @42 }
+                     toURL:[NSURL URLWithString:@"https://api.vendor.example/v1/events"]
+                   headers:@{ @"Authorization" : [@"Bearer " stringByAppendingString:token] }
+                     error:&error];
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `allowedHosts` | required | Hostnames, optionally `host:port`. A bare host allows only the scheme's default port. Exact, case-insensitive; no wildcards. |
+| `timeoutSeconds` | 10 (1–300) | One deadline for the whole request, redirects included. |
+| `maxResponseBytes` | 1048576 (at most 64 MiB) | Response body limit, checked against `Content-Length` and while streaming. |
+| `maxRedirects` | 0 (at most 10) | With 0 a 3xx is returned as the result (`stoppedAtRedirectLimit`). |
+| `allowHTTP` | NO | Allow plain `http` URLs, for example a loopback service. |
+
+The configuration is checked at construction; unknown keys and out-of-range
+values are errors. Then, per request:
+
+- The URL must be `https` (or `http` with `allowHTTP`), must not carry
+  `user:password@`, and its host and port must be on the allowlist. Anything
+  else fails with `ALNHTTPClientErrorHostNotAllowed` or
+  `ALNHTTPClientErrorInvalidRequest` before a connection is made.
+- Methods are GET, HEAD, POST, PUT, PATCH and DELETE. HTTP error statuses are
+  results, not errors.
+- Redirects are followed only up to `maxRedirects`, and every hop must also be
+  on the allowlist (`ALNHTTPClientErrorRedirectNotAllowed` otherwise). A request
+  carrying `Authorization` or `Cookie` is never redirected: the 3xx is
+  returned, so a credential is not replayed to wherever a server points it.
+  Other headers, such as an API-key header, go only to allowed hosts but are
+  kept across allowed redirects.
+- Errors (`ALNHTTPClientErrorDomain`) have fixed descriptions; they name at
+  most the host and port, never headers, bodies, paths or query strings.
+- With `logger` set, each request is logged once (`event=http_client.request`,
+  info on success, warn on failure) with method, host, path, status, duration,
+  byte count and redirect count. Headers, bodies and query strings are never
+  logged.
+
+Requests are synchronous and use the same libcurl transport as
+`ALNSynchronousHTTPResult` on GNUstep and Apple (TLS verification on, no shared
+cookie store, TLS and asynchronous DNS required). The allowlist checks host
+names, not resolved addresses, so it does not defend against an allowed name
+that resolves somewhere unexpected.
+
 ## Existing helpers
 
 `ALNSynchronousURLRequest` follows at most ten redirects.

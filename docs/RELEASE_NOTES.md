@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- `ALNHTTPClient`, an outbound HTTP client for calling third-party APIs from app
+  code. Every request and redirect hop must go to a host on an allowlist fixed
+  at construction; each request has one total deadline and a response size
+  limit; redirects are off by default and never followed for a request carrying
+  `Authorization` or `Cookie`; errors and optional log lines never contain
+  headers, bodies or query strings. `GETURL:`, `POSTJSONObject:` and
+  `performRequest:` return the existing `ALNHTTPClientResult` (GitHub issue 99,
+  HelpDesk ARLEN-FR-011). See [HTTP client](HTTP_CLIENT.md).
+
 - OIDC providers accept an `assurance` map from verified ID-token `amr` and
   `acr` values to an assurance level, for example `amr = { mfa = 2; }`, so an
   MFA sign-in at the identity provider reaches module surfaces that need level

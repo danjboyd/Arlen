@@ -41,7 +41,7 @@ jobs:
       - name: Verify OIDC transport and concurrent security-header initialization
         run: |
           bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
-          for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests; do
+          for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests HTTPClientTests; do
             xcrun xctest -XCTest "$filter" "$bundle_path"
           done
 
