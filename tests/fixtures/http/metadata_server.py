@@ -45,6 +45,9 @@ class Peer(socketserver.BaseRequestHandler):
             if path == b"/timeout":
                 time.sleep(1)
                 return
+            if path == b"/sleep":
+                time.sleep(3)
+                return
             headers = b"HTTP/1.1 200 OK\r\nConnection: close\r\n"
             if path.startswith((b"/budget/", b"/absolute-budget/")):
                 hops = int(path.rsplit(b"/", 1)[1])

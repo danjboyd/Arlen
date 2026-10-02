@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `92`
-- Symbols: `161`
-- Public methods: `1096`
-- Public properties: `488`
+- Public headers: `93`
+- Symbols: `162`
+- Public methods: `1101`
+- Public properties: `494`
 
 ## API Surface Boundary
 
@@ -173,7 +173,8 @@ python3 tools/docs/generate_api_reference.py
 - [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
-- [ALNHTTPClientResult](api/ALNHTTPClientResult.md): Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
+- [ALNHTTPClient](api/ALNHTTPClient.md): Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).
+- [ALNHTTPClientResult](api/ALNHTTPClientResult.md): Complete final HTTP response returned by `ALNSynchronousHTTPResult` and `ALNHTTPClient`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
 - [ALNInMemoryAttachmentAdapter](api/ALNInMemoryAttachmentAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryCacheAdapter](api/ALNInMemoryCacheAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryEventStreamBroker](api/ALNInMemoryEventStreamBroker.md): In-memory adapter implementation useful for development and tests.
@@ -291,6 +292,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNAuthProviderSessionBridge.h`
 - `src/Arlen/Support/ALNAuthSession.h`
 - `src/Arlen/Support/ALNEventStream.h`
+- `src/Arlen/Support/ALNHTTPClient.h`
 - `src/Arlen/Support/ALNHTTPCompat.h`
 - `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`

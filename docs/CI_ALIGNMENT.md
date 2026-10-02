@@ -416,10 +416,12 @@ state in the XCTest runner cannot hide initialization races. No required lane
 is added or renamed by this regression.
 
 The Apple baseline job also selects `AuthModuleOIDCTests`,
-`MetadataTransportTests`, and `SecurityHeadersColdStartTests` using Apple XCTest.
-This exercises the shared libcurl bounded-POST implementation and native
-cold-start probe on Apple, including cookie isolation and exact size/error
-contracts.
+`MetadataTransportTests`, `SecurityHeadersColdStartTests` and `HTTPClientTests`
+using Apple XCTest. This exercises the shared libcurl bounded-POST
+implementation, the outbound `ALNHTTPClient` (host allowlist, redirects, size
+and deadline limits) and the native cold-start probe on Apple, including cookie
+isolation and exact size/error contracts. The step and required checks are
+unchanged; only its suite list grew.
 
 `InstanceLockColdStartTests` is explicitly selected in the Linux quality job
 and included in the sanitizer matrix's full unit suite. It guards the
