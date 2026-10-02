@@ -368,16 +368,19 @@ causing SSH to treat `-oBatchMode=yes` as the config-file path.
 
 ## ISSUE-004: Production workers leak `/dev/null` file descriptors until file responses fail
 
-- Status: `hardened upstream; awaiting downstream revalidation`
+- Status: `resolved`
 - Priority: `high`
 - Tracking ID: `ARLEN-BUG-024`
 - Discovered: `2026-04-27`
 - Reported by: `StateCompulsoryPoolingAPI`
-- Last updated: `2026-09-30`
-- Resolution: no Arlen-side leak has been reproduced; the likely opener is
-  downstream app code (see Current assessment). Arlen now guards against
-  regressions with descriptor-stability tests and documents the propane
-  FD-pressure safety net and triage tools in `docs/DEPLOYMENT.md`.
+- Last updated: `2026-10-02`
+- Resolution: the leak was in downstream app code, not Arlen. The app now
+  launches its Perl helper with `posix_spawn` and child-side `addopen` file
+  actions instead of an `NSTask` holding three null-device handles, and
+  production descriptor counts are flat (see the 2026-10-02 revalidation
+  below). Arlen guards against regressions with descriptor-stability tests and
+  documents the propane FD-pressure safety net and triage tools in
+  `docs/DEPLOYMENT.md`.
 - Verification:
   - `HTTPIntegrationTests::testFileResponsesKeepWorkerDescriptorsStable_Issue67`
   - `FileDescriptorStabilityTests::testDataverseCurlTransportReleasesItsDescriptors`
@@ -498,6 +501,28 @@ per-response leak in the Arlen file-send path fails CI.
 
 Any further Arlen fix is blocked until a leaking path is reproduced or captured
 from production-safe diagnostics.
+
+### Downstream revalidation (2026-10-02)
+
+Read-only checks on `iep-softwaredev`:
+
+- Running release `a49cab23e36e` (built 2026-09-11, Arlen `7b4c8452e64f`):
+  `src/main.m` spawns `/usr/bin/perl` with `posix_spawn`; the `/dev/null`
+  opens are `posix_spawn_file_actions_addopen` actions that run in the child,
+  so the worker opens nothing per launch, and a detached thread reaps the
+  child. The `NSTask` + `fileHandleWithNullDevice` pattern is gone from app
+  sources.
+- `scp-api-arlen.service` under `propane`, two workers, soft limit `1024`:
+  after 21 days of uptime (about 10,700 service journal lines in that time)
+  each worker holds `72` descriptors, identical across workers and unchanged
+  between samples. At failure time both workers were at `1023`.
+- Per-target counts (`/dev/null` specifically) were not sampled: the workers
+  run under a different group than the SSH user, so `/proc/<pid>/fd` targets
+  need root. A flat, low total rules out the original growth either way.
+
+Closed on this evidence. Reopen if a worker's descriptor count climbs again;
+`tools/ops/sample_fd_targets.py` (as root) and `ARLEN_FD_DELTA_DEBUG=1` remain
+the triage path.
 
 ## ISSUE-003: File streaming responses sent successful headers with no body
 
