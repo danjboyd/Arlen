@@ -52,11 +52,9 @@ Common targets used in CI and by reviewers:
 | `make ci-sanitizers`     | ASan/UBSan sanitizer lanes.                           |
 | `make ci-docs`           | Documentation navigation and consistency checks.      |
 
-For a fast smoke check:
-
-```bash
-./bin/test --smoke-only
-```
+On macOS, `./bin/test --smoke-only` runs a fast smoke check. On Linux,
+`./bin/test` runs the full `make test`; use the targets above or a filter for
+something quicker.
 
 For a single test method (XCTest filter syntax):
 
@@ -94,6 +92,10 @@ look for:
 
 ## Documentation
 
+User-facing changes get an entry in
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md), which is the project's
+changelog.
+
 User-facing documentation lives in [`docs/`](docs/). Engineering-internal
 material (phase roadmaps, dated reconciliations, milestone notes) lives in
 [`docs/internal/`](docs/internal/). Keep user-facing prose evergreen — no
@@ -117,6 +119,7 @@ Open a bug report from the GitHub Issues tab. Useful reports include:
 
 - For setup or toolchain trouble, start with `./bin/arlen doctor` and the
   guides under [`docs/`](docs/).
-- For design questions, open an issue tagged `discussion`.
+- For design questions, open an issue describing the problem before writing
+  code.
 
 Thanks for helping make Arlen better.

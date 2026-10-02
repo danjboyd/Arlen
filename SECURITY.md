@@ -63,10 +63,13 @@ the commit you are running in your report.
 ## Coordinated disclosure
 
 We follow coordinated disclosure. After we and the reporter agree the fix is
-ready, we publish a security advisory with credit to the reporter (unless they
-prefer to remain anonymous) and ship the fix in a tagged release.
+ready, we land it on `main` and publish a security advisory that names the
+fixing commit (and, for a first-party module, its new version so `arlen module
+upgrade` picks it up), with credit to the reporter unless they prefer to remain
+anonymous.
 
-## Hall of fame
+## Published advisories
 
-We will list security reporters here once we have published our first
-advisory.
+Published advisories, with their credits, are listed on the repository's
+[Security advisories](https://github.com/danjboyd/Arlen/security/advisories)
+page.
