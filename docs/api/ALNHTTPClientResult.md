@@ -3,7 +3,7 @@
 - Kind: `interface`
 - Header: `src/Arlen/Support/ALNHTTPCompat.h`
 
-Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
+Complete final HTTP response returned by `ALNSynchronousHTTPResult` and `ALNHTTPClient`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
 
 ## Typical Usage
 

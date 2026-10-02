@@ -2,6 +2,15 @@
 
 ## Upcoming Release Candidate
 
+- `ALNHTTPClient`, an outbound HTTP client for calling third-party APIs from app
+  code. Every request and redirect hop must go to a host on an allowlist fixed
+  at construction; each request has one total deadline and a response size
+  limit; redirects are off by default and never followed for a request carrying
+  `Authorization` or `Cookie`; errors and optional log lines never contain
+  headers, bodies or query strings. `GETURL:`, `POSTJSONObject:` and
+  `performRequest:` return the existing `ALNHTTPClientResult` (GitHub issue 99,
+  HelpDesk ARLEN-FR-011). See [HTTP client](HTTP_CLIENT.md).
+
 - `ALNOAuthResourceServer` logs why it rejected a bearer token: one WARN line
   per request (`event=token.rejected`) with a `reason` naming the failed check,
   `signature_verified`, and `client_id` once the signature verified. The token

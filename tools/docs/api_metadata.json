@@ -187,8 +187,12 @@
       "summary": "Immutable job claim carrying an ownership token, initial expiration, and heartbeat duration."
     },
     "ALNHTTPClientResult": {
-      "summary": "Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).",
+      "summary": "Complete final HTTP response returned by `ALNSynchronousHTTPResult` and `ALNHTTPClient`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).",
       "usage_example": "ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 3, ALNHTTPRedirectLimitReturnResponse, &error);\nif (result) {\n  NSData *body = result.body;\n  NSString *phrase = result.receivedReasonPhrase; // nil for HTTP/2 or HTTP/3\n}"
+    },
+    "ALNHTTPClient": {
+      "summary": "Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).",
+      "usage_example": "NSError *error = nil;\nALNHTTPClient *client = [[ALNHTTPClient alloc] initWithConfiguration:@{\n  @\"allowedHosts\" : @[ @\"api.vendor.example\" ],\n  @\"timeoutSeconds\" : @10,\n} error:&error];\nALNHTTPClientResult *result = [client POSTJSONObject:@{ @\"ticket\" : @42 }\n    toURL:[NSURL URLWithString:@\"https://api.vendor.example/v1/events\"]\n    headers:@{ @\"Authorization\" : @\"Bearer ...\" } error:&error];"
     }
   },
   "properties": {
