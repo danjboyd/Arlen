@@ -11,6 +11,15 @@
   `performRequest:` return the existing `ALNHTTPClientResult` (GitHub issue 99,
   HelpDesk ARLEN-FR-011). See [HTTP client](HTTP_CLIENT.md).
 
+- `ALNOAuthResourceServer` logs why it rejected a bearer token: one WARN line
+  per request (`event=token.rejected`) with a `reason` naming the failed check,
+  `signature_verified`, and `client_id` once the signature verified. The token
+  and other claim values are never logged. The catch-all "Invalid access token
+  claims" and "Invalid Entra access token profile" errors are split into
+  specific reasons, including an Entra app-only token missing the optional
+  `idtyp` claim (GitHub issue 96). See
+  [OAuth resource servers](OAUTH_RESOURCE_SERVER.md#verification-and-operations).
+
 - OIDC providers accept an `assurance` map from verified ID-token `amr` and
   `acr` values to an assurance level, for example `amr = { mfa = 2; }`, so an
   MFA sign-in at the identity provider reaches module surfaces that need level

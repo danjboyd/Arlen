@@ -13,6 +13,9 @@
 #import "ALNResponse.h"
 #import "ALNRouter.h"
 #import "ALNHTTPCompat.h"
+#import "ALNLogger.h"
+#include <fcntl.h>
+#include <unistd.h>
 static NSDictionary *OAuthTestRSAKeyMaterial(NSString *kid) {
   NSMutableDictionary *material = [NSMutableDictionary dictionary];
   EVP_PKEY *privateKey = ALNCryptoGenerateRSAKey(2048);
@@ -269,6 +272,87 @@ static NSUInteger OAuthCalls;
     XCTAssertEqual(401, [self request:app path:path token:[self token:claims]].statusCode);
   }
   XCTAssertEqual(2u, OAuthCalls);
+}
+// GitHub issue 96: each rejection names the failed check, and a client id is
+// attached only once the signature has verified.
+- (void)testRejectionReasonsNameTheFailedCheck {
+  NSDictionary *cases = @{
+    @"iss": @[ @"https://evil.example", @"Access token issuer mismatch" ],
+    @"aud": @[ @"another-service", @"Access token audience mismatch" ],
+    @"exp": @[ @1, @"Access token expired or missing exp" ],
+    @"tid": @[ @"other-tenant", @"Entra access token tenant (tid) mismatch" ],
+    @"ver": @[ @"1.0", @"Entra access token version (ver) does not match tokenVersion" ],
+  };
+  for (NSString *key in cases) {
+    NSMutableDictionary *claims = [self claims]; claims[key] = cases[key][0];
+    NSError *error = nil;
+    XCTAssertNil([self.server principalForAccessToken:[self token:claims] error:&error], @"%@", key);
+    XCTAssertEqualObjects(cases[key][1], error.localizedDescription, @"%@", key);
+    XCTAssertEqualObjects(@"registered-client", error.userInfo[@"Arlen.OAuth.verifiedClientID"], @"%@", key);
+  }
+  NSError *error = nil;
+  NSString *forged = [[self token:[self claims]] stringByAppendingString:@"x"];
+  XCTAssertNil([self.server principalForAccessToken:forged error:&error]);
+  XCTAssertEqualObjects(@"Invalid access token signature", error.localizedDescription);
+  XCTAssertNil(error.userInfo[@"Arlen.OAuth.verifiedClientID"]);
+
+  // The InvitoContext case: an Entra client-credentials token without the optional idtyp claim.
+  NSMutableDictionary *config = [[self config] mutableCopy]; config[@"allowApplicationPermissions"] = @YES;
+  self.server = [self serverWithConfig:config policy:^BOOL(NSDictionary *p, ALNContext *c) { return YES; }];
+  NSMutableDictionary *claims = [self claims]; [claims removeObjectForKey:@"scp"];
+  error = nil;
+  XCTAssertNil([self.server principalForAccessToken:[self token:claims] error:&error]);
+  XCTAssertTrue([error.localizedDescription hasPrefix:@"Entra app-only token lacks idtyp=app"], @"%@", error);
+  claims[@"idtyp"] = @"app"; claims[@"roles"] = @[];
+  XCTAssertNil([self.server principalForAccessToken:[self token:claims] error:&error]);
+  XCTAssertEqualObjects(@"Application token has no roles", error.localizedDescription);
+}
+- (NSString *)logOutputOf:(ALNApplication *)app during:(void (^)(void))block {
+  int fds[2];
+  XCTAssertEqual(0, pipe(fds));
+  fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+  ALNLogLevel level = app.logger.minimumLevel;
+  app.logger.minimumLevel = ALNLogLevelWarn;
+  app.logger.outputFileDescriptor = fds[1];
+  block();
+  app.logger.outputFileDescriptor = STDERR_FILENO;
+  app.logger.minimumLevel = level;
+  close(fds[1]);
+  NSMutableData *data = [NSMutableData data];
+  char buffer[4096];
+  ssize_t count;
+  while ((count = read(fds[0], buffer, sizeof(buffer))) > 0) [data appendBytes:buffer length:(NSUInteger)count];
+  close(fds[0]);
+  return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+}
+- (void)testRejectedBearerTokensAreLoggedWithoutTokenOrClaimValues {
+  ALNApplication *app = [self appWithPolicy:nil];
+  NSMutableDictionary *claims = [self claims]; claims[@"aud"] = @"another-service";
+  NSString *token = [self token:claims];
+  NSString *log = [self logOutputOf:app during:^{
+    XCTAssertEqual(401, [self request:app path:@"/records" token:token].statusCode);
+  }];
+  XCTAssertTrue([log containsString:@"token.rejected"], @"%@", log);
+  XCTAssertTrue([log containsString:@"Access token audience mismatch"], @"%@", log);
+  XCTAssertTrue([log containsString:@"registered-client"], @"%@", log);
+  XCTAssertFalse([log containsString:token], @"%@", log);
+  XCTAssertFalse([log containsString:@"another-service"], @"%@", log);
+  XCTAssertFalse([log containsString:@"user-object-id"], @"%@", log);
+
+  // Unverified garbage is logged with its reason but no client id.
+  log = [self logOutputOf:app during:^{
+    XCTAssertEqual(401, [self request:app path:@"/records" token:@"old-hs256-pilot-token"].statusCode);
+  }];
+  XCTAssertTrue([log containsString:@"token.rejected"], @"%@", log);
+  XCTAssertTrue([log containsString:@"Invalid access token"], @"%@", log);
+  XCTAssertFalse([log containsString:@"client_id"], @"%@", log);
+  XCTAssertFalse([log containsString:@"old-hs256-pilot-token"], @"%@", log);
+
+  // No credentials is the normal challenge and is not logged.
+  log = [self logOutputOf:app during:^{
+    XCTAssertEqual(401, [self request:app path:@"/records" token:nil].statusCode);
+  }];
+  XCTAssertFalse([log containsString:@"token.rejected"], @"%@", log);
 }
 - (void)testSuspensionAndRecordPolicyRunOnBothDispatches {
   __block BOOL suspended = NO;
