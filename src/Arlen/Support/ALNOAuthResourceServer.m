@@ -3,6 +3,7 @@
 #import "ALNOIDCClient.h"
 #import "ALNHTTPCompat.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLogger.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -18,6 +19,15 @@ static BOOL D(id x) { return [x isKindOfClass:[NSDictionary class]]; }
 static BOOL S(id x) { return [x isKindOfClass:[NSString class]] && [x length] > 0; }
 static id Fail(NSError **error, NSString *message) {
   if (error) *error = [NSError errorWithDomain:@"Arlen.OAuth" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
+  return nil;
+}
+// Rejections after the signature verified also carry the token's client id, so the
+// rejection log can name a client without trusting unverified token contents.
+static NSString *const VerifiedClientKey = @"Arlen.OAuth.verifiedClientID";
+static id FailVerified(NSError **error, NSString *message, id client) {
+  NSMutableDictionary *info = [NSMutableDictionary dictionaryWithObject:message forKey:NSLocalizedDescriptionKey];
+  info[VerifiedClientKey] = [client isKindOfClass:[NSString class]] ? client : @"";
+  if (error) *error = [NSError errorWithDomain:@"Arlen.OAuth" code:2 userInfo:info];
   return nil;
 }
 static BOOL Strings(id x) {
@@ -245,25 +255,37 @@ static NSDictionary *Part(NSString *part) {
   if (![ALNOIDCClient verifyRS256Token:token jwk:key error:NULL]) return Fail(error, @"Invalid access token signature");
   NSDictionary *claims = Part(parts[1]);
   NSTimeInterval now = [NSDate date].timeIntervalSince1970;
-  if (![claims[@"iss"] isEqual:self.configuration[@"issuer"]] || ![claims[@"aud"] isEqual:self.configuration[@"audience"]] ||
-      !S(claims[@"sub"]) || !Number(claims[@"exp"]) || [claims[@"exp"] doubleValue] <= now ||
-      !Number(claims[@"iat"]) || [claims[@"iat"] doubleValue] > now ||
-      (claims[@"nbf"] && (!Number(claims[@"nbf"]) || [claims[@"nbf"] doubleValue] > now))) return Fail(error, @"Invalid access token claims");
+  // Each rejection names one check with a fixed message (never token or claim
+  // values) so the rejection log says what to fix.
+  NSString *client = claims[entra ? ([self.configuration[@"tokenVersion"] isEqual:@"2.0"] ? @"azp" : @"appid") : @"client_id"];
+  if (![claims[@"iss"] isEqual:self.configuration[@"issuer"]]) return FailVerified(error, @"Access token issuer mismatch", client);
+  if (![claims[@"aud"] isEqual:self.configuration[@"audience"]]) return FailVerified(error, @"Access token audience mismatch", client);
+  if (!S(claims[@"sub"])) return FailVerified(error, @"Access token subject (sub) required", client);
+  if (!Number(claims[@"exp"]) || [claims[@"exp"] doubleValue] <= now) return FailVerified(error, @"Access token expired or missing exp", client);
+  if (!Number(claims[@"iat"]) || [claims[@"iat"] doubleValue] > now) return FailVerified(error, @"Access token iat missing or in the future", client);
+  if (claims[@"nbf"] && (!Number(claims[@"nbf"]) || [claims[@"nbf"] doubleValue] > now)) return FailVerified(error, @"Access token not yet valid (nbf)", client);
   NSString *scope = claims[entra ? @"scp" : @"scope"];
-  if (scope && ![scope isKindOfClass:[NSString class]]) return Fail(error, @"Invalid access token permissions");
+  if (scope && ![scope isKindOfClass:[NSString class]]) return FailVerified(error, @"Invalid access token permissions", client);
   NSArray *roles = claims[@"roles"] ?: @[];
-  if (!Strings(roles)) return Fail(error, @"Invalid access token roles");
+  if (!Strings(roles)) return FailVerified(error, @"Invalid access token roles", client);
   // RFC 9068 does not standardize a grant-type claim. Require an explicit
   // provider claim mapping instead of mistaking client-credentials scopes for users.
   NSString *typeClaim = self.configuration[@"permissionTypeClaim"];
   BOOL delegated = entra ? scope.length > 0 : [claims[typeClaim] isEqual:self.configuration[@"delegatedPermissionValue"]];
-  if (!entra && !delegated && ![claims[typeClaim] isEqual:self.configuration[@"applicationPermissionValue"]]) return Fail(error, @"Unknown access token permission type");
-  NSString *client = claims[entra ? ([self.configuration[@"tokenVersion"] isEqual:@"2.0"] ? @"azp" : @"appid") : @"client_id"];
-  if (!S(client)) return Fail(error, @"Access token client identity required");
-  if (entra && (![claims[@"tid"] isEqual:self.configuration[@"tenantID"]] || !S(claims[@"oid"]) ||
-                ![claims[@"ver"] isEqual:self.configuration[@"tokenVersion"]] || !Number(claims[@"nbf"]) ||
-                (delegated && [claims[@"idtyp"] isEqual:@"app"]) || (!delegated && ![claims[@"idtyp"] isEqual:@"app"]))) return Fail(error, @"Invalid Entra access token profile");
-  if (!delegated && (![self.configuration[@"allowApplicationPermissions"] boolValue] || !roles.count)) return Fail(error, @"Application access is disabled");
+  if (!entra && !delegated && ![claims[typeClaim] isEqual:self.configuration[@"applicationPermissionValue"]]) return FailVerified(error, @"Unknown access token permission type", client);
+  if (!S(client)) return FailVerified(error, @"Access token client identity required", nil);
+  if (entra) {
+    if (![claims[@"tid"] isEqual:self.configuration[@"tenantID"]]) return FailVerified(error, @"Entra access token tenant (tid) mismatch", client);
+    if (!S(claims[@"oid"])) return FailVerified(error, @"Entra access token object ID (oid) required", client);
+    if (![claims[@"ver"] isEqual:self.configuration[@"tokenVersion"]]) return FailVerified(error, @"Entra access token version (ver) does not match tokenVersion", client);
+    if (!Number(claims[@"nbf"])) return FailVerified(error, @"Entra access token nbf required", client);
+    if (delegated && [claims[@"idtyp"] isEqual:@"app"]) return FailVerified(error, @"Entra delegated token (scp) is marked idtyp=app", client);
+    if (!delegated && ![claims[@"idtyp"] isEqual:@"app"]) {
+      return FailVerified(error, @"Entra app-only token lacks idtyp=app; add idtyp as an optional access-token claim on the API registration", client);
+    }
+  }
+  if (!delegated && ![self.configuration[@"allowApplicationPermissions"] boolValue]) return FailVerified(error, @"Application access is disabled (allowApplicationPermissions)", client);
+  if (!delegated && !roles.count) return FailVerified(error, @"Application token has no roles", client);
   // Entra ID tokens cannot satisfy the delegated scp profile or app-only idtyp profile.
   // API and interactive client registrations MUST have different audiences.
   NSArray *scopes = [ALNAuth scopesFromClaims:@{@"scope":scope ?: @""}];
@@ -298,6 +320,22 @@ static NSDictionary *Part(NSString *part) {
   [application registerLifecycleHook:self];
   return YES;
 }
+- (void)logRejection:(NSError *)rejection context:(ALNContext *)context {
+  NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"plugin" : [self pluginName], @"event" : @"token.rejected",
+    @"reason" : rejection.localizedDescription ?: @"Invalid access token",
+    @"signature_verified" : @(rejection.userInfo[VerifiedClientKey] != nil),
+    @"path" : context.request.path ?: @"",
+  }];
+  // Only a client id from a signature-verified token, and only if it is a plain identifier.
+  NSString *client = rejection.userInfo[VerifiedClientKey];
+  NSCharacterSet *unsafe = [[NSCharacterSet characterSetWithCharactersInString:
+      @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._:"] invertedSet];
+  if (S(client) && client.length <= 128 && [client rangeOfCharacterFromSet:unsafe].location == NSNotFound) fields[@"client_id"] = client;
+  id requestID = context.stash[@"request_id"];
+  fields[@"request_id"] = S(requestID) ? requestID : ([context.response headerForName:@"X-Request-Id"] ?: @"");
+  [context.logger warn:@"oauth bearer token rejected" fields:fields];
+}
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   if ([context.request.path isEqual:self.metadataPath]) {
     context.stash[ServerKey] = self;
@@ -308,9 +346,12 @@ static NSDictionary *Part(NSString *part) {
   if (![self protectsPath:context.request.path]) return YES;
   // Always validate original bearer credentials; session/HS256 identities cannot bypass this mode.
   NSString *header = [context.request headerValueForName:@"authorization"];
-  NSString *token = [ALNAuth bearerTokenFromAuthorizationHeader:header error:NULL];
-  NSDictionary *principal = [self principalForAccessToken:token error:NULL];
+  NSError *rejection = nil;
+  NSString *token = [ALNAuth bearerTokenFromAuthorizationHeader:header error:&rejection];
+  NSDictionary *principal = token ? [self principalForAccessToken:token error:&rejection] : nil;
   if (!principal) {
+    // A request without credentials is the normal challenge flow; only log credentials we rejected.
+    if (header.length) [self logRejection:rejection context:context];
     [context.response setHeader:@"WWW-Authenticate" value:[self challengeForError:header.length ? @"invalid_token" : nil]];
     context.response.statusCode = 401; context.response.committed = YES; return NO;
   }
