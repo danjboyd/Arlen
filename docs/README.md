@@ -32,7 +32,13 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 ## Building Apps
 
+- [Static files](STATIC_FILES.md): cache validators, conditional GET/HEAD, and byte ranges.
+
+- [Multipart Uploads](MULTIPART_UPLOADS.md): ordered form fields, binary files, limits, and memory ownership.
+
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.
+- [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md): repeated headers, session coexistence, and cookie expiration.
+- [Synchronous HTTP client](HTTP_CLIENT.md): `ALNHTTPClient` for third-party APIs (host allowlist, deadline, size limit, safe redirects and logging), received reason phrases, redirect budgets, transport errors, and platform behavior.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.
@@ -53,11 +59,13 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Auth Module](AUTH_MODULE.md): first-party auth product routes, fragments, helpers, and `/auth/api` surface.
 - [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui`.
 - [Admin UI Module](ADMIN_UI_MODULE.md): admin resources, filters, exports, and `/admin/api`.
+- [Durable Jobs](DURABLE_JOBS.md): PostgreSQL queues, transactional enqueue, renewable leases, crash recovery, and durable results.
 - [Jobs Module](JOBS_MODULE.md): `/jobs` HTML plus `/jobs/api` JSON/OpenAPI surface.
 - [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences plus admin preview/outbox/test-send flows.
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
 - [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.
+- [MCP Module](MCP_MODULE.md): explicitly registered route and service tools over Streamable HTTP.
 - [Ecosystem Services](ECOSYSTEM_SERVICES.md): jobs/cache/i18n/mail/attachment adapter contracts.
 
 ## Data Layer
@@ -65,7 +73,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Getting Started: Data Layer](GETTING_STARTED_DATA_LAYER.md): PostgreSQL-first migrations, typed SQL helpers, and codegen.
 - [ArlenData Reuse Guide](ARLEN_DATA.md): standalone data-layer packaging and PostgreSQL/MSSQL/Dataverse usage.
 - [Dataverse Integration](DATAVERSE.md): Dataverse Web API client, config shape, OData query usage, and typed codegen workflow.
-- [ArlenORM Guide](ARLEN_ORM.md): optional SQL and Dataverse ORM layers on ArlenData.
+- [ArlenORM Guide](ARLEN_ORM.md): optional SQL and Dataverse ORM layers on ArlenData, including quoted legacy SQL identifiers, safe generated property names, and concurrent descriptor initialization.
 - [ArlenORM Migration Contracts](ARLEN_ORM_MIGRATIONS.md): descriptor snapshots and schema/codegen drift checks.
 - [ArlenORM Backend Matrix](ARLEN_ORM_BACKEND_MATRIX.md): PostgreSQL, MSSQL, and Dataverse capability boundaries.
 - [SQL Builder Conformance Matrix](SQL_BUILDER_CONFORMANCE_MATRIX.md): SQL snapshot matrix and regression map.
@@ -103,6 +111,8 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 ## Examples
 
+- [MCP Catalog Example](../examples/mcp_app/README.md): read-only route and service tools with bearer auth.
+
 - [Tech Demo](../examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features.
 - [Basic App Smoke Guide](../examples/basic_app/README.md): smallest app-owned smoke path.
 - [API-First Reference App](../examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
@@ -122,5 +132,38 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Documentation Policy](DOCUMENTATION_POLICY.md): docs standards, review checklist, and the internal/user-facing split.
 - [CI Alignment](CI_ALIGNMENT.md): required CI shape and merge-gate guidance.
+- [TSAN reliability investigation](internal/TSAN_RELIABILITY_2026-09-21.md): current runtime findings, coverage repair, and promotion criteria.
 - [Comparative Benchmarking](COMPARATIVE_BENCHMARKING.md): benchmarking source-of-truth split.
 - [Internal docs (`docs/internal/`)](internal/): engineering material — phase roadmaps, session handoffs, dated reconciliation notes, audits, and benchmark/operational handoffs. Not part of the user-facing surface.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.
+
+GNUstep OAuth metadata transport requires libcurl development files with TLS and
+asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
+[getting-started guide](GETTING_STARTED.md).
+
+For isolated live database checks, see the
+[PostgreSQL regression gate](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+It covers generated clients, migrations, search, and auth server cleanup.
+
+For composing an ops dashboard with optional modules, see [Ops Module](OPS_MODULE.md).
+
+For enterprise browser sign-in, start with the [auth module OIDC/Entra setup](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers) describes
+concurrent security defaults and explicit header overrides.
+
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized)
+describes the libobjc2 `@synchronized` defect and the locking pattern to use
+in application code.

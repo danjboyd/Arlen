@@ -5,11 +5,82 @@
 #import <string.h>
 
 #import "ALNConfig.h"
+#import "ALNMultipart.h"
 
 @interface ConfigTests : XCTestCase
 @end
 
 @implementation ConfigTests
+
+- (void)testDocumentedMultipartPlistLimitsNormalizeAndEnforce {
+  NSString *root = [self createTempAppRoot];
+  @try {
+    NSString *path = [root stringByAppendingPathComponent:@"config/app.plist"];
+    XCTAssertTrue([self writeFile:path content:
+        @"{ requestLimits = { maxBodyBytes = 6291456; maxMultipartFileBytes = 5242880; "
+         "maxMultipartParts = 16; maxMultipartFieldBytes = \"65536\"; maxMultipartHeaderBytes = 16384; }; }"]);
+    NSError *error = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error];
+    XCTAssertNotNil(config, @"%@", error);
+    NSDictionary *limits = config[@"requestLimits"];
+    for (NSString *key in limits) {
+      XCTAssertTrue([limits[key] isKindOfClass:[NSNumber class]], @"%@", key);
+    }
+    XCTAssertEqualObjects(limits[@"maxMultipartParts"], @16);
+    XCTAssertEqualObjects(limits[@"maxMultipartFileBytes"], @5242880);
+    NSString *part = @"--Aa\r\nContent-Disposition: form-data; name=x\r\n\r\nx\r\n";
+    NSMutableString *body = [NSMutableString string];
+    for (NSUInteger i = 0; i < 16; i++) [body appendString:part];
+    NSData *data = [[body stringByAppendingString:@"--Aa--"] dataUsingEncoding:NSUTF8StringEncoding];
+    XCTAssertEqual([ALNMultipart parseBody:data contentType:@"multipart/form-data; boundary=Aa"
+                                   limits:limits error:&error].count, 16u);
+    XCTAssertNil(error);
+    [body appendString:part];
+    data = [[body stringByAppendingString:@"--Aa--"] dataUsingEncoding:NSUTF8StringEncoding];
+    XCTAssertNil([ALNMultipart parseBody:data contentType:@"multipart/form-data; boundary=Aa"
+                                 limits:limits error:&error]);
+    XCTAssertEqual(error.code, ALNMultipartErrorLimitExceeded);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
+- (void)testInvalidRequestLimitConfigurationReturnsKeyedError {
+  NSString *root = [self createTempAppRoot];
+  @try {
+    NSString *path = [root stringByAppendingPathComponent:@"config/app.plist"];
+    for (NSString *key in @[@"maxBodyBytes", @"maxHeaderBytes", @"maxRequestLineBytes",
+                           @"maxMultipartParts", @"maxMultipartFieldBytes",
+                           @"maxMultipartFileBytes", @"maxMultipartHeaderBytes", @"spoolThresholdBytes"]) {
+      for (NSString *bad in @[@"0", @"-1", @"junk", @"16parts", @"1.5",
+                             @"18446744073709551616", @"()", @"{}"] ) {
+        XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
+            @"{ requestLimits = { %@ = %@; }; }", key, bad]]));
+        NSError *error = nil;
+        XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);
+        XCTAssertEqualObjects(error.domain, @"Arlen.Config.Error");
+        XCTAssertTrue([error.localizedDescription containsString:key], @"%@", error);
+      }
+    }
+    for (NSString *bad in @[@"relative/spool", @"()", @"{}"]) {
+      XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
+          @"{ requestLimits = { spoolDirectory = %@; }; }", bad]]));
+      NSError *error = nil;
+      XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error], @"%@", bad);
+      XCTAssertTrue([error.localizedDescription containsString:@"spoolDirectory"], @"%@", error);
+    }
+    XCTAssertTrue([self writeFile:path content:@"{ requestLimits = { spoolThresholdBytes = \"4096\"; spoolDirectory = \"/var/spool/arlen\"; }; }"]);
+    NSDictionary *spoolConfig = [ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:NULL];
+    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolThresholdBytes"], @4096);
+    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolDirectory"], @"/var/spool/arlen");
+    XCTAssertTrue([self writeFile:path content:@"{ requestLimits = invalid; }"]);
+    NSError *error = nil;
+    XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);
+    XCTAssertTrue([error.localizedDescription containsString:@"requestLimits must be a dictionary"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
 
 - (NSString *)createTempAppRoot {
   NSString *templatePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-config-XXXXXX"];
@@ -104,6 +175,7 @@
 
   NSDictionary *database = config[@"database"];
   XCTAssertEqual((NSInteger)8, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualWithAccuracy(0.0, [database[@"poolAcquireTimeoutSeconds"] doubleValue], 0.0001);
   XCTAssertEqualObjects(@"postgresql", database[@"adapter"]);
 
   NSDictionary *state = config[@"state"];
@@ -299,9 +371,11 @@
   setenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS", "3", 1);
   setenv("ARLEN_DATABASE_URL", "postgresql://localhost/arlen_test", 1);
   setenv("ARLEN_DB_POOL_SIZE", "11", 1);
+  setenv("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.5", 1);
   setenv("ARLEN_DB_ADAPTER", "gdl2", 1);
   setenv("ARLEN_SESSION_ENABLED", "1", 1);
   setenv("ARLEN_SESSION_SECRET", "super-secret", 1);
+  setenv("ARLEN_STORAGE_SIGNING_SECRET", "storage-env-signing-secret-0123456789", 1);
   setenv("ARLEN_SESSION_COOKIE_NAME", "sid", 1);
   setenv("ARLEN_SESSION_MAX_AGE_SECONDS", "777", 1);
   setenv("ARLEN_SESSION_SECURE", "1", 1);
@@ -374,9 +448,11 @@
   unsetenv("ARLEN_PROPANE_RELOAD_OVERLAP_SECONDS");
   unsetenv("ARLEN_DATABASE_URL");
   unsetenv("ARLEN_DB_POOL_SIZE");
+  unsetenv("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS");
   unsetenv("ARLEN_DB_ADAPTER");
   unsetenv("ARLEN_SESSION_ENABLED");
   unsetenv("ARLEN_SESSION_SECRET");
+  unsetenv("ARLEN_STORAGE_SIGNING_SECRET");
   unsetenv("ARLEN_SESSION_COOKIE_NAME");
   unsetenv("ARLEN_SESSION_MAX_AGE_SECONDS");
   unsetenv("ARLEN_SESSION_SECURE");
@@ -451,11 +527,13 @@
   XCTAssertEqualObjects(@"postgresql://localhost/arlen_test",
                         database[@"connectionString"]);
   XCTAssertEqual((NSInteger)11, [database[@"poolSize"] integerValue]);
+  XCTAssertEqualWithAccuracy(2.5, [database[@"poolAcquireTimeoutSeconds"] doubleValue], 0.0001);
   XCTAssertEqualObjects(@"gdl2", database[@"adapter"]);
 
   NSDictionary *session = config[@"session"];
   XCTAssertEqualObjects(@(YES), session[@"enabled"]);
   XCTAssertEqualObjects(@"super-secret", session[@"secret"]);
+  XCTAssertEqualObjects(@"storage-env-signing-secret-0123456789", config[@"storageModule"][@"signingSecret"]);
   XCTAssertEqualObjects(@"sid", session[@"cookieName"]);
   XCTAssertEqual((NSInteger)777, [session[@"maxAgeSeconds"] integerValue]);
   XCTAssertEqualObjects(@(YES), session[@"secure"]);

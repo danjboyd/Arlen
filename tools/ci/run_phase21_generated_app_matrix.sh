@@ -9,7 +9,7 @@ fixture="${ARLEN_PHASE21_MATRIX_FIXTURE:-tests/fixtures/phase21/generated_app_ma
 allow_fail="${ARLEN_PHASE21_MATRIX_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 make arlen boomhauer

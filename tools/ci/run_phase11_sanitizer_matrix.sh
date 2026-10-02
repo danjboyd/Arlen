@@ -10,7 +10,7 @@ selected_lanes="${ARLEN_PHASE11_SANITIZER_LANES:-asan_ubsan_phase11_protocol_adv
 include_thread="${ARLEN_PHASE11_INCLUDE_THREAD:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 asan_so="$(clang -print-file-name=libasan.so)"

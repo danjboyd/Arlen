@@ -578,10 +578,10 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   XCTAssertEqualObjects(@"pass", eval[@"live_validation"][@"overall"]);
 }
 
-- (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {
+- (ALNSearchModuleRuntime *)seedPostgresRuntime {
   NSString *dsn = [self pgTestDSN];
   if ([dsn length] == 0) {
-    return;
+    return nil;
   }
 
   NSString *tableName = Phase27SearchUniquePostgresTableName();
@@ -602,35 +602,64 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
   [self seedSearchIndexesForRuntime:runtime];
 
+  return runtime;
+}
+
+- (void)testPostgresExactPromotionAndPhraseMatching {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
   NSError *error = nil;
-  NSDictionary *phrase = [runtime searchQuery:@"Priority Kit"
-                           resourceIdentifier:@"products"
-                                      filters:nil
-                                         sort:nil
-                                        limit:10
-                                       offset:0
-                                 queryOptions:@{ @"mode" : @"phrase" }
-                                        error:&error];
+  NSDictionary *promoted = [runtime searchQuery:@"priority" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"search" } error:&error];
+  XCTAssertNotNil(promoted);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"sku-102", [promoted[@"promotedResults"] firstObject][@"recordID"]);
+  NSDictionary *phrase = [runtime searchQuery:@"Priority Kit" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"phrase" } error:&error];
   XCTAssertNotNil(phrase);
   XCTAssertNil(error);
-  XCTAssertEqualObjects(@"ALNPostgresSearchEngine", phrase[@"engine"]);
-  XCTAssertTrue([phrase[@"engineCapabilities"][@"supportsFullTextRanking"] boolValue]);
-  XCTAssertEqualObjects(@"sku-102", [phrase[@"promotedResults"] firstObject][@"recordID"]);
+  XCTAssertEqual((NSUInteger)0, [phrase[@"promotedResults"] count]);
+  XCTAssertEqualObjects(@"sku-102", [phrase[@"results"] firstObject][@"recordID"]);
+}
 
-  NSDictionary *fuzzy = [runtime searchQuery:@"pririty"
-                          resourceIdentifier:@"products"
-                                     filters:nil
-                                        sort:nil
-                                       limit:10
-                                      offset:0
-                                queryOptions:@{ @"mode" : @"fuzzy" }
-                                       error:&error];
+- (void)testPostgresFuzzyMatchesWordsInLongDocumentsWithMarkedHighlights {
+  // Keep the typo-bearing word out of the title; document length must not dilute it.
+  NSMutableDictionary *record = Phase27SearchProductStore()[@"sku-103"];
+  record[@"name"] = @"Operations Rack";
+  record[@"category"] = @"operations";
+  record[@"description"] = @"The decision contains several sections about warehouse staffing and inventory. "
+      "This priority station needs attention. Additional reasons describe routine equipment maintenance and scheduling.";
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
+  NSDictionary *fuzzy = [runtime searchQuery:@"pririty" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"fuzzy" } error:&error];
   XCTAssertNotNil(fuzzy);
   XCTAssertNil(error);
-  NSArray *fuzzyResults = [fuzzy[@"results"] isKindOfClass:[NSArray class]] ? fuzzy[@"results"] : @[];
-  XCTAssertEqualObjects(@"sku-103", fuzzyResults[0][@"recordID"]);
-  XCTAssertTrue([(NSArray *)(fuzzyResults[0][@"highlights"] ?: @[]) count] > 0);
+  XCTAssertEqual((NSUInteger)0, [fuzzy[@"promotedResults"] count]);
+  NSArray *results = fuzzy[@"results"] ?: @[];
+  XCTAssertEqual((NSUInteger)2, [results count]);
+  NSMutableSet *recordIDs = [NSMutableSet set];
+  for (NSDictionary *result in results) {
+    [recordIDs addObject:result[@"recordID"]];
+    NSString *highlight = [[result[@"highlights"] componentsJoinedByString:@" "] lowercaseString];
+    XCTAssertTrue([highlight containsString:@"<b>priority</b>"], @"%@", highlight);
+  }
+  XCTAssertEqualObjects(([NSSet setWithArray:@[ @"sku-102", @"sku-103" ]]), recordIDs);
+  NSDictionary *unmatched = [runtime searchQuery:@"zzzzqqqq" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"fuzzy" } error:&error];
+  XCTAssertNotNil(unmatched);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, [unmatched[@"results"] count]);
+  NSDictionary *repeated = [runtime searchQuery:@"pririty" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"fuzzy" } error:&error];
+  XCTAssertEqualObjects([results valueForKey:@"recordID"], [repeated[@"results"] valueForKey:@"recordID"]);
+}
 
+- (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
   NSMutableDictionary *updated = [Phase27SearchProductStore()[@"sku-103"] mutableCopy];
   updated[@"description"] = @"Escalation bench for newly urgent requests.";
   Phase27SearchProductStore()[@"sku-103"] = updated;

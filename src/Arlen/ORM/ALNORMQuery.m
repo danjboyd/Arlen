@@ -1,4 +1,5 @@
 #import "ALNORMQuery.h"
+#import "ALNSQLDialect.h"
 
 #import "ALNORMErrors.h"
 #import "ALNORMFieldDescriptor.h"
@@ -12,26 +13,7 @@ static NSString *ALNORMQueryTrimmedString(NSString *value) {
 }
 
 static BOOL ALNORMQueryIdentifierIsSafe(NSString *value) {
-  NSString *candidate = ALNORMQueryTrimmedString(value);
-  if ([candidate length] == 0) {
-    return NO;
-  }
-  NSCharacterSet *allowed =
-      [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_."];
-  if ([[candidate stringByTrimmingCharactersInSet:allowed] length] > 0) {
-    return NO;
-  }
-  NSArray *parts = [candidate componentsSeparatedByString:@"."];
-  for (NSString *part in parts) {
-    if ([part length] == 0) {
-      return NO;
-    }
-    unichar first = [part characterAtIndex:0];
-    if (![[NSCharacterSet letterCharacterSet] characterIsMember:first] && first != '_') {
-      return NO;
-    }
-  }
-  return YES;
+  return ALNSQLDialectIdentifierComponents(value) != nil;
 }
 
 NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
@@ -108,7 +90,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
 }
 
 - (ALNORMFieldDescriptor *)resolvedFieldDescriptorForName:(NSString *)fieldName {
-  NSString *candidate = ALNORMQueryTrimmedString(fieldName);
+  NSString *candidate = ([fieldName isKindOfClass:[NSString class]] ? fieldName : @"");
   if ([candidate length] == 0) {
     return nil;
   }
@@ -120,14 +102,17 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
   if (field != nil) {
     return field;
   }
-  return [self.descriptor fieldForColumnName:candidate];
+  field = [self.descriptor fieldForColumnName:candidate];
+  if (field != nil) return field;
+  NSString *trimmed = ALNORMQueryTrimmedString(candidate);
+  return [trimmed isEqual:candidate] ? nil : [self resolvedFieldDescriptorForName:trimmed];
 }
 
 - (NSString *)qualifiedFieldNameForDescriptor:(ALNORMFieldDescriptor *)field {
   if (field == nil) {
     return @"";
   }
-  return [NSString stringWithFormat:@"%@.%@", self.descriptor.qualifiedTableName ?: @"", field.columnName ?: @""];
+  return [NSString stringWithFormat:@"%@.%@", self.descriptor.qualifiedTableName ?: @"", ALNSQLDialectIdentifierComponent(field.columnName)];
 }
 
 - (ALNORMQuery *)selectFields:(NSArray<NSString *> *)fieldNames {
@@ -159,7 +144,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
   NSMutableArray *predicates = [NSMutableArray arrayWithArray:self.predicates ?: @[]];
   [predicates addObject:@{
     @"kind" : @"field",
-    @"field_name" : ALNORMQueryTrimmedString(fieldName),
+    @"field_name" : ([fieldName isKindOfClass:[NSString class]] ? fieldName : @""),
     @"operator" : ALNORMQueryTrimmedString(operatorName),
     @"value" : value ?: [NSNull null],
   }];
@@ -171,7 +156,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
   NSMutableArray *predicates = [NSMutableArray arrayWithArray:self.predicates ?: @[]];
   [predicates addObject:@{
     @"kind" : @"field_in",
-    @"field_name" : ALNORMQueryTrimmedString(fieldName),
+    @"field_name" : ([fieldName isKindOfClass:[NSString class]] ? fieldName : @""),
     @"values" : [values copy] ?: @[],
   }];
   self.predicates = predicates;
@@ -182,7 +167,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
   NSMutableArray *predicates = [NSMutableArray arrayWithArray:self.predicates ?: @[]];
   [predicates addObject:@{
     @"kind" : @"field_not_in",
-    @"field_name" : ALNORMQueryTrimmedString(fieldName),
+    @"field_name" : ([fieldName isKindOfClass:[NSString class]] ? fieldName : @""),
     @"values" : [values copy] ?: @[],
   }];
   self.predicates = predicates;
@@ -218,7 +203,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
   NSMutableArray *predicates = [NSMutableArray arrayWithArray:self.predicates ?: @[]];
   [predicates addObject:@{
     @"kind" : @"field_in_subquery",
-    @"field_name" : ALNORMQueryTrimmedString(fieldName),
+    @"field_name" : ([fieldName isKindOfClass:[NSString class]] ? fieldName : @""),
     @"subquery" : subquery ?: [NSNull null],
   }];
   self.predicates = predicates;
@@ -243,7 +228,7 @@ NSString *ALNORMRelationLoadStrategyName(ALNORMRelationLoadStrategy strategy) {
 - (ALNORMQuery *)orderByField:(NSString *)fieldName descending:(BOOL)descending {
   NSMutableArray *orderings = [NSMutableArray arrayWithArray:self.orderings ?: @[]];
   [orderings addObject:@{
-    @"field_name" : ALNORMQueryTrimmedString(fieldName),
+    @"field_name" : ([fieldName isKindOfClass:[NSString class]] ? fieldName : @""),
     @"descending" : @(descending),
   }];
   self.orderings = orderings;

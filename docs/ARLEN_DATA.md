@@ -173,7 +173,7 @@ ArlenData reuse remains continuously validated by CI via:
 Expression-capable builder APIs now route through a trusted-template IR (`trusted-template-v1`) with explicit contracts:
 
 - Identifier slots use `{{token}}` and must be satisfied by `identifierBindings`.
-- Identifier bindings must resolve to safe SQL identifiers/wildcards (for example `d.state_code`, `d.*`, `*`).
+- Identifier bindings must resolve to identifier paths/wildcards (for example `d.state_code`, `d.*`, `*`, or `d."Unit Name"`). Paths accept only ordinary or double-quoted components separated by dots, never SQL fragments. Use `ALNSQLDialectIdentifierComponent` to encode a physical component from trusted metadata; embedded quotes are doubled. Aliases remain ordinary identifiers.
 - Expression parameters must be an array and placeholders must map exactly to `$1..$N`.
 - Malformed expression IR shapes fail deterministically with `ALNSQLBuilderErrorDomain` diagnostics.
 
@@ -513,3 +513,89 @@ Confidence pack:
   - `tests/fixtures/phase20/postgres_reflection_contract.json`
   - `tests/fixtures/phase20/postgres_type_codec_contract.json`
   - `tests/fixtures/phase20/backend_support_matrix.json`
+
+## PostgreSQL timestamp precision
+
+`ALNPg` binds `NSDate` scalar and array parameters with six fractional digits,
+rounded to the nearest microsecond with carry into the next second. The decoder
+and encoder preserve PostgreSQL microseconds for dates from 1900-01-01 through
+2100-12-31 on the supported GNUstep and Apple double-precision `NSDate` runtimes.
+This is a database round-trip guarantee; binary floating-point does not represent
+every decimal fraction exactly. Negative epochs and offsets are supported.
+
+`timestamptz` becomes an instant: received offsets are normalized and parameters
+are emitted in UTC. The original offset/zone name is not retained. PostgreSQL
+`timestamp without time zone` is interpreted as UTC wall-clock components, and
+binding that date back to `timestamp` preserves those components; it does not
+attach the session or machine timezone. Use explicit SQL casts for parameter
+intent. An application-supplied date is rounded, not truncated.
+
+Outside this guaranteed range, or for PostgreSQL infinity/BC/extended-year
+values, use the lossless text path instead of converting through `NSDate`:
+
+```objc
+NSDictionary *row = [connection executeQueryOne:
+    @"SELECT audit_time::text AS value FROM events WHERE id = $1"
+    parameters:@[eventID] error:&error];
+[connection executeCommand:
+    @"UPDATE prospects SET changed_at = $1::timestamptz WHERE id = $2"
+    parameters:@[row[@"value"], prospectID] error:&error];
+```
+
+Keep a deterministic PostgreSQL `DateStyle` (`ISO, YMD`) for text interchange.
+For timestamps without a timezone, use `::timestamp` instead. Text values and
+`ALNDatabaseArrayParameter` containing timestamp strings bypass `NSDate` and
+retain all six digits. NSDate conversion outside the supported range can lose
+precision or fail decoding and is not the lossless alternative. PostgreSQL's
+original zone spelling is not stored even when text is used.
+
+## Connection pool acquire timeout
+
+`ALNPg` and `ALNMSSQL` keep at most `maxConnections` connections. When all of
+them are checked out, `acquireConnection:` (and every helper built on it, such
+as `executeQuery:parameters:error:`) fails straight away with
+`ALNPgErrorPoolExhausted` / `ALNMSSQLErrorPoolExhausted`. That is the default.
+
+Set `acquireTimeout` to let a borrower wait for a connection to come back
+instead. This absorbs short bursts, for example several webhooks arriving
+within a few milliseconds, without holding more database backends open:
+
+```objc
+ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn
+                                            maxConnections:4
+                                                     error:&error];
+database.acquireTimeout = 2.0;  // seconds; 0 (default) fails immediately
+```
+
+- A waiter wakes when a connection is released, or when a dead connection is
+  discarded and its slot freed. It then reuses the idle connection or opens a
+  replacement.
+- If the wait runs out, the error is the same pool-exhausted code, with the
+  message `connection pool exhausted after waiting <seconds>s`. Its
+  `ALNPgErrorDiagnosticsKey` / `ALNMSSQLErrorDiagnosticsKey` dictionary holds
+  `max_connections`, `acquire_timeout_seconds` and `acquire_wait_seconds`.
+- Waiters are not served first-come-first-served.
+- Connects, checkout liveness checks and release-time rollbacks run outside
+  the pool lock, so one slow checkout does not hold up other borrowers.
+- Code that holds one connection while acquiring a second can stall when every
+  borrower does the same: each waits for a connection none of them will
+  release. With a timeout this ends in pool-exhausted errors after
+  `acquireTimeout` rather than hanging, but keep the timeout short (a few
+  seconds) and avoid nested acquisition.
+- `poolDiagnostics` returns `max_connections`, `in_use_connections`,
+  `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
+  `acquire_wait_seconds_total` and `pool_exhausted_count`. A rising
+  `pool_exhausted_count` or `acquire_wait_seconds_total` means the pool is too
+  small for the load.
+- `acquireTimeout` is an optional `ALNDatabaseAdapter` property; `ALNGDL2Adapter`
+  forwards it to its PostgreSQL fallback adapter.
+
+Size `maxConnections` to at least the number of requests that use the
+database concurrently (`runtimeLimits.maxConcurrentHTTPWorkers`, default 8,
+per worker process) when you can afford the backends; use `acquireTimeout`
+for bursts beyond that.
+
+Apps that build adapters from configuration can read
+`database.poolAcquireTimeoutSeconds` (default `0`, env override
+`ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`) alongside `database.poolSize`. See
+the [Configuration Reference](CONFIGURATION_REFERENCE.md).

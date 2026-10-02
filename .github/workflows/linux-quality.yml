@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   quality-gate:
+    name: linux-quality / quality-gate
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     timeout-minutes: 90
     steps:
@@ -19,6 +20,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # Full history so the module version check can find the merge base.
+          fetch-depth: 0
+
+      - name: Verify module versions bump when module sources change
+        env:
+          ARLEN_MODULE_VERSION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 ./tools/ci/check_module_versions.py --repo-root .
 
       - name: Install build dependencies
         env:
@@ -26,12 +35,65 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Install PostgreSQL server tools for isolated acceptance
+        run: |
+          if ! bash tools/ci/resolve_postgres_test_bin.sh; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          bash tools/ci/resolve_postgres_test_bin.sh
+
+      - name: Verify durable jobs concurrency, crash recovery, and database outages
+        run: |
+          source tools/source_gnustep_env.sh
+          make ci-durable-jobs
+
+      - name: Verify live PostgreSQL CLI, search, and auth cleanup regressions
+        run: |
+          bash ./tools/ci/run_postgres_regressions.sh
+
       - name: Run linux quality gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
           ARLEN_PERF_BASELINE_ROOT: tests/performance/baselines/iep-apt
         run: |
           bash ./tools/ci/run_linux_quality_gate.sh
+
+      - name: Verify OAuth socket transport, maintenance, synthetic discovery and MCP HTTP examples
+        run: |
+          source tools/source_gnustep_env.sh
+          make oauth-check mcp-check
+
+      - name: Verify generated ORM models and live quoted-identifier persistence
+        run: |
+          source tools/source_gnustep_env.sh
+          bash tools/ci/run_orm_identifier_regressions.sh
+
+      - name: Verify ops builds with optional modules absent
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-integration-filter TEST=OpsOptionalModulesIntegrationTests
+
+      - name: Verify configurable OIDC login and bounded token transport
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=AuthModuleOIDCTests
+          make test-unit-filter TEST=MetadataTransportTests
+
+      - name: Verify concurrent security-header first use in fresh processes
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=SecurityHeadersColdStartTests
+
+      - name: Verify concurrent first use of framework instance locks in fresh processes
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=InstanceLockColdStartTests
+
+      - name: Verify concurrent first use of lazy framework statics in fresh processes
+        run: |
+          source tools/source_gnustep_env.sh
+          make test-unit-filter TEST=LazyStaticColdStartTests
 
       - name: Upload perf + confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

@@ -74,6 +74,13 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 
 - (void)close;
 
+// Returns PostgreSQL notifications for channels this connection has LISTENed on
+// (@{ channel, payload, pid }), waiting up to `timeout` seconds when none are
+// queued. An empty array means the timeout passed; nil means the connection
+// failed and should be reopened. Use a dedicated connection, not a pooled one.
+- (nullable NSArray<NSDictionary *> *)waitForNotificationsWithTimeout:(NSTimeInterval)timeout
+                                                                error:(NSError *_Nullable *_Nullable)error;
+
 - (BOOL)prepareStatementNamed:(NSString *)name
                           sql:(NSString *)sql
                parameterCount:(NSInteger)parameterCount
@@ -134,6 +141,11 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 @property(nonatomic, assign) BOOL includeSQLInDiagnosticsEvents;
 @property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
 @property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;
+/// Seconds `acquireConnection:` waits for a connection to be released when all
+/// `maxConnections` are checked out. `0` (the default) fails immediately with
+/// `ALNPgErrorPoolExhausted`; a positive value fails with the same error once
+/// the wait runs out.
+@property(nonatomic, assign) NSTimeInterval acquireTimeout;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -143,6 +155,10 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 
 - (nullable ALNPgConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
 - (void)releaseConnection:(ALNPgConnection *)connection;
+/// Pool occupancy and wait counters: `max_connections`, `in_use_connections`,
+/// `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
+/// `acquire_wait_seconds_total`, `pool_exhausted_count`.
+- (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;
 - (void)releaseAdapterConnection:(id<ALNDatabaseConnection>)connection;

@@ -139,4 +139,15 @@
   XCTAssertEqualObjects([makefiles stringByAppendingPathComponent:@"GNUstep.sh"], [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
+- (void)testCIScriptsUsePortableBootstrap {
+  NSString *directory = ALNTestPathFromRepoRoot(@"tools/ci");
+  for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL]) {
+    if (![name hasSuffix:@".sh"] || ![name hasPrefix:@"run_"]) { continue; }
+    NSString *source = [NSString stringWithContentsOfFile:[directory stringByAppendingPathComponent:name]
+                                               encoding:NSUTF8StringEncoding error:NULL];
+    XCTAssertFalse([source containsString:@"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"],
+                   @"%@ must use tools/source_gnustep_env.sh", name);
+  }
+}
+
 @end

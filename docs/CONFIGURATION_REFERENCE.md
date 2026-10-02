@@ -28,8 +28,19 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `serveStatic`: serve files from `public/`
+- `serveStatic`: serve files from `public/`, mounted under `/static/` — the
+  scaffold's own `public/health.txt` answers at `/static/health.txt`, not at
+  `/health.txt`
 - `staticAllowExtensions`: extensions Arlen may serve from `public/`
+- `staticCacheControl`: optional `Cache-Control` for the default `/static` mount,
+  either one string or a glob dictionary (`ARLEN_STATIC_CACHE_CONTROL` supplies
+  a single string); `staticMounts` entries take the same form as `cacheControl`
+  (see [Static files](STATIC_FILES.md#cache-control))
+- `spaFallback`: optional single-page-app shell for unmatched HTML navigations
+  (`file`, `excludePrefixes`, `prefix`, `cacheControl`, `allowDottedPaths`; see
+  [Static files](STATIC_FILES.md#spa-history-fallback))
+- `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
+  and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog
 - `connectionTimeoutSeconds`: request/connection timeout baseline
 - `enableReusePort`: opt-in socket reuse for supported deployments
@@ -56,6 +67,19 @@ Generated apps start with:
 Raise these only for real application needs. The defaults are intentionally
 bounded.
 
+Instead of raising `maxBodyBytes` for the whole app, give only the routes that
+need it a larger limit, either `route.maxBodyBytes` in code or `maxBodyBytes` on
+a plist route. The server finds the route from the request line and applies its
+limit to `Content-Length` as soon as the head is parsed: a larger body gets `413`
+before any of it is read. Routes without an override keep `requestLimits.maxBodyBytes`,
+which can also be lower than the default. No middleware or controller runs
+before this check or before the body is read; route matching is the only input.
+On a route with an override, multipart parsing uses that limit for the whole body
+and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
+stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)). Request bodies
+with `Transfer-Encoding: chunked` are not supported and are rejected with `400`
+without reading the body; clients must send `Content-Length`.
+
 ## 4. Database
 
 The scaffold includes:
@@ -72,7 +96,14 @@ Common keys:
 
 - `connectionString`: DSN or connection string
 - `adapter`: `postgresql` by default; optional MSSQL support is also available
-- `poolSize`: adapter connection pool size
+- `poolSize`: adapter connection pool size (env `ARLEN_DB_POOL_SIZE`)
+- `poolAcquireTimeoutSeconds`: seconds a request waits for a free pooled
+  connection when all `poolSize` connections are in use; `0` (default) fails
+  immediately with a pool-exhausted error (env
+  `ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`). Arlen normalizes this key; apps
+  that create their own `ALNPg`/`ALNMSSQL` pass it to the adapter's
+  `acquireTimeout`. See
+  [ArlenData](ARLEN_DATA.md#connection-pool-acquire-timeout).
 
 If you are just starting, set the connection string first and leave the rest
 alone until you need different pool behavior.
@@ -105,6 +136,14 @@ Environment overrides:
 This is an operator/developer intent signal. Arlen does not claim it can
 statically prove every app-owned store is durable. The signal drives production
 doctor/deploy warnings for multi-worker apps.
+
+## 4.1a Storage Module Signing Secret
+
+When the `storage` module is installed, `storageModule.signingSecret` signs
+its upload and download tokens. `ARLEN_STORAGE_SIGNING_SECRET` overrides it.
+The secret must be at least 32 characters. Outside `development` and `test` the
+module refuses to configure without one; see
+[Storage Module](STORAGE_MODULE.md#signing-secret).
 
 ## 4.2 Dataverse (Optional)
 
@@ -179,10 +218,33 @@ CSRF config:
 - `csrf.enabled`
 - `csrf.headerName`
 - `csrf.queryParamName`
+- `csrf.exemptPathPrefixes`: optional array of literal absolute paths (not `/`).
+  Unsafe requests to a listed path, or below it, skip the check only when they
+  carry no session cookie, which suits bearer-authenticated API clients such as
+  MCP in a mixed browser app. Requests with the session cookie still need a
+  token. Invalid entries fail startup with error `339`.
+
+The CSRF token is created the first time a request reads it
+(`-[ALNContext csrfToken]`, which form helpers and module pages call), and only
+then is a session started and a session cookie sent. Requests that never read a
+token, including cookieless `GET`/`HEAD` for static-ish routes, get no
+`Set-Cookie`, so they cannot replace a signed-in browser's session.
 
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.
+
+A rejected unsafe request returns `403`. Requests that prefer JSON (an `Accept`
+of `application/json`, an `/api` path, or `apiOnly`) get the structured error
+envelope with the stable code `csrf_invalid`:
+
+```json
+{"error":{"code":"csrf_invalid","message":"CSRF token missing or invalid","status":403,"request_id":"...","correlation_id":"..."}}
+```
+
+Other clients get the plain-text `csrf verification failed` body. SPA clients
+can match on `error.code == "csrf_invalid"` to refresh their token and retry.
+Tokens are compared in constant time.
 
 ## 6. Rate Limits and Security Headers
 
@@ -198,7 +260,9 @@ Security headers:
 - `securityHeaders.contentSecurityPolicy`
 
 Many apps can keep the generated security-header defaults and only tighten the
-CSP later as the frontend becomes more specific.
+CSP later as the frontend becomes more specific. The headers cover every response, including static
+files, 404s and built-in endpoints, not only routed ones (see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers)).
 
 ## 6.1 Route Policies
 
@@ -339,7 +403,8 @@ security = {
 Required route fields:
 
 - `method`: one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`,
-  `OPTIONS`, or `ANY`
+  `OPTIONS`, or `ANY`. `GET` routes also answer `HEAD` unless a `HEAD` or `ANY`
+  route matches first.
 - `path`: absolute route path beginning with `/`
 - `controller`: Objective-C controller class name
 - `action`: action name without a trailing colon
@@ -351,6 +416,8 @@ Optional route fields:
 - `formats`: accepted route formats
 - `guardAction`: guard action name without a trailing colon
 - `policies`: named route policies from `security.routePolicies`
+- `maxBodyBytes`: request body limit for this route (positive integer; see
+  [Request Limits](#3-request-limits)); invalid values fail with `invalid_max_body_bytes`
 
 Configured routes are loaded during application startup after normal app and
 module route registration. Invalid configured routes fail startup with
@@ -457,3 +524,66 @@ For most new apps:
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/MODULES.md`
 - `docs/LITE_MODE_GUIDE.md`
+
+## Optional MCP module configuration
+
+`mcp.enabled` defaults to `NO`. Explicit registration is required for every tool.
+Settings include `path` (default `/mcp`), `providerClass`, `requiredScopes`,
+`requiredRoles`, `policies`, `allowedOrigins` (default empty), `maxOutputBytes`
+(default 262144), and `requestsPerMinute` (default 120). Authentication and
+existing request policies remain active. See [MCP Module](MCP_MODULE.md).
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.
+
+Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). Request bodies and multipart file parts larger than `spoolThresholdBytes` (1048576) are spooled to private temporary files under `spoolDirectory` (an absolute path; default the system temp directory) instead of memory. All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
+
+## Auth Module OIDC Providers
+
+Configure `authModule.providers.<identifier>` with `enabled = YES` and
+`type = "oidc"`. Provider identifiers contain only ASCII letters, digits,
+underscores, or hyphens; `stub` is reserved.
+
+| Key | Contract/default |
+| --- | --- |
+| `issuer` | Required exact HTTPS issuer; discovery must match it. |
+| `discoveryURL` | Required HTTPS discovery URL on an allowed endpoint host. |
+| `clientID` | Required web/public client identifier and ID-token audience. |
+| `redirectURI` | Required registered HTTPS callback URI. |
+| `clientSecretEnvironmentKey` | Required nonempty environment secret for confidential clients; never a literal secret. |
+| `tokenEndpointAuthMethod` | `client_secret_post` by default; `none` for public PKCE clients. |
+| `scopes` | Defaults to `(openid, profile, email)`; must include `openid`. |
+| `subjectClaim` | Verified claim used for the principal; defaults to `sub`. |
+| `tenantClaim`, `allowedTenants` | Configure together; nonempty allowlist required. Produces `<tenant>:<subject>`. |
+| `endpointAllowedHosts` | Lowercase host allowlist for discovery/authorization/token endpoints; defaults to issuer host. |
+| `jwksAllowedHosts` | Lowercase JWKS host allowlist; defaults to endpoint allowlist. |
+| `ctaLabel` | Login button text; defaults to `Continue with <identifier>`. |
+| `preset` | Optional. `google` fills in `type`, `issuer`, `discoveryURL`, `scopes`, `tokenEndpointAuthMethod`, `ctaLabel`, and endpoint/JWKS allowed hosts derived from the preset's endpoints. Explicit keys win. Unknown or unsupported presets fail startup. |
+| `failureRedirect` | Optional local path for failed browser callbacks; overrides `authModule.failureRedirect`. Receives `?error=<code>&provider=<identifier>`. See [Auth Module](AUTH_MODULE.md#failure-redirect). |
+| `admission` | Optional sign-in allowlist, checked after ID-token verification and before the resolver: `requireVerifiedEmail`, `allowedEmails`, `allowedEmailsEnvironmentKey`, `allowedDomains`, `requireHostedDomain`, `rejectionMessage`. See [Auth Module](AUTH_MODULE.md#admission-policy). |
+
+`authModule.hooks.providerSessionResolverClass` is required for real providers.
+Its class implements `ALNAuthProviderSessionResolver` and decides whether a
+verified principal maps to an application user. There is no automatic email
+linking or user creation on this path.
+
+`authModule.localPassword.enabled` and `authModule.providers.stub.enabled`
+default to false when a real provider is enabled, true otherwise. Explicit
+values override those defaults. Older copied manifests may explicitly enable
+stub; turn it off in application configuration. The same choices apply to
+HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
+injection, primarily for deterministic tests.
+
+See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)
+for the complete Entra example, callback/session semantics, transport limits,
+resolver implementation, and upgrade instructions.

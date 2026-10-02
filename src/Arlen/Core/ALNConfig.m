@@ -1,6 +1,7 @@
 #import "ALNConfig.h"
 #import "ALNDataCompat.h"
 #import "ALNModuleSystem.h"
+#import "ALNPositiveInteger.h"
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -83,6 +84,19 @@ static void ALNApplyIntegerOverride(NSMutableDictionary *target,
   }
   NSInteger parsed = [value integerValue];
   if (parsed < minimum) {
+    return;
+  }
+  target[key] = @(parsed);
+}
+
+static void ALNApplyNonNegativeSecondsOverride(NSMutableDictionary *target,
+                                               NSString *value,
+                                               NSString *key) {
+  if ([value length] == 0) {
+    return;
+  }
+  double parsed = [value doubleValue];
+  if (!(parsed >= 0.0)) {
     return;
   }
   target[key] = @(parsed);
@@ -400,6 +414,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       [NSMutableDictionary dictionaryWithDictionary:ALNMergeDictionaries(base, overlay)];
   config[@"environment"] = env;
   config[@"appRoot"] = [[rootPath ?: @"" stringByStandardizingPath] copy];
+  if (config[@"requestLimits"] != nil &&
+      ![config[@"requestLimits"] isKindOfClass:[NSDictionary class]]) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                              userInfo:@{NSLocalizedDescriptionKey : @"requestLimits must be a dictionary"}];
+    }
+    return nil;
+  }
 
   NSString *host = ALNEnvValueCompat("ARLEN_HOST", "MOJOOBJC_HOST");
   NSString *port = ALNEnvValueCompat("ARLEN_PORT", "MOJOOBJC_PORT");
@@ -426,11 +448,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *readinessRequiresClusterQuorum =
       ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM",
                         "MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM");
+  NSString *readinessRequiresMigrations =
+      ALNEnvValueCompat("ARLEN_READINESS_REQUIRES_MIGRATIONS", "MOJOOBJC_READINESS_REQUIRES_MIGRATIONS");
   NSString *metricsEnabled =
       ALNEnvValueCompat("ARLEN_METRICS_ENABLED", "MOJOOBJC_METRICS_ENABLED");
   NSString *serveStatic = ALNEnvValueCompat("ARLEN_SERVE_STATIC", "MOJOOBJC_SERVE_STATIC");
   NSString *staticAllowExtensions =
       ALNEnvValueCompat("ARLEN_STATIC_ALLOW_EXTENSIONS", "MOJOOBJC_STATIC_ALLOW_EXTENSIONS");
+  NSString *staticCacheControl = ALNEnvValueCompat("ARLEN_STATIC_CACHE_CONTROL", NULL);
   NSString *apiOnly = ALNEnvValueCompat("ARLEN_API_ONLY", "MOJOOBJC_API_ONLY");
   NSString *securityProfile =
       ALNEnvValueCompat("ARLEN_SECURITY_PROFILE", "MOJOOBJC_SECURITY_PROFILE");
@@ -483,6 +508,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_DATABASE_URL", "MOJOOBJC_DATABASE_URL");
   NSString *databasePoolSize =
       ALNEnvValueCompat("ARLEN_DB_POOL_SIZE", "MOJOOBJC_DB_POOL_SIZE");
+  NSString *databasePoolAcquireTimeoutSeconds =
+      ALNEnvValueCompat("ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", NULL);
   NSString *databaseAdapter =
       ALNEnvValueCompat("ARLEN_DB_ADAPTER", "MOJOOBJC_DB_ADAPTER");
   NSString *stateDurable = ALNEnvValueCompat("ARLEN_STATE_DURABLE", NULL);
@@ -493,6 +520,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_SESSION_ENABLED", "MOJOOBJC_SESSION_ENABLED");
   NSString *sessionSecret =
       ALNEnvValueCompat("ARLEN_SESSION_SECRET", "MOJOOBJC_SESSION_SECRET");
+  NSString *storageSigningSecret = ALNEnvValueCompat("ARLEN_STORAGE_SIGNING_SECRET", NULL);
   NSString *sessionCookieName =
       ALNEnvValueCompat("ARLEN_SESSION_COOKIE_NAME", "MOJOOBJC_SESSION_COOKIE_NAME");
   NSString *sessionMaxAge =
@@ -604,6 +632,11 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if ([staticAllowExtensionsValue count] > 0) {
     config[@"staticAllowExtensions"] = staticAllowExtensionsValue;
   }
+  NSString *trimmedStaticCacheControl =
+      [staticCacheControl stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmedStaticCacheControl length] > 0) {
+    config[@"staticCacheControl"] = trimmedStaticCacheControl;
+  }
   NSNumber *apiOnlyValue = ALNParseBooleanString(apiOnly);
   if (apiOnlyValue != nil) {
     config[@"apiOnly"] = apiOnlyValue;
@@ -681,6 +714,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     database[@"adapter"] = [databaseAdapter lowercaseString];
   }
   ALNApplyIntegerOverride(database, databasePoolSize, @"poolSize", 1);
+  ALNApplyNonNegativeSecondsOverride(database,
+                                     databasePoolAcquireTimeoutSeconds,
+                                     @"poolAcquireTimeoutSeconds");
   config[@"database"] = database;
 
   NSMutableDictionary *state =
@@ -718,6 +754,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   ALNApplyIntegerOverride(session, sessionMaxAge, @"maxAgeSeconds", 1);
   config[@"session"] = session;
+
+  if ([storageSigningSecret length] > 0) {
+    NSMutableDictionary *storageModule = [NSMutableDictionary
+        dictionaryWithDictionary:[config[@"storageModule"] isKindOfClass:[NSDictionary class]] ? config[@"storageModule"]
+                                                                                                : @{}];
+    storageModule[@"signingSecret"] = storageSigningSecret;
+    config[@"storageModule"] = storageModule;
+  }
 
   NSMutableDictionary *csrf =
       [NSMutableDictionary dictionaryWithDictionary:config[@"csrf"] ?: @{}];
@@ -858,6 +902,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (readinessRequiresClusterQuorumValue != nil) {
     observability[@"readinessRequiresClusterQuorum"] = readinessRequiresClusterQuorumValue;
   }
+  NSNumber *readinessRequiresMigrationsValue = ALNParseBooleanString(readinessRequiresMigrations);
+  if (readinessRequiresMigrationsValue != nil) {
+    observability[@"readinessRequiresMigrations"] = readinessRequiresMigrationsValue;
+  }
   NSNumber *metricsEnabledValue = ALNParseBooleanString(metricsEnabled);
   if (metricsEnabledValue != nil) {
     observability[@"metricsEnabled"] = metricsEnabledValue;
@@ -948,6 +996,12 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (finalLimits[@"maxBodyBytes"] == nil) {
     finalLimits[@"maxBodyBytes"] = @(1048576);
+  }
+  NSDictionary *multipartDefaults = @{ @"maxMultipartParts":@128,
+      @"maxMultipartFieldBytes":@65536, @"maxMultipartFileBytes":@1048576,
+      @"maxMultipartHeaderBytes":@16384 };
+  for (NSString *key in multipartDefaults) {
+    if (finalLimits[key] == nil) finalLimits[key] = multipartDefaults[key];
   }
   config[@"requestLimits"] = finalLimits;
 
@@ -1050,6 +1104,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       [NSMutableDictionary dictionaryWithDictionary:config[@"database"] ?: @{}];
   if (finalDatabase[@"poolSize"] == nil) {
     finalDatabase[@"poolSize"] = @(8);
+  }
+  if (finalDatabase[@"poolAcquireTimeoutSeconds"] == nil) {
+    finalDatabase[@"poolAcquireTimeoutSeconds"] = @(0);
   }
   if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
       [finalDatabase[@"adapter"] length] == 0) {
@@ -1258,6 +1315,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
+  // Pending schema migrations fail /readyz by default in production (GitHub issue 90).
+  if (finalObservability[@"readinessRequiresMigrations"] == nil) {
+    finalObservability[@"readinessRequiresMigrations"] = @([config[@"environment"] isEqual:@"production"]);
+  }
   if (finalObservability[@"metricsEnabled"] == nil) {
     finalObservability[@"metricsEnabled"] = @(YES);
   }
@@ -1339,9 +1400,43 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"requestDispatchMode"] = resolvedRequestDispatchMode;
 
-  finalLimits[@"maxRequestLineBytes"] = @([finalLimits[@"maxRequestLineBytes"] integerValue]);
-  finalLimits[@"maxHeaderBytes"] = @([finalLimits[@"maxHeaderBytes"] integerValue]);
-  finalLimits[@"maxBodyBytes"] = @([finalLimits[@"maxBodyBytes"] integerValue]);
+  for (NSString *key in @[@"maxRequestLineBytes", @"maxHeaderBytes", @"maxBodyBytes",
+                         @"maxMultipartParts", @"maxMultipartFieldBytes",
+                         @"maxMultipartFileBytes", @"maxMultipartHeaderBytes"]) {
+    NSNumber *value = ALNPositiveInteger(finalLimits[key]);
+    if (value == nil) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                                userInfo:@{NSLocalizedDescriptionKey :
+                                    [NSString stringWithFormat:@"requestLimits.%@ must be a positive integer in range", key]}];
+      }
+      return nil;
+    }
+    finalLimits[key] = value;
+  }
+  if (finalLimits[@"spoolThresholdBytes"] != nil) {
+    NSNumber *value = ALNPositiveInteger(finalLimits[@"spoolThresholdBytes"]);
+    if (value == nil) {
+      if (error != NULL) {
+        *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                                userInfo:@{NSLocalizedDescriptionKey :
+                                    @"requestLimits.spoolThresholdBytes must be a positive integer in range"}];
+      }
+      return nil;
+    }
+    finalLimits[@"spoolThresholdBytes"] = value;
+  }
+  // Existence is checked when a request spools: CLI tooling loads config off-host.
+  id spoolDirectory = finalLimits[@"spoolDirectory"];
+  if (spoolDirectory != nil &&
+      (![spoolDirectory isKindOfClass:[NSString class]] || ![spoolDirectory isAbsolutePath])) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNConfigErrorDomain code:3
+                              userInfo:@{NSLocalizedDescriptionKey :
+                                  @"requestLimits.spoolDirectory must be an absolute path"}];
+    }
+    return nil;
+  }
   config[@"requestLimits"] = finalLimits;
 
   finalRuntimeLimits[@"maxConcurrentHTTPSessions"] =
@@ -1380,6 +1475,12 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   config[@"propaneAccessories"] = finalAccessories;
 
   finalDatabase[@"poolSize"] = @([finalDatabase[@"poolSize"] integerValue]);
+  double poolAcquireTimeoutSeconds =
+      [finalDatabase[@"poolAcquireTimeoutSeconds"] respondsToSelector:@selector(doubleValue)]
+          ? [finalDatabase[@"poolAcquireTimeoutSeconds"] doubleValue]
+          : 0.0;
+  finalDatabase[@"poolAcquireTimeoutSeconds"] =
+      @((poolAcquireTimeoutSeconds > 0.0) ? poolAcquireTimeoutSeconds : 0.0);
   if (![finalDatabase[@"adapter"] isKindOfClass:[NSString class]] ||
       [finalDatabase[@"adapter"] length] == 0) {
     finalDatabase[@"adapter"] = @"postgresql";
@@ -1501,6 +1602,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @([finalObservability[@"readinessRequiresStartup"] boolValue]);
   finalObservability[@"readinessRequiresClusterQuorum"] =
       @([finalObservability[@"readinessRequiresClusterQuorum"] boolValue]);
+  finalObservability[@"readinessRequiresMigrations"] =
+      @([finalObservability[@"readinessRequiresMigrations"] boolValue]);
   finalObservability[@"metricsEnabled"] =
       @([finalObservability[@"metricsEnabled"] boolValue]);
   config[@"observability"] = finalObservability;

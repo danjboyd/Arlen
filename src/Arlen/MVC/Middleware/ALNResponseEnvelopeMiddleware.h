@@ -7,6 +7,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Set to @YES in a context stash for protocols that require their own envelope.
+FOUNDATION_EXPORT NSString *const ALNResponseEnvelopeDisabledStashKey;
+
 @interface ALNResponseEnvelopeMiddleware : NSObject <ALNMiddleware>
 
 - (instancetype)init;

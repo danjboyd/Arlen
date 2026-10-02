@@ -6,6 +6,7 @@
 #import "ALNModuleSystem.h"
 #import "ALNServices.h"
 
+@protocol ALNDatabaseConnection;
 @class ALNApplication;
 @class ALNContext;
 @class ALNJobsModuleRuntime;
@@ -33,6 +34,9 @@ typedef NS_ENUM(NSInteger, ALNJobsModuleErrorCode) {
                            error:(NSError *_Nullable *_Nullable)error;
 
 @optional
+// If implemented, the runtime uses this in place of the legacy perform method.
+- (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context
+                         result:(id _Nullable *_Nullable)result error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)jobsModuleDefaultEnqueueOptions;
 
 @end
@@ -79,6 +83,12 @@ typedef NS_ENUM(NSInteger, ALNJobsModuleErrorCode) {
 - (nullable NSString *)enqueueJobIdentifier:(NSString *)identifier
                                     payload:(nullable NSDictionary *)payload
                                     options:(nullable NSDictionary *)options
+                                      error:(NSError *_Nullable *_Nullable)error;
+// Validates and wraps the module payload, then enqueues on the caller's transaction.
+- (nullable NSString *)enqueueJobIdentifier:(NSString *)identifier
+                                    payload:(nullable NSDictionary *)payload
+                                    options:(nullable NSDictionary *)options
+                               onConnection:(nullable id<ALNDatabaseConnection>)connection
                                       error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)runSchedulerAt:(nullable NSDate *)timestamp
                                     error:(NSError *_Nullable *_Nullable)error;

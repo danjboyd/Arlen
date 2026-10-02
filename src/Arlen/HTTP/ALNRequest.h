@@ -2,6 +2,7 @@
 #define ALN_REQUEST_H
 
 #import <Foundation/Foundation.h>
+#import "ALNMultipart.h"
 
 #ifndef ARLEN_ENABLE_LLHTTP
 #define ARLEN_ENABLE_LLHTTP 1
@@ -26,6 +27,27 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, strong, readonly) NSData *body;
 @property(nonatomic, copy, readonly) NSDictionary *queryParams;
 @property(nonatomic, copy, readonly) NSDictionary *formParams;
+// formParams keeps the last text value for each name, matching URL-encoded forms.
+@property(nonatomic, copy, readonly) NSArray<ALNMultipartPart *> *multipartParts;
+@property(nonatomic, copy, readonly) NSArray<ALNUpload *> *uploads;
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSArray<NSString *> *> *formValues;
+@property(nonatomic, strong, readonly, nullable) NSError *multipartError;
+// Applies defaults plus the supplied limits; failure exposes no partial results.
+- (BOOL)parseMultipartFormWithLimits:(nullable NSDictionary *)limits
+                             error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<ALNUpload *> *)uploadsForName:(NSString *)name;
+// Removes spooled upload files (see ALNUpload temporaryFilePath). Runs automatically
+// when the request is deallocated; safe to call more than once.
+- (void)removeTemporaryFiles;
+
+// Server internals for request bodies spooled to disk (requestLimits.spoolThresholdBytes).
+// Parses a complete request head (through CRLF CRLF) with the given backend and
+// no body, then `adoptSpooledBodyAtPath:` maps the spooled file as `body`. The
+// request owns the file and removes it with its other temporary files.
++ (nullable ALNRequest *)requestFromHeadData:(NSData *)head
+                                     backend:(ALNHTTPParserBackend)backend
+                                       error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError *_Nullable *_Nullable)error;
 @property(nonatomic, copy, readonly) NSDictionary *cookies;
 @property(nonatomic, copy) NSDictionary *routeParams;
 @property(nonatomic, copy) NSString *remoteAddress;
@@ -34,6 +56,8 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 @property(nonatomic, assign) double parseDurationMilliseconds;
 @property(nonatomic, assign) double responseWriteDurationMilliseconds;
 
+// Case-insensitive header lookup. Never nil: an absent header (or an empty name)
+// returns @"", the same as a present-but-empty header. Test with `length == 0`.
 - (NSString *)headerValueForName:(NSString *)name;
 - (nullable NSString *)queryValueForName:(NSString *)name;
 

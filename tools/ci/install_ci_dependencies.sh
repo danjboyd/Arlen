@@ -13,7 +13,7 @@ if [[ "$platform" == "Darwin" ]]; then
       echo "ci: Homebrew is required for the Apple CI bootstrap path" >&2
       exit 1
     fi
-    brew install openssl@3
+    brew install openssl@3 postgresql@17 libpq
   }
 
   validate_apple_toolchain() {
@@ -86,9 +86,11 @@ install_apt_toolchain() {
   "${apt_cmd[@]}" install -y \
     clang \
     curl \
+    libcurl4-openssl-dev \
     jq \
     make \
     pandoc \
+    postgresql \
     python3 \
     gnustep-clang-tools-xctest \
     gnustep-clang-make \
@@ -139,6 +141,22 @@ validate_clang_gnustep_toolchain() {
     echo "ci: observed flags: $gnustep_objc_flags" >&2
     exit 1
   fi
+
+  local curl_probe_dir
+  curl_probe_dir="$(mktemp -d)"
+  cat > "$curl_probe_dir/probe.c" <<'CURL_PROBE'
+#include <curl/curl.h>
+int main(void) {
+  long required = CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL;
+  return (curl_version_info(CURLVERSION_NOW)->features & required) != required;
+}
+CURL_PROBE
+  if ! clang "$curl_probe_dir/probe.c" -lcurl -o "$curl_probe_dir/probe" || ! "$curl_probe_dir/probe"; then
+    rm -rf "$curl_probe_dir"
+    echo "ci: libcurl development files with TLS and asynchronous DNS are required" >&2
+    exit 1
+  fi
+  rm -rf "$curl_probe_dir"
 
   echo "ci: GNUstep strategy: $strategy"
   echo "ci: GNUSTEP_SH: $gnustep_sh"

@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 
 #import "ALNAuthProviderSessionBridge.h"
+#import "ALNAuthModuleOIDC.h"
 #import "ALNModuleSystem.h"
 
 @class ALNApplication;
@@ -86,6 +87,12 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *changePasswordPath;
 @property(nonatomic, copy, readonly) NSString *mfaManagePath;
 @property(nonatomic, copy, readonly) NSString *totpPath;
+/// Where module surfaces send a user who needs higher assurance
+/// (`authModule.paths.stepUp`). Defaults to `totpPath`. Apps whose users sign in
+/// only through an identity provider point this at a provider login with
+/// `prompt=login`, so a step-up is a fresh sign-in rather than a TOTP page the
+/// user has no factor for.
+@property(nonatomic, copy, readonly) NSString *stepUpPath;
 @property(nonatomic, copy, readonly) NSString *totpVerifyPath;
 @property(nonatomic, copy, readonly) NSString *smsPath;
 @property(nonatomic, copy, readonly) NSString *smsStartPath;
@@ -97,9 +104,13 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readonly) NSString *defaultRedirect;
 @property(nonatomic, copy, readonly) NSArray<NSDictionary *> *loginProviders;
+@property(nonatomic, assign, readonly) BOOL localPasswordEnabled;
 @property(nonatomic, copy, readonly) NSString *uiMode;
 @property(nonatomic, copy, readonly) NSString *layoutTemplate;
 @property(nonatomic, copy, readonly) NSString *generatedPagePrefix;
+// URL prefix for module-ui assets (auth.css, auth_totp_qr.js): `<paths.prefix>/assets`
+// once registration mounts them there, else the framework's `/modules/auth` mount.
+@property(nonatomic, copy, readonly) NSString *uiAssetPrefix;
 @property(nonatomic, assign, readonly) BOOL smsEnabled;
 
 + (instancetype)sharedRuntime;

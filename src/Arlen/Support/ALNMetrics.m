@@ -46,6 +46,7 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
 @property(nonatomic, strong) NSMutableDictionary *counters;
 @property(nonatomic, strong) NSMutableDictionary *gauges;
 @property(nonatomic, strong) NSMutableDictionary *timings;
+@property(nonatomic, strong) NSLock *lock;
 
 @end
 
@@ -57,6 +58,9 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
     _counters = [NSMutableDictionary dictionary];
     _gauges = [NSMutableDictionary dictionary];
     _timings = [NSMutableDictionary dictionary];
+    // Created before the registry is shared; avoids first-use @synchronized
+    // races in libobjc2 (gnustep/libobjc2#424).
+    _lock = [[NSLock alloc] init];
   }
   return self;
 }
@@ -69,11 +73,14 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   if ([name length] == 0) {
     return;
   }
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     double current = [self.counters[name] respondsToSelector:@selector(doubleValue)]
                          ? [self.counters[name] doubleValue]
                          : 0.0;
     self.counters[name] = @(current + amount);
+  } @finally {
+    [self.lock unlock];
   }
 }
 
@@ -81,8 +88,11 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   if ([name length] == 0) {
     return;
   }
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     self.gauges[name] = @(value);
+  } @finally {
+    [self.lock unlock];
   }
 }
 
@@ -90,11 +100,14 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   if ([name length] == 0) {
     return;
   }
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     double current = [self.gauges[name] respondsToSelector:@selector(doubleValue)]
                          ? [self.gauges[name] doubleValue]
                          : 0.0;
     self.gauges[name] = @(current + delta);
+  } @finally {
+    [self.lock unlock];
   }
 }
 
@@ -108,7 +121,8 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
     duration = 0.0;
   }
 
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSMutableDictionary *entry =
         [self.timings[name] isKindOfClass:[NSMutableDictionary class]]
             ? self.timings[name]
@@ -128,11 +142,14 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
     entry[@"min"] = @(min);
     entry[@"max"] = @(max);
     self.timings[name] = entry;
+  } @finally {
+    [self.lock unlock];
   }
 }
 
 - (NSDictionary *)snapshot {
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSMutableDictionary *timingsSnapshot = [NSMutableDictionary dictionary];
     for (NSString *name in self.timings) {
       NSDictionary *entry = self.timings[name];
@@ -148,6 +165,8 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
       @"gauges" : [NSDictionary dictionaryWithDictionary:self.gauges],
       @"timings" : timingsSnapshot,
     };
+  } @finally {
+    [self.lock unlock];
   }
 }
 

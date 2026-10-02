@@ -112,6 +112,35 @@ def validate_registry(payload: Dict[str, Any]) -> ValidationResult:
 
 
 
+def validate_tsan_patterns(payload, suppression_path, repo_root):
+    """Every live TSAN pattern needs an owner, rationale and reviewable evidence."""
+    errors = []
+    registered = []
+    entries = payload.get("suppressions", [])
+    if not isinstance(entries, list):
+        return ["registry must contain suppressions array"]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("status", "active") != "active" or entry.get("sanitizer") != "thread":
+            continue
+        patterns = entry.get("patterns")
+        if not isinstance(patterns, list) or not patterns or not all(isinstance(p, str) for p in patterns):
+            errors.append(f"{entry.get('id')}: missing TSAN patterns")
+        else:
+            registered.extend(patterns)
+        evidence = entry.get("evidence", "")
+        if not evidence or not (repo_root / evidence).is_file():
+            errors.append(f"{entry.get('id')}: missing evidence document")
+    actual = [line.strip() for line in suppression_path.read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith("#")]
+    if sorted(actual) != sorted(registered):
+        errors.append("TSAN suppression file and active registry patterns differ")
+    if len(actual) != len(set(actual)):
+        errors.append("duplicate TSAN suppression patterns")
+    return errors
+
+
 def load_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -128,11 +157,13 @@ def main() -> int:
         default="tests/fixtures/sanitizers/phase9h_suppressions.json",
         help="Path to suppression registry fixture",
     )
+    parser.add_argument("--tsan-suppressions", default="tests/fixtures/sanitizers/phase9h_tsan.supp")
     args = parser.parse_args()
 
     fixture_path = Path(args.fixture).resolve()
     payload = load_json(fixture_path)
     result = validate_registry(payload)
+    result.errors.extend(validate_tsan_patterns(payload, Path(args.tsan_suppressions), Path.cwd()))
 
     if result.errors:
         print("sanitizer-suppressions: validation failed")

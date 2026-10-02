@@ -1,5 +1,7 @@
 #import "ALNAdminUIModule.h"
 
+#import <dispatch/dispatch.h>
+
 #import "../../auth/Sources/ALNAuthModule.h"
 
 #import "ALNApplication.h"
@@ -103,6 +105,30 @@ static NSString *AUPathJoin(NSString *prefix, NSString *suffix) {
     return [@"/" stringByAppendingString:cleanSuffix];
   }
   return [NSString stringWithFormat:@"%@/%@", cleanPrefix, cleanSuffix];
+}
+
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol AUStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *AUStepUpPath(id runtime) {
+  id<AUStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *AUStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = AUStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
 }
 
 static NSString *AUPercentEncodedQueryComponent(NSString *value) {
@@ -1053,11 +1079,10 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
 
 + (instancetype)sharedRuntime {
   static ALNAdminUIModuleRuntime *runtime = nil;
-  @synchronized(self) {
-    if (runtime == nil) {
-      runtime = [[ALNAdminUIModuleRuntime alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    runtime = [[ALNAdminUIModuleRuntime alloc] init];
+  });
   return runtime;
 }
 
@@ -1959,9 +1984,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     return NO;
   }
   if ([ctx authAssuranceLevel] < 2) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    AUPercentEncodedQueryComponent(returnTo)];
+    NSString *location = AUStepUpLocation(self.authRuntime, AUPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -3322,7 +3345,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     if (![child configureAuthAssuranceForRouteNamed:routeName
                          minimumAuthAssuranceLevel:2
                    maximumAuthenticationAgeSeconds:0
-                                        stepUpPath:[[ALNAuthModuleRuntime sharedRuntime] totpPath]
+                                        stepUpPath:AUStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                              error:&routeError]) {
       if (error != NULL) {
         *error = routeError;

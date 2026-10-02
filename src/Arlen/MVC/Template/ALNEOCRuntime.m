@@ -1,4 +1,5 @@
 #import "ALNEOCRuntime.h"
+#import <dispatch/dispatch.h>
 
 NSString *const ALNEOCErrorDomain = @"Arlen.EOC.Error";
 NSString *const ALNEOCErrorLineKey = @"line";
@@ -76,24 +77,42 @@ static id ALNEOCLookupValueOnObject(id object, NSString *name, BOOL *found);
 
 @end
 
+static NSMutableDictionary *gALNEOCTemplateRegistry = nil;
+static NSMutableDictionary *gALNEOCTemplateLayoutRegistry = nil;
+static NSLock *gALNEOCTemplateRegistryLock = nil;
+static NSLock *gALNEOCTemplateLayoutRegistryLock = nil;
+
+// Registries and their locks are created together, before any caller can lock
+// them; libobjc2's first @synchronized on an instance can race
+// (gnustep/libobjc2#424).
+static void ALNEOCInitializeTemplateRegistries(void) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    gALNEOCTemplateRegistry = [[NSMutableDictionary alloc] init];
+    gALNEOCTemplateLayoutRegistry = [[NSMutableDictionary alloc] init];
+    gALNEOCTemplateRegistryLock = [[NSLock alloc] init];
+    gALNEOCTemplateLayoutRegistryLock = [[NSLock alloc] init];
+  });
+}
+
 static NSMutableDictionary *ALNEOCTemplateRegistry(void) {
-  static NSMutableDictionary *registry = nil;
-  @synchronized([NSThread class]) {
-    if (registry == nil) {
-      registry = [[NSMutableDictionary alloc] init];
-    }
-    return registry;
-  }
+  ALNEOCInitializeTemplateRegistries();
+  return gALNEOCTemplateRegistry;
 }
 
 static NSMutableDictionary *ALNEOCTemplateLayoutRegistry(void) {
-  static NSMutableDictionary *registry = nil;
-  @synchronized([NSThread class]) {
-    if (registry == nil) {
-      registry = [[NSMutableDictionary alloc] init];
-    }
-    return registry;
-  }
+  ALNEOCInitializeTemplateRegistries();
+  return gALNEOCTemplateLayoutRegistry;
+}
+
+static NSLock *ALNEOCTemplateRegistryLock(void) {
+  ALNEOCInitializeTemplateRegistries();
+  return gALNEOCTemplateRegistryLock;
+}
+
+static NSLock *ALNEOCTemplateLayoutRegistryLock(void) {
+  ALNEOCInitializeTemplateRegistries();
+  return gALNEOCTemplateLayoutRegistryLock;
 }
 
 static NSMutableDictionary *ALNEOCThreadOptions(void) {
@@ -684,11 +703,17 @@ BOOL ALNEOCAppendYield(NSMutableString *out,
 }
 
 void ALNEOCClearTemplateRegistry(void) {
-  @synchronized(ALNEOCTemplateRegistry()) {
+  [ALNEOCTemplateRegistryLock() lock];
+  @try {
     [ALNEOCTemplateRegistry() removeAllObjects];
+  } @finally {
+    [ALNEOCTemplateRegistryLock() unlock];
   }
-  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+  [ALNEOCTemplateLayoutRegistryLock() lock];
+  @try {
     [ALNEOCTemplateLayoutRegistry() removeAllObjects];
+  } @finally {
+    [ALNEOCTemplateLayoutRegistryLock() unlock];
   }
 }
 
@@ -698,8 +723,11 @@ void ALNEOCRegisterTemplate(NSString *logicalPath, ALNEOCRenderFunction function
     return;
   }
 
-  @synchronized(ALNEOCTemplateRegistry()) {
+  [ALNEOCTemplateRegistryLock() lock];
+  @try {
     ALNEOCTemplateRegistry()[canonical] = [NSValue valueWithPointer:function];
+  } @finally {
+    [ALNEOCTemplateRegistryLock() unlock];
   }
 }
 
@@ -710,8 +738,11 @@ void ALNEOCRegisterTemplateLayout(NSString *logicalPath, NSString *layoutLogical
     return;
   }
 
-  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+  [ALNEOCTemplateLayoutRegistryLock() lock];
+  @try {
     ALNEOCTemplateLayoutRegistry()[canonical] = normalizedLayout;
+  } @finally {
+    [ALNEOCTemplateLayoutRegistryLock() unlock];
   }
 }
 
@@ -722,11 +753,14 @@ NSString *ALNEOCResolveTemplateLayout(NSString *logicalPath) {
   }
 
   NSString *layout = nil;
-  @synchronized(ALNEOCTemplateLayoutRegistry()) {
+  [ALNEOCTemplateLayoutRegistryLock() lock];
+  @try {
     id current = ALNEOCTemplateLayoutRegistry()[canonical];
     if ([current isKindOfClass:[NSString class]]) {
       layout = current;
     }
+  } @finally {
+    [ALNEOCTemplateLayoutRegistryLock() unlock];
   }
   return layout;
 }
@@ -738,8 +772,11 @@ ALNEOCRenderFunction ALNEOCResolveTemplate(NSString *logicalPath) {
   }
 
   NSValue *ptr = nil;
-  @synchronized(ALNEOCTemplateRegistry()) {
+  [ALNEOCTemplateRegistryLock() lock];
+  @try {
     ptr = ALNEOCTemplateRegistry()[canonical];
+  } @finally {
+    [ALNEOCTemplateRegistryLock() unlock];
   }
 
   if (ptr == nil) {

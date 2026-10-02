@@ -590,6 +590,92 @@ static NSUInteger gPhase15UIContextCalls = 0;
   XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_callback"]);
 }
 
+static ALNContext *ALNTestStandInContext(void) {
+  // The runtime only forwards the context to the session-policy hook, and these
+  // cases configure none, so a stand-in keeps the nonnull contract satisfied.
+  return (ALNContext *)(id)[NSObject new];
+}
+
+/// An unvalidated `return_to` made every successful sign-in an open redirect.
+/// The post-login target must stay same-origin.
+- (void)testPostLoginRedirectRejectsOffOriginTargets_OPEN_REDIRECT {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+
+  NSArray *hostile = @[
+    @"https://evil.example/",           // absolute, its own origin
+    @"http://evil.example/",
+    @"//evil.example/",                 // protocol-relative
+    @"/\\evil.example",                 // backslash normalizes to a slash in browsers
+    @"\\\\evil.example",
+    @"javascript:alert(1)",             // not a path at all
+    @"dashboard",                       // unrooted relative
+    @"https:/evil.example",
+  ];
+  for (NSString *target in hostile) {
+    NSString *resolved = [runtime postLoginRedirectForContext:ALNTestStandInContext() user:@{} defaultRedirect:target];
+    XCTAssertEqualObjects(@"/dashboard", resolved, @"should have refused %@", target);
+  }
+}
+
+- (void)testPostLoginRedirectKeepsSameOriginTargets_OPEN_REDIRECT {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+
+  // Ordinary in-app returns must survive untouched, query and fragment included.
+  for (NSString *target in @[ @"/tickets", @"/tickets/42?tab=notes", @"/a/b#section", @"/" ]) {
+    XCTAssertEqualObjects(target,
+                          [runtime postLoginRedirectForContext:ALNTestStandInContext() user:@{} defaultRedirect:target]);
+  }
+}
+
+- (void)testPostLoginRedirectFallsBackWhenTargetIsEmpty_OPEN_REDIRECT {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  XCTAssertEqualObjects(@"/dashboard",
+                        [runtime postLoginRedirectForContext:ALNTestStandInContext() user:@{} defaultRedirect:@""]);
+  XCTAssertEqualObjects(@"/dashboard",
+                        [runtime postLoginRedirectForContext:ALNTestStandInContext() user:@{} defaultRedirect:@"   "]);
+}
+
+/// CR/LF in a redirect target is header splitting, not just an odd path.
+- (void)testPostLoginRedirectRejectsControlCharacters_OPEN_REDIRECT {
+  if ([[self pgTestDSN] length] == 0) {
+    return;
+  }
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  for (NSString *target in @[ @"/a\r\nSet-Cookie: x=1", @"/a\tb", @"/a\x7F" ]) {
+    XCTAssertEqualObjects(@"/dashboard",
+                          [runtime postLoginRedirectForContext:ALNTestStandInContext() user:@{} defaultRedirect:target]);
+  }
+}
+
 - (void)testSMSRoutesAreNotRegisteredWhenSMSIsDisabled {
   if ([[self pgTestDSN] length] == 0) {
     return;

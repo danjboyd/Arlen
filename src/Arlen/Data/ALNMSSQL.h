@@ -59,6 +59,11 @@ typedef NS_ENUM(NSInteger, ALNMSSQLErrorCode) {
 @property(nonatomic, copy, readonly) NSString *connectionString;
 @property(nonatomic, assign, readonly) NSUInteger maxConnections;
 @property(nonatomic, assign) BOOL connectionLivenessChecksEnabled;
+/// Seconds `acquireConnection:` waits for a connection to be released when all
+/// `maxConnections` are checked out. `0` (the default) fails immediately with
+/// `ALNMSSQLErrorPoolExhausted`; a positive value fails with the same error
+/// once the wait runs out.
+@property(nonatomic, assign) NSTimeInterval acquireTimeout;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -68,6 +73,8 @@ typedef NS_ENUM(NSInteger, ALNMSSQLErrorCode) {
 
 - (nullable ALNMSSQLConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
 - (void)releaseConnection:(ALNMSSQLConnection *)connection;
+/// Pool occupancy and wait counters; same keys as `-[ALNPg poolDiagnostics]`.
+- (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                         parameters:(NSArray *)parameters

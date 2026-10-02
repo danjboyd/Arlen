@@ -133,6 +133,12 @@ Config semantics:
 - `ui.contextClass`
   - optional Objective-C hook class for page-level layout and context injection
 
+In `module-ui`, the stock stylesheet and TOTP QR script are served under the
+module's own prefix at `<paths.prefix>/assets/` (default `/auth/assets/`), and
+pages link them there. An app mounted behind a path-scoped reverse proxy that
+only forwards `paths.prefix` therefore gets styled pages without extra config.
+The files are also still served at `/modules/auth/`.
+
 Session payloads expose both `ui_mode` and `login_providers`, so app-owned or
 SPA clients can discover the active presentation mode and provider affordances
 without hard-coding them.
@@ -200,6 +206,15 @@ Use `authModule.hooks` for auth behavior and policy seams:
 - notification delivery
 - session policy
 - provider mapping
+
+Post-login redirects stay on the app's origin. Every route that accepts
+`return_to` (login, registration, MFA, recovery codes, SMS, and provider login)
+keeps it only when it is a single-slash absolute path such as `/dashboard?tab=2`.
+Absolute URLs, protocol-relative `//host` values, backslashes, and control
+characters are dropped, and the redirect falls back to `defaultRedirect`. An app
+that really needs a cross-origin return implements
+`authModulePostLoginRedirectForContext:user:defaultRedirect:` on its session
+policy hook, whose result is used as-is.
 
 Use `ALNAuthModuleUIContextHook` for page-level UI ownership in `module-ui`:
 
@@ -285,3 +300,337 @@ The result payload includes `user`, `session`, `created_user`,
 - `headless`: `examples/auth_ui_modes/headless/README.md`
 - `module-ui`: `examples/auth_ui_modes/module_ui/README.md`
 - `generated-app-ui`: `examples/auth_ui_modes/generated_app_ui/README.md`
+
+## Configurable OIDC Login (including Microsoft Entra)
+
+Enable real providers under `authModule.providers`. The module owns discovery,
+authorization-code login with PKCE S256, the session-bound state and nonce,
+token exchange, RS256 ID-token verification against JWKS, and session completion.
+This is browser sign-in; `ALNOAuthResourceServer` separately handles bearer-token
+access to APIs and MCP.
+
+```plist
+authModule = {
+  paths = { prefix = "/context/auth"; };
+  localPassword = { enabled = NO; };
+  providers = {
+    stub = { enabled = NO; };
+    entra = {
+      enabled = YES;
+      type = "oidc";
+      ctaLabel = "Sign in with Microsoft";
+      issuer = "https://login.microsoftonline.com/<TENANT_GUID>/v2.0";
+      discoveryURL = "https://login.microsoftonline.com/<TENANT_GUID>/v2.0/.well-known/openid-configuration";
+      clientID = "<WEB_CLIENT_GUID>";
+      clientSecretEnvironmentKey = "ARLEN_AUTH_ENTRA_CLIENT_SECRET";
+      redirectURI = "https://example.com/context/auth/provider/entra/callback";
+      scopes = ("openid", "profile", "email");
+      subjectClaim = "oid";
+      tenantClaim = "tid";
+      allowedTenants = ("<TENANT_GUID>");
+      jwksAllowedHosts = ("login.microsoftonline.com");
+    };
+  };
+  hooks = { providerSessionResolverClass = "CompanyIdentityResolver"; };
+};
+```
+
+For local development against `boomhauer`, `redirectURI` may be a loopback
+`http` URL (`http://localhost:3000/...`, `http://127.0.0.1:3000/...` or
+`http://[::1]:3000/...`) when the app environment is `development` or `test`.
+Google and Entra both accept loopback http redirect URIs for development
+clients. Any other environment, including `production` and `staging`, refuses
+them at startup. Issuer, discovery, token and JWKS URLs are always HTTPS-only.
+
+Register the exact HTTPS redirect URI as a web redirect in the identity provider,
+and supply the client secret through the named environment variable in every
+worker. Do not put the secret into the plist. The auth module's existing
+`session.secret` and `database.connectionString` requirements still apply.
+The resolver may use a separate application-owned person store; OIDC does not
+create or link an `auth_users` row automatically.
+
+### Google preset
+
+`preset = "google"` fills in Google's issuer, discovery URL, scopes, client
+authentication method and button label. It also derives the allowed hosts from
+Google's endpoints: `accounts.google.com` and `oauth2.googleapis.com` for
+endpoints, and `www.googleapis.com` for JWKS. A hand-written Google config needs
+those hosts listed explicitly; the preset makes that unnecessary.
+
+```plist
+authModule = {
+  providers = {
+    google = {
+      enabled = YES;
+      preset = "google";
+      clientID = "<CLIENT_ID>.apps.googleusercontent.com";
+      clientSecretEnvironmentKey = "ARLEN_AUTH_GOOGLE_CLIENT_SECRET";
+      redirectURI = "https://app.example.com/auth/provider/google/callback";
+    };
+  };
+  hooks = { providerSessionResolverClass = "AppIdentityResolver"; };
+};
+```
+
+`enabled = YES` is still required. Any key set explicitly overrides the preset.
+The auth module currently supports only the `google` preset. The other
+`ALNAuthProviderPresets` entries need a tenant-specific issuer (Microsoft,
+Okta, Auth0), are not OIDC (GitHub), or need a client authentication method
+the module does not implement (Apple), so the module rejects them at startup.
+For Entra, use the explicit configuration above.
+
+### Admission policy
+
+Small private apps often only need "these people may sign in". An optional
+per-provider `admission` dictionary provides that without a custom resolver.
+It is checked after ID-token verification and before the resolver runs:
+
+```plist
+google = {
+  enabled = YES;
+  preset = "google";
+  /* ... */
+  admission = {
+    allowedEmails = ("parent@example.com", "kid@example.com");
+    allowedEmailsEnvironmentKey = "APP_ALLOWED_EMAILS";  // optional comma-separated list
+    allowedDomains = ("example.com");
+    requireHostedDomain = NO;
+    rejectionMessage = "This site is for family members only.";
+  };
+};
+```
+
+- `allowedEmails`, and addresses from `allowedEmailsEnvironmentKey`, are matched
+  case-insensitively against the verified `email` claim.
+- `allowedDomains` matches the email's domain exactly; subdomains do not match.
+  When the ID token carries Google's `hd` (hosted domain) claim, `hd` must also
+  be listed. `requireHostedDomain = YES` additionally requires `hd` to be
+  present, which excludes consumer Google accounts created with a work address.
+- If any list is configured, the address must be provider-verified
+  (`email_verified` true). `requireVerifiedEmail = YES` imposes that requirement
+  on its own, without lists.
+- Unknown keys and malformed values fail at startup. Entries must be plain
+  `name@domain.tld` addresses and dotted domain names, not patterns. A missing
+  or empty `allowedEmailsEnvironmentKey` variable also fails startup.
+
+Rejected logins never reach the resolver or create a session. JSON callbacks
+return `403` with `{"status":"error","code":"admission_denied","message":...}`.
+Browser callbacks redirect to the module's login page, which shows
+`rejectionMessage` (default "This account is not permitted to sign in."). If a
+[failure redirect](#failure-redirect) is configured, they go there with
+`error=admission_denied` instead.
+
+Admission only decides who may sign in. It does not link identities: accounts
+are still keyed on the verified provider subject, the resolver still decides
+membership and roles, and email is never a fallback match.
+
+For the example above, the module registers:
+
+- `GET /context/auth/provider/entra/login`
+- `GET /context/auth/provider/entra/callback`
+- `GET /context/auth/api/provider/entra/login`
+- `GET /context/auth/api/provider/entra/callback`
+
+Use the configured redirect URI consistently even when starting from the API
+login route. API login returns `authorize_url`; browser login redirects there.
+A successful browser callback redirects to a local `return_to` path or the
+module's `defaultRedirect`. External `return_to` URLs are ignored. JSON callbacks
+return session metadata and `redirect_to`, without provider tokens. Failed
+callbacks return 401 with a generic message (403 `admission_denied` for an
+admission-policy rejection); provider setup/network failures
+at login return 502. Disabled providers have no routes or login buttons.
+
+### Failure redirect
+
+By default a rejected browser callback answers `401` with a small JSON body.
+SPA and headless apps can instead send people to their own page. Set
+`authModule.failureRedirect`, or `failureRedirect` on a provider (which wins),
+to a local absolute path:
+
+```plist
+authModule = {
+  failureRedirect = "/sign-in";
+  providers = { google = { /* ... */ failureRedirect = "/family/sign-in"; }; };
+};
+```
+
+A failed browser callback then redirects with `302` to
+`<failureRedirect>?error=<code>&provider=<identifier>`, or with `&` if the path
+already has a query string. The JSON API callback (`<apiPrefix>/provider/...`)
+never redirects. It keeps its `401` and adds the same `code` field. The value
+must be a local path: a scheme, a leading `//`, a backslash, a fragment or
+whitespace fails configuration at startup.
+
+| `error` code | Meaning |
+| --- | --- |
+| `rejected` | The resolver returned nil, or the verified subject/tenant was not accepted. |
+| `admission_denied` | The provider's `admission` policy refused the identity. |
+| `expired_state` | The login state was missing, expired, or did not match. |
+| `provider_error` | The provider returned an error, such as `access_denied`. |
+| `verification_failed` | Token or ID-token checks failed (signature, issuer, audience, nonce). |
+| `provider_unavailable` | Discovery, token or JWKS requests failed, or the client secret is missing. |
+
+A resolver can supply a more specific code by setting
+`ALNAuthModuleOIDCFailureCodeKey` in the `userInfo` of the NSError it returns.
+The code must be lowercase letters, digits or underscores, at most 64
+characters; otherwise `rejected` is used.
+
+```objc
+if (invite == nil) {
+  if (error) *error = [NSError errorWithDomain:@"App" code:1
+                                      userInfo:@{ ALNAuthModuleOIDCFailureCodeKey : @"not_invited" }];
+  return nil;
+}
+```
+
+Codes never include provider messages or claim values.
+
+### Application Identity Resolver
+
+Implement `ALNAuthProviderSessionResolver` and configure its class under
+`hooks.providerSessionResolverClass`. The class is instantiated without arguments
+and must support concurrent calls. It receives only an identity whose ID token
+has passed signature, issuer, audience, expiry, nonce, and tenant checks.
+
+```objc
+@interface CompanyIdentityResolver : NSObject <ALNAuthProviderSessionResolver>
+@end
+
+@implementation CompanyIdentityResolver
+- (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
+                                         providerConfiguration:(NSDictionary *)provider
+                                                         error:(NSError **)error {
+  NSString *principal = identity[@"provider_subject"]; // verified "tid:oid"
+  // Implement this lookup against the application's durable person directory.
+  NSDictionary *person = [CompanyPeople activePersonForPrincipal:principal error:error];
+  if (person == nil) return nil; // deny unknown or suspended principals
+  return @{
+    @"subject": person[@"identifier"],
+    @"roles": person[@"roles"] ?: @[],
+    // No assuranceLevel: the provider's `assurance` mapping (or 1) applies.
+  };
+}
+@end
+```
+
+`CompanyPeople` above represents application code, not a framework class. Use
+immutable principal identifiers for the lookup; email is display data and is
+never a fallback match on this path. With `tenantClaim` configured,
+`provider_subject` is `<tenant>:<subject>`; both claims must be nonempty, contain
+no colon, and the tenant must be allowed. Without `tenantClaim`, it is the
+verified `subjectClaim` (default `sub`). The raw verified claims remain available
+under `identity["claims"]`. Normal OIDC `sub` validation still applies when using
+`oid` as the application principal. The resolver owns membership, roles, and any
+explicit account-linking decision; nil rejects login. Arlen does not infer MFA
+assurance from the fact that a provider was used.
+
+### Provider assurance from amr and acr
+
+Module surfaces such as the admin UI need assurance level 2. A provider sign-in
+gets level 1 unless something says it was multi-factor. Rather than reading
+`amr` in every resolver, map the verified ID-token claims on the provider:
+
+```plist
+providers = {
+  entra = {
+    /* ... */
+    assurance = {
+      amr = { mfa = 2; otp = 2; hwk = 2; };
+      acr = { "urn:example:loa:mfa" = 2; };
+    };
+  };
+};
+```
+
+- The session gets the highest level any `amr` value or the `acr` value maps
+  to, and 1 when none matches or the claims are absent. Matching is exact and
+  case-sensitive, and only the signature-checked ID token is read (never
+  userinfo).
+- Levels are 1 to 3. Unknown keys, empty maps and other level values are a
+  startup error.
+- The resolver sees the mapped level as `identity[@"assurance_level"]`. If it
+  returns its own `assuranceLevel`, that wins, so a resolver that hard-codes
+  `assuranceLevel` turns the mapping off. Leave it out to use the mapping.
+- Which claims a provider sends, and their values, is provider-specific; some
+  send neither by default. Check a real ID token before relying on a mapping.
+
+Without `assurance`, nothing changes: the resolver's level applies, or 1.
+
+OIDC sessions expose the application's subject and roles. The auth session API
+does not try to look up an external subject in its own user table. Stock local
+account/MFA management remains backed by the auth module's own user records;
+applications with external person stores own those account-management surfaces.
+
+### Step-up for provider sign-in
+
+Module surfaces (admin UI, jobs, notifications, ops, search, storage) send a
+user who needs assurance level 2 to `authModule.paths.stepUp`, adding
+`return_to` (and, from route-level checks, `reason`). It defaults to the TOTP
+page (`paths.totp`), which is right for local accounts. A user who signs in only
+through a provider has no TOTP factor there, so point step-up at the provider
+login and ask it to re-authenticate:
+
+```plist
+authModule = {
+  paths = { stepUp = "/auth/provider/entra/login?prompt=login"; };
+};
+```
+
+The value is a local path; a relative value is joined to `paths.prefix`, and a
+query is kept (the redirect then appends with `&`). Absolute URLs are a
+configuration error. Provider login routes accept `prompt=login` and pass it to
+the identity provider; other `prompt` values are ignored.
+
+A fresh provider sign-in satisfies step-up only if it reaches assurance level 2,
+through the provider's [`assurance` mapping](#provider-assurance-from-amr-and-acr)
+or the level your resolver returns. `prompt=login` asks the provider to
+re-authenticate; Arlen does not verify that it did.
+
+### Defaults and Upgrade Behavior
+
+When any real OIDC provider is enabled, local password login and the stub
+provider default off. Explicit `localPassword.enabled` or
+`providers.stub.enabled` overrides are honored. Without real OIDC providers,
+the existing local-password and stub defaults remain enabled for compatibility.
+Disabling local passwords removes registration, verification, password-login,
+forgot/reset/change-password routes in both HTML and API surfaces. The login
+page remains available and shows provider buttons without a password form.
+Session payloads include `local_password_enabled` and `login_providers`.
+
+Existing applications may have copied an older auth manifest containing
+`stub.enabled = YES`. Set `authModule.providers.stub.enabled = NO` explicitly
+when upgrading to enterprise login; update the copied module sources and login
+body template together. The example above makes both opt-outs explicit.
+
+### Transport and Callback Contract
+
+- Provider/discovery/redirect URLs require HTTPS. The only exception is a
+  loopback http `redirectURI` in `development`/`test`. Endpoint hosts default to the
+  issuer host; `endpointAllowedHosts` can explicitly allow other discovery,
+  authorization, and token hosts. `jwksAllowedHosts` separately restricts key
+  retrieval and defaults to the endpoint hosts. Redirects are rejected.
+- Each discovery, token, or JWKS request has a five-second total deadline and a
+  256 KiB response limit. TLS verification is required and shared cookies are
+  disabled. A callback fetches fresh discovery and keys, so a key rotation does
+  not depend on worker-local caches. Calls are synchronous; account for provider
+  latency in request capacity planning.
+- Confidential web clients use `client_secret_post` by default. Public clients
+  must explicitly set `tokenEndpointAuthMethod = "none"`; PKCE remains required.
+  Other token authentication methods and ID-token algorithms are not supported
+  by this module path.
+- One pending provider login is stored per browser session. Starting another
+  replaces it. The five-minute callback is bound to the provider, configured
+  redirect URI, state, nonce, and PKCE verifier. Callback attempts clear pending
+  state. Signed cookie sessions cannot revoke an older copied cookie; the
+  provider must enforce one-time authorization-code redemption, including PKCE.
+- `hooks.oidcTransportClass` optionally names an application implementation of
+  `ALNAuthModuleOIDCTransport` for controlled tests or custom networking. This is
+  trusted application code, responsible for the same TLS, redirect, deadline,
+  and response-limit contract. Normal deployments should use the default.
+
+Run `make test-unit-filter TEST=AuthModuleOIDCTests` and
+`make test-unit-filter TEST=MetadataTransportTests` after sourcing
+`tools/source_gnustep_env.sh`. These tests use synthetic signed tokens and local
+transport fixtures; no tenant credentials are required. Validate the registered
+web client, real tenant policy, reverse-proxy callback URL, and downstream person
+mapping separately before enabling an application deployment.

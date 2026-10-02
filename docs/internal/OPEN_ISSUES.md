@@ -1,5 +1,80 @@
 # Open Issues
 
+## ISSUE-013: Synchronous `stderr` logging hangs the request path under an undrained output consumer
+
+- Status: `hardened upstream; awaiting downstream revalidation`
+- Priority: `medium` (production unaffected; blocks `make test` in the consumer suite)
+- Tracking ID: `ARLEN-BUG-033`
+- Discovered: `2026-06-03`
+- Reported by: `StateCompulsoryPoolingAPI`
+- Last updated: `2026-06-03`
+- Resolution: `ALNLogger` no longer blocks the calling thread on a stalled or
+  full output sink. Emission now goes through a bounded, poll-gated writer
+  (`src/Arlen/Support/ALNLogger.m`): a line is written only while the sink can
+  accept bytes within `writeTimeoutMilliseconds` (default 100 ms), and is
+  otherwise dropped with `droppedMessageCount` incremented instead of parking
+  in `write()`/`pipe_write`. `SIGPIPE` is ignored process-wide (without
+  clobbering an app-installed handler) so a closed reader degrades to a dropped
+  line rather than a crash. Per-line atomicity is preserved by serializing
+  emission through a write lock. Windows keeps the historical synchronous path.
+- Verification:
+  - `LoggerTests::testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033`
+  - `LoggerTests::testLoggerResumesWritingAfterSinkDrains_ARLEN_BUG_033`
+- Reconciliation note:
+  `docs/internal/STATECOMPULSORYPOOLINGAPI_DISPATCH_HANG_RECONCILIATION_2026-06-03.md`
+
+### Summary
+
+The consumer reported a non-deterministic hang in their integration suite under
+Arlen's default (`concurrent`) dispatch mode: after some number of sequential
+requests the test server stops responding, with worker threads in
+`futex_wait_queue`, the main thread idle at `accept()`, and a "log thread" in
+`pipe_write`. The report attributed this to a concurrent-dispatch race / pool
+deadlock and suspected the same root cause as the resolved `ISSUE-001`
+`malloc_consolidate` crash.
+
+Upstream assessment: the hang is real, but the attribution is wrong. The
+reproduction is purely sequential, so no concurrent path is exercised. The
+`futex_wait_queue × 7` signature is the **normal idle state** of the
+eight-worker pool (seven idle on the timed work-queue `NSCondition` wait, one
+busy). The real fault is the thread blocked in `pipe_write`:
+
+- `ALNLogger` emits synchronously and unbuffered via `fprintf(stderr, …)` on the
+  request-handling thread (`src/Arlen/Support/ALNLogger.m:103,119`), with no
+  async queue and no drop-on-full path.
+- Each served request logs an Info-level line (`ALNApplication.m:5043,5168,5333,5708`),
+  emitted in the `test` environment.
+- The consumer's harness captures the child server's `stdout`/`stderr` into a
+  pipe it stops draining. Once cumulative log output crosses the 64 KiB pipe
+  buffer, the next `fprintf` blocks in `write()` and the in-flight request never
+  completes.
+
+This explains the non-deterministic hang point (a function of cumulative log
+bytes, not the endpoint) and why endpoints pass in isolation. Production is
+stable because journald continuously drains the service's output, not because
+of `serialized` dispatch mode (which still logs synchronously and would stall
+identically under an undrained consumer).
+
+### Current Contract (target)
+
+1. A stalled or slow `stderr` consumer must not block Arlen's request path.
+2. `ALNLogger` should degrade gracefully when its sink backpressures — drop with
+   a dropped-line counter on `EAGAIN`, or emit via a bounded queue that drops
+   rather than blocks when full.
+3. `SIGPIPE` should be ignored process-wide so a closed log reader surfaces as a
+   handleable error instead of a signal.
+
+### Confirmation status
+
+Root cause is code-and-evidence supported and is now covered by an upstream
+regression that reproduces the blocking-sink condition directly (a full pipe
+that the logger must drop rather than park in). The end-to-end consumer hang
+was not reproduced upstream (the `make test` harness is not in-tree); the
+remaining downstream check is to re-pin to a ref containing this fix and
+confirm the suite completes without the output-drain workaround. Frame-walking
+the busy worker (expected: `pipe_write` inside `ALNLogger`) remains the
+definitive on-host confirmation if needed.
+
 ## ISSUE-012: Post-restart health probe could race service startup
 
 - Status: `fixed upstream; awaiting downstream revalidation`
@@ -293,12 +368,20 @@ causing SSH to treat `-oBatchMode=yes` as the config-file path.
 
 ## ISSUE-004: Production workers leak `/dev/null` file descriptors until file responses fail
 
-- Status: `open`
-- Priority: `critical`
+- Status: `hardened upstream; awaiting downstream revalidation`
+- Priority: `high`
 - Tracking ID: `ARLEN-BUG-024`
 - Discovered: `2026-04-27`
 - Reported by: `StateCompulsoryPoolingAPI`
-- Last updated: `2026-04-28`
+- Last updated: `2026-09-30`
+- Resolution: no Arlen-side leak has been reproduced; the likely opener is
+  downstream app code (see Current assessment). Arlen now guards against
+  regressions with descriptor-stability tests and documents the propane
+  FD-pressure safety net and triage tools in `docs/DEPLOYMENT.md`.
+- Verification:
+  - `HTTPIntegrationTests::testFileResponsesKeepWorkerDescriptorsStable_Issue67`
+  - `FileDescriptorStabilityTests::testDataverseCurlTransportReleasesItsDescriptors`
+- GitHub tracking issue: `danjboyd/Arlen#67`
 - Target follow-up: Phase 38
 - Reconciliation note:
   `docs/internal/STATECOMPULSORYPOOLINGAPI_REPORT_RECONCILIATION_2026-04-24.md`
@@ -339,7 +422,19 @@ GNUstep Base reason `Failed to create pipe to handle perform in thread`.
 
 ### Current assessment
 
-This is accepted as a real Arlen-facing production reliability bug. The visible
+2026-09-25 status: Phase 38 production follow-up points to a downstream opener
+rather than an Arlen file-response leak. `StateCompulsoryPoolingAPI` launches an
+`NSTask` with three `[NSFileHandle fileHandleWithNullDevice]` handles and does
+not release the task. On GNUstep that retains three `/dev/null` descriptors per
+launch (see `docs/internal/PHASE38_ROADMAP.md`). The issue stays open until
+production confirms that the drift stopped after the app fix, or until a
+downstream reproduction implicates Arlen. StateMap (serving authenticated media
+through `fileBodyPath`) was advised to use `workerFDRetirePercent`,
+`tools/ops/sample_fd_targets.py`, and `ARLEN_FD_DELTA_DEBUG=1` rather than
+scheduled reloads.
+
+Original assessment (2026-04-28): this is accepted as a real Arlen-facing
+production reliability bug. The visible
 `ALNResponse.fileBodyPath` send path preflights and closes its per-request
 descriptor, and the static file descriptor cache is capped and evicts by
 closing entries, so this does not currently look like a simple missing close in
@@ -395,7 +490,13 @@ showed real descriptor exhaustion over uptime. Phase 38 therefore added:
 - `make ci-phase38-fd-regression` for an opt-in Arlen-only FD drift evidence
   lane under `build/release_confidence/phase38/fd_regression`
 
-The focused fix remains blocked until a leaking path is reproduced or captured
+2026-09-30: `HTTPIntegrationTests::testFileResponsesKeepWorkerDescriptorsStable_Issue67`
+now runs in the default integration suite. In both dispatch modes it serves
+2,000 file responses (full, range, `304`, `HEAD`, and a static mount) and
+requires a flat total and `/dev/null` descriptor count, so any future
+per-response leak in the Arlen file-send path fails CI.
+
+Any further Arlen fix is blocked until a leaking path is reproduced or captured
 from production-safe diagnostics.
 
 ## ISSUE-003: File streaming responses sent successful headers with no body
@@ -546,8 +647,8 @@ Regression coverage should include:
 
 - Status: `resolved`
 - Priority: `critical`
-- GitHub: https://github.com/danjboyd/Arlen/issues/1
-- Last updated: `2026-02-25`
+- GitHub: https://github.com/danjboyd/Arlen/issues/1 and https://github.com/danjboyd/Arlen/issues/2 (closed 2026-09-21)
+- Last updated: `2026-09-21`
 
 ### Summary
 
@@ -577,13 +678,20 @@ Externally this presents as intermittent or sustained `502 Bad Gateway` from ngi
 ### Resolution summary
 
 - Fix commit: `0920889` (`fix(http): stabilize serialized dispatch connection lifecycle`)
-- Final fix behavior in serialized mode:
+- Original fix behavior in serialized mode:
   - force one request per HTTP connection (`Connection: close`)
   - disable detached per-connection background thread handling
   - preserve explicit serialized behavior as opt-in (`requestDispatchMode=serialized`)
 - Regression coverage:
   - `HTTPIntegrationTests::testProductionSerializedDispatchClosesHTTPConnections`
   - existing production serialization/concurrent-override tests remained passing
+
+Current behavior: `b5dc20e` subsequently restored HTTP keep-alive with dedicated
+`testSerializedDispatchAllowsKeepAliveConnections` coverage. Serialized dispatch
+still handles connections on the accept thread. The original close-connection
+test above is historical; current main's HTTP lifecycle and runtime concurrency
+checks passed on 2026-09-21. Both GitHub reports predate the successful fix and
+have now been closed with that evidence.
 
 ### Verification evidence
 

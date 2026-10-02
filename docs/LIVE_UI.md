@@ -254,6 +254,42 @@ NSError *error = nil;
 The pushed message is the same live JSON payload used for ordinary HTTP live
 responses.
 
+### Multiple workers and hosts
+
+By default `ALNRealtimeHub` is **process-local**: a publish reaches only the
+websocket subscribers connected to the same process. That is correct under
+`boomhauer` (one process) but silently partial under `propane`, where the request
+that publishes and the browser's websocket are often on different workers. Nothing
+errors; the other workers' subscribers just miss the update. When a websocket
+channel opens under several propane workers (or a multi-node cluster) with no
+fanout configured, the worker logs a one-time warning.
+
+To deliver across workers and hosts, enable the PostgreSQL fanout:
+
+```plist
+realtime = {
+  fanout = {
+    adapter = "postgresql";
+    // optional: defaults to ARLEN_DATABASE_URL, then database.connectionString
+    connectionString = "host=db dbname=app";
+    // optional: the PostgreSQL NOTIFY channel, default "arlen_realtime"
+    channel = "arlen_realtime";
+  };
+};
+```
+
+Each worker then publishes with `NOTIFY` and keeps one extra connection that
+`LISTEN`s, delivering other workers' messages to its local subscribers (never
+echoing its own). Publishing is asynchronous and ordered per worker, so a request
+does not wait on the database. Messages larger than NOTIFY's 8000-byte limit are
+stored briefly in `arlen_realtime_payloads` (created on first use, pruned after
+five minutes) and sent by id. The listener reconnects with backoff after a lost
+connection. Delivery is at most once: a message published while a worker's
+listener is reconnecting is not replayed to that worker, so pages that must not
+miss an update should also refresh their state on reconnect (or use durable event
+streams). Apps that share a PostgreSQL database should give each app its own
+`channel`.
+
 ## 8. Upload Progress and Failure Signals
 
 For live forms with file inputs, or forms that set

@@ -2,35 +2,19 @@
 
 #import "ALNContext.h"
 #import "ALNResponse.h"
+#import <dispatch/dispatch.h>
 
 @interface ALNSecurityHeadersMiddleware ()
 
 @property(nonatomic, copy) NSString *contentSecurityPolicy;
+@property(nonatomic, copy) NSDictionary<NSString *, NSString *> *resolvedResponseHeaders;
 
 @end
 
-@implementation ALNSecurityHeadersMiddleware
-
-- (instancetype)initWithContentSecurityPolicy:(NSString *)contentSecurityPolicy {
-  self = [super init];
-  if (self) {
-    _contentSecurityPolicy =
-        [contentSecurityPolicy copy] ?: @"default-src 'self'";
-  }
-  return self;
-}
-
-- (void)ensureHeader:(NSString *)name value:(NSString *)value response:(ALNResponse *)response {
-  if ([response headerForName:name] == nil) {
-    [response setHeader:name value:value];
-  }
-}
-
-- (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
-  (void)error;
-  ALNResponse *response = context.response;
+static NSDictionary<NSString *, NSString *> *ALNSecurityHeadersDefaults(void) {
   static NSDictionary<NSString *, NSString *> *defaults = nil;
-  if (defaults == nil) {
+  static dispatch_once_t defaultsOnce;
+  dispatch_once(&defaultsOnce, ^{
     defaults = @{
       @"X-Content-Type-Options" : @"nosniff",
       @"X-Frame-Options" : @"SAMEORIGIN",
@@ -39,11 +23,33 @@
       @"Cross-Origin-Resource-Policy" : @"same-site",
       @"X-Permitted-Cross-Domain-Policies" : @"none",
     };
+  });
+  return defaults;
+}
+
+@implementation ALNSecurityHeadersMiddleware
+
+- (instancetype)initWithContentSecurityPolicy:(NSString *)contentSecurityPolicy {
+  self = [super init];
+  if (self) {
+    _contentSecurityPolicy =
+        [contentSecurityPolicy copy] ?: @"default-src 'self'";
+    NSMutableDictionary *headers = [ALNSecurityHeadersDefaults() mutableCopy];
+    if ([_contentSecurityPolicy length] > 0) {
+      headers[@"Content-Security-Policy"] = _contentSecurityPolicy;
+    }
+    _resolvedResponseHeaders = [headers copy];
   }
-  [response setHeadersIfMissing:defaults];
-  if ([self.contentSecurityPolicy length] > 0) {
-    [self ensureHeader:@"Content-Security-Policy" value:self.contentSecurityPolicy response:response];
-  }
+  return self;
+}
+
+- (NSDictionary<NSString *, NSString *> *)responseHeaders {
+  return self.resolvedResponseHeaders;
+}
+
+- (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
+  (void)error;
+  [context.response setHeadersIfMissing:[self responseHeaders]];
   return YES;
 }
 

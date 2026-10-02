@@ -12,6 +12,7 @@ Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 | `connectionString` | `NSString *` | `nonatomic, copy, readonly` | Public `connectionString` property available on `ALNMSSQL`. |
 | `maxConnections` | `NSUInteger` | `nonatomic, assign, readonly` | Public `maxConnections` property available on `ALNMSSQL`. |
 | `connectionLivenessChecksEnabled` | `BOOL` | `nonatomic, assign` | Public `connectionLivenessChecksEnabled` property available on `ALNMSSQL`. |
+| `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNMSSQL`. |
 
 ## Methods
 
@@ -21,6 +22,7 @@ Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 | `initWithConnectionString:maxConnections:error:` | `- (nullable instancetype)initWithConnectionString:(NSString *)connectionString maxConnections:(NSUInteger)maxConnections error:(NSError *_Nullable *_Nullable)error;` | Initialize and return a new `ALNMSSQL` instance. | Use as `[[Class alloc] init...]`; treat `nil` as initialization failure. Pass `NSError **` and treat a `nil` result as failure. This method is chainable; continue composing and call `build`/`buildSQL` to finalize. |
 | `acquireConnection:` | `- (nullable ALNMSSQLConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;` | Acquire a pooled database connection instance. | Capture the returned value and propagate errors/validation as needed. |
 | `releaseConnection:` | `- (void)releaseConnection:(ALNMSSQLConnection *)connection;` | Release a pooled database connection back to the adapter. | Call for side effects; this method does not return a value. |
+| `poolDiagnostics` | `- (NSDictionary<NSString *, id> *)poolDiagnostics;` | Perform `pool diagnostics` for `ALNMSSQL`. | Read this value when you need current runtime/request state. |
 | `executeQueryResult:parameters:error:` | `- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql parameters:(NSArray *)parameters error:(NSError *_Nullable *_Nullable)error;` | Execute a read/query operation and return row dictionaries. | Pass `NSError **` and treat a `nil` result as failure. |
 | `executeCommandBatch:parameterSets:error:` | `- (NSInteger)executeCommandBatch:(NSString *)sql parameterSets:(NSArray<NSArray *> *)parameterSets error:(NSError *_Nullable *_Nullable)error;` | Execute a write/command operation and return affected row count. | Pass `NSError **` when you need detailed failure diagnostics. |
 | `executeBuilderQuery:error:` | `- (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder error:(NSError *_Nullable *_Nullable)error;` | Compile and execute an `ALNSQLBuilder` query. | Pass `NSError **` and treat a `nil` result as failure. |

@@ -108,12 +108,8 @@ static BOOL ALNHeaderNameIsValid(NSString *name) {
   if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
     return NO;
   }
-  const char *bytes = [name UTF8String];
-  if (bytes == NULL) {
-    return NO;
-  }
-  for (const unsigned char *cursor = (const unsigned char *)bytes; *cursor != '\0'; cursor++) {
-    unsigned char c = *cursor;
+  for (NSUInteger index = 0; index < [name length]; index++) {
+    unichar c = [name characterAtIndex:index];
     if (c > 127) {
       return NO;
     }
@@ -142,46 +138,107 @@ static BOOL ALNHeaderValueContainsForbiddenBytes(NSString *value) {
   return NO;
 }
 
+// An explicit allowlist prevents append from introducing ambiguous framing or
+// changing singleton fields. Expand only with a documented repeated-field contract.
+static BOOL ALNHeaderSupportsRepeatedValues(NSString *key) {
+  return [key isEqualToString:@"set-cookie"] ||
+         [key isEqualToString:@"www-authenticate"] ||
+         [key isEqualToString:@"proxy-authenticate"] ||
+         [key isEqualToString:@"link"] ||
+         [key isEqualToString:@"warning"] ||
+         [key isEqualToString:@"vary"] ||
+         [key isEqualToString:@"cache-control"];
+}
+
+/// Reason phrases are advisory -- a conformant client takes its meaning from the
+/// status code -- but they are what lands in access logs, proxy logs and
+/// `curl -i`, so a wrong one costs debugging time. Kept in numeric order: the
+/// gaps are the point, and an unordered table is how 401 went missing.
 static NSString *ALNStatusText(NSInteger statusCode) {
   switch (statusCode) {
+  case 100:
+    return @"Continue";
   case 101:
     return @"Switching Protocols";
   case 200:
     return @"OK";
   case 201:
     return @"Created";
+  case 202:
+    return @"Accepted";
   case 204:
     return @"No Content";
+  case 206:
+    return @"Partial Content";
   case 301:
     return @"Moved Permanently";
   case 302:
     return @"Found";
+  case 303:
+    return @"See Other";
   case 304:
     return @"Not Modified";
+  case 307:
+    return @"Temporary Redirect";
+  case 308:
+    return @"Permanent Redirect";
   case 400:
     return @"Bad Request";
+  case 401:
+    return @"Unauthorized";
   case 403:
     return @"Forbidden";
   case 404:
     return @"Not Found";
   case 405:
     return @"Method Not Allowed";
+  case 406:
+    return @"Not Acceptable";
   case 408:
     return @"Request Timeout";
-  case 429:
-    return @"Too Many Requests";
+  case 409:
+    return @"Conflict";
+  case 410:
+    return @"Gone";
+  case 411:
+    return @"Length Required";
+  case 412:
+    return @"Precondition Failed";
   case 413:
     return @"Payload Too Large";
-  case 431:
-    return @"Request Header Fields Too Large";
-  case 503:
-    return @"Service Unavailable";
+  case 414:
+    return @"URI Too Long";
+  case 415:
+    return @"Unsupported Media Type";
+  case 416:
+    return @"Range Not Satisfiable";
   case 422:
     return @"Unprocessable Content";
+  case 428:
+    return @"Precondition Required";
+  case 429:
+    return @"Too Many Requests";
+  case 431:
+    return @"Request Header Fields Too Large";
+  case 451:
+    return @"Unavailable For Legal Reasons";
   case 500:
     return @"Internal Server Error";
+  case 501:
+    return @"Not Implemented";
+  case 502:
+    return @"Bad Gateway";
+  case 503:
+    return @"Service Unavailable";
+  case 504:
+    return @"Gateway Timeout";
+  case 505:
+    return @"HTTP Version Not Supported";
   default:
-    return @"OK";
+    // RFC 9112 section 4.1 permits an empty reason phrase. Saying nothing about
+    // an unknown code is honest; the previous "OK" described every one of them,
+    // including every error, as success.
+    return @"";
   }
 }
 
@@ -193,6 +250,7 @@ static NSString *ALNStatusText(NSInteger statusCode) {
 @property(nonatomic, strong) NSMutableArray *orderedHeaderKeys;
 @property(nonatomic, strong) NSMutableDictionary *headerNamesByNormalizedKey;
 @property(nonatomic, strong) NSData *cachedHeaderData;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *additionalHeaderValues;
 @property(nonatomic, assign) BOOL serializedHeadersDirty;
 
 @end
@@ -227,7 +285,7 @@ static BOOL ALNResponseCanUseSharedHeaderSerialization(ALNResponse *response,
                                                        NSString **contentTypeValueOut,
                                                        NSString **serverNameOut,
                                                        NSString **serverValueOut) {
-  if (response == nil) {
+  if (response == nil || [response.additionalHeaderValues count] > 0) {
     return NO;
   }
 
@@ -421,6 +479,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
 - (void)resetFileBodyState {
   self.fileBodyPath = nil;
   self.fileBodyLength = 0;
+  self.fileBodyOffset = 0;
+  self.fileBodyFullLength = 0;
   self.fileBodyDevice = 0;
   self.fileBodyInode = 0;
   self.fileBodyMTimeSeconds = 0;
@@ -492,7 +552,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
                     value:(NSString *)value
                invalidate:(BOOL)invalidate {
   NSString *normalizedKey = ALNNormalizedHeaderKey(name);
-  if ([normalizedKey length] == 0 || !ALNHeaderNameIsValid(normalizedKey)) {
+  if (ALNHeaderValueContainsForbiddenBytes(name) ||
+      [normalizedKey length] == 0 || !ALNHeaderNameIsValid(normalizedKey)) {
     return NO;
   }
   NSString *resolvedValue = value ?: @"";
@@ -506,14 +567,16 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   NSString *currentValue = [self.headers[normalizedKey] isKindOfClass:[NSString class]]
                                ? self.headers[normalizedKey]
                                : nil;
-  if (currentValue != nil && [currentValue isEqualToString:resolvedValue]) {
-    self.headerNamesByNormalizedKey[normalizedKey] = displayName;
+  BOOL repeated = [self.additionalHeaderValues[normalizedKey] count] > 0;
+  if (currentValue != nil && [currentValue isEqualToString:resolvedValue] && !repeated &&
+      [self.headerNamesByNormalizedKey[normalizedKey] isEqualToString:displayName]) {
     return NO;
   }
   if (currentValue == nil) {
     [self insertOrderedHeaderKeyIfNeeded:normalizedKey];
   }
-  self.headers[normalizedKey] = resolvedValue;
+  [self.additionalHeaderValues removeObjectForKey:normalizedKey];
+  self.headers[normalizedKey] = [resolvedValue copy];
   self.headerNamesByNormalizedKey[normalizedKey] = displayName;
   if (invalidate) {
     [self invalidateSerializedHeaders];
@@ -537,6 +600,8 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   _fileBodyPath = [fileBodyPath copy];
   if ([_fileBodyPath length] == 0) {
     _fileBodyLength = 0;
+    _fileBodyOffset = 0;
+    _fileBodyFullLength = 0;
     _fileBodyDevice = 0;
     _fileBodyInode = 0;
     _fileBodyMTimeSeconds = 0;
@@ -578,13 +643,53 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   (void)[self setHeaderInternal:name value:value invalidate:YES];
 }
 
+- (BOOL)appendHeader:(NSString *)name value:(NSString *)value {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  if (ALNHeaderValueContainsForbiddenBytes(name) || !ALNHeaderNameIsValid(key) ||
+      !ALNHeaderSupportsRepeatedValues(key) || ALNHeaderValueContainsForbiddenBytes(value)) {
+    return NO;
+  }
+  if ([self headerForName:key] == nil) {
+    return [self setHeaderInternal:name value:value invalidate:YES];
+  }
+  if (self.additionalHeaderValues == nil) {
+    self.additionalHeaderValues = [NSMutableDictionary dictionary];
+  }
+  NSArray *existing = self.additionalHeaderValues[key] ?: @[];
+  self.additionalHeaderValues[key] = [existing arrayByAddingObject:[value copy]];
+  [self invalidateSerializedHeaders];
+  return YES;
+}
+
+- (NSArray<NSString *> *)headerValuesForName:(NSString *)name {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  NSString *first = [self headerForName:name];
+  if (first == nil) {
+    return @[];
+  }
+  NSArray *additional = self.additionalHeaderValues[key] ?: @[];
+  return [@[ first ] arrayByAddingObjectsFromArray:additional];
+}
+
+- (void)removeHeaderForName:(NSString *)name {
+  NSString *key = ALNNormalizedHeaderKey(name);
+  if (key == nil || self.headers[key] == nil) {
+    return;
+  }
+  [self.headers removeObjectForKey:key];
+  [self.additionalHeaderValues removeObjectForKey:key];
+  [self.headerNamesByNormalizedKey removeObjectForKey:key];
+  [self.orderedHeaderKeys removeObject:key];
+  [self invalidateSerializedHeaders];
+}
+
 - (void)setHeadersIfMissing:(NSDictionary<NSString *, NSString *> *)headers {
   if (![headers isKindOfClass:[NSDictionary class]] || [headers count] == 0) {
     return;
   }
   BOOL mutated = NO;
   for (id rawName in headers) {
-    if (![rawName isKindOfClass:[NSString class]]) {
+    if (![rawName isKindOfClass:[NSString class]] || ALNHeaderValueContainsForbiddenBytes(rawName)) {
       continue;
     }
     NSString *name = [(NSString *)rawName
@@ -690,7 +795,7 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
     return nil;
   }
 
-  if ([self headerForName:@"Content-Length"] == nil) {
+  if (self.statusCode != 304 && [self headerForName:@"Content-Length"] == nil) {
     unsigned long long bodyLength = [self bodyLength];
     if ([self.fileBodyPath length] > 0) {
       bodyLength = self.fileBodyLength;
@@ -733,6 +838,12 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
     [head appendString:@": "];
     [head appendString:value];
     [head appendString:@"\r\n"];
+    for (NSString *additional in self.additionalHeaderValues[normalizedKey]) {
+      [head appendString:displayName];
+      [head appendString:@": "];
+      [head appendString:additional];
+      [head appendString:@"\r\n"];
+    }
   }
   [head appendString:@"\r\n"];
   NSData *serialized = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];

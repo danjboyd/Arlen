@@ -1,7 +1,68 @@
 # Testing Workflow
 
 This guide describes the fastest path from a bug report to a permanent Arlen
-regression test.
+regression test. For testing your own app, start with
+[App request tests](#app-request-tests).
+
+## App request tests
+
+Apps test their routes in process with `ALNTestClient`: it loads the app's
+`config/` for an environment (default `test`), registers the app's own routes,
+and dispatches requests without a socket. New apps ship one such test; run all
+of `tests/**/*.m` with `arlen test --app` (see
+[CLI Reference](CLI_REFERENCE.md) (`arlen test --app`)).
+
+```objc
+#import <XCTest/XCTest.h>
+#import "ALNTestClient.h"
+
+@interface ProjectsTests : XCTestCase
+@property(nonatomic, strong) ALNTestClient *client;
+@end
+
+@implementation ProjectsTests
+- (void)setUp {
+  [super setUp];
+  NSError *error = nil;
+  self.client = [ALNTestClient clientWithEnvironment:@"test"
+                                     configOverrides:@{ @"database" : @{ @"connectionString" : @"" } }
+                                               error:&error];
+  XCTAssertNotNil(self.client, @"%@", error);
+}
+
+- (void)testCreatingAProjectRequiresSignIn {
+  XCTAssertEqual(401, [self.client post:@"/api/projects" JSON:@{ @"name" : @"Atlas" }].statusCode);
+  XCTAssertTrue([self.client signInAsSubject:@"user-1" roles:@[ @"editor" ] scopes:nil error:NULL]);
+  ALNResponse *created = [self.client post:@"/api/projects" JSON:@{ @"name" : @"Atlas" }];
+  XCTAssertEqual(201, created.statusCode, @"%@", [created bodyText]);
+  XCTAssertEqualObjects(@"Atlas", [created JSONObject][@"name"]);
+}
+@end
+```
+
+- Requests: `get:`, `get:query:headers:`, `post:form:`, `post:JSON:`,
+  `post:multipartFields:files:` (files are `@{ @"name", @"filename", @"data",
+  @"contentType" }`), and `requestWithMethod:path:query:headers:body:`.
+- Responses are `ALNResponse`; `bodyText` and `JSONObject` read the body.
+- Cookies persist across requests. `session` decodes the sealed session,
+  `updateSession:error:` edits it, and `signInAsSubject:roles:scopes:error:`
+  establishes an authenticated session the way `ALNAuthSession` does after a
+  login. `clearCookies` signs out.
+- With CSRF enabled, unsafe requests get the app's CSRF header automatically
+  (`csrfToken` creates the session token if needed). Set `automaticCSRF = NO`
+  to test rejection.
+- `configOverrides` is merged over the loaded config after normalization, so
+  use final types (`NSNumber`, not plist strings).
+- Tests call the app's own controllers, templates and modules, so anything they
+  touch (a database, for example) must be available in the `test` environment.
+
+Route capture needs no app changes: the test build recompiles the file that
+defines `main` with `main` renamed, and `ALNCaptureRouteRegistration` runs it
+with `ALNRunAppMain` in capture mode, which records the route callback and
+returns before loading config or starting a server. To test an app built some
+other way, pass `registerRoutes:` to
+`clientWithAppRoot:environment:configOverrides:registerRoutes:error:`, or wrap
+an `ALNApplication` with `initWithApplication:error:`.
 
 ## Merge-Gate Validation
 
@@ -123,7 +184,7 @@ Windows-focused preview lanes:
  `propane`
 - `make phase24-windows-confidence`
  - runs both Windows preview lanes and matches the CI preview entrypoint
-- `make phase31-confidence`
+- `make windows-confidence`
  - runs packaged release smoke, packaged `deploy doctor --base-url`,
  packaged `jobs-worker --once`, and the synthetic `.exe` manifest fallback
  check
@@ -342,3 +403,212 @@ Use runtime-mode entries for real Arlen app variants and keep fixture-backed
 entries in fast mode. Do not move runtime-mode entries into the default lane
 without updating CI alignment and branch-protection guidance in the same
 change.
+
+### Generated ORM naming regressions
+
+After sourcing `tools/source_gnustep_env.sh`, run `make phase26-orm-generated`.
+This uses the repo-local XCTest runner and compiles a generated model fixture
+with property-type, property-attribute and nullability warnings as errors, then
+loads it to exercise typed accessors and ORM runtime state. The Linux quality
+workflow runs this target explicitly. Use `make phase26-orm-unit` and
+`make phase26-orm-integration` for broader ORM runtime coverage.
+
+## Durable jobs acceptance
+
+Run `source tools/source_gnustep_env.sh` then `make ci-durable-jobs`. The gate
+creates a disposable PostgreSQL Unix-socket cluster and runs the repo-local
+XCTest bundle plus independent producer/consumer executables. PostgreSQL server
+binaries must be installed; `ARLEN_TEST_PG_BIN` overrides `pg_config --bindir`.
+No application credentials or database are used. The suite stops/restarts only
+its disposable cluster to exercise database outages. A missing server binary or
+failed database start is a failure, not a skipped test.
+
+Coverage includes four producers, four consumers, accepted-ID reconciliation,
+kill/restart, finite leases and heartbeat renewal, stale-worker mutation
+rejection, transaction rollback, retry exhaustion, replay/deduplication,
+module payload/results, database outage recovery, and private file initialization.
+Lock-contention coverage holds a terminal job or queue-control row locked while
+another adapter claims unrelated work, checks same-queue and cross-queue
+progress, and verifies eventual cleanup after release. A 205-job backlog verifies
+the 100-job cleanup limit and progress across polls; live and retryable leases
+must remain untouched by terminal cleanup.
+Logs are saved to `build/release_confidence/durable_jobs.log`. The
+`durable-jobs-tests` target is the inner bundle runner; use the outer
+`ci-durable-jobs` target to supply the isolated database contract.
+
+This runs before the broader gate as an explicit step in
+`linux-quality / quality-gate`, so later failures do not skip queue acceptance.
+Required check names and branch-protection settings are unchanged.
+
+Server-tool discovery honors `ARLEN_TEST_PG_BIN` first (an invalid explicit path
+fails), then a complete `pg_config --bindir`, an `initdb` directory on PATH, and
+finally the newest complete Debian/Ubuntu server directory under
+`/usr/lib/postgresql`. This allows client development tools and server packages
+to have different versions. The Linux quality workflow installs the `postgresql`
+server package when tools are missing; clang-based GNUstep provisioning is
+unchanged. ORM identifier acceptance uses the same resolver.
+
+The required job display names explicitly emit `linux-quality / quality-gate`,
+`linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`, matching the
+existing branch-protection contexts exactly. Keep those literal names aligned
+when editing workflows. Bare job IDs did not satisfy the configured contexts;
+no required check is removed or weakened by this alignment.
+
+## Request-limit and parser-backend regressions
+
+After sourcing `tools/source_gnustep_env.sh`, use:
+
+```bash
+make test-unit-filter TEST=ConfigTests
+make test-unit-filter TEST=MultipartTests
+make test-integration-filter TEST=HTTPIntegrationTests/testMultipartDocumentedPlistLimitsKeepServerAlive
+make test-integration-filter TEST=DeploymentIntegrationTests/testCompileTimeFeatureFlagsCanDisableYYJSONAndLLHTTP
+```
+
+The multipart socket regression loads an old-style plist and checks configured
+file and part caps on both HTTP parsers, including server usability after a
+rejected upload. The feature-toggle smoke compiles the legacy request parser
+with its multipart implementation while disabling both optional C backends.
+Both regressions also run in the existing Linux integration suite.
+
+## TSAN reliability and retained evidence
+
+The nightly thread-race lane remains informational. Its library-wide
+suppressions and 14 TSAN-only test returns were retired on 2026-09-21;
+previous green runs are not promotion evidence for the new configuration.
+GNUstep queue/CLI findings remain visible. Required check names and branch
+protection stay unchanged; do not add the full TSAN nightly as a required check
+until the investigation's clean-run criteria are met.
+
+Run `python3 tools/ci/test_tsan_reliability.py` for harness checks (also run by
+`make ci-sanitizers`). After sourcing `tools/source_gnustep_env.sh`, run
+`python3 tools/ci/tsan_runtime_diagnostics.py --output /tmp/arlen-tsan-diagnostics`
+for raw/suppressed Foundation reproducers and the deliberate application race
+control, or `bash tools/ci/run_linux_thread_race_nightly.sh` for the complete
+lane. Findings can make these commands fail on the current GNUstep toolchain.
+
+Nightly artifacts are uploaded on success and failure, including coverage
+counts, raw/suppressed probe logs, and toolchain details. Missing TSAN fails with
+exit 77 and `unavailable`, rather than passing. `ARLEN_REQUIRE_TSAN=0` explicitly
+permits the legacy local Helgrind fallback; its summary identifies the engine.
+Shell helpers remove only TSAN preload entries before launching Bash and keep
+TSAN options for linked instrumented binaries. No tests are excluded solely
+because TSAN is active; unrelated service-dependent opt-in tests remain.
+
+See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
+remaining runtime work, and promotion criteria.
+
+## HTTP/data client regressions
+
+On GNUstep, source `tools/source_gnustep_env.sh`, then run these commands
+sequentially (they share build artifacts):
+
+```bash
+make test-unit-filter TEST=HTTPCompatTests
+make phase23-dataverse-tests
+bash tools/ci/run_orm_identifier_regressions.sh
+```
+
+The PostgreSQL script provisions a disposable database and runs PgTests alongside
+ORM and SQL-builder checks. The HTTP peer binds loopback sockets. Neither path
+needs provider credentials. Dataverse policy tests record sleeps without waiting.
+
+On macOS with full Xcode:
+
+```bash
+brew install openssl@3 postgresql@17 libpq
+bash tools/ci/run_apple_client_data_regressions.sh
+```
+
+This builds the Apple XCTest bundle once and runs HTTP, Dataverse policy, and
+live timestamp regressions. `ARLEN_TEST_PG_BIN` and `ARLEN_LIBPQ_PREFIX` can select
+an existing PostgreSQL installation. Linux CI's clang `/usr/GNUstep` bootstrap
+and repo-local tools-xctest runner remain unchanged.
+
+## Live PostgreSQL regression gate
+
+Run `bash tools/ci/run_postgres_regressions.sh` with the supported clang GNUstep
+toolchain and PostgreSQL server tools, including `pg_trgm`, installed. It creates
+an isolated cluster, sets `ARLEN_PG_TEST_DSN`, and exercises generated-code
+consumers, module migrations, PostgreSQL search, and auth server lifecycle tests.
+Auth tests run twice; remaining database sessions fail the gate before `dropdb`
+without force verifies cleanup. Logs are under
+`build/release_confidence/postgres_regressions/`.
+
+The script also supplies a temporary non-default `GNUSTEP_SH`; CI harnesses use
+`tools/source_gnustep_env.sh` instead of assuming a system install. Deployment
+fixtures resolve the local toolchain while explicit deployment target paths
+remain subject to doctor validation. CI provisioning still uses `/usr/GNUstep`.
+
+Generated smoke programs use `make test-client-program` through the shared test
+helper, linking `libArlenFramework.a` with canonical build flags. JSON assertions
+capture stdout separately from stderr, retaining notices for diagnostics. Auth
+servers launch with `exec` so the test owns the server PID; cleanup sends TERM,
+waits up to five seconds, escalates to KILL if necessary, and reaps the process.
+This cleanup runs in `@finally`, including assertion failures.
+
+## Security Header Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=SecurityHeadersColdStartTests`. The test compiles a
+standalone probe against the framework, runs a single-thread control, and runs
+20 fresh processes with 32 barrier-synchronized first callers each. It checks
+all six security-header defaults, default/custom CSP, and existing response
+header preservation. The probe inherits sanitizer instrumentation from the
+test bundle, while excluding preload libraries from compiler utilities.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+ASan/UBSan unit lane. Required checks remain unchanged.
+
+On macOS, the Apple baseline job selects the OIDC, metadata transport,
+security-header cold-start and outbound HTTP client tests with native XCTest.
+To reproduce:
+
+```bash
+bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
+for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests HTTPClientTests; do
+  xcrun xctest -XCTest "$filter" "$bundle_path"
+done
+```
+
+## Instance Lock Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=InstanceLockColdStartTests`. The test compiles
+`tests/fixtures/runtime/instance_lock_first_use_probe.m` against the framework
+and runs a single-thread control and 20 fresh processes. In each process, 16
+threads lock a fresh `ALNMetricsRegistry` and a fresh `ALNPg` pool for the
+first time at once, for 2,000 rounds (fewer under sanitizers). The pool uses a
+nonexistent socket path, so no PostgreSQL server is needed. Each process runs
+under a 120-second alarm because a hang is one failure mode. The probe checks
+that no metric updates are lost.
+
+Against the unfixed code on the stock libobjc2 2.3 runtime, most processes
+hang or abort in `objc_sync_enter`
+([gnustep/libobjc2#424](https://github.com/gnustep/libobjc2/issues/424)).
+`BuildPolicyTests/testShippedSourcesAvoidSynchronizedOnInstanceReceivers`
+keeps new instance `@synchronized` out of shipped code.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+sanitizer unit lanes. Required checks remain unchanged.
+
+## Lazy Static Cold-Start Regression
+
+After sourcing `tools/source_gnustep_env.sh`, run
+`make test-unit-filter TEST=LazyStaticColdStartTests`. The test compiles
+`tests/fixtures/runtime/lazy_static_first_use_probe.m` against the framework
+and runs a single-thread control and 100 fresh processes (fewer under
+sanitizers). In each process, 32 threads start at once and each builds the same
+`ALNSQLBuilder` query 20 times. The query uses identifier tokens, `$N`
+placeholders, a comparison operator, and a join operator, so it touches every
+lazily created regex and operator set in the builder. Each process runs under a
+60-second alarm and must produce identical SQL on every thread. No PostgreSQL
+server is needed.
+
+Against the unfixed code (issue #49), 77 of 100 processes crashed or returned a
+failed build. `BuildPolicyTests/testShippedSourcesAvoidUnguardedLazyStatics`
+rejects the `static T *x = nil; if (x == nil)` pattern in `src/`, `modules/`,
+`tools/` and `examples/`. Use `dispatch_once` instead.
+
+The test is included in the full unit suite, the Linux quality gate, and the
+sanitizer unit lanes. Required checks remain unchanged.

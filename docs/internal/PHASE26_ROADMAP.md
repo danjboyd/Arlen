@@ -691,3 +691,33 @@ Arlen can claim Phase 26 complete only if:
 - PDOM metadata import tooling.
 - Full inheritance/polymorphic-association productization in ORM v1.
 - Pretending Dataverse is a SQL adapter or a second SQL dialect.
+
+## Post-completion codegen correction (2026-09-12)
+
+SQL codegen now allocates reserved property aliases, accepts exact-column
+`property_names` overrides, rejects field/helper collisions and preserves setter
+capitalization. The generated confidence target includes strict compilation and
+a loaded generated-model runtime regression. See `docs/ARLEN_ORM.md` and
+`docs/ARLEN_ORM_MIGRATIONS.md` for the updated contract and regeneration procedure.
+
+## Quoted legacy SQL identifiers (2026-09-13)
+
+The SQL descriptor/codegen/runtime contract now preserves quoted physical names
+and separates them from generated logical/property aliases. Strict component
+parsing and dialect escaping cover the ORM read/write, key, join, returning,
+and PostgreSQL conflict paths. Normalization collisions have explicit
+`field_names` overrides. The existing Linux quality lane exercises a disposable
+PostgreSQL cluster. See `../ARLEN_ORM.md` for the public contract and
+`OPPORTUNITYTRACKER_QUOTED_IDENTIFIERS_2026-09-13.md` for downstream report ownership.
+
+## Generated descriptor concurrency follow-up (issue #32)
+
+Generated SQL `+modelDescriptor` implementations now publish a single fully
+initialized descriptor through a per-model `dispatch_once` token. Existing
+applications must regenerate and rebuild their generated source to adopt the fix.
+The ORMCodegenTests regression compiles actual generated models against the
+framework archive and executes a single-thread control plus 20 independent
+32-thread cold-start processes, checking contents, identity, per-model separation,
+and ARC ownership after worker autorelease pools drain. The probe inherits the
+test build's sanitizer instrumentation. It runs in the existing unit/generated
+quality and sanitizer gates without a database or application warm-up.

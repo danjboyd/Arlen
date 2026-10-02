@@ -1,15 +1,12 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "../shared/ALNTestSupport.h"
+
 @interface BuildPolicyTests : XCTestCase
 @end
 
 @implementation BuildPolicyTests
-
-- (BOOL)isThreadSanitizerRuntimeActive {
-  NSString *ldPreload = [[[NSProcessInfo processInfo] environment] objectForKey:@"LD_PRELOAD"];
-  return [ldPreload length] > 0;
-}
 
 - (NSString *)readFile:(NSString *)path {
   NSError *error = nil;
@@ -98,27 +95,7 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ?: @"" ];
-  NSString *capturePath = [NSTemporaryDirectory()
-      stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-test-shell-%@.log",
-                                                               [[NSUUID UUID] UUIDString]]];
-  [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
-  NSFileHandle *captureWrite = [NSFileHandle fileHandleForWritingAtPath:capturePath];
-  task.standardOutput = captureWrite;
-  task.standardError = captureWrite;
-  [task launch];
-  [task waitUntilExit];
-
-  if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
-  }
-  [captureWrite closeFile];
-  NSData *capturedData = [NSData dataWithContentsOfFile:capturePath] ?: [NSData data];
-  [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
-  NSString *output = [[NSString alloc] initWithData:capturedData encoding:NSUTF8StringEncoding];
-  return output ?: @"";
+  return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
@@ -230,7 +207,7 @@
   XCTAssertTrue([makefile containsString:@"GNUSTEP_SYSTEM_LIBS_DIR := $(strip $(shell gnustep-config --variable=GNUSTEP_SYSTEM_LIBRARIES 2>/dev/null))"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -ldl"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -lws2_32"]);
-  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)"]);
+  XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
@@ -251,8 +228,8 @@
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests"]);
-  XCTAssertTrue([makefile containsString:@"phase31-confidence:"]);
-  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase31_confidence.sh"]);
+  XCTAssertTrue([makefile containsString:@"windows-confidence:"]);
+  XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_windows_confidence.sh"]);
   XCTAssertTrue([makefile containsString:@"phase32-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_phase32_confidence.sh"]);
   XCTAssertTrue([makefile containsString:@"phase35-confidence:"]);
@@ -557,7 +534,7 @@
                 @"boomhauer app build must include vendored app module headers");
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s"]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
-  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch\\n' \"$gnustep_base_libs\""]);
+  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\\n' \"$gnustep_base_libs\""]);
   XCTAssertTrue([script containsString:@"-ldispatch"]);
 }
 
@@ -667,7 +644,7 @@
   XCTAssertTrue([makefile containsString:@"ci-syscall-faults:"]);
   XCTAssertTrue([makefile containsString:@"ci-allocation-faults:"]);
   XCTAssertTrue([makefile containsString:@"ci-soak:"]);
-  XCTAssertTrue([makefile containsString:@"ci-phase38-fd-regression:"]);
+  XCTAssertTrue([makefile containsString:@"ci-fd-regression:"]);
   XCTAssertTrue([makefile containsString:@"ci-chaos-restart:"]);
   XCTAssertTrue([makefile containsString:@"ci-static-analysis:"]);
   XCTAssertTrue([makefile containsString:@"ci-blob-throughput:"]);
@@ -715,7 +692,7 @@
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *makefilePath = [repoRoot stringByAppendingPathComponent:@"GNUmakefile"];
   NSString *makefile = [self readFile:makefilePath];
-  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase38_fd_regression.sh"];
+  NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"tools/ci/run_fd_regression.sh"];
   NSString *script = [self readFile:scriptPath];
   NSString *samplerPath = [repoRoot stringByAppendingPathComponent:@"tools/ops/sample_fd_targets.py"];
   NSString *sampler = [self readFile:samplerPath];
@@ -724,7 +701,7 @@
       [self readFile:[repoRoot stringByAppendingPathComponent:@"src/Arlen/Core/ALNApplication.m"]];
   NSString *propaneDocs = [self readFile:[repoRoot stringByAppendingPathComponent:@"docs/PROPANE.md"]];
 
-  XCTAssertTrue([makefile containsString:@"ci-phase38-fd-regression:"]);
+  XCTAssertTrue([makefile containsString:@"ci-fd-regression:"]);
   XCTAssertTrue([script containsString:@"build/release_confidence/phase38/fd_regression"]);
   XCTAssertTrue([script containsString:@"phase38_fd_regression_summary.json"]);
   XCTAssertTrue([sampler containsString:@"arlen-fd-target-sample-v1"]);
@@ -811,12 +788,12 @@
       [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase4_sanitizers.sh"]];
   NSString *phase5eScript =
       [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase5e_tsan_experimental.sh"]];
-  NSString *phase10mScript = [self
-      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_sanitizer_matrix.sh"]];
+  NSString *sanitizerMatrixScript = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_linux_sanitizer_matrix.sh"]];
 
   XCTAssertTrue([phase4Script containsString:@"make clean"]);
   XCTAssertTrue([phase5eScript containsString:@"make clean"]);
-  XCTAssertTrue([phase10mScript containsString:@"make clean"]);
+  XCTAssertTrue([sanitizerMatrixScript containsString:@"make clean"]);
 }
 
 - (void)testTSANScriptStagesArtifactsOutsideCleanBuildTree {
@@ -836,6 +813,25 @@
   XCTAssertTrue([script containsString:@"suppressions=$tsan_suppressions_file"]);
   XCTAssertTrue([script containsString:@"trap cleanup EXIT"]);
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
+}
+
+- (void)testShellEnvironmentRemovesOnlyTSANPreloadBeforeLaunch {
+  NSDictionary *parent = @{
+    @"LD_PRELOAD": @"/tmp/libtsan.so:/tmp/libkeep.so /tmp/libclang_rt.tsan-x86_64.so",
+    @"XCTEST_LD_PRELOAD": @"/tmp/libtsan.so",
+    @"TSAN_OPTIONS": @"halt_on_error=1",
+    @"PATH": @"/usr/bin:/bin",
+  };
+  NSDictionary *child = ALNTestShellEnvironment(parent);
+  XCTAssertEqualObjects(child[@"LD_PRELOAD"], @"/tmp/libkeep.so");
+  XCTAssertNil(child[@"XCTEST_LD_PRELOAD"]);
+  XCTAssertEqualObjects(child[@"TSAN_OPTIONS"], parent[@"TSAN_OPTIONS"]);
+  XCTAssertEqualObjects(child[@"PATH"], parent[@"PATH"]);
+  XCTAssertNotNil(parent[@"XCTEST_LD_PRELOAD"]);
+  int exitCode = -1;
+  NSString *output = ALNTestRunShellCapture(@"printf shell-capture-ok", &exitCode);
+  XCTAssertEqual(exitCode, 0, @"%@", output);
+  XCTAssertEqualObjects(output, @"shell-capture-ok");
 }
 
 - (void)testTSANHotPathsAvoidObjCSynchronizedMonitors {
@@ -859,10 +855,121 @@
   XCTAssertFalse([pgTests containsString:@"@synchronized(state)"]);
 }
 
-- (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
+// gnustep/libobjc2#424: the first @synchronized on an instance publishes its
+// lock before initializing it, so concurrent first use can hang or abort.
+// Class objects take a safe path. Shipped code must lock instances with
+// explicit locks created before the object is shared.
+- (void)testShippedSourcesAvoidSynchronizedOnInstanceReceivers {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSRegularExpression *classReceiver =
+      [NSRegularExpression regularExpressionWithPattern:@"^\\[[A-Za-z_][A-Za-z0-9_]* class\\]$"
+                                                options:0
+                                                  error:NULL];
+  NSMutableArray<NSString *> *violations = [NSMutableArray array];
+  NSUInteger scannedFiles = 0;
+  for (NSString *root in @[ @"src", @"modules", @"tools", @"examples" ]) {
+    NSString *rootPath = [repoRoot stringByAppendingPathComponent:root];
+    NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:rootPath];
+    for (NSString *relativePath in enumerator) {
+      NSString *extension = [relativePath pathExtension];
+      if (![extension isEqualToString:@"m"] && ![extension isEqualToString:@"h"]) {
+        continue;
+      }
+      NSString *source = [self readFile:[rootPath stringByAppendingPathComponent:relativePath]];
+      scannedFiles += 1;
+      if (![source containsString:@"@synchronized"]) {
+        continue;
+      }
+      NSArray<NSString *> *lines = [source componentsSeparatedByString:@"\n"];
+      for (NSUInteger index = 0; index < [lines count]; index++) {
+        NSString *line = lines[index];
+        NSRange keyword = [line rangeOfString:@"@synchronized"];
+        if (keyword.location == NSNotFound) {
+          continue;
+        }
+        NSRange comment = [line rangeOfString:@"//"];
+        if (comment.location != NSNotFound && comment.location < keyword.location) {
+          continue;
+        }
+        NSString *rest = [[line substringFromIndex:NSMaxRange(keyword)]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (![rest hasPrefix:@"("]) {
+          continue;
+        }
+        NSInteger depth = 0;
+        NSUInteger end = NSNotFound;
+        for (NSUInteger offset = 0; offset < [rest length]; offset++) {
+          unichar ch = [rest characterAtIndex:offset];
+          if (ch == '(') depth += 1;
+          if (ch == ')' && --depth == 0) {
+            end = offset;
+            break;
+          }
+        }
+        NSString *receiver = (end == NSNotFound)
+            ? rest
+            : [[rest substringWithRange:NSMakeRange(1, end - 1)]
+                  stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([classReceiver numberOfMatchesInString:receiver
+                                           options:0
+                                             range:NSMakeRange(0, [receiver length])] == 1) {
+          continue;
+        }
+        [violations addObject:[NSString stringWithFormat:@"%@/%@:%lu: @synchronized(%@)",
+                                                         root, relativePath,
+                                                         (unsigned long)(index + 1), receiver]];
+      }
+    }
   }
+  XCTAssertGreaterThan(scannedFiles, (NSUInteger)100);
+  XCTAssertEqual((NSUInteger)0, [violations count],
+                 @"use a lock created before the object is shared instead:\n%@",
+                 [violations componentsJoinedByString:@"\n"]);
+}
+
+// Issue #49: `static T *x = nil; if (x == nil) { x = ...; }` races on
+// concurrent first use. Both threads assign, and under ARC the second store
+// frees the object the first thread is still using. Use dispatch_once.
+- (void)testShippedSourcesAvoidUnguardedLazyStatics {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSRegularExpression *lazyStatic = [NSRegularExpression
+      regularExpressionWithPattern:
+          @"^[ \\t]*static [A-Za-z_][A-Za-z0-9_]* *\\* *([A-Za-z_][A-Za-z0-9_]*) = nil;[ \\t]*\\n"
+           "[ \\t]*if \\((?:\\1 == nil|!\\1)\\)"
+                           options:NSRegularExpressionAnchorsMatchLines
+                             error:NULL];
+  XCTAssertNotNil(lazyStatic);
+  NSMutableArray<NSString *> *violations = [NSMutableArray array];
+  NSUInteger scannedFiles = 0;
+  for (NSString *root in @[ @"src", @"modules", @"tools", @"examples" ]) {
+    NSString *rootPath = [repoRoot stringByAppendingPathComponent:root];
+    NSDirectoryEnumerator *enumerator = [[NSFileManager defaultManager] enumeratorAtPath:rootPath];
+    for (NSString *relativePath in enumerator) {
+      if (![[relativePath pathExtension] isEqualToString:@"m"]) {
+        continue;
+      }
+      NSString *source = [self readFile:[rootPath stringByAppendingPathComponent:relativePath]];
+      scannedFiles += 1;
+      if (![source containsString:@" = nil;"]) {
+        continue;
+      }
+      for (NSTextCheckingResult *match in
+           [lazyStatic matchesInString:source options:0 range:NSMakeRange(0, [source length])]) {
+        NSUInteger line = [[[source substringToIndex:match.range.location]
+            componentsSeparatedByString:@"\n"] count];
+        [violations addObject:[NSString stringWithFormat:@"%@/%@:%lu: %@", root, relativePath,
+                                                         (unsigned long)line,
+                                                         [source substringWithRange:[match rangeAtIndex:1]]]];
+      }
+    }
+  }
+  XCTAssertGreaterThan(scannedFiles, (NSUInteger)100);
+  XCTAssertEqual((NSUInteger)0, [violations count],
+                 @"initialize these statics with dispatch_once instead:\n%@",
+                 [violations componentsJoinedByString:@"\n"]);
+}
+
+- (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fakebin"];
@@ -992,13 +1099,19 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && ARLEN_TSAN_ARTIFACT_DIR=./outer-tsan-artifacts "
+                          "ARLEN_PHASE10M_THREAD_ARTIFACT_DIR=./outer-thread-artifacts "
+                          "env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
     NSString *output = [self runShellCapture:command exitCode:&exitCode];
 
     XCTAssertEqual(0, exitCode, @"%@", output);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [fixtureRoot stringByAppendingPathComponent:@"outer-tsan-artifacts"]]);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [fixtureRoot stringByAppendingPathComponent:@"outer-thread-artifacts"]]);
     XCTAssertTrue([output containsString:@"ci: tsan bootstrap eocc "], @"%@", output);
     XCTAssertTrue([output containsString:@"ci: phase5e tsan experimental run complete"], @"%@", output);
 
@@ -1029,9 +1142,6 @@
 }
 
 - (void)testTSANScriptStopsOnInstrumentedFailureBeforeRuntimeProbe {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fakebin"];
@@ -1123,7 +1233,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
+        stringWithFormat:@"cd %@ && env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase5e_tsan_experimental.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
@@ -1147,9 +1257,6 @@
 }
 
 - (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
-  if ([self isThreadSanitizerRuntimeActive]) {
-    return;
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];
@@ -1169,9 +1276,9 @@
     XCTAssertNil(error);
 
     NSString *sourceScript =
-        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase10m_thread_race_nightly.sh"];
+        [repoRoot stringByAppendingPathComponent:@"tools/ci/run_linux_thread_race_nightly.sh"];
     NSString *targetScript =
-        [toolsDir stringByAppendingPathComponent:@"run_phase10m_thread_race_nightly.sh"];
+        [toolsDir stringByAppendingPathComponent:@"run_linux_thread_race_nightly.sh"];
     XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:sourceScript
                                                           toPath:targetScript
                                                            error:&error]);
@@ -1222,7 +1329,7 @@
     XCTAssertTrue([self makeExecutableAtPath:fakeClang]);
 
     NSString *command = [NSString
-        stringWithFormat:@"cd %@ && LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_phase10m_thread_race_nightly.sh 2>&1",
+        stringWithFormat:@"cd %@ && env -u ARLEN_TSAN_ARTIFACT_DIR -u ARLEN_PHASE10M_THREAD_ARTIFACT_DIR -u ARLEN_TSAN_RUNTIME_ITERS -u ARLEN_TSAN_SUPPRESSIONS_FILE -u TSAN_OPTIONS -u EXTRA_OBJC_FLAGS LD_PRELOAD='' PATH=%@:$PATH bash ./tools/ci/run_linux_thread_race_nightly.sh 2>&1",
                          [self shellQuoted:fixtureRoot],
                          [self shellQuoted:fakeBin]];
     int exitCode = 0;
@@ -1330,7 +1437,7 @@
   NSString *workflow = [self
       readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/linux-sanitizers.yml"]];
 
-  XCTAssertTrue([workflow containsString:@"Run Phase 10M sanitizer matrix gate"]);
+  XCTAssertTrue([workflow containsString:@"Run linux sanitizer matrix gate"]);
   XCTAssertTrue([workflow containsString:@"ARLEN_PERF_RETRY_COUNT: \"3\""]);
 }
 
@@ -1368,7 +1475,7 @@
 - (void)testReleaseCertificationStartsFromCleanBuildTree {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *script = [self
-      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_phase9j_release_certification.sh"]];
+      readFile:[repoRoot stringByAppendingPathComponent:@"tools/ci/run_release_certification.sh"]];
 
   XCTAssertTrue([script containsString:@"make clean"]);
   XCTAssertTrue([script containsString:@"bash ./tools/ci/run_linux_quality_gate.sh"]);
@@ -1376,6 +1483,66 @@
   XCTAssertTrue([script containsString:@"stash_release_artifact_dir phase9i"]);
   XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase5e"]);
   XCTAssertTrue([script containsString:@"restore_release_artifact_dir phase9i"]);
+}
+
+- (void)testModuleVersionCheckRequiresBumpWhenModuleSourcesChange {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *checker = [repoRoot stringByAppendingPathComponent:@"tools/ci/check_module_versions.py"];
+  NSString *work = [self createTempDirectoryWithPrefix:@"module-version-policy"];
+  XCTAssertNotNil(work);
+  if (work == nil) {
+    return;
+  }
+
+  @try {
+    NSString *manifest = [work stringByAppendingPathComponent:@"modules/alpha/module.plist"];
+    NSString *source = [work stringByAppendingPathComponent:@"modules/alpha/Sources/Alpha.m"];
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 1.0.0\"; } );\n}\n"]);
+    XCTAssertTrue([self writeFile:source content:@"// v1\n"]);
+
+    int code = 0;
+    NSString *git = [NSString stringWithFormat:@"cd %@ && git -c user.name=t -c user.email=t@example.invalid",
+                                               [self shellQuoted:work]];
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && git init -q && %@ add -A && %@ commit -qm base && git tag base",
+        [self shellQuoted:work], git, git]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *check = [NSString stringWithFormat:@"python3 %@ --repo-root %@ --base base 2>&1",
+                                                 [self shellQuoted:checker],
+                                                 [self shellQuoted:work]];
+
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    XCTAssertTrue([self writeFile:source content:@"// v2\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"modules/alpha: files changed (Sources/Alpha.m)"], @"%@", output);
+
+    // A dependency constraint is not the module's own version.
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 2.0.0\"; } );\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(1, code, @"%@", output);
+
+    XCTAssertTrue([self writeFile:manifest
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.1\";\n"
+                                  "  dependencies = ( { identifier = \"jobs\"; version = \">= 2.0.0\"; } );\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    // New modules need no bump.
+    XCTAssertTrue([self writeFile:[work stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"1.0.0\";\n}\n"]);
+    output = [self runShellCapture:check exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:work error:nil];
+  }
 }
 
 @end

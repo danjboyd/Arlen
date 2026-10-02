@@ -3,6 +3,7 @@
 #import <errno.h>
 #import <fcntl.h>
 #import <limits.h>
+#import <math.h>
 #import <openssl/sha.h>
 #import <stdlib.h>
 #import <stdio.h>
@@ -11,6 +12,7 @@
 #import <sys/stat.h>
 #include <signal.h>
 #import "Support/ALNPlatform.h"
+#import "Support/ALNPositiveInteger.h"
 
 #if defined(_WIN32)
 #include <io.h>
@@ -43,15 +45,27 @@ typedef SSIZE_T ssize_t;
 
 #import "ALNApplication.h"
 #import "ALNEventStream.h"
+#import "ALNFileResponseInternal.h"
+#import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRealtime.h"
+#import "ALNPgRealtimeFanout.h"
 #import "Support/ALNJSONSerialization.h"
 
 typedef struct {
   NSUInteger maxRequestLineBytes;
   NSUInteger maxHeaderBytes;
   NSUInteger maxBodyBytes;
+  // Bodies larger than this stream to a file instead of the connection buffer.
+  NSUInteger spoolThresholdBytes;
+  // Owned by the application config, which outlives every connection.
+  __unsafe_unretained NSString *spoolDirectory;
+  // Per-route body limits (GitHub issue 87). When active, maxBodyBytes is the
+  // largest of the default and every route override (the header-stage ceiling),
+  // and each request's own limit comes from its route before any body is read.
+  BOOL routeBodyLimitsActive;
+  __unsafe_unretained ALNApplication *application;
 } ALNRequestLimits;
 
 typedef struct {
@@ -455,14 +469,8 @@ static double ALNNowMilliseconds(void) {
 }
 
 static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
-  id value = dict[key];
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed > 0) {
-      return parsed;
-    }
-  }
-  return defaultValue;
+  NSNumber *value = ALNPositiveInteger(dict[key]);
+  return value != nil ? value.unsignedIntegerValue : defaultValue;
 }
 
 static NSUInteger ALNConfigUIntAllowZero(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
@@ -482,6 +490,10 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   out.maxRequestLineBytes = ALNConfigUInt(limits, @"maxRequestLineBytes", 4096);
   out.maxHeaderBytes = ALNConfigUInt(limits, @"maxHeaderBytes", 32768);
   out.maxBodyBytes = ALNConfigUInt(limits, @"maxBodyBytes", 1048576);
+  out.spoolThresholdBytes = ALNConfigUInt(limits, @"spoolThresholdBytes", 1048576);
+  out.spoolDirectory = [limits[@"spoolDirectory"] isKindOfClass:[NSString class]] ? limits[@"spoolDirectory"] : nil;
+  out.routeBodyLimitsActive = NO;
+  out.application = nil;
   return out;
 }
 
@@ -491,6 +503,61 @@ static ALNServerSocketTuning ALNTuningFromConfig(NSDictionary *config) {
   out.connectionTimeoutSeconds = ALNConfigUInt(config, @"connectionTimeoutSeconds", 30);
   out.enableReusePort = ALNConfigBool(config, @"enableReusePort", NO);
   return out;
+}
+
+// realtime.fanout (GitHub issue 48): cross-process fanout for ALNRealtimeHub so
+// live push reaches websocket subscribers on every propane worker.
+static id<ALNRealtimeFanout> ALNRealtimeFanoutFromConfig(NSDictionary *config, NSString **failure) {
+  NSDictionary *realtime = [config[@"realtime"] isKindOfClass:[NSDictionary class]] ? config[@"realtime"] : @{};
+  NSDictionary *fanout = [realtime[@"fanout"] isKindOfClass:[NSDictionary class]] ? realtime[@"fanout"] : nil;
+  NSString *adapter = [fanout[@"adapter"] isKindOfClass:[NSString class]] ? [fanout[@"adapter"] lowercaseString] : @"";
+  if ([adapter length] == 0 || [adapter isEqualToString:@"memory"]) {
+    return nil;
+  }
+  if (![adapter isEqualToString:@"postgresql"]) {
+    if (failure != NULL) *failure = [NSString stringWithFormat:@"unsupported realtime.fanout.adapter '%@'", adapter];
+    return nil;
+  }
+  NSString *dsn = [fanout[@"connectionString"] isKindOfClass:[NSString class]] ? fanout[@"connectionString"] : @"";
+  const char *envDSN = getenv("ARLEN_DATABASE_URL");
+  if ([dsn length] == 0 && envDSN != NULL && envDSN[0] != '\0') {
+    dsn = [NSString stringWithUTF8String:envDSN];
+  }
+  if ([dsn length] == 0) {
+    NSDictionary *database = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : @{};
+    dsn = [database[@"connectionString"] isKindOfClass:[NSString class]] ? database[@"connectionString"] : @"";
+  }
+  NSError *error = nil;
+  ALNPgRealtimeFanout *pgFanout =
+      [[ALNPgRealtimeFanout alloc] initWithConnectionString:dsn
+                                              notifyChannel:[fanout[@"channel"] isKindOfClass:[NSString class]] ? fanout[@"channel"] : nil
+                                                        hub:[ALNRealtimeHub sharedHub]
+                                                      error:&error];
+  if (pgFanout == nil) {
+    if (failure != NULL) *failure = error.localizedDescription ?: @"could not create the PostgreSQL realtime fanout";
+    return nil;
+  }
+  if (![pgFanout startWaitingUpTo:5.0]) {
+    fprintf(stderr, "arlen: realtime fanout not listening yet; it keeps retrying in the background\n");
+  }
+  return pgFanout;
+}
+
+// Once per process: a websocket channel under several propane workers (or a
+// multi-node cluster) without a fanout only sees publishes from its own worker.
+static void ALNWarnIfRealtimeIsWorkerLocal(void) {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    const char *workers = getenv("ARLEN_PROPANE_WORKERS");
+    const char *cluster = getenv("ARLEN_CLUSTER_ENABLED");
+    BOOL multiProcess = (workers != NULL && atoi(workers) > 1) || (cluster != NULL && atoi(cluster) == 1);
+    if (multiProcess && [ALNRealtimeHub sharedHub].fanout == nil) {
+      fprintf(stderr,
+              "arlen: warning: websocket channels are process-local; with multiple propane workers a publish only "
+              "reaches subscribers on the same worker. Configure realtime.fanout = { adapter = \"postgresql\"; } "
+              "(docs/LIVE_UI.md).\n");
+    }
+  });
 }
 
 static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
@@ -1504,8 +1571,24 @@ static int ALNStaticFileFDForPath(NSString *path,
   }
 
   ALNEnsureStaticFileFDCache();
-  if (gALNStaticFileFDCacheCapacity == 0) {
-    return ALNOpenWithRetry(filesystemPath, openFlags);
+  if (gALNStaticFileFDCacheCapacity == 0
+#if defined(_WIN32)
+      || YES // The Windows seek/read fallback needs an independent file position.
+#endif
+  ) {
+    int opened = ALNOpenWithRetry(filesystemPath, openFlags);
+    if (opened < 0) return -1;
+    struct stat openedStat;
+    if (ALNFstatWithRetry(opened, &openedStat) != 0 || !S_ISREG(openedStat.st_mode) ||
+        (unsigned long long)openedStat.st_dev != device ||
+        (unsigned long long)openedStat.st_ino != inode ||
+        (unsigned long long)openedStat.st_size != size ||
+        (long long)openedStat.st_mtime != mtimeSeconds ||
+        ALNStaticFileMTimeNanoseconds(&openedStat) != mtimeNanoseconds) {
+      close(opened);
+      return -1;
+    }
+    return opened;
   }
 
   [gALNStaticFileFDCacheLock lock];
@@ -1579,7 +1662,8 @@ static void ALNStaticFileFDCacheClear(void) {
 
 static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
                                     int fileFd,
-                                    unsigned long long remaining) {
+                                    unsigned long long remaining,
+                                    off_t offset) {
   if (remaining == 0) {
     return YES;
   }
@@ -1589,7 +1673,12 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
     size_t chunk = (remaining > (unsigned long long)sizeof(buffer))
                        ? sizeof(buffer)
                        : (size_t)remaining;
+#if defined(_WIN32)
+    if (lseek(fileFd, offset, SEEK_SET) < 0) return NO;
     ssize_t readBytes = read(fileFd, buffer, chunk);
+#else
+    ssize_t readBytes = pread(fileFd, buffer, chunk, offset);
+#endif
     if (readBytes < 0) {
       if (errno == EINTR) {
         continue;
@@ -1603,20 +1692,22 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
       return NO;
     }
     remaining -= (unsigned long long)readBytes;
+    offset += readBytes;
   }
   return YES;
 }
 
 static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
                                   int fileFd,
-                                  unsigned long long byteLength) {
+                                  unsigned long long byteLength,
+                                  unsigned long long byteOffset) {
   if (fileFd < 0) {
     return NO;
   }
   BOOL ok = NO;
   unsigned long long remaining = byteLength;
 #ifdef __linux__
-  off_t offset = 0;
+  off_t offset = (off_t)byteOffset;
   int transientRetries = 0;
   while (remaining > 0) {
     size_t chunk = (remaining > (unsigned long long)SSIZE_MAX)
@@ -1634,11 +1725,7 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
       }
       transientRetries = 0;
       if (errno == EINVAL || errno == ENOSYS) {
-        if (lseek(fileFd, offset, SEEK_SET) < 0) {
-          ok = NO;
-          goto cleanup;
-        }
-        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
         goto cleanup;
       }
       ok = NO;
@@ -1652,13 +1739,10 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
   }
   ok = (remaining == 0);
   if (!ok) {
-    if (lseek(fileFd, offset, SEEK_SET) < 0) {
-      goto cleanup;
-    }
-    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
   }
 #else
-  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining);
+  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, (off_t)byteOffset);
 #endif
 
 #ifdef __linux__
@@ -1808,10 +1892,128 @@ static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
   return YES;
 }
 
+// Streams a Content-Length body larger than limits.spoolThresholdBytes into a
+// private file instead of the connection buffer (GitHub issue 64). `headerBytes`
+// of complete head are buffered, possibly followed by some body. Reads never
+// exceed the declared length, so a pipelined next request stays on the socket.
+// The returned request owns the file; every failure removes it.
+// The body limit for the request whose head is buffered: its route's
+// maxBodyBytes, or the server default. Only the route table is consulted; no
+// middleware or controller runs before the body is read.
+static NSUInteger ALNRequestBodyLimit(ALNRequestLimits limits, const uint8_t *bytes, size_t headerBytes) {
+  if (!limits.routeBodyLimitsActive || limits.application == nil || bytes == NULL) {
+    return limits.maxBodyBytes;
+  }
+  size_t lineEnd = 0;
+  while (lineEnd < headerBytes && bytes[lineEnd] != '\r' && bytes[lineEnd] != '\n') {
+    lineEnd++;
+  }
+  size_t methodEnd = 0;
+  while (methodEnd < lineEnd && bytes[methodEnd] != ' ') {
+    methodEnd++;
+  }
+  size_t targetStart = methodEnd + 1;
+  size_t targetEnd = targetStart;
+  while (targetEnd < lineEnd && bytes[targetEnd] != ' ' && bytes[targetEnd] != '?' && bytes[targetEnd] != '#') {
+    targetEnd++;
+  }
+  if (methodEnd == 0 || targetStart >= lineEnd || targetEnd <= targetStart) {
+    return limits.maxBodyBytes;
+  }
+  NSString *method = [[NSString alloc] initWithBytes:bytes length:methodEnd encoding:NSASCIIStringEncoding];
+  NSString *target = [[NSString alloc] initWithBytes:bytes + targetStart
+                                              length:targetEnd - targetStart
+                                            encoding:NSUTF8StringEncoding];
+  if (![target hasPrefix:@"/"]) {
+    // absolute-form (http://host/path): keep the path.
+    NSRange scheme = [target rangeOfString:@"://"];
+    NSRange slash = (scheme.location == NSNotFound)
+                        ? NSMakeRange(NSNotFound, 0)
+                        : [target rangeOfString:@"/" options:0
+                                          range:NSMakeRange(NSMaxRange(scheme), [target length] - NSMaxRange(scheme))];
+    target = (slash.location == NSNotFound) ? @"/" : [target substringFromIndex:slash.location];
+  }
+  if ([method length] == 0 || [target length] == 0) {
+    return limits.maxBodyBytes;
+  }
+  return [limits.application maxBodyBytesForMethod:method path:target];
+}
+
+static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
+                                         ALNRequestLimits limits,
+                                         ALNHTTPParserBackend backend,
+                                         size_t headerBytes,
+                                         NSUInteger contentLength,
+                                         NSInteger *statusCode,
+                                         ALNConnectionReadState *readState) {
+  NSString *directory = [limits.spoolDirectory length] > 0 ? limits.spoolDirectory : NSTemporaryDirectory();
+  NSString *path = [directory stringByAppendingPathComponent:
+      [@"arlen-body-" stringByAppendingString:[[NSUUID UUID] UUIDString]]];
+  NSData *head = [NSData dataWithBytes:readState->bytes length:headerBytes];
+  size_t buffered = MIN(readState->length - headerBytes, (size_t)contentLength);
+  FILE *file = NULL;
+  NSInteger failure = 503;
+  ALNRequest *request = nil;
+  @try {
+    if ([[NSFileManager defaultManager] createFileAtPath:path contents:nil
+                                              attributes:@{NSFilePosixPermissions : @0600}]) {
+      file = fopen([path fileSystemRepresentation], "wb");
+    }
+    failure = (file == NULL) ? 503 : 0;
+    if (failure == 0 && buffered > 0 && fwrite(readState->bytes + headerBytes, 1, buffered, file) != buffered) {
+      failure = 503;
+    }
+    ALNConnectionReadStateConsumePrefix(readState, headerBytes + buffered);
+    NSUInteger remaining = contentLength - buffered;
+    char chunk[65536];
+    while (failure == 0 && remaining > 0) {
+      ssize_t readBytes = ALNRecvWithFaults(clientFd, chunk, MIN(sizeof(chunk), remaining), 0);
+      if (readBytes < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        failure = (errno == EAGAIN || errno == EWOULDBLOCK) ? 408 : 400;
+      } else if (readBytes == 0) {
+        failure = 400;  // client went away mid-body
+      } else if (fwrite(chunk, 1, (size_t)readBytes, file) != (size_t)readBytes) {
+        failure = 503;
+      } else {
+        remaining -= (NSUInteger)readBytes;
+      }
+    }
+    if (file != NULL && fclose(file) != 0 && failure == 0) {
+      failure = 503;
+    }
+    file = NULL;
+    if (failure == 0) {
+      request = [ALNRequest requestFromHeadData:head backend:backend error:NULL];
+      if (request == nil) {
+        failure = 400;
+      } else if (![request adoptSpooledBodyAtPath:path error:NULL]) {
+        request = nil;
+        failure = 503;
+      }
+    }
+  } @finally {
+    // Also runs when an exception unwinds through here: never leave a spool file behind.
+    if (file != NULL) {
+      fclose(file);
+    }
+    if (request == nil) {
+      [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    }
+  }
+  if (statusCode != NULL) {
+    *statusCode = failure;
+  }
+  return request;
+}
+
 static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
-                                            ALNConnectionReadState *readState) {
+                                            ALNConnectionReadState *readState,
+                                            ALNRequest **spooledRequest) {
   if (statusCode != NULL) {
     *statusCode = 0;
   }
@@ -1853,6 +2055,24 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
       } else {
         readState->scanOffset = readState->length;
       }
+    }
+
+    if (readState->metadataReady && limits.routeBodyLimitsActive && readState->metadata.contentLength > 0 &&
+        (NSUInteger)readState->metadata.contentLength >
+            ALNRequestBodyLimit(limits, readState->bytes, readState->metadata.headerBytes)) {
+      if (statusCode != NULL) {
+        *statusCode = 413;
+      }
+      return nil;
+    }
+
+    if (readState->metadataReady && spooledRequest != NULL &&
+        (NSUInteger)readState->metadata.contentLength > limits.spoolThresholdBytes) {
+      *spooledRequest = ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLegacy,
+                                              readState->metadata.headerBytes,
+                                              (NSUInteger)readState->metadata.contentLength,
+                                              statusCode, readState);
+      return nil;
     }
 
     if (readState->metadataReady) {
@@ -1966,6 +2186,29 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
       return nil;
     }
 
+    // llhttp counts content_length down as it parses body bytes, so take the
+    // declared length from the head itself.
+    if (headersComplete && requestError == nil && (request == nil || limits.routeBodyLimitsActive)) {
+      size_t separatorLocation = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+      ALNRequestHeadMetadata head;
+      memset(&head, 0, sizeof(head));
+      if (separatorLocation != SIZE_MAX && separatorLocation + 4 <= limits.maxHeaderBytes &&
+          ALNParseRequestHeadMetadataBytes(readState->bytes, separatorLocation + 4, limits, &head) &&
+          head.contentLength > 0) {
+        if (limits.routeBodyLimitsActive &&
+            (NSUInteger)head.contentLength > ALNRequestBodyLimit(limits, readState->bytes, separatorLocation + 4)) {
+          if (statusCode != NULL) {
+            *statusCode = 413;
+          }
+          return nil;
+        }
+        if (request == nil && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
+          return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
+                                       (NSUInteger)head.contentLength, statusCode, readState);
+        }
+      }
+    }
+
     if (!headersComplete) {
       if (readState->length > limits.maxHeaderBytes) {
         if (statusCode != NULL) {
@@ -2072,7 +2315,14 @@ static ALNRequest *ALNReadHTTPRequest(ALNSocketHandle clientFd,
   }
 
   NSInteger readStatus = 0;
-  NSData *rawRequest = ALNReadHTTPRequestDataLegacy(clientFd, limits, &readStatus, readState);
+  ALNRequest *spooledRequest = nil;
+  NSData *rawRequest = ALNReadHTTPRequestDataLegacy(clientFd, limits, &readStatus, readState, &spooledRequest);
+  if (spooledRequest != nil) {
+    if (statusCode != NULL) {
+      *statusCode = 0;
+    }
+    return spooledRequest;
+  }
   if (rawRequest == nil) {
     if (statusCode != NULL) {
       *statusCode = readStatus;
@@ -2242,35 +2492,6 @@ static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   if ([proto isEqualToString:@"http"] || [proto isEqualToString:@"https"]) {
     request.scheme = proto;
   }
-}
-
-static NSString *ALNContentTypeForFilePath(NSString *filePath) {
-  NSString *extension = [[filePath pathExtension] lowercaseString];
-  if ([extension isEqualToString:@"html"] || [extension isEqualToString:@"htm"]) {
-    return @"text/html; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"css"]) {
-    return @"text/css; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"js"]) {
-    return @"application/javascript; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"json"]) {
-    return @"application/json; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"txt"]) {
-    return @"text/plain; charset=utf-8";
-  }
-  if ([extension isEqualToString:@"svg"]) {
-    return @"image/svg+xml";
-  }
-  if ([extension isEqualToString:@"png"]) {
-    return @"image/png";
-  }
-  if ([extension isEqualToString:@"jpg"] || [extension isEqualToString:@"jpeg"]) {
-    return @"image/jpeg";
-  }
-  return @"application/octet-stream";
 }
 
 static NSArray *ALNDefaultStaticAllowExtensions(void) {
@@ -2481,7 +2702,8 @@ static NSString *ALNPathWithTrailingSlash(NSString *path) {
 
 static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
                                               NSDictionary *mount,
-                                              NSString *publicRoot) {
+                                              NSString *publicRoot,
+                                              NSDictionary *mimeTypes) {
   NSString *prefix = ALNNormalizeStaticPrefix(mount[@"prefix"]);
   NSString *directory = [mount[@"directory"] isKindOfClass:[NSString class]] ? mount[@"directory"] : @"";
   NSArray *allowExtensions = [mount[@"allowExtensions"] isKindOfClass:[NSArray class]]
@@ -2576,18 +2798,26 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
     return response;
   }
 
-  ALNResponse *response = [[ALNResponse alloc] init];
-  response.statusCode = 200;
-  [response setHeader:@"Content-Type" value:ALNContentTypeForFilePath(resolvedFilePath)];
-  if (![request.method isEqualToString:@"HEAD"]) {
-    response.fileBodyPath = resolvedFilePath;
-    response.fileBodyLength = (unsigned long long)fileStat.st_size;
-    response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
-    response.fileBodyInode = (unsigned long long)fileStat.st_ino;
-    response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;
-    response.fileBodyMTimeNanoseconds = ALNStaticFileMTimeNanoseconds(&fileStat);
+  NSMutableDictionary *options = [NSMutableDictionary dictionaryWithObject:mimeTypes ?: @{}
+                                                                    forKey:ALNFileResponseMIMETypesOption];
+  NSArray *cacheControlRules = [mount[@"cacheControlRules"] isKindOfClass:[NSArray class]]
+                                   ? mount[@"cacheControlRules"]
+                                   : nil;
+  if ([cacheControlRules count] > 0) {
+    // Rules match the served file's path under the mount root, so a directory
+    // request is matched as its index file.
+    NSString *rootPrefix = [canonicalRoot hasSuffix:@"/"] ? canonicalRoot
+                                                          : [canonicalRoot stringByAppendingString:@"/"];
+    NSString *mountRelativePath = [resolvedFilePath hasPrefix:rootPrefix]
+                                      ? [resolvedFilePath substringFromIndex:[rootPrefix length]]
+                                      : [resolvedFilePath lastPathComponent];
+    NSString *cacheControl = ALNStaticCacheControlForPath(cacheControlRules, mountRelativePath);
+    if ([cacheControl length] > 0) {
+      options[ALNFileResponseCacheControlOption] = cacheControl;
+    }
   }
-  response.committed = YES;
+  ALNResponse *response = [[ALNResponse alloc] init];
+  ALNFileResponseApplyStat(response, request, resolvedFilePath, &fileStat, nil, options);
   return response;
 }
 
@@ -2646,7 +2876,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     fileBodyFd = ALNStaticFileFDForPath(fileBodyPath,
                                         fileBodyDevice,
                                         fileBodyInode,
-                                        fileBodyLength,
+                                        response.fileBodyFullLength ?: fileBodyLength,
                                         fileBodyMTimeSeconds,
                                         fileBodyMTimeNanoseconds);
     if (fileBodyFd < 0) {
@@ -2695,7 +2925,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
       (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
     }
     if (fileBodyFd >= 0) {
-      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength);
+      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength, response.fileBodyOffset);
       close(fileBodyFd);
       fileBodyFd = -1;
     }
@@ -3049,6 +3279,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
       @"prefix" : prefix,
       @"directory" : directory,
       @"allowExtensions" : allowExtensions,
+      @"cacheControlRules" : [entry[@"cacheControlRules"] isKindOfClass:[NSArray class]]
+                                 ? entry[@"cacheControlRules"]
+                                 : @[],
     }];
   }
 
@@ -3058,10 +3291,22 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         ALNNormalizedStaticAllowExtensions(self.application.config[@"staticAllowExtensions"]);
     NSArray *allowExtensions =
         ([configuredAllowlist count] > 0) ? configuredAllowlist : ALNDefaultStaticAllowExtensions();
+    NSString *cacheControlReason = nil;
+    NSArray *cacheControlRules =
+        ALNStaticCacheControlRules(self.application.config[@"staticCacheControl"], &cacheControlReason);
+    if (cacheControlRules == nil) {
+      [self.application.logger warn:@"static cache control ignored"
+                             fields:@{
+                               @"prefix" : @"/static",
+                               @"reason" : cacheControlReason ?: @"invalid staticCacheControl",
+                             }];
+      cacheControlRules = @[];
+    }
     [mounts addObject:@{
       @"prefix" : @"/static",
       @"directory" : @"public",
       @"allowExtensions" : allowExtensions,
+      @"cacheControlRules" : cacheControlRules,
     }];
   }
 
@@ -3100,6 +3345,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             [route[@"source"] UTF8String],
             [route[@"controller"] UTF8String], [route[@"action"] UTF8String],
             [route[@"name"] UTF8String]);
+  }
+  NSDictionary *spaFallback = self.application.spaFallback;
+  if (spaFallback != nil) {
+    // Considered only after routes and built-ins decline an HTML navigation.
+    fprintf(out, "GET %s/* [spa_fallback] -> ALNSPAFallbackController#shell (arlen_spa_fallback)\n",
+            [[spaFallback[@"prefix"] isEqualToString:@"/"] ? @"" : spaFallback[@"prefix"] UTF8String]);
   }
 }
 
@@ -3499,6 +3750,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
+  NSUInteger largestRouteBodyLimit = [self.application largestRouteMaxBodyBytes];
+  if (largestRouteBodyLimit > 0) {
+    limits.routeBodyLimitsActive = YES;
+    limits.application = self.application;
+    limits.maxBodyBytes = MAX(limits.maxBodyBytes, largestRouteBodyLimit);
+  }
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
   NSString *connectionRemoteAddress = ALNRemoteAddressForClient(clientFd) ?: @"";
@@ -3555,13 +3812,23 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL supportsStaticMethod = [request.method isEqualToString:@"GET"] ||
                                     [request.method isEqualToString:@"HEAD"];
         BOOL handledStatic = NO;
-        if (supportsStaticMethod) {
+        BOOL multipartValid = [request parseMultipartFormWithLimits:[self.application requestLimitsForRequest:request] error:NULL];
+        if (supportsStaticMethod && multipartValid) {
           NSArray *staticMounts = [self effectiveStaticMounts];
+          NSDictionary *staticMIMETypes =
+              [self.application.config[@"mimeTypes"] isKindOfClass:[NSDictionary class]]
+                  ? self.application.config[@"mimeTypes"]
+                  : nil;
           for (NSDictionary *mount in staticMounts) {
-            ALNResponse *staticResponse = ALNStaticResponseForMount(request, mount, self.publicRoot);
+            ALNResponse *staticResponse = ALNStaticResponseForMount(request,
+                                                                      mount,
+                                                                      self.publicRoot,
+                                                                      staticMIMETypes);
             if (staticResponse == nil) {
               continue;
             }
+            // Static responses bypass the middleware chain (GitHub issue 81).
+            [staticResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
             // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
             BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
@@ -3587,15 +3854,22 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         }
 
         ALNResponse *response = nil;
-        if (self.serializeRequestDispatch) {
-          [self.requestDispatchLock lock];
-          @try {
+        @try {
+          if (self.serializeRequestDispatch) {
+            [self.requestDispatchLock lock];
+            @try {
+              response = [self.application dispatchRequest:request];
+            } @finally {
+              [self.requestDispatchLock unlock];
+            }
+          } else {
             response = [self.application dispatchRequest:request];
-          } @finally {
-            [self.requestDispatchLock unlock];
           }
-        } else {
-          response = [self.application dispatchRequest:request];
+        } @finally {
+          // Spooled bodies and uploads end with the handler. Do not rely on
+          // dealloc: a handler exception unwinds ARC frames without releasing
+          // them, which leaked the request and its spool files.
+          [request removeTemporaryFiles];
         }
 
         NSString *webSocketMode = [self webSocketModeFromResponse:response];
@@ -3647,6 +3921,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           }
 
           if ([webSocketMode isEqualToString:@"channel"]) {
+            ALNWarnIfRealtimeIsWorkerLocal();
             webSocketChannel = [self webSocketChannelFromResponse:response];
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
             NSString *rejectionReason = nil;
@@ -3880,6 +4155,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
                       maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
+    NSString *fanoutFailure = nil;
+    id<ALNRealtimeFanout> fanout = ALNRealtimeFanoutFromConfig(config, &fanoutFailure);
+    if ([fanoutFailure length] > 0) {
+      fprintf(stderr, "%s: realtime fanout disabled: %s\n", [self.serverName UTF8String], [fanoutFailure UTF8String]);
+    }
+    if (fanout != nil) {
+      [ALNRealtimeHub sharedHub].fanout = fanout;
+    }
 
     if (!ALNInitializeSocketLayer()) {
       fprintf(stderr, "%s: Winsock startup failed\n", [self.serverName UTF8String]);
@@ -4057,6 +4340,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     }
     self.serverSocketFD = ALNInvalidSocketHandle;
     [self requestStop];
+    [ALNRealtimeHub sharedHub].fanout = nil;
     [self.application shutdown];
   }
 

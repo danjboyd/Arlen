@@ -24,6 +24,49 @@
   XCTAssertFalse([headerText containsString:@"hello"]);
 }
 
+- (NSString *)statusLineForCode:(NSInteger)statusCode {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = statusCode;
+  NSString *text = [[NSString alloc] initWithData:[response serializedData]
+                                         encoding:NSUTF8StringEncoding];
+  NSRange terminator = [text rangeOfString:@"\r\n"];
+  return terminator.location == NSNotFound ? text : [text substringToIndex:terminator.location];
+}
+
+/// B-1: 401 was absent from the reason-phrase table, and the fallback described
+/// every unknown code -- including every error -- as "OK".
+- (void)testUnauthorizedStatusUsesItsOwnReasonPhrase_HELPDESK_B1 {
+  XCTAssertEqualObjects(@"HTTP/1.1 401 Unauthorized", [self statusLineForCode:401]);
+}
+
+- (void)testCommonStatusCodesCarryCorrectReasonPhrases_HELPDESK_B1 {
+  NSDictionary *expected = @{
+    @303 : @"See Other",
+    @307 : @"Temporary Redirect",
+    @308 : @"Permanent Redirect",
+    @409 : @"Conflict",
+    @410 : @"Gone",
+    @412 : @"Precondition Failed",
+    @415 : @"Unsupported Media Type",
+    @428 : @"Precondition Required",
+    @451 : @"Unavailable For Legal Reasons",
+    @501 : @"Not Implemented",
+    @502 : @"Bad Gateway",
+    @504 : @"Gateway Timeout",
+  };
+  for (NSNumber *code in expected) {
+    NSString *want = [NSString stringWithFormat:@"HTTP/1.1 %@ %@", code, expected[code]];
+    XCTAssertEqualObjects(want, [self statusLineForCode:[code integerValue]]);
+  }
+}
+
+/// RFC 9112 section 4.1 permits an empty reason phrase, and the SP before it is
+/// still required, so the status line stays well-formed.
+- (void)testUnknownStatusCodeGetsEmptyReasonPhraseNotOK_HELPDESK_B1 {
+  XCTAssertEqualObjects(@"HTTP/1.1 599 ", [self statusLineForCode:599]);
+  XCTAssertFalse([[self statusLineForCode:599] containsString:@"OK"]);
+}
+
 - (void)testSerializedDataStillIncludesBody {
   ALNResponse *response = [[ALNResponse alloc] init];
   response.statusCode = 404;
@@ -147,12 +190,27 @@
   ALNResponse *response = [[ALNResponse alloc] init];
   response.fileBodyPath = @"/tmp/example.bin";
   response.fileBodyLength = 2048;
+  response.fileBodyOffset = 512;
+  response.fileBodyFullLength = 4096;
   [response setDataBody:[@"ok" dataUsingEncoding:NSUTF8StringEncoding]
             contentType:@"application/custom"];
 
   XCTAssertNil(response.fileBodyPath);
   XCTAssertEqual((unsigned long long)0, response.fileBodyLength);
+  XCTAssertEqual((unsigned long long)0, response.fileBodyOffset);
+  XCTAssertEqual((unsigned long long)0, response.fileBodyFullLength);
   XCTAssertEqualObjects(@"application/custom", [response headerForName:@"Content-Type"]);
+}
+
+- (void)testNotModifiedDoesNotInventZeroRepresentationLength {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 304;
+  [response setHeader:@"ETag" value:@"W/\"asset\""];
+  NSString *headers = [[NSString alloc] initWithData:[response serializedHeaderData]
+                                           encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([headers containsString:@"304 Not Modified"]);
+  XCTAssertFalse([headers containsString:@"Content-Length:"]);
+  XCTAssertTrue([headers containsString:@"ETag: W/\"asset\""]);
 }
 
 - (void)testSetDataBodyStillSupportsMutableBodyAccess {
@@ -211,6 +269,109 @@
     }
   }
   XCTAssertEqual((NSUInteger)1, contentLengthLineCount);
+}
+
+- (void)testRepeatedCookiesPreserveOrderingAndExpiresCommas {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  NSString *first = @"session=abc; Path=/; HttpOnly";
+  NSString *second = @"remember=xyz; Path=/account; Expires=Wed, 09 Jun 2032 10:18:14 GMT";
+  [response setHeader:@"Set-Cookie" value:first];
+  XCTAssertTrue([response appendHeader:@"sEt-CoOkIe" value:second]);
+  XCTAssertEqualObjects([response headerValuesForName:@"SET-COOKIE"], (@[first, second]));
+  XCTAssertEqualObjects([response headerForName:@"set-cookie"], first);
+  XCTAssertEqualObjects(response.headers[@"set-cookie"], first);
+  NSString *wire = [[NSString alloc] initWithData:response.serializedHeaderData encoding:NSUTF8StringEncoding];
+  XCTAssertTrue(([wire containsString:[NSString stringWithFormat:@"Set-Cookie: %@\r\nSet-Cookie: %@\r\n", first, second]]));
+}
+
+- (void)testRepeatedHeaderCacheAppendReplacementRemovalAndReuse {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response setTextBody:@"ok"];
+  NSData *plain = response.serializedHeaderData;
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"a=1"]);
+  NSData *one = response.serializedHeaderData;
+  XCTAssertNotEqual(plain, one);
+  XCTAssertEqual(one, response.serializedHeaderData);
+  NSArray *snapshot = [response headerValuesForName:@"Set-Cookie"];
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"b=2"]);
+  NSData *two = response.serializedHeaderData;
+  XCTAssertNotEqual(one, two);
+  XCTAssertEqualObjects(snapshot, (@[@"a=1"]));
+  // Even replacement by the first existing value must discard the extras.
+  [response setHeader:@"set-cookie" value:@"a=1"];
+  XCTAssertEqualObjects([response headerValuesForName:@"Set-Cookie"], (@[@"a=1"]));
+  NSString *replacement = [[NSString alloc] initWithData:response.serializedHeaderData encoding:NSUTF8StringEncoding];
+  XCTAssertFalse([replacement containsString:@"b=2"]);
+  XCTAssertTrue([replacement containsString:@"set-cookie: a=1\r\n"]);
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"c=3"]);
+  (void)response.serializedHeaderData;
+  [response removeHeaderForName:@"SET-COOKIE"];
+  XCTAssertNil([response headerForName:@"Set-Cookie"]);
+  XCTAssertEqual([response headerValuesForName:@"Set-Cookie"].count, 0u);
+  XCTAssertEqualObjects(plain, response.serializedHeaderData);
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"fresh=4"]);
+  XCTAssertEqualObjects([response headerValuesForName:@"Set-Cookie"], (@[@"fresh=4"]));
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"other=6"]);
+  [response setHeadersIfMissing:@{@"set-cookie":@"ignored=5"}];
+  XCTAssertEqualObjects([response headerValuesForName:@"Set-Cookie"], (@[@"fresh=4", @"other=6"]));
+  [response removeHeaderForName:@"set-cookie"];
+  NSData *removed = response.serializedHeaderData;
+  [response setHeadersIfMissing:@{@"Set-Cookie\r\n":@"invalid=7"}];
+  XCTAssertEqual(removed, response.serializedHeaderData);
+}
+
+- (void)testHeaderSpellingChangesInvalidateCache {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response setHeader:@"X-Name" value:@"same"];
+  NSData *before = response.serializedHeaderData;
+  [response setHeader:@"x-name" value:@"same"];
+  XCTAssertNotEqual(before, response.serializedHeaderData);
+  NSString *wire = [[NSString alloc] initWithData:response.serializedHeaderData encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([wire containsString:@"x-name: same\r\n"]);
+}
+
+- (void)testRepeatedHeadersRejectInjectionWithoutMutation {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"safe=1"]);
+  NSData *before = response.serializedHeaderData;
+  unichar nul = 0;
+  NSString *zero = [NSString stringWithCharacters:&nul length:1];
+  for (NSString *bad in @[@"x\rInjected: yes", @"x\nInjected: yes", zero]) {
+    XCTAssertFalse([response appendHeader:@"Set-Cookie" value:bad]);
+    [response setHeader:@"Set-Cookie" value:bad];
+    XCTAssertEqual(before, response.serializedHeaderData);
+  }
+  for (NSString *badName in @[@"Set-Cookie\r\n", @"Set-Cookie\n", [@"Set-Cookie" stringByAppendingString:zero], @"Bad Name"]) {
+    XCTAssertFalse([response appendHeader:badName value:@"unsafe=2"]);
+    [response setHeader:badName value:@"unsafe=2"];
+    XCTAssertEqual(before, response.serializedHeaderData);
+  }
+  XCTAssertEqualObjects([response headerValuesForName:@"set-cookie"], (@[@"safe=1"]));
+}
+
+- (void)testAppendAllowlistKeepsFramingHeadersSingleton {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  for (NSString *name in @[@"Content-Length", @"Transfer-Encoding", @"Connection", @"Host", @"Content-Type", @"Trailer", @"Location", @"X-Unregistered"]) {
+    XCTAssertFalse([response appendHeader:name value:@"first"]);
+    [response setHeader:name value:@"one"];
+    XCTAssertFalse([response appendHeader:name.lowercaseString value:@"two"]);
+    XCTAssertEqualObjects([response headerValuesForName:name], (@[@"one"]));
+    [response removeHeaderForName:name];
+  }
+  for (NSString *name in @[@"WWW-Authenticate", @"Proxy-Authenticate", @"Link", @"Warning", @"Vary", @"Cache-Control"]) {
+    XCTAssertTrue([response appendHeader:name value:@"one"]);
+    XCTAssertTrue([response appendHeader:name value:@"two"]);
+    XCTAssertEqualObjects([response headerValuesForName:name], (@[@"one", @"two"]));
+  }
+}
+
+- (void)testHeaderValuesCopyMutableInputs {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  NSMutableString *value = [@"a=1" mutableCopy];
+  [response setHeader:@"Set-Cookie" value:value];
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:value]);
+  [value appendString:@"\r\nInjected: yes"];
+  XCTAssertEqualObjects([response headerValuesForName:@"Set-Cookie"], (@[@"a=1", @"a=1"]));
 }
 
 @end

@@ -1,4 +1,5 @@
 #import "ALNORMRepository.h"
+#import "ALNSQLDialect.h"
 
 #import "../Data/ALNPostgresSQLBuilder.h"
 #import "ALNORMContext.h"
@@ -173,19 +174,24 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
                      alias:alias
                onLeftField:[NSString stringWithFormat:@"%@.%@",
                                                         self.descriptor.qualifiedTableName ?: @"",
-                                                        sourceField.columnName ?: @""]
+                                                        ALNSQLDialectIdentifierComponent(sourceField.columnName)]
                   operator:@"="
-              onRightField:[NSString stringWithFormat:@"%@.%@", alias, targetField.columnName ?: @""]];
+              onRightField:[NSString stringWithFormat:@"%@.%@", alias, ALNSQLDialectIdentifierComponent(targetField.columnName)]];
 
     NSMutableDictionary<NSString *, NSString *> *columnAliases = [NSMutableDictionary dictionary];
     for (ALNORMFieldDescriptor *field in targetRepository.descriptor.fields ?: @[]) {
       NSString *columnAlias =
           [NSString stringWithFormat:@"%@__%@", alias, ALNORMRepositorySafeIdentifierFragment(field.columnName)];
+      NSString *aliasBase = columnAlias;
+      NSUInteger suffix = 2;
+      while (columnAliases[columnAlias] != nil) {
+        columnAlias = [aliasBase stringByAppendingFormat:@"_%lu", (unsigned long)suffix++];
+      }
       [builder selectExpression:@"{{table}}.{{column}}"
                           alias:columnAlias
              identifierBindings:@{
                @"table" : alias,
-               @"column" : field.columnName ?: @"",
+               @"column" : ALNSQLDialectIdentifierComponent(field.columnName),
              }
                      parameters:nil];
       columnAliases[columnAlias] = field.columnName ?: @"";
@@ -989,7 +995,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
         return nil;
       }
     }
-    encodedValues[field.columnName] = encoded ?: [NSNull null];
+    encodedValues[ALNSQLDialectIdentifierComponent(field.columnName)] = encoded ?: [NSNull null];
   }
   return encodedValues;
 }
@@ -1104,7 +1110,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
     NSMutableArray<NSString *> *returningColumns =
         [NSMutableArray arrayWithCapacity:[generatedPrimaryKeyFields count]];
     for (ALNORMFieldDescriptor *field in generatedPrimaryKeyFields) {
-      [returningColumns addObject:field.columnName ?: @""];
+      [returningColumns addObject:ALNSQLDialectIdentifierComponent(field.columnName)];
     }
     [builder returningFields:returningColumns];
   }
@@ -1191,11 +1197,11 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   ALNSQLBuilder *builder = [ALNSQLBuilder updateTable:self.descriptor.qualifiedTableName values:values];
   for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
     ALNORMFieldDescriptor *field = [self.descriptor fieldNamed:fieldName];
-    [builder whereField:field.columnName equals:[model objectForFieldName:field.name]];
+    [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:[model objectForFieldName:field.name]];
   }
   if ([options.optimisticLockFieldName length] > 0) {
     ALNORMFieldDescriptor *lockField = [self.descriptor fieldNamed:options.optimisticLockFieldName];
-    [builder whereField:lockField.columnName equals:currentVersion];
+    [builder whereField:ALNSQLDialectIdentifierComponent(lockField.columnName) equals:currentVersion];
   }
 
   NSDictionary<NSString *, id> *plan = ALNORMRepositoryCompileBuilder(self.context.adapter, builder, error);
@@ -1321,12 +1327,12 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
            ALNSQLBuilder *builder = [ALNSQLBuilder deleteFrom:strongSelf.descriptor.qualifiedTableName];
            for (NSString *fieldName in strongSelf.descriptor.primaryKeyFieldNames ?: @[]) {
              ALNORMFieldDescriptor *field = [strongSelf.descriptor fieldNamed:fieldName];
-             [builder whereField:field.columnName equals:[model objectForFieldName:field.name]];
+             [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:[model objectForFieldName:field.name]];
            }
            if ([resolvedOptions.optimisticLockFieldName length] > 0) {
              ALNORMFieldDescriptor *lockField =
                  [strongSelf.descriptor fieldNamed:resolvedOptions.optimisticLockFieldName];
-             [builder whereField:lockField.columnName
+             [builder whereField:ALNSQLDialectIdentifierComponent(lockField.columnName)
                          equals:[model objectForFieldName:lockField.name]];
            }
            NSDictionary<NSString *, id> *plan =
@@ -1446,7 +1452,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
            for (NSString *fieldName in conflictFieldNames ?: @[]) {
              ALNORMFieldDescriptor *field = [strongSelf.descriptor fieldNamed:fieldName];
              if (field != nil) {
-               [conflictColumns addObject:field.columnName ?: @""];
+               [conflictColumns addObject:ALNSQLDialectIdentifierComponent(field.columnName)];
              }
            }
 
@@ -1454,7 +1460,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
            NSSet *conflictColumnSet = [NSSet setWithArray:conflictColumns ?: @[]];
            for (NSString *columnName in [[values allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
              if (![conflictColumnSet containsObject:columnName] &&
-                 ![columnName isEqualToString:[strongSelf.descriptor fieldNamed:resolvedOptions.createdAtFieldName].columnName]) {
+                 ![columnName isEqualToString:ALNSQLDialectIdentifierComponent([strongSelf.descriptor fieldNamed:resolvedOptions.createdAtFieldName].columnName)]) {
                [updateColumns addObject:columnName];
              }
            }
@@ -1469,7 +1475,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
              NSMutableArray<NSString *> *returningColumns =
                  [NSMutableArray arrayWithCapacity:[generatedPrimaryKeyFields count]];
              for (ALNORMFieldDescriptor *field in generatedPrimaryKeyFields) {
-               [returningColumns addObject:field.columnName ?: @""];
+               [returningColumns addObject:ALNSQLDialectIdentifierComponent(field.columnName)];
              }
              [builder returningFields:returningColumns];
            }

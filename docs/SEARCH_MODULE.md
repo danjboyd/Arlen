@@ -45,6 +45,14 @@ searchModule = {
 };
 ```
 
+Relative `persistence.path` values, and the default
+`var/module_state/<module>-<environment>.plist`, resolve against the
+application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
+`ARLEN_APP_ROOT`) rather than the process working directory. The HTTP server,
+`arlen jobs worker` and other CLI delegates therefore share one state file.
+Production deployments should still use absolute paths under the release's
+`shared/` directory.
+
 Optional first-party PostgreSQL search uses the same resource/provider
 contracts:
 
@@ -275,6 +283,23 @@ They also expose:
   descriptors, fixture-backed contract validation, authoritative live
   query/sync translation, cursor pagination, and required live confidence
   validation.
+
+
+## PostgreSQL typo matching
+
+PostgreSQL fuzzy mode compares the query against word extents with
+`strict_word_similarity(query, searchable_text)` and the `<<%` operator. A typo
+such as `pririty` can match `priority` inside a long document without unrelated
+text diluting its score. The operator uses PostgreSQL's
+`pg_trgm.strict_word_similarity_threshold` (default `0.5`). Full-text matches
+also qualify; relevance uses the larger of the full-text and trigram scores.
+
+Highlights use `ts_headline` with matching document words as well as the original
+query, so a corrected word is marked with `<b>...</b>` even when the literal typo
+is absent. Treat headline output as untrusted document text when rendering HTML;
+the module's templates escape it. Backend rankings need not match other engines.
+Promotions continue to match configured queries exactly after trimming and
+lowercasing; phrase and fuzzy queries do not implicitly activate promotions.
 
 ## Migration Notes
 

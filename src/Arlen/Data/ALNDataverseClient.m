@@ -1,3 +1,4 @@
+#include <math.h>
 #import "ALNDataverseClient.h"
 
 #import <ctype.h>
@@ -175,13 +176,20 @@ static NSDictionary<NSString *, NSString *> *ALNDataverseLowercaseHeaderMap(
   return [lowercase copy];
 }
 
-static NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders(NSString *headerText) {
+NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders(NSString *headerText) {
   NSString *raw = [headerText isKindOfClass:[NSString class]] ? headerText : @"";
   if ([raw length] == 0) {
     return @{};
   }
 
-  NSArray<NSString *> *lines = [raw componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+  // CRLF must be folded to a single separator before splitting. Splitting on a
+  // character set treats CR and LF as two separators, which puts an empty
+  // string between every header line; the blank-line handling below then ends a
+  // block at each one, leaving the status line alone in its own block and every
+  // header discarded.
+  NSString *normalized = [[raw stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"]
+      stringByReplacingOccurrencesOfString:@"\r" withString:@"\n"];
+  NSArray<NSString *> *lines = [normalized componentsSeparatedByString:@"\n"];
   NSMutableArray<NSArray<NSString *> *> *blocks = [NSMutableArray array];
   NSMutableArray<NSString *> *current = [NSMutableArray array];
   for (NSString *line in lines) {
@@ -1713,6 +1721,27 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                                             error:error];
 }
 
+- (BOOL)shouldRetryRequest:(ALNDataverseRequest *)request
+                 retryIndex:(NSUInteger)retryIndex
+                   response:(ALNDataverseResponse *)response
+             transportError:(NSError *)transportError {
+  NSNumber *delay = nil;
+  if (self.retryDelayProvider != nil) {
+    delay = self.retryDelayProvider(request, retryIndex, response, transportError);
+  } else if (response == nil || response.statusCode == 429 ||
+             response.statusCode == 503 || response.statusCode == 504) {
+    NSInteger retryAfter = response ? ALNDataverseRetryAfterSeconds(response.headers) : 0;
+    delay = @(retryAfter > 0 ? (NSTimeInterval)retryAfter : (NSTimeInterval)retryIndex + 1);
+  }
+  if (delay == nil || !isfinite(delay.doubleValue) || delay.doubleValue < 0) return NO;
+  if (self.retrySleeper != nil) {
+    self.retrySleeper(delay.doubleValue);
+  } else if (delay.doubleValue > 0) {
+    [NSThread sleepForTimeInterval:delay.doubleValue];
+  }
+  return YES;
+}
+
 - (ALNDataverseResponse *)executeAuthorizedRequestWithMethod:(NSString *)method
                                                    URLString:(NSString *)URLString
                                                      headers:(NSDictionary<NSString *, NSString *> *)headers
@@ -1770,7 +1799,7 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       [NSMutableDictionary dictionaryWithDictionary:headers ?: @{}];
   requestHeaders[@"Authorization"] = [NSString stringWithFormat:@"Bearer %@", accessToken];
   NSDictionary<NSString *, NSString *> *redactedHeaders = ALNDataverseRedactedRequestHeaders(requestHeaders);
-  NSUInteger maxAttempts = MAX((NSUInteger)1, (self.target.maxRetries + 1));
+  NSUInteger maxAttempts = self.target.maxRetries == NSUIntegerMax ? NSUIntegerMax : self.target.maxRetries + 1;
   NSError *lastError = nil;
 
   for (NSUInteger attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1804,8 +1833,8 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       lastError = ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
                                         @"Dataverse transport failed",
                                         details);
-      if ((attempt + 1) < maxAttempts) {
-        [NSThread sleepForTimeInterval:(NSTimeInterval)(attempt + 1)];
+      if ((attempt + 1) < maxAttempts &&
+          [self shouldRetryRequest:request retryIndex:attempt response:nil transportError:transportError]) {
         continue;
       }
       if (error != NULL) {
@@ -1816,15 +1845,12 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
 
     NSInteger statusCode = response.statusCode;
     NSInteger retryAfterSeconds = ALNDataverseRetryAfterSeconds(response.headers);
-    BOOL retryableStatus = (statusCode == 429 || statusCode == 503 || statusCode == 504);
-    if (retryableStatus && (attempt + 1) < maxAttempts) {
-      NSTimeInterval delay = retryAfterSeconds > 0 ? retryAfterSeconds : (attempt + 1);
-      [NSThread sleepForTimeInterval:delay];
-      continue;
-    }
-
     if (statusCode >= 200 && statusCode < 300) {
       return response;
+    }
+    if ((attempt + 1) < maxAttempts &&
+        [self shouldRetryRequest:request retryIndex:attempt response:response transportError:nil]) {
+      continue;
     }
 
     NSString *correlationID = ALNDataverseCorrelationIDFromHeaders(response.headers);

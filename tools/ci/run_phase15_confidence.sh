@@ -18,7 +18,7 @@ rm -rf "$focused_bundle"
 mkdir -p "$focused_bundle/Resources"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 run_xctest() {
@@ -90,6 +90,8 @@ clang \
   "${base_libs[@]}" \
   -ldl \
   -lcrypto \
+  -lcurl \
+  -ldispatch \
   -lXCTest
 
 cp "$repo_root/tests/Info-gnustep-integration.plist" "$focused_bundle/Resources/Info-gnustep.plist"

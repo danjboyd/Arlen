@@ -1,4 +1,5 @@
 #import "ALNMSSQLDialect.h"
+#import "ALNSQLLexical.h"
 
 #import "ALNPostgresSQLBuilder.h"
 #import "ALNSQLBuilder.h"
@@ -213,7 +214,7 @@ static BOOL ALNMSSQLBuilderUsesUnsupportedFeatures(ALNSQLBuilder *builder, NSErr
 }
 
 static NSString *ALNMSSQLStripTrailingReturningClause(NSString *sql) {
-  NSRange returningRange = [sql rangeOfString:@" RETURNING " options:NSBackwardsSearch];
+  NSRange returningRange = [ALNSQLMaskQuotedText(sql, NO) rangeOfString:@" RETURNING " options:NSBackwardsSearch];
   if (returningRange.location == NSNotFound) {
     return sql ?: @"";
   }
@@ -225,13 +226,13 @@ static NSString *ALNMSSQLRemoveLimitOffsetSuffix(NSString *sql,
                                                  BOOL hasOffset) {
   NSString *rewritten = sql ?: @"";
   if (hasOffset) {
-    NSRange offsetRange = [rewritten rangeOfString:@" OFFSET " options:NSBackwardsSearch];
+    NSRange offsetRange = [ALNSQLMaskQuotedText(rewritten, NO) rangeOfString:@" OFFSET " options:NSBackwardsSearch];
     if (offsetRange.location != NSNotFound) {
       rewritten = [rewritten substringToIndex:offsetRange.location];
     }
   }
   if (hasLimit) {
-    NSRange limitRange = [rewritten rangeOfString:@" LIMIT " options:NSBackwardsSearch];
+    NSRange limitRange = [ALNSQLMaskQuotedText(rewritten, NO) rangeOfString:@" LIMIT " options:NSBackwardsSearch];
     if (limitRange.location != NSNotFound) {
       rewritten = [rewritten substringToIndex:limitRange.location];
     }
@@ -248,10 +249,12 @@ static NSString *ALNMSSQLConvertPlaceholders(NSString *sql) {
   if (regex == nil || regexError != nil || [sql length] == 0) {
     return sql ?: @"";
   }
-  return [regex stringByReplacingMatchesInString:sql
-                                         options:0
-                                           range:NSMakeRange(0, [sql length])
-                                    withTemplate:@"?"];
+  NSMutableString *result = [sql mutableCopy];
+  NSArray *matches = [regex matchesInString:ALNSQLMaskQuotedText(sql, YES) options:0 range:NSMakeRange(0, sql.length)];
+  for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
+    [result replaceCharactersInRange:match.range withString:@"?"];
+  }
+  return result;
 }
 
 static NSString *ALNMSSQLConvertQuotedIdentifiers(NSString *sql, NSError **error) {
@@ -279,8 +282,15 @@ static NSString *ALNMSSQLConvertQuotedIdentifiers(NSString *sql, NSError **error
 
     if (!inSingleQuote && character == '"') {
       NSUInteger end = index + 1;
-      while (end < length && [sql characterAtIndex:end] != '"') {
-        end += 1;
+      while (end < length) {
+        if ([sql characterAtIndex:end] == '"') {
+          if (end + 1 < length && [sql characterAtIndex:end + 1] == '"') {
+            end += 2;
+            continue;
+          }
+          break;
+        }
+        end++;
       }
       if (end >= length) {
         if (error != NULL) {
@@ -290,7 +300,7 @@ static NSString *ALNMSSQLConvertQuotedIdentifiers(NSString *sql, NSError **error
         }
         return nil;
       }
-      NSString *identifier = [sql substringWithRange:NSMakeRange(index + 1, end - index - 1)];
+      NSString *identifier = [[sql substringWithRange:NSMakeRange(index + 1, end - index - 1)] stringByReplacingOccurrencesOfString:@"\"\"" withString:@"\""];
       [rewritten appendString:ALNSQLDialectBracketQuoteIdentifier(identifier)];
       index = end + 1;
       continue;
@@ -318,9 +328,9 @@ static NSString *ALNMSSQLReturningExpressionForField(NSString *field,
     return [NSString stringWithFormat:@"%@.*", sourceAlias ?: @"INSERTED"];
   }
 
-  NSArray<NSString *> *components = [trimmed componentsSeparatedByString:@"."];
+  NSArray<NSString *> *components = ALNSQLDialectIdentifierComponents(trimmed);
   NSString *column = [components lastObject];
-  if (!ALNSQLDialectIdentifierIsSafe(column)) {
+  if (components == nil) {
     if (error != NULL) {
       *error = ALNMSSQLDialectError(ALNSQLBuilderErrorInvalidIdentifier,
                                     @"invalid OUTPUT field",
@@ -330,7 +340,7 @@ static NSString *ALNMSSQLReturningExpressionForField(NSString *field,
   }
   return [NSString stringWithFormat:@"%@.%@",
                                     sourceAlias ?: @"INSERTED",
-                                    ALNSQLDialectBracketQuoteIdentifier(column)];
+                                    ALNSQLDialectDoubleQuoteIdentifier(column)];
 }
 
 static NSString *ALNMSSQLCompileOutputClause(ALNSQLBuilder *builder,
@@ -378,7 +388,7 @@ static NSString *ALNMSSQLApplyReturningClause(ALNSQLBuilder *builder,
 
   NSString *rewritten = ALNMSSQLStripTrailingReturningClause(sql);
   if (builder.kind == ALNSQLBuilderKindInsert) {
-    NSRange valuesRange = [rewritten rangeOfString:@" VALUES "];
+    NSRange valuesRange = [ALNSQLMaskQuotedText(rewritten, NO) rangeOfString:@" VALUES "];
     if (valuesRange.location == NSNotFound) {
       if (error != NULL) {
         *error = ALNMSSQLDialectError(ALNSQLBuilderErrorCompileFailed,
@@ -392,7 +402,7 @@ static NSString *ALNMSSQLApplyReturningClause(ALNSQLBuilder *builder,
     return [NSString stringWithFormat:@"%@%@%@", prefix, outputClause, suffix];
   }
 
-  NSRange whereRange = [rewritten rangeOfString:@" WHERE " options:NSBackwardsSearch];
+  NSRange whereRange = [ALNSQLMaskQuotedText(rewritten, NO) rangeOfString:@" WHERE " options:NSBackwardsSearch];
   if (whereRange.location == NSNotFound) {
     return [rewritten stringByAppendingString:outputClause];
   }

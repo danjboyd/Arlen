@@ -61,6 +61,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, readonly) NSArray *modules;
 @property(nonatomic, copy, readonly) NSArray *lifecycleHooks;
 @property(nonatomic, copy, readonly) NSArray *staticMounts;
+// Normalized `spaFallback` descriptor (file, prefix, excludePrefixes, cacheControl,
+// allowDottedPaths), or nil when no fallback is configured.
+@property(nonatomic, copy, readonly, nullable) NSDictionary *spaFallback;
+// Security headers from `securityHeaders` config, empty when disabled. The HTTP
+// server applies them to static-mount responses, which bypass middleware.
+@property(nonatomic, copy, readonly) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readonly) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readonly) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readonly) id<ALNLocalizationAdapter> localizationAdapter;
@@ -113,6 +119,28 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)mountStaticDirectory:(NSString *)directory
                     atPrefix:(NSString *)prefix
              allowExtensions:(nullable NSArray *)allowExtensions;
+// options: `cacheControl` is a Cache-Control string, or a dictionary of glob
+// pattern (relative to the mount root) -> value with an optional `default` key.
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(nullable NSArray *)allowExtensions
+                     options:(nullable NSDictionary *)options;
+// SPA history fallback (docs/STATIC_FILES.md#spa-history-fallback). `options` keys:
+// prefix, excludePrefixes, cacheControl, allowDottedPaths. Relative files resolve
+// against the app root. Returns NO with an error for invalid values.
+- (BOOL)setSPAFallbackFile:(NSString *)file
+                   options:(nullable NSDictionary *)options
+                     error:(NSError *_Nullable *_Nullable)error;
+// The application root: config `appRoot` (set when config is loaded from an app
+// directory), else ARLEN_APP_ROOT, else the current directory.
+- (NSString *)appRootPath;
+// The /readyz schema_migrations result (see ALNMigrationStatus), cached as
+// described in docs/DEPLOYMENT.md.
+- (NSDictionary *)currentMigrationReadiness;
+// Resolves a relative path against -appRootPath; absolute paths are returned
+// standardized. Use this rather than the process working directory, which differs
+// between the server, workers and CLI delegates.
+- (NSString *)pathRelativeToAppRoot:(NSString *)path;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;
@@ -172,12 +200,24 @@ NS_ASSUME_NONNULL_BEGIN
                                         error:(NSError *_Nullable *_Nullable)error;
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;
+/// Full dispatch constrained to an existing route. Rejects mounts, built-ins and
+/// a different matched route with 409; never invokes an alternate controller.
+- (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(nullable ALNRoute *)route;
 - (NSArray *)routeTable;
 - (NSDictionary *)openAPISpecification;
 - (BOOL)writeOpenAPISpecToPath:(NSString *)path
                         pretty:(BOOL)pretty
                          error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)startWithError:(NSError *_Nullable *_Nullable)error;
+// Body limit for a request, from the matching route's maxBodyBytes (mounted
+// applications included) or else requestLimits.maxBodyBytes. The HTTP server
+// calls this after the head is parsed and before any body is read.
+- (NSUInteger)maxBodyBytesForMethod:(NSString *)method path:(NSString *)path;
+// Largest route override (0 when no route sets maxBodyBytes).
+- (NSUInteger)largestRouteMaxBodyBytes;
+// requestLimits for this request: the configured limits, with maxBodyBytes (and
+// at least as much maxMultipartFileBytes) taken from the route's override.
+- (NSDictionary *)requestLimitsForRequest:(ALNRequest *)request;
 - (void)shutdown;
 
 @end

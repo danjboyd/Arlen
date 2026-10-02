@@ -10,7 +10,7 @@ Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
 
 The project is still young, but the core shipped surface is already real:
 server-rendered HTML and JSON app paths, OpenAPI output, first-party auth/admin
-/jobs/storage modules, a PostgreSQL-first data layer, realtime support, and a
+/jobs/storage modules, [durable PostgreSQL jobs](docs/DURABLE_JOBS.md), a PostgreSQL-first data layer, realtime support, and a
 managed production runtime (`propane`). Linux with a clang-built GNUstep
 toolchain is the primary production target. macOS has a verified Apple-runtime
 path, and Windows `CLANG64` is currently a preview target.
@@ -62,6 +62,12 @@ That route is wired up for you by `arlen new MyApp`; the
 - [Lite Mode Guide](docs/LITE_MODE_GUIDE.md) — single-file apps without scaffolding.
 
 **Full documentation:** the [Docs Index](docs/README.md) groups everything by intent (Building Apps, Modules, Data Layer, Operations and Deployment, Reference, Migration Guides, Examples).
+
+Static assets support automatic cache revalidation, HEAD metadata, and single
+byte ranges. See [Static files](docs/STATIC_FILES.md) for the HTTP contract.
+
+Generated SQL ORM models support safe concurrent first use of their descriptors;
+see the [regeneration guidance](docs/ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update) when upgrading existing generated code.
 
 ## Quick Start
 
@@ -148,7 +154,7 @@ one coherent toolchain.
 - `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
 - `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
 - `Realtime and live UI`: WebSocket and SSE support, live fragment responses, built-in `/arlen/live.js`, keyed collection helpers, live regions, controller helpers for live updates/navigation, and a durable event-stream seam with append/replay/auth contracts plus websocket/SSE/poll integration.
-- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
+- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation with quoted legacy identifier support, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
 - `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
 - `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
 
@@ -230,6 +236,8 @@ Run bootstrap diagnostics before building:
 ```
 
 Contributor and CI notes:
+
+- [TSAN reliability investigation](docs/internal/TSAN_RELIABILITY_2026-09-21.md): restored test coverage, current GNUstep findings, and promotion criteria.
 - Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
 - The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
 - The current documented required checks for `main` are `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.
@@ -329,6 +337,12 @@ make test-data-layer
 make browser-error-audit
 ```
 
+
+Live PostgreSQL regression coverage for generated clients, migration JSON,
+search, and auth server cleanup runs in the required Linux quality gate.
+Contributors can run `bash tools/ci/run_postgres_regressions.sh`; see the
+[testing workflow](docs/TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+
 The `GNUmakefile` exposes additional confidence lanes tied to historical
 milestone work (search the `Makefile` for `*-confidence` targets). Those lanes
 are intended for contributors validating specific subsystems and are not part
@@ -365,6 +379,7 @@ Best next reads for evaluation:
 - [First App Guide](docs/FIRST_APP_GUIDE.md)
 - [Getting Started](docs/GETTING_STARTED.md)
 - [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md)
+- [Response Headers and Multiple Cookies](docs/RESPONSE_HEADERS.md)
 - [Modules](docs/MODULES.md)
 - [Auth Module](docs/AUTH_MODULE.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
@@ -385,6 +400,12 @@ Open `build/docs/index.html` in a browser.
 For the broader guide set, examples, historical roadmap material, and specs,
 use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
 
+Optional integrations: [MCP tools over Streamable HTTP](docs/MCP_MODULE.md).
+
+HTTP integrations can use [received response details and redirect policies](docs/HTTP_CLIENT.md),
+[Dataverse retry policies](docs/DATAVERSE.md#custom-retry-policies), and
+[PostgreSQL microsecond round trips](docs/ARLEN_DATA.md#postgresql-timestamp-precision).
+
 ## Naming
 
 - Development server: `boomhauer`
@@ -394,3 +415,33 @@ use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
 ## License
 
 Arlen is licensed under the GNU Lesser General Public License, version 2 or (at your option) any later version (LGPL-2.0-or-later), aligned with GNUstep Base library licensing.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](docs/OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.
+
+GNUstep OAuth metadata transport requires libcurl development files with TLS and
+asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
+[getting-started guide](docs/GETTING_STARTED.md).
+
+Multipart forms provide ordered fields and binary uploads; see [Multipart Uploads](docs/MULTIPART_UPLOADS.md) for APIs and memory limits.
+
+The ops dashboard supports partial module installations; see [Ops Module](docs/OPS_MODULE.md).
+
+The auth module supports configurable OIDC browser login, including Entra, with
+application-owned identity resolution. See [OIDC setup](docs/AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Security-header defaults are safe on concurrent first requests; see
+[Response Headers](docs/RESPONSE_HEADERS.md#concurrent-security-headers).
+
+Framework locks are safe on concurrent first use under GNUstep libobjc2; see
+[Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).

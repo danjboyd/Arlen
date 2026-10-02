@@ -512,18 +512,18 @@ static BOOL ALNMSSQLBindODBCSymbol(void **target, void *handle, const char *symb
   return (*target != NULL);
 }
 
-static NSObject *ALNMSSQLODBCLockToken(void) {
-  static NSObject *token = nil;
-  @synchronized([ALNMSSQL class]) {
-    if (token == nil) {
-      token = [[NSObject alloc] init];
-    }
-  }
-  return token;
+static NSLock *ALNMSSQLODBCLoadLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
 }
 
 static BOOL ALNMSSQLLoadODBC(NSError **error) {
-  @synchronized(ALNMSSQLODBCLockToken()) {
+  [ALNMSSQLODBCLoadLock() lock];
+  @try {
     if (gODBCHandle != NULL) {
       return YES;
     }
@@ -590,6 +590,8 @@ static BOOL ALNMSSQLLoadODBC(NSError **error) {
 
     gODBCHandle = handle;
     return YES;
+  } @finally {
+    [ALNMSSQLODBCLoadLock() unlock];
   }
 }
 
@@ -2280,6 +2282,10 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 @property(nonatomic, assign, readwrite) NSUInteger maxConnections;
 @property(nonatomic, strong) NSMutableArray<ALNMSSQLConnection *> *idleConnections;
 @property(nonatomic, assign) NSUInteger inUseConnections;
+@property(nonatomic, strong) NSCondition *poolCondition;
+@property(nonatomic, assign) NSUInteger acquireWaitCount;
+@property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
+@property(nonatomic, assign) NSUInteger poolExhaustedCount;
 
 @end
 
@@ -2327,10 +2333,23 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   return [ALNMSSQLDialect sharedDialect];
 }
 
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    // Created before the pool is shared; libobjc2's first @synchronized on an
+    // instance can race (gnustep/libobjc2#424). Guards pool bookkeeping only
+    // (slot count and idle list); connects, liveness checks and release-time
+    // rollbacks run outside it. acquireTimeout waiters block on it for a
+    // released slot.
+    _poolCondition = [[NSCondition alloc] init];
+  }
+  return self;
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {
-  self = [super init];
+  self = [self init];
   if (self == nil) {
     return nil;
   }
@@ -2356,48 +2375,114 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
 }
 
 - (void)dealloc {
-  @synchronized(self) {
+  [self.poolCondition lock];
+  @try {
     for (ALNMSSQLConnection *connection in self.idleConnections) {
       [connection close];
     }
     [self.idleConnections removeAllObjects];
+  } @finally {
+    [self.poolCondition unlock];
   }
 }
 
+// Give back a slot reserved by acquireConnection: whose connection could not
+// be handed out, and wake any acquireTimeout waiter.
+- (void)returnReservedSlot {
+  [self.poolCondition lock];
+  if (self.inUseConnections > 0) {
+    self.inUseConnections -= 1;
+  }
+  [self.poolCondition broadcast];
+  [self.poolCondition unlock];
+}
+
 - (ALNMSSQLConnection *)acquireConnection:(NSError **)error {
-  @synchronized(self) {
-    while ([self.idleConnections count] > 0) {
-      ALNMSSQLConnection *connection = [self.idleConnections lastObject];
-      [self.idleConnections removeLastObject];
-      if (self.connectionLivenessChecksEnabled) {
-        NSError *livenessError = nil;
-        if (![connection checkConnectionLiveness:&livenessError]) {
-          [connection close];
-          continue;
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSTimeInterval timeout = self.acquireTimeout;
+  NSDate *deadline = nil;
+  NSTimeInterval waited = 0;
+
+  while (YES) {
+    ALNMSSQLConnection *candidate = nil;
+    BOOL createNew = NO;
+
+    // Reserve a slot: either an idle connection or room to open a new one.
+    // The slot counts as in use from here until it is handed out or returned.
+    [self.poolCondition lock];
+    @try {
+      while (YES) {
+        if ([self.idleConnections count] > 0) {
+          candidate = [self.idleConnections lastObject];
+          [self.idleConnections removeLastObject];
+          self.inUseConnections += 1;
+          break;
         }
+        if (self.inUseConnections < self.maxConnections) {
+          self.inUseConnections += 1;
+          createNew = YES;
+          break;
+        }
+        if (timeout <= 0 || (deadline != nil && [deadline timeIntervalSinceNow] <= 0)) {
+          self.poolExhaustedCount += 1;
+          if (error != NULL) {
+            NSString *message =
+                (deadline != nil)
+                    ? [NSString stringWithFormat:
+                                    @"MSSQL connection pool exhausted after waiting %.3fs", waited]
+                    : @"MSSQL connection pool exhausted";
+            *error = ALNMSSQLMakeError(ALNMSSQLErrorPoolExhausted,
+                                       message,
+                                       nil,
+                                       @{
+                                         @"max_connections" : @(self.maxConnections),
+                                         @"acquire_timeout_seconds" : @(timeout),
+                                         @"acquire_wait_seconds" : @(waited),
+                                       });
+          }
+          return nil;
+        }
+        if (deadline == nil) {
+          deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+          self.acquireWaitCount += 1;
+        }
+        // The loop re-checks the pool after every wakeup, so spurious wakeups
+        // and a slot taken first by another borrower are both harmless.
+        NSDate *sliceStarted = [NSDate date];
+        (void)[self.poolCondition waitUntilDate:deadline];
+        NSTimeInterval slice = -[sliceStarted timeIntervalSinceNow];
+        waited += slice;
+        self.acquireWaitSecondsTotal += slice;
       }
-      self.inUseConnections += 1;
-      return connection;
+    } @finally {
+      [self.poolCondition unlock];
     }
 
-    NSUInteger total = self.inUseConnections + [self.idleConnections count];
-    if (total >= self.maxConnections) {
-      if (error != NULL) {
-        *error = ALNMSSQLMakeError(ALNMSSQLErrorPoolExhausted,
-                                   @"MSSQL connection pool exhausted",
-                                   nil,
-                                   nil);
+    BOOL handedOut = NO;
+    @try {
+      if (createNew) {
+        ALNMSSQLConnection *connection =
+            [[ALNMSSQLConnection alloc] initWithConnectionString:self.connectionString error:error];
+        if (connection == nil) {
+          return nil;
+        }
+        handedOut = YES;
+        return connection;
       }
-      return nil;
+      NSError *livenessError = nil;
+      if (!self.connectionLivenessChecksEnabled ||
+          [candidate checkConnectionLiveness:&livenessError]) {
+        handedOut = YES;
+        return candidate;
+      }
+      [candidate close];
+    } @finally {
+      if (!handedOut) {
+        [self returnReservedSlot];
+      }
     }
-
-    ALNMSSQLConnection *connection =
-        [[ALNMSSQLConnection alloc] initWithConnectionString:self.connectionString error:error];
-    if (connection == nil) {
-      return nil;
-    }
-    self.inUseConnections += 1;
-    return connection;
   }
 }
 
@@ -2405,21 +2490,45 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   if (connection == nil) {
     return;
   }
-  @synchronized(self) {
-    if (self.inUseConnections > 0) {
-      self.inUseConnections -= 1;
-    }
+  BOOL reusable = NO;
+  @try {
     if ([connection isOpen] && connection.inTransaction) {
       NSError *rollbackError = nil;
       if (![connection rollbackTransaction:&rollbackError]) {
         [connection close];
       }
     }
-    if ([connection isOpen]) {
-      [self.idleConnections addObject:connection];
-    } else {
+    reusable = [connection isOpen];
+    if (!reusable) {
       [connection close];
     }
+  } @finally {
+    [self.poolCondition lock];
+    if (self.inUseConnections > 0) {
+      self.inUseConnections -= 1;
+    }
+    if (reusable) {
+      [self.idleConnections addObject:connection];
+    }
+    [self.poolCondition broadcast];
+    [self.poolCondition unlock];
+  }
+}
+
+- (NSDictionary<NSString *, id> *)poolDiagnostics {
+  [self.poolCondition lock];
+  @try {
+    return @{
+      @"max_connections" : @(self.maxConnections),
+      @"in_use_connections" : @(self.inUseConnections),
+      @"idle_connections" : @([self.idleConnections count]),
+      @"acquire_timeout_seconds" : @(self.acquireTimeout),
+      @"acquire_wait_count" : @(self.acquireWaitCount),
+      @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
+      @"pool_exhausted_count" : @(self.poolExhaustedCount),
+    };
+  } @finally {
+    [self.poolCondition unlock];
   }
 }
 

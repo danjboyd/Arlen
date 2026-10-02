@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dispatch/dispatch.h>
 
 #import <stdlib.h>
 #import <string.h>
@@ -149,6 +150,183 @@
   XCTAssertNotNil(pool);
   XCTAssertTrue(pool.connectionLivenessChecksEnabled,
                 @"liveness checks must default ON after the pool-poisoning fix");
+}
+
+#pragma mark - Pool acquire timeout (issue #52, no live DB required)
+
+// A pool of `maxConnections` fake connections, all idle, so acquires never
+// open a real libpq connection.
+- (ALNPg *)fakePoolWithConnections:(NSArray<ALNFakePgConnection *> *)connections {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:[connections count]
+                         error:&error];
+  XCTAssertNil(error);
+  pool.connectionLivenessChecksEnabled = NO;
+  for (ALNFakePgConnection *connection in connections) {
+    [pool releaseConnection:connection];
+  }
+  return pool;
+}
+
+- (ALNFakePgConnection *)usableFakeConnection {
+  ALNFakePgConnection *connection = [ALNFakePgConnection new];
+  connection.simulatedOpen = YES;
+  connection.simulatedUsable = YES;
+  return connection;
+}
+
+- (void)testAcquireTimeoutDefaultsToZeroAndFailsImmediatelyWhenPoolIsFull {
+  ALNFakePgConnection *only = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ only ]];
+  XCTAssertEqual(0.0, pool.acquireTimeout);
+
+  NSError *error = nil;
+  XCTAssertEqual([pool acquireConnection:&error], (ALNPgConnection *)only);
+  XCTAssertNil(error);
+
+  NSDate *started = [NSDate date];
+  XCTAssertNil([pool acquireConnection:&error]);
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertEqualObjects(ALNPgErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNPgErrorPoolExhausted, error.code);
+  XCTAssertEqualObjects(@"connection pool exhausted", error.localizedDescription);
+  XCTAssertLessThan(elapsed, 0.25, @"acquireTimeout = 0 must not wait");
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@1, diagnostics[@"pool_exhausted_count"]);
+  XCTAssertEqualObjects(@0, diagnostics[@"acquire_wait_count"]);
+}
+
+- (void)testAcquireTimeoutWaitsForAConnectionReleasedByAnotherThread {
+  ALNFakePgConnection *only = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ only ]];
+  pool.acquireTimeout = 5.0;
+
+  NSError *error = nil;
+  ALNPgConnection *held = [pool acquireConnection:&error];
+  XCTAssertEqual(held, (ALNPgConnection *)only);
+
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                 ^{
+                   [pool releaseConnection:held];
+                 });
+
+  NSDate *started = [NSDate date];
+  ALNPgConnection *next = [pool acquireConnection:&error];
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertNil(error);
+  XCTAssertEqual(next, (ALNPgConnection *)only,
+                 @"the waiter must receive the connection released during its wait");
+  XCTAssertGreaterThanOrEqual(elapsed, 0.05);
+  XCTAssertLessThan(elapsed, 5.0);
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@1, diagnostics[@"acquire_wait_count"]);
+  XCTAssertEqualObjects(@0, diagnostics[@"pool_exhausted_count"]);
+  XCTAssertGreaterThan([diagnostics[@"acquire_wait_seconds_total"] doubleValue], 0.0);
+}
+
+- (void)testAcquireTimeoutFailsWithPoolExhaustedAfterWaitingWhenNothingIsReleased {
+  ALNFakePgConnection *only = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ only ]];
+  pool.acquireTimeout = 0.3;
+
+  NSError *error = nil;
+  XCTAssertNotNil([pool acquireConnection:&error]);
+
+  NSDate *started = [NSDate date];
+  XCTAssertNil([pool acquireConnection:&error]);
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertEqual((NSInteger)ALNPgErrorPoolExhausted, error.code);
+  XCTAssertGreaterThanOrEqual(elapsed, 0.25);
+  XCTAssertLessThan(elapsed, 5.0);
+  XCTAssertTrue([error.localizedDescription hasPrefix:@"connection pool exhausted after waiting "],
+                @"%@", error.localizedDescription);
+  NSDictionary *errorDiagnostics = error.userInfo[ALNPgErrorDiagnosticsKey];
+  XCTAssertEqualObjects(@1, errorDiagnostics[@"max_connections"]);
+  XCTAssertEqualWithAccuracy(0.3, [errorDiagnostics[@"acquire_timeout_seconds"] doubleValue], 0.001);
+  XCTAssertGreaterThanOrEqual([errorDiagnostics[@"acquire_wait_seconds"] doubleValue], 0.25);
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@1, diagnostics[@"acquire_wait_count"]);
+  XCTAssertEqualObjects(@1, diagnostics[@"pool_exhausted_count"]);
+  XCTAssertEqualObjects(@1, diagnostics[@"in_use_connections"]);
+}
+
+// A dead connection released while a borrower waits frees its slot: the waiter
+// must wake and open a replacement (which fails here because nothing listens
+// on port 1) instead of timing out, and that failed connect must hand the slot
+// back rather than leak it.
+- (void)testAcquireTimeoutWaiterWakesWhenDeadConnectionIsDiscardedAndFailedConnectReturnsSlot {
+  ALNFakePgConnection *only = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ only ]];
+  pool.acquireTimeout = 5.0;
+
+  NSError *error = nil;
+  ALNPgConnection *held = [pool acquireConnection:&error];
+  XCTAssertEqual(held, (ALNPgConnection *)only);
+
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                 ^{
+                   only.simulatedUsable = NO;
+                   [pool releaseConnection:held];
+                 });
+
+  NSDate *started = [NSDate date];
+  XCTAssertNil([pool acquireConnection:&error]);
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertNotNil(error);
+  XCTAssertNotEqual((NSInteger)ALNPgErrorPoolExhausted, error.code,
+                    @"the waiter must get the freed slot, not time out: %@", error);
+  XCTAssertLessThan(elapsed, 5.0);
+  XCTAssertEqual((NSInteger)1, only.closeCount);
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@0, diagnostics[@"in_use_connections"],
+                        @"a failed connect must return its reserved slot");
+  XCTAssertEqualObjects(@0, diagnostics[@"idle_connections"]);
+}
+
+// The Helpdesk burst: more concurrent borrowers than connections, each holding
+// a connection briefly. With a bounded wait every one of them succeeds.
+- (void)testAcquireTimeoutAbsorbsABurstLargerThanThePool {
+  ALNPg *pool = [self fakePoolWithConnections:@[
+    [self usableFakeConnection], [self usableFakeConnection]
+  ]];
+  pool.acquireTimeout = 10.0;
+
+  NSUInteger borrowers = 8;
+  __block NSUInteger failures = 0;
+  NSLock *failuresLock = [[NSLock alloc] init];
+  dispatch_group_t group = dispatch_group_create();
+  dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+  for (NSUInteger index = 0; index < borrowers; index++) {
+    dispatch_group_async(group, queue, ^{
+      NSError *acquireError = nil;
+      ALNPgConnection *connection = [pool acquireConnection:&acquireError];
+      if (connection == nil) {
+        [failuresLock lock];
+        failures += 1;
+        [failuresLock unlock];
+        return;
+      }
+      usleep(20000);
+      [pool releaseConnection:connection];
+    });
+  }
+  long waitResult =
+      dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)));
+  XCTAssertEqual(0L, waitResult, @"burst borrowers did not finish");
+  XCTAssertEqual((NSUInteger)0, failures);
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@0, diagnostics[@"in_use_connections"]);
+  XCTAssertEqualObjects(@2, diagnostics[@"idle_connections"]);
+  XCTAssertEqualObjects(@0, diagnostics[@"pool_exhausted_count"]);
 }
 
 - (NSInteger)phase5ESoakIterationCount {
@@ -434,6 +612,85 @@
   XCTAssertEqualObjects((@[ @"name", @"id" ]), ordered.columns);
   XCTAssertEqualObjects(@"hank", [[ordered first] objectAtColumnIndex:0]);
   XCTAssertEqualObjects(@7, [[ordered first] objectAtColumnIndex:1]);
+}
+
+- (void)testPostgresTimestampMicrosecondRoundTrips {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  if (dsn.length == 0) return;
+  NSError *error = nil;
+  ALNPgConnection *connection = [[ALNPgConnection alloc] initWithConnectionString:dsn error:&error];
+  XCTAssertNotNil(connection);
+  XCTAssertNil(error, @"%@", error);
+  if (!connection) return;
+  // Keep the session non-UTC to exercise decoder offset normalization too.
+  [connection executeCommand:@"SET TIME ZONE 'America/New_York'" parameters:@[] error:&error];
+  XCTAssertNil(error, @"%@", error);
+  NSArray *values = @[
+    @"2026-09-17 12:34:56.123456+00", @"1969-12-31 23:59:59.999999+00",
+    @"1900-01-01 00:00:00.000001+00", @"2100-12-31 23:59:59.999999+00",
+    @"2001-01-01 00:00:00.000001+00", @"2001-01-01 00:00:00+00", @"2000-12-31 23:59:59.999999+00",
+    @"2026-09-17 18:04:56.123456+05:30", @"2026-09-17 12:34:56+00"
+  ];
+  for (NSString *type in @[@"timestamp", @"timestamptz"]) {
+    NSMutableArray *dates = [NSMutableArray array];
+    for (NSString *value in values) {
+      NSString *readSQL = [NSString stringWithFormat:@"SELECT $1::%@ AS value", type];
+      NSDictionary *row = [connection executeQueryOne:readSQL parameters:@[value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      NSDate *date = row[@"value"];
+      XCTAssertTrue([date isKindOfClass:[NSDate class]], @"%@ %@", type, value);
+      if (![date isKindOfClass:[NSDate class]]) continue;
+      [dates addObject:date];
+      NSString *sql = [NSString stringWithFormat:
+          @"SELECT $1::%@ = $2::%@ AS equal, to_char($1::%@, 'US') AS fraction, "
+           "to_char($2::%@, 'US') AS expected_fraction", type, type, type, type];
+      row = [connection executeQueryOne:sql parameters:@[date, value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@ %@ date=%@ ref=%.12f row=%@", type, value, date, date.timeIntervalSinceReferenceDate, row);
+      XCTAssertEqualObjects(row[@"expected_fraction"], row[@"fraction"]);
+    }
+    NSString *sql = [NSString stringWithFormat:@"SELECT $1::%@[] = $2::%@[] AS equal", type, type];
+    NSDictionary *row = [connection executeQueryOne:sql
+        parameters:@[ALNDatabaseArrayParameter(dates), ALNDatabaseArrayParameter(values)] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    NSString *readArraySQL = [NSString stringWithFormat:@"SELECT $1::%@[] AS value", type];
+    row = [connection executeQueryOne:readArraySQL parameters:@[ALNDatabaseArrayParameter(values)] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    NSArray *decoded = row[@"value"];
+    XCTAssertTrue([decoded isKindOfClass:[NSArray class]]);
+    if (decoded) {
+      row = [connection executeQueryOne:sql
+          parameters:@[ALNDatabaseArrayParameter(decoded), ALNDatabaseArrayParameter(values)] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    }
+  }
+  // Rounding must carry into the next second, including below the reference epoch.
+  for (NSNumber *interval in @[@0.9999996, @(-0.0000004)]) {
+    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSString *expected = interval.doubleValue > 0 ? @"2001-01-01 00:00:01+00" : @"2001-01-01 00:00:00+00";
+    NSDictionary *row = [connection executeQueryOne:@"SELECT $1::timestamptz = $2::timestamptz AS equal"
+        parameters:@[date, expected] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+  }
+  // Lossless escape hatch: read as text and rebind as text with an explicit SQL cast.
+  for (NSString *type in @[@"timestamp", @"timestamptz"]) {
+    for (NSString *value in @[@"12000-01-01 00:00:00.123456+00", @"infinity", @"-infinity"]) {
+      NSString *sql = [NSString stringWithFormat:@"SELECT ($1::%@)::text AS value", type];
+      NSDictionary *row = [connection executeQueryOne:sql parameters:@[value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      NSString *raw = row[@"value"];
+      XCTAssertTrue([raw isKindOfClass:[NSString class]]);
+      if (!raw) continue;
+      sql = [NSString stringWithFormat:@"SELECT $1::%@ = $2::%@ AS equal", type, type];
+      row = [connection executeQueryOne:sql parameters:@[raw, value] error:&error];
+      XCTAssertNil(error, @"%@", error);
+      XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+    }
+  }
+  [connection close];
 }
 
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {

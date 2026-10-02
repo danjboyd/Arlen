@@ -39,6 +39,7 @@ BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
 PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke
 PHASE26_ORM_PERF_TOOL := $(BUILD_DIR)/phase26-orm-perf-smoke
 ARLEN_ORM_REFERENCE_TOOL := $(BUILD_DIR)/arlen-orm-reference
+MCP_EXAMPLE_TOOL := $(BUILD_DIR)/mcp-example
 PHASE27_SEARCH_CHARACTERIZE_TOOL := $(BUILD_DIR)/phase27-search-characterize
 XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner
 ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a
@@ -204,7 +205,7 @@ ARLEN_PLATFORM_LINK_LIBS := -ldl
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 ARLEN_PLATFORM_LINK_LIBS := -lws2_32 -lbcrypt
 endif
-BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch $(ARLEN_PLATFORM_LINK_LIBS)
+BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)
 XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
 
 ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json
@@ -325,10 +326,12 @@ PHASE27_SEARCH_TEST_OBJS := $(call objs_from,$(PHASE27_SEARCH_TEST_SRCS))
 PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_DB_SMOKE_TEST_SRCS))
 PHASE24_WINDOWS_RUNTIME_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_RUNTIME_TEST_SRCS))
 
-ALL_OBJECTS := $(sort $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
+MCP_EXAMPLE_OBJS := $(call objs_from,examples/mcp_app/main.m)
+
+ALL_OBJECTS := $(sort $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence windows-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -449,6 +452,11 @@ $(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
 >@ar rcs $@ $(FRAMEWORK_OBJS)
 
 framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)
+
+# Compile generated-code consumers with the shipped archive and canonical flags.
+.PHONY: test-client-program
+test-client-program: $(ARLEN_FRAMEWORK_LIB)
+>@source "$(GNUSTEP_SH)" && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(CLIENT_INCLUDE_FLAGS) $(CLIENT_SOURCES) $(ARLEN_FRAMEWORK_LIB) -o "$(CLIENT_OUTPUT)" $(BASE_LINK_LIBS)
 
 $(EOC_TOOL): $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) | $(BUILD_DIR)
 >@mkdir -p $(@D)
@@ -832,8 +840,12 @@ phase29-confidence:
 phase30-confidence:
 >bash ./tools/ci/run_phase30_confidence.sh
 
+windows-confidence:
+>bash ./tools/ci/run_windows_confidence.sh
+
 phase31-confidence:
->bash ./tools/ci/run_phase31_confidence.sh
+>@echo "[ci-compat] make phase31-confidence is deprecated; use make windows-confidence" >&2
+>@$(MAKE) windows-confidence
 
 phase32-confidence:
 >bash ./tools/ci/run_phase32_confidence.sh
@@ -924,16 +936,16 @@ phase20-confidence:
 >bash ./tools/ci/run_phase20_confidence.sh
 
 ci-quality:
->bash ./tools/ci/run_phase5e_quality.sh
+>bash ./tools/ci/run_linux_quality_gate.sh
 
 ci-sanitizers:
->bash ./tools/ci/run_phase10m_sanitizer_matrix.sh
+>bash ./tools/ci/run_linux_sanitizer_matrix.sh
 
 ci-fault-injection:
 >bash ./tools/ci/run_phase9i_fault_injection.sh
 
 ci-release-certification:
->bash ./tools/ci/run_phase9j_release_certification.sh
+>bash ./tools/ci/run_release_certification.sh
 
 ci-json-abstraction:
 >python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root $(ROOT_DIR)
@@ -965,8 +977,12 @@ ci-allocation-faults:
 ci-soak:
 >bash ./tools/ci/run_phase10m_soak.sh
 
+ci-fd-regression:
+>bash ./tools/ci/run_fd_regression.sh
+
 ci-phase38-fd-regression:
->bash ./tools/ci/run_phase38_fd_regression.sh
+>@echo "[ci-compat] make ci-phase38-fd-regression is deprecated; use make ci-fd-regression" >&2
+>@$(MAKE) ci-fd-regression
 
 ci-chaos-restart:
 >bash ./tools/ci/run_phase10m_chaos_restart.sh
@@ -1016,3 +1032,44 @@ clean:
 >rm -rf $(BUILD_DIR) $(ROOT_DIR)/.gnustep $(ROOT_DIR)/.gnustep-home
 
 -include $(wildcard $(ALL_DEPFILES))
+
+.PHONY: mcp-example
+mcp-example: $(MCP_EXAMPLE_TOOL)
+
+$(MCP_EXAMPLE_TOOL): $(MCP_EXAMPLE_OBJS) $(filter %/mcp/Sources/ALNMCPModule.o %/mcp/Sources/ALNMCPSchema.o,$(MODULE_OBJS)) $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+.PHONY: mcp-check
+mcp-check:
+>$(MAKE) test-unit-filter TEST=MCPModuleTests mcp-example
+>python3 tools/mcp/check_client.py
+
+.PHONY: oauth-check
+oauth-check:
+>$(MAKE) test-unit-filter TEST=MetadataTransportTests
+>$(MAKE) test-unit-filter TEST=OAuthResourceServerTests mcp-example
+>python3 tools/oauth/check_example.py
+>python3 tools/oauth/check_discovery.py --self-test
+
+# Durable jobs are exercised against an isolated PostgreSQL cluster by CI.
+DURABLE_JOBS_BUNDLE := $(BUILD_DIR)/tests/ArlenDurableJobsTests.xctest
+DURABLE_JOBS_BIN := $(DURABLE_JOBS_BUNDLE)/ArlenDurableJobsTests
+DURABLE_JOBS_OBJ := $(OBJ_DIR)/tests/durable_jobs/DurableJobsTests.o
+DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
+
+$(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
+>@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)
+>@sed 's/ArlenUnitTests/ArlenDurableJobsTests/g' tests/Info-gnustep-unit.plist > $(DURABLE_JOBS_BUNDLE)/Resources/Info-gnustep.plist
+
+.PHONY: durable-jobs-tests ci-durable-jobs
+durable-jobs-tests: $(DURABLE_JOBS_BIN) $(BUILD_DIR)/durable-job-probe $(XCTEST_RUNNER_PREREQ)
+>source tools/source_gnustep_env.sh && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(DURABLE_JOBS_BUNDLE)
+
+ci-durable-jobs:
+>bash tools/ci/run_durable_jobs.sh
+
+-include $(DURABLE_JOBS_OBJ:.o=.d) $(DURABLE_JOB_PROBE_OBJ:.o=.d)

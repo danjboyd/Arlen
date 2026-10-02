@@ -11,6 +11,7 @@ Optional GDL2 compatibility adapter with fallback behavior when native GDL2 runt
 | --- | --- | --- | --- |
 | `fallbackAdapter` | `ALNPg *` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `migrationMode` | `NSString *` | `nonatomic, copy, readonly` | Public `migrationMode` property available on `ALNGDL2Adapter`. |
+| `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNGDL2Adapter`. |
 
 ## Methods
 

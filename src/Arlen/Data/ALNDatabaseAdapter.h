@@ -139,6 +139,9 @@ typedef NS_ENUM(NSInteger, ALNDatabaseAdapterErrorCode) {
                            error:(NSError *_Nullable *_Nullable)error;
 - (nullable id<ALNSQLDialect>)sqlDialect;
 - (NSDictionary<NSString *, id> *)capabilityMetadata;
+/// Seconds to wait for a pooled connection when the pool is full; `0` fails
+/// immediately. Implemented by the pooled adapters (`ALNPg`, `ALNMSSQL`).
+@property(nonatomic, assign) NSTimeInterval acquireTimeout;
 
 @end
 

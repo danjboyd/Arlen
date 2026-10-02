@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-
-source "$repo_root/tools/source_gnustep_env.sh"
-
-make -C "$repo_root" arlen
-make -C "$repo_root" phase24-windows-confidence
-
-echo "ci: phase24 windows preview confidence complete"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/lib/run_lane_compat.sh"
+aln_lane_compat_exec "run_windows_preview.sh" "$@"

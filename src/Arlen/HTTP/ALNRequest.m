@@ -1,5 +1,7 @@
 #import "ALNRequest.h"
 
+#import <dispatch/dispatch.h>
+
 #if ARLEN_ENABLE_LLHTTP
 #import "third_party/llhttp/llhttp.h"
 #include <pthread.h>
@@ -42,17 +44,11 @@ static BOOL ALNRequestEnvFlagEnabled(const char *name) {
 }
 
 static void ALNEnsureRequestFaultInjectionState(void) {
-  if (gALNRequestFaultInjectionLock != nil && gALNRequestFaultInjectionConsumed != nil) {
-    return;
-  }
-  @synchronized([NSProcessInfo processInfo]) {
-    if (gALNRequestFaultInjectionLock == nil) {
-      gALNRequestFaultInjectionLock = [[NSLock alloc] init];
-    }
-    if (gALNRequestFaultInjectionConsumed == nil) {
-      gALNRequestFaultInjectionConsumed = [NSMutableSet set];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    gALNRequestFaultInjectionLock = [[NSLock alloc] init];
+    gALNRequestFaultInjectionConsumed = [NSMutableSet set];
+  });
 }
 
 static BOOL ALNRequestConsumeFaultOnce(const char *name) {
@@ -494,6 +490,8 @@ static llhttp_settings_t gALNLLHTTPSettings;
 static pthread_once_t gALNLLHTTPSettingsOnce = PTHREAD_ONCE_INIT;
 static llhttp_settings_t gALNLLHTTPStreamingSettings;
 static pthread_once_t gALNLLHTTPStreamingSettingsOnce = PTHREAD_ONCE_INIT;
+static llhttp_settings_t gALNLLHTTPHeadOnlySettings;
+static pthread_once_t gALNLLHTTPHeadOnlySettingsOnce = PTHREAD_ONCE_INIT;
 static pthread_key_t gALNLLHTTPStateKey;
 static pthread_once_t gALNLLHTTPStateKeyOnce = PTHREAD_ONCE_INIT;
 
@@ -968,6 +966,30 @@ static void ALNLLHTTPInitializeStreamingSettings(void) {
 static const llhttp_settings_t *ALNLLHTTPStreamingSettings(void) {
   pthread_once(&gALNLLHTTPStreamingSettingsOnce, ALNLLHTTPInitializeStreamingSettings);
   return &gALNLLHTTPStreamingSettings;
+}
+
+// Head-only parse for spooled bodies: returning 1 from on_headers_complete tells
+// llhttp the message has no body, so the same parser validates the head and the
+// server supplies the body from its spool file.
+static int ALNLLHTTPOnHeadersCompleteSkipBody(llhttp_t *parser) {
+  int result = ALNLLHTTPOnHeadersComplete(parser);
+  return result == 0 ? 1 : result;
+}
+
+static void ALNLLHTTPInitializeHeadOnlySettings(void) {
+  llhttp_settings_init(&gALNLLHTTPHeadOnlySettings);
+  gALNLLHTTPHeadOnlySettings.on_url = ALNLLHTTPOnURL;
+  gALNLLHTTPHeadOnlySettings.on_header_field = ALNLLHTTPOnHeaderField;
+  gALNLLHTTPHeadOnlySettings.on_header_value = ALNLLHTTPOnHeaderValue;
+  gALNLLHTTPHeadOnlySettings.on_header_value_complete = ALNLLHTTPOnHeaderValueComplete;
+  gALNLLHTTPHeadOnlySettings.on_headers_complete = ALNLLHTTPOnHeadersCompleteSkipBody;
+  gALNLLHTTPHeadOnlySettings.on_body = ALNLLHTTPOnBody;
+  gALNLLHTTPHeadOnlySettings.on_message_complete = ALNLLHTTPOnMessageCompletePause;
+}
+
+static const llhttp_settings_t *ALNLLHTTPHeadOnlySettings(void) {
+  pthread_once(&gALNLLHTTPHeadOnlySettingsOnce, ALNLLHTTPInitializeHeadOnlySettings);
+  return &gALNLLHTTPHeadOnlySettings;
 }
 
 static void ALNLLHTTPThreadStateRelease(void *value) {
@@ -1453,6 +1475,24 @@ static ALNRequest *ALNRequestFromBufferedDataLLHTTP(NSData *data,
   return ALNBuildRequestFromLLHTTPState(data, &parser, state, error);
 }
 
+static ALNRequest *ALNRequestFromHeadDataLLHTTP(NSData *head, NSError **error) {
+  ALNLLHTTPParseState *state = ALNLLHTTPThreadState();
+  llhttp_t parser;
+  llhttp_init(&parser, HTTP_REQUEST, ALNLLHTTPHeadOnlySettings());
+  parser.data = (__bridge void *)state;
+  state->_sourceData = head;
+  const char *bytes = (const char *)[head bytes];
+  llhttp_errno_t parseError = llhttp_execute(&parser, bytes, (size_t)[head length]);
+  if (parseError == HPE_PAUSED && state->_messageComplete) {
+    return ALNBuildRequestFromLLHTTPState(head, &parser, state, error);
+  }
+  if (error != NULL) {
+    *error = (parseError != HPE_OK) ? ALNLLHTTPParseErrorForState(state, &parser, parseError)
+                                    : ALNRequestError(2, @"Incomplete request head");
+  }
+  return nil;
+}
+
 static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
   NSError *parseError = nil;
   ALNRequest *request = ALNRequestFromRawDataLLHTTPOnce(data, &parseError);
@@ -1491,6 +1531,11 @@ static ALNRequest *ALNRequestFromRawDataLLHTTP(NSData *data, NSError **error) {
 @property(nonatomic, strong, readwrite) NSData *body;
 @property(nonatomic, copy) NSDictionary *cachedQueryParams;
 @property(nonatomic, copy) NSDictionary *cachedFormParams;
+@property(nonatomic, copy) NSArray *cachedMultipartParts;
+@property(nonatomic, copy) NSDictionary *cachedMultipartLimits;
+@property(nonatomic, strong) NSError *cachedMultipartError;
+@property(nonatomic, copy) NSString *multipartSpoolDirectory;
+@property(nonatomic, copy) NSString *bodySpoolPath;
 @property(nonatomic, copy) NSDictionary *cachedCookies;
 @property(nonatomic, strong) NSMutableDictionary *cachedQueryValueLookups;
 @property(nonatomic, copy) NSArray *deferredHeaderNames;
@@ -1599,6 +1644,52 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 
 @implementation ALNRequest
 
+- (void)dealloc {
+  [self removeTemporaryFiles];
+}
+
+- (void)removeMultipartSpool {
+  NSString *directory = self.multipartSpoolDirectory;
+  if (directory != nil) {
+    self.multipartSpoolDirectory = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+  }
+}
+
+- (void)removeTemporaryFiles {
+  [self removeMultipartSpool];
+  // The mapping in `body` stays valid after the unlink on POSIX systems.
+  NSString *bodyPath = self.bodySpoolPath;
+  if (bodyPath != nil) {
+    self.bodySpoolPath = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:bodyPath error:NULL];
+  }
+}
+
++ (ALNRequest *)requestFromHeadData:(NSData *)head
+                            backend:(ALNHTTPParserBackend)backend
+                              error:(NSError **)error {
+#if ARLEN_ENABLE_LLHTTP
+  if (backend != ALNHTTPParserBackendLegacy) {
+    return ALNRequestFromHeadDataLLHTTP(head ?: [NSData data], error);
+  }
+#endif
+  (void)backend;
+  return ALNRequestFromRawDataLegacy(head ?: [NSData data], error);
+}
+
+- (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
+  NSData *mapped = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+  if (mapped == nil) {
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    return NO;
+  }
+  _body = mapped;
+  self.bodySpoolPath = path;
+  self.cachedFormParams = nil;
+  return YES;
+}
+
 - (instancetype)initWithMethod:(NSString *)method
                           path:(NSString *)path
                    queryString:(NSString *)queryString
@@ -1612,7 +1703,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     _queryString = [queryString copy] ?: @"";
     _httpVersion = [httpVersion copy] ?: @"HTTP/1.1";
     _headers = [headers isKindOfClass:[NSDictionary class]] ? [headers copy] : @{};
-    _body = body ?: [NSData data];
+    _body = [body copy] ?: [NSData data];
     _routeParams = @{};
     _remoteAddress = @"";
     _effectiveRemoteAddress = @"";
@@ -1791,13 +1882,85 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   return self.cachedQueryParams ?: parsed;
 }
 
+- (BOOL)parseMultipartFormWithLimits:(NSDictionary *)limits error:(NSError **)error {
+  NSString *contentType = [self headerValueForName:@"content-type"];
+  NSString *mediaType = [[[contentType componentsSeparatedByString:@";"] firstObject]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+  if (![[mediaType lowercaseString] isEqual:@"multipart/form-data"]) {
+    if (error) *error = nil;
+    return YES;
+  }
+  NSDictionary *policy = limits ?: [ALNMultipart defaultLimits];
+  if (!self.cachedMultipartParts || ![self.cachedMultipartLimits isEqual:policy]) {
+    NSError *failure = nil;
+    // A re-parse replaces the parts, so drop the files behind the previous ones.
+    [self removeMultipartSpool];
+    NSString *spoolDirectory = nil;
+    NSArray *parts = [ALNMultipart parseBody:self.body contentType:contentType limits:policy
+                              spoolDirectory:&spoolDirectory error:&failure];
+    self.multipartSpoolDirectory = spoolDirectory;
+    self.cachedMultipartParts = parts ?: @[];
+    self.cachedMultipartLimits = policy;
+    self.cachedMultipartError = failure;
+    self.cachedFormParams = nil;
+  }
+  if (error) *error = self.cachedMultipartError;
+  return self.cachedMultipartError == nil;
+}
+
+- (NSArray *)multipartParts {
+  if (!self.cachedMultipartParts) [self parseMultipartFormWithLimits:nil error:NULL];
+  return self.cachedMultipartParts ?: @[];
+}
+
+- (NSError *)multipartError {
+  (void)self.multipartParts;
+  return self.cachedMultipartError;
+}
+
+- (NSArray *)uploads {
+  NSMutableArray *out = [NSMutableArray array];
+  for (ALNMultipartPart *part in self.multipartParts)
+    if ([part isKindOfClass:[ALNUpload class]]) [out addObject:part];
+  return [out copy];
+}
+
+- (NSArray *)uploadsForName:(NSString *)name {
+  NSMutableArray *out = [NSMutableArray array];
+  for (ALNUpload *upload in self.uploads)
+    if ([upload.fieldName isEqual:name]) [out addObject:upload];
+  return [out copy];
+}
+
+- (NSDictionary *)formValues {
+  NSMutableDictionary *out = [NSMutableDictionary dictionary];
+  for (ALNMultipartPart *part in self.multipartParts) {
+    if ([part isKindOfClass:[ALNUpload class]]) continue;
+    out[part.fieldName] = [(out[part.fieldName] ?: @[]) arrayByAddingObject:part.text ?: @""];
+  }
+  if (ALNContentTypeIsFormURLEncoded([self headerValueForName:@"content-type"])) {
+    NSString *bodyString = [[NSString alloc] initWithData:self.body encoding:NSUTF8StringEncoding];
+    for (NSString *pair in [bodyString componentsSeparatedByString:@"&"]) {
+      if (!pair.length) continue;
+      NSRange equals = [pair rangeOfString:@"="];
+      NSString *name = ALNURLDecode(equals.location == NSNotFound ? pair : [pair substringToIndex:equals.location]);
+      NSString *value = equals.location == NSNotFound ? @"" : ALNURLDecode([pair substringFromIndex:equals.location+1]);
+      out[name] = [(out[name] ?: @[]) arrayByAddingObject:value];
+    }
+  }
+  return [out copy];
+}
+
 - (NSDictionary *)formParams {
   NSDictionary *cached = self.cachedFormParams;
   if (cached != nil) {
     return cached;
   }
 
-  NSDictionary *parsed = @{};
+  NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+  for (ALNMultipartPart *part in self.multipartParts)
+    if (![part isKindOfClass:[ALNUpload class]]) fields[part.fieldName] = part.text ?: @"";
+  NSDictionary *parsed = [fields copy];
   if (ALNContentTypeIsFormURLEncoded([self headerValueForName:@"content-type"]) &&
       [_body length] > 0) {
     NSString *bodyString = [[NSString alloc] initWithData:_body encoding:NSUTF8StringEncoding];
