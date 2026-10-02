@@ -101,6 +101,7 @@ done < <(find "$repo_root/modules" -mindepth 2 -maxdepth 2 -type d -name Sources
 objc_flags=("${common_flags[@]}")
 c_flags=("${common_flags[@]}")
 link_flags=(
+  -lcurl
   -isysroot "$sdk_path"
   -arch arm64
   -L"$openssl_prefix/lib"

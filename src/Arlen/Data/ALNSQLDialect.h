@@ -22,6 +22,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// Physical components are descriptor data, not SQL text. Empty/NUL names are invalid.
+FOUNDATION_EXPORT BOOL ALNSQLDialectIdentifierComponentIsValid(NSString *value);
+// Encode one physical component for the builder; ordinary names retain their spelling.
+FOUNDATION_EXPORT NSString *ALNSQLDialectIdentifierComponent(NSString *value);
+// Parse only dot-separated ordinary or SQL double-quoted components, never expressions.
+FOUNDATION_EXPORT NSArray<NSString *> *_Nullable ALNSQLDialectIdentifierComponents(NSString *value);
 FOUNDATION_EXPORT BOOL ALNSQLDialectIdentifierIsSafe(NSString *value);
 FOUNDATION_EXPORT NSString *ALNSQLDialectDoubleQuoteIdentifier(NSString *value);
 FOUNDATION_EXPORT NSString *ALNSQLDialectBracketQuoteIdentifier(NSString *value);

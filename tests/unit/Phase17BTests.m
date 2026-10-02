@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dispatch/dispatch.h>
 
 #import "../ALNTestRequirements.h"
 #import "../shared/ALNDatabaseTestSupport.h"
@@ -8,6 +9,26 @@
 #import "ALNMSSQL.h"
 #import "ALNMSSQLDialect.h"
 #import "ALNSQLBuilder.h"
+
+// Stands in for an ODBC connection so the pool's acquire timeout can be
+// exercised without a SQL Server.
+@interface ALNFakeMSSQLPoolConnection : ALNMSSQLConnection
+@property(nonatomic, assign) BOOL simulatedOpen;
+@property(nonatomic, assign) NSInteger closeCount;
+@end
+
+@implementation ALNFakeMSSQLPoolConnection
+
+- (BOOL)isOpen {
+  return self.simulatedOpen;
+}
+
+- (void)close {
+  self.closeCount += 1;
+  self.simulatedOpen = NO;
+}
+
+@end
 
 @interface Phase17BTests : XCTestCase
 @end
@@ -166,6 +187,55 @@
     XCTAssertEqualObjects(ALNMSSQLErrorDomain, error.domain);
     XCTAssertEqual((NSInteger)ALNMSSQLErrorTransportUnavailable, error.code);
   }
+}
+
+// Issue #52: bounded wait for a released connection, same contract as ALNPg.
+- (void)testMSSQLAcquireTimeoutWaitsForReleaseAndOtherwiseFailsAsPoolExhausted {
+  if (![self requireMSSQLTransportForSelector:_cmd]) {
+    return;
+  }
+  NSError *error = nil;
+  ALNMSSQL *pool = [[ALNMSSQL alloc]
+      initWithConnectionString:@"Driver={Definitely Missing Driver};Server=localhost;Database=master;"
+                 maxConnections:1
+                          error:&error];
+  XCTAssertNotNil(pool);
+  XCTAssertEqual(0.0, pool.acquireTimeout);
+
+  ALNFakeMSSQLPoolConnection *only = [ALNFakeMSSQLPoolConnection new];
+  only.simulatedOpen = YES;
+  [pool releaseConnection:only];
+  ALNMSSQLConnection *held = [pool acquireConnection:&error];
+  XCTAssertEqual(held, (ALNMSSQLConnection *)only);
+
+  XCTAssertNil([pool acquireConnection:&error]);
+  XCTAssertEqual((NSInteger)ALNMSSQLErrorPoolExhausted, error.code);
+  XCTAssertEqualObjects(@"MSSQL connection pool exhausted", error.localizedDescription);
+
+  pool.acquireTimeout = 5.0;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                 ^{
+                   [pool releaseConnection:held];
+                 });
+  error = nil;
+  ALNMSSQLConnection *next = [pool acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual(next, (ALNMSSQLConnection *)only);
+
+  pool.acquireTimeout = 0.3;
+  NSDate *started = [NSDate date];
+  XCTAssertNil([pool acquireConnection:&error]);
+  XCTAssertGreaterThanOrEqual(-[started timeIntervalSinceNow], 0.25);
+  XCTAssertEqual((NSInteger)ALNMSSQLErrorPoolExhausted, error.code);
+  XCTAssertTrue([error.localizedDescription
+                    hasPrefix:@"MSSQL connection pool exhausted after waiting "],
+                @"%@", error.localizedDescription);
+
+  NSDictionary *diagnostics = [pool poolDiagnostics];
+  XCTAssertEqualObjects(@2, diagnostics[@"acquire_wait_count"]);
+  XCTAssertEqualObjects(@2, diagnostics[@"pool_exhausted_count"]);
+  XCTAssertEqualObjects(@1, diagnostics[@"in_use_connections"]);
 }
 
 - (void)testMSSQLAdapterConformanceSuiteRunsWhenExplicitTestDSNIsProvided {

@@ -1,7 +1,11 @@
 #import "ALNAuthModule.h"
 
+#import <dispatch/dispatch.h>
+#import "ALNAuthModuleOIDC.h"
+
 #import "ALNHTTPCompat.h"
 #import "ALNApplication.h"
+#import "ALNAuthProviderPresets.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -20,6 +24,7 @@ NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
 static NSString *const ALNAuthModuleVerificationNoticeSessionKey = @"aln.auth_module.notice.verify";
+static NSString *const ALNAuthModuleProviderErrorSessionKey = @"aln.auth_module.notice.provider_error";
 static NSString *const ALNAuthModuleResetNoticeSessionKey = @"aln.auth_module.notice.reset";
 static NSString *const ALNAuthModuleSMSStateSessionKey = @"aln.auth_module.sms_state";
 
@@ -30,6 +35,49 @@ static NSString *AMTrimmedString(id value) {
   return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+/// Clamps a caller-supplied `return_to` to a same-origin path.
+///
+/// `return_to` arrives from the query string or a form field and is handed back
+/// to the browser as a `Location` after a successful sign-in, so a value
+/// carrying its own origin turns a genuine authentication into an open
+/// redirect. That is worth more to an attacker than an ordinary one: the victim
+/// really did just authenticate on the legitimate host, which is exactly what
+/// makes a "your session expired, sign in again" page served immediately
+/// afterwards convincing.
+///
+/// Only a single-slash absolute path is accepted. Anything else yields an empty
+/// string, and callers fall back to the configured default redirect. Apps that
+/// genuinely need a cross-origin return use the session-policy hook, whose
+/// override is deliberately not clamped.
+static NSString *AMSafeReturnTo(id value) {
+  NSString *candidate = AMTrimmedString(value);
+  if ([candidate length] == 0) {
+    return @"";
+  }
+  // A scheme-bearing target ("https://evil.example") or a bare relative path
+  // both fail this: only a rooted path is a same-origin return.
+  if (![candidate hasPrefix:@"/"]) {
+    return @"";
+  }
+  // "//evil.example" is protocol-relative, and therefore off-origin.
+  if ([candidate hasPrefix:@"//"]) {
+    return @"";
+  }
+  // Browsers normalize a backslash to a slash, so "/\evil.example" is
+  // protocol-relative once the browser is done with it.
+  if ([candidate rangeOfString:@"\\"].location != NSNotFound) {
+    return @"";
+  }
+  NSUInteger length = [candidate length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [candidate characterAtIndex:idx];
+    if (c < 0x20 || c == 0x7F) {
+      return @"";
+    }
+  }
+  return candidate;
+}
+
 static NSString *AMLowerTrimmedString(id value) {
   return [[AMTrimmedString(value) lowercaseString] copy];
 }
@@ -38,6 +86,72 @@ static NSError *AMError(ALNAuthModuleErrorCode code, NSString *message, NSDictio
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:details ?: @{}];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"auth module error";
   return [NSError errorWithDomain:ALNAuthModuleErrorDomain code:code userInfo:userInfo];
+}
+
+// Local absolute paths only: no scheme, no protocol-relative `//`, no backslashes,
+// fragments or control characters.
+static BOOL AMIsLocalRedirectPath(id value) {
+  if (![value isKindOfClass:[NSString class]]) return NO;
+  NSString *path = value;
+  return [path hasPrefix:@"/"] && ![path hasPrefix:@"//"] &&
+         [path rangeOfString:@"\\"].location == NSNotFound &&
+         [path rangeOfString:@"#"].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet whitespaceCharacterSet]].location == NSNotFound;
+}
+
+// OIDC presets the auth module can expand. Presets that need a tenant-specific issuer
+// or an unsupported client authentication method are deliberately not listed.
+static NSArray *AMSupportedOIDCProviderPresets(void) {
+  return @[ @"google" ];
+}
+
+static NSString *AMURLHost(id value) {
+  NSString *url = [value isKindOfClass:[NSString class]] ? value : @"";
+  return [[NSURL URLWithString:url].host lowercaseString] ?: @"";
+}
+
+// Expands `preset = "google"` into discovery-based provider keys, deriving the endpoint
+// and JWKS allowed hosts from the preset's own endpoints. Explicit keys win.
+static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *provider, NSError **error) {
+  if (provider[@"preset"] == nil) {
+    return provider;
+  }
+  NSString *presetName = AMLowerTrimmedString(provider[@"preset"]);
+  NSDictionary *preset = [AMSupportedOIDCProviderPresets() containsObject:presetName]
+                             ? [ALNAuthProviderPresets presetNamed:presetName error:NULL]
+                             : nil;
+  if (preset == nil) {
+    if (error) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       [NSString stringWithFormat:@"authModule.providers.%@ has unknown OIDC preset \"%@\" (supported: %@)",
+                                                  identifier, presetName ?: @"",
+                                                  [AMSupportedOIDCProviderPresets() componentsJoinedByString:@", "]],
+                       nil);
+    }
+    return nil;
+  }
+  NSString *issuer = preset[@"issuer"];
+  NSMutableArray *endpointHosts = [NSMutableArray array];
+  for (NSString *key in @[ @"issuer", @"authorizationEndpoint", @"tokenEndpoint" ]) {
+    NSString *host = AMURLHost(preset[key]);
+    if ([host length] > 0 && ![endpointHosts containsObject:host]) {
+      [endpointHosts addObject:host];
+    }
+  }
+  NSMutableDictionary *expanded = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"type" : @"oidc",
+    @"issuer" : issuer,
+    @"discoveryURL" : [issuer stringByAppendingString:@"/.well-known/openid-configuration"],
+    @"scopes" : preset[@"defaultScopes"] ?: @[ @"openid", @"email", @"profile" ],
+    @"tokenEndpointAuthMethod" : preset[@"tokenEndpointAuthMethod"] ?: @"client_secret_post",
+    @"endpointAllowedHosts" : endpointHosts,
+    @"jwksAllowedHosts" : @[ AMURLHost(preset[@"jwksURI"]) ],
+    @"ctaLabel" : [NSString stringWithFormat:@"Continue with %@", preset[@"displayName"] ?: identifier],
+  }];
+  [expanded addEntriesFromDictionary:provider];
+  [expanded removeObjectForKey:@"preset"];
+  return expanded;
 }
 
 static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
@@ -566,6 +680,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @end
 
 @interface ALNAuthModuleRuntime ()
+@property(nonatomic, copy) NSDictionary<NSString *, ALNAuthModuleOIDC *> *oidcProviders;
+@property(nonatomic, assign, readwrite) BOOL localPasswordEnabled;
+
 
 @property(nonatomic, strong) ALNPg *database;
 @property(nonatomic, strong) id<ALNMailAdapter> mailAdapter;
@@ -583,6 +700,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *changePasswordPath;
 @property(nonatomic, copy, readwrite) NSString *mfaManagePath;
 @property(nonatomic, copy, readwrite) NSString *totpPath;
+@property(nonatomic, copy, readwrite) NSString *stepUpPath;
 @property(nonatomic, copy, readwrite) NSString *totpVerifyPath;
 @property(nonatomic, copy, readwrite) NSString *smsPath;
 @property(nonatomic, copy, readwrite) NSString *smsStartPath;
@@ -593,10 +711,14 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *providerStubAuthorizePath;
 @property(nonatomic, copy, readwrite) NSString *providerStubCallbackPath;
 @property(nonatomic, copy, readwrite) NSString *defaultRedirect;
+@property(nonatomic, copy) NSString *failureRedirect;
+@property(nonatomic, copy) NSDictionary<NSString *, NSString *> *providerFailureRedirects;
 @property(nonatomic, copy, readwrite) NSArray<NSDictionary *> *loginProviders;
 @property(nonatomic, copy, readwrite) NSString *uiMode;
 @property(nonatomic, copy, readwrite) NSString *layoutTemplate;
 @property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
+@property(nonatomic, copy, readwrite) NSString *uiAssetPrefix;
+- (void)mountUIAssetsForApplication:(ALNApplication *)application;
 @property(nonatomic, assign, readwrite) BOOL smsEnabled;
 @property(nonatomic, assign) BOOL smsAllowEnrollment;
 @property(nonatomic, assign) BOOL smsAllowChallenge;
@@ -893,11 +1015,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 + (instancetype)sharedRuntime {
   static ALNAuthModuleRuntime *runtime = nil;
-  @synchronized(self) {
-    if (runtime == nil) {
-      runtime = [[ALNAuthModuleRuntime alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    runtime = [[ALNAuthModuleRuntime alloc] init];
+  });
   return runtime;
 }
 
@@ -917,6 +1038,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _changePasswordPath = @"/auth/password/change";
     _mfaManagePath = @"/auth/mfa";
     _totpPath = @"/auth/mfa/totp";
+    _stepUpPath = @"/auth/mfa/totp";
     _totpVerifyPath = @"/auth/mfa/totp/verify";
     _smsPath = @"/auth/mfa/sms";
     _smsStartPath = @"/auth/mfa/sms/start";
@@ -963,6 +1085,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.moduleConfig = [moduleConfig isKindOfClass:[NSDictionary class]] ? moduleConfig : @{};
   NSDictionary *paths = [self.moduleConfig[@"paths"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"paths"] : @{};
   self.prefix = AMPathJoin(AMTrimmedString(paths[@"prefix"]), @"");
+  self.uiAssetPrefix = @"/modules/auth";
   self.apiPrefix = AMConfiguredPath(self.moduleConfig, @"apiPrefix", @"api");
   self.loginPath = AMConfiguredPath(self.moduleConfig, @"login", @"login");
   self.registerPath = AMConfiguredPath(self.moduleConfig, @"register", @"register");
@@ -974,6 +1097,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.changePasswordPath = AMConfiguredPath(self.moduleConfig, @"changePassword", @"password/change");
   self.mfaManagePath = AMConfiguredPath(self.moduleConfig, @"mfa", @"mfa");
   self.totpPath = AMConfiguredPath(self.moduleConfig, @"totp", @"mfa/totp");
+  // The step-up target may carry a query (for example "?prompt=login"); the
+  // step-up redirect appends its own parameters with "&" in that case.
+  NSString *configuredStepUp = AMTrimmedString(paths[@"stepUp"]);
+  NSString *stepUpPath = ([configuredStepUp length] > 0)
+                             ? AMConfiguredPath(self.moduleConfig, @"stepUp", @"")
+                             : self.totpPath;
+  // A relative value is joined to the prefix like every other path, so an
+  // absolute URL would quietly become "/auth/https://..."; refuse it instead.
+  if ([configuredStepUp containsString:@"://"] || !AMIsLocalRedirectPath(stepUpPath)) {
+    if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                @"authModule.paths.stepUp must be a local absolute path", nil);
+    return NO;
+  }
+  self.stepUpPath = stepUpPath;
   self.totpVerifyPath = AMConfiguredPath(self.moduleConfig, @"totpVerify", @"mfa/totp/verify");
   self.smsPath = AMConfiguredPath(self.moduleConfig, @"sms", @"mfa/sms");
   self.smsStartPath = AMConfiguredPath(self.moduleConfig, @"smsStart", @"mfa/sms/start");
@@ -989,6 +1126,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([self.defaultRedirect length] == 0) {
     self.defaultRedirect = @"/";
   }
+  id failureRedirect = self.moduleConfig[@"failureRedirect"];
+  if (failureRedirect != nil && !AMIsLocalRedirectPath(failureRedirect)) {
+    if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                @"authModule.failureRedirect must be a local absolute path", nil);
+    return NO;
+  }
+  self.failureRedirect = failureRedirect;
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1032,7 +1176,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                 ? self.moduleConfig[@"providers"]
                                 : @{};
   NSDictionary *stubProvider = [providers[@"stub"] isKindOfClass:[NSDictionary class]] ? providers[@"stub"] : @{};
-  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], YES);
+  BOOL hasOIDC = NO;
+  for (NSString *identifier in providers) {
+    if ([identifier isEqual:@"stub"]) continue;
+    NSDictionary *provider = providers[identifier];
+    if (![provider isKindOfClass:[NSDictionary class]]) {
+      if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"Provider configuration must be a dictionary", nil);
+      return NO;
+    }
+    if (AMConfigBool(provider[@"enabled"], NO)) hasOIDC = YES;
+  }
+  id localPasswordConfig = self.moduleConfig[@"localPassword"];
+  if (localPasswordConfig && ![localPasswordConfig isKindOfClass:[NSDictionary class]]) {
+    if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"localPassword must be a dictionary", nil);
+    return NO;
+  }
+  self.localPasswordEnabled = AMConfigBool(localPasswordConfig[@"enabled"], !hasOIDC);
+  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], !hasOIDC);
   NSString *stubEmail = AMLowerTrimmedString(stubProvider[@"email"]);
   if ([stubEmail length] > 0) {
     self.stubProviderEmail = stubEmail;
@@ -1056,6 +1216,53 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   } else {
     self.loginProviders = @[];
   }
+
+  NSDictionary *providerHooks = [self.moduleConfig[@"hooks"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"hooks"] : @{};
+  id resolver = hasOIDC ? AMInstantiateHookClass(providerHooks, @"providerSessionResolverClass",
+                                                @protocol(ALNAuthProviderSessionResolver), error) : nil;
+  if (hasOIDC && !resolver) {
+    if (error && !*error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"OIDC requires hooks.providerSessionResolverClass", nil);
+    return NO;
+  }
+  id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
+                                                 @protocol(ALNAuthModuleOIDCTransport), error) : nil;
+  if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
+  BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
+                                   [self.environmentName isEqualToString:@"test"];
+  NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
+  NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
+  NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
+  for (NSString *identifier in [[providers allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    if ([identifier isEqual:@"stub"] || !AMConfigBool(providers[identifier][@"enabled"], NO)) continue;
+    NSDictionary *provider = AMExpandedOIDCProvider(identifier, providers[identifier], error);
+    if (!provider) return NO;
+    if (![provider[@"type"] isEqual:@"oidc"]) {
+      if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"Enabled provider requires type oidc", nil);
+      return NO;
+    }
+    ALNAuthModuleOIDC *oidc = [[ALNAuthModuleOIDC alloc] initWithIdentifier:identifier configuration:provider
+                                                               resolver:resolver transport:transport
+                                              allowLoopbackHTTPRedirect:allowLoopbackHTTPRedirect
+                                                                  error:error];
+    if (!oidc) return NO;
+    oidcProviders[identifier] = oidc;
+    if (provider[@"failureRedirect"] != nil) {
+      if (!AMIsLocalRedirectPath(provider[@"failureRedirect"])) {
+        if (error) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                    [NSString stringWithFormat:@"authModule.providers.%@.failureRedirect must be a local absolute path",
+                                                               identifier], nil);
+        return NO;
+      }
+      providerFailureRedirects[identifier] = provider[@"failureRedirect"];
+    }
+    NSString *suffix = [NSString stringWithFormat:@"provider/%@/login", identifier];
+    [loginProviders addObject:@{ @"identifier": identifier, @"kind": @"oidc",
+       @"ctaLabel": AMTrimmedString(provider[@"ctaLabel"]).length ? provider[@"ctaLabel"] : [@"Continue with " stringByAppendingString:identifier],
+       @"loginPath": AMPathJoin(self.prefix, suffix), @"apiLoginPath": AMPathJoin(self.apiPrefix, suffix) }];
+  }
+  self.oidcProviders = oidcProviders;
+  self.providerFailureRedirects = providerFailureRedirects;
+  self.loginProviders = loginProviders;
 
   self.bootstrapAdminEmails = AMNormalizedEmailArray(self.moduleConfig[@"bootstrapAdminEmails"]);
   NSDictionary *hooksConfig = [self.moduleConfig[@"hooks"] isKindOfClass:[NSDictionary class]]
@@ -1108,10 +1315,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *moduleConfig = [application.config[@"authModule"] isKindOfClass:[NSDictionary class]]
                                    ? application.config[@"authModule"]
                                    : @{};
+  // Provider validation depends on the environment (loopback redirect URIs).
+  self.environmentName = AMEffectiveEnvironmentName(application.environment);
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
-  self.environmentName = AMEffectiveEnvironmentName(application.environment);
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};
@@ -1247,7 +1455,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (NSString *)postLoginRedirectForContext:(ALNContext *)context
                                      user:(NSDictionary *)user
                           defaultRedirect:(NSString *)defaultRedirect {
-  NSString *fallback = ([AMTrimmedString(defaultRedirect) length] > 0) ? AMTrimmedString(defaultRedirect) : self.defaultRedirect;
+  // Clamped here as well as where `return_to` is read, so a future caller that
+  // passes an unsanitized target cannot reopen the redirect. The hook's own
+  // override is intentionally left alone: an app that returns a cross-origin
+  // target from its session policy has said so explicitly.
+  NSString *requested = AMSafeReturnTo(defaultRedirect);
+  NSString *fallback = ([requested length] > 0) ? requested : self.defaultRedirect;
   if (self.sessionPolicyHook != nil &&
       [self.sessionPolicyHook respondsToSelector:@selector(authModulePostLoginRedirectForContext:user:defaultRedirect:)]) {
     NSString *override = [self.sessionPolicyHook authModulePostLoginRedirectForContext:context
@@ -1321,7 +1534,28 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([[self.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
     return [NSString stringWithFormat:@"/%@/%@", self.generatedPagePrefix ?: @"auth", normalized];
   }
-  return [NSString stringWithFormat:@"/modules/auth/%@", normalized];
+  return [NSString stringWithFormat:@"%@/%@", self.uiAssetPrefix ?: @"/modules/auth", normalized];
+}
+
+// The framework mounts Resources/Public at /modules/auth, outside paths.prefix, so
+// an app behind a path-scoped proxy cannot reach it. Serve the same directory
+// under the module's own prefix too and link pages there; /modules/auth keeps working.
+- (void)mountUIAssetsForApplication:(ALNApplication *)application {
+  NSDictionary *moduleMount = nil;
+  for (NSDictionary *mount in application.staticMounts) {
+    if ([mount[@"prefix"] isEqual:@"/modules/auth"]) {
+      moduleMount = mount;
+    }
+  }
+  NSString *directory = moduleMount[@"directory"];
+  if ([directory length] == 0) {
+    return;
+  }
+  NSString *prefix = [self.prefix length] > 0 && ![self.prefix isEqualToString:@"/"] ? self.prefix : @"/auth";
+  NSString *assetPrefix = AMPathJoin(prefix, @"assets");
+  if ([application mountStaticDirectory:directory atPrefix:assetPrefix allowExtensions:moduleMount[@"allowExtensions"]]) {
+    self.uiAssetPrefix = assetPrefix;
+  }
 }
 
 - (NSString *)layoutTemplateForPage:(NSString *)pageIdentifier
@@ -2540,7 +2774,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self.smsVerifyClient sendVerificationToPhoneNumber:resolvedPhone locale:self.smsLocale error:error]) {
     return nil;
   }
-  NSString *normalizedReturnTo = AMTrimmedString([context stringParamForName:@"return_to"]);
+  NSString *normalizedReturnTo = AMSafeReturnTo([context stringParamForName:@"return_to"]);
   NSDictionary *state = @{
     @"purpose" : normalizedPurpose ?: @"challenge",
     @"phone" : resolvedPhone ?: @"",
@@ -2751,7 +2985,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   payload[@"csrf_token"] = [context csrfToken] ?: @"";
   payload[@"login_providers"] = self.loginProviders ?: @[];
   payload[@"ui_mode"] = self.uiMode ?: @"module-ui";
-  if (includeUser && [subject length] > 0) {
+  payload[@"local_password_enabled"] = @(self.localPasswordEnabled);
+  if (includeUser && [subject length] > 0 && self.oidcProviders[[context authProvider]] == nil) {
     NSDictionary *user = [self currentUserForSubject:subject error:error];
     if (user != nil) {
       payload[@"user"] = user;
@@ -3009,6 +3244,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   context[@"authSMSResendPath"] = self.runtime.smsResendPath ?: @"/auth/mfa/sms/resend";
   context[@"authSMSRemovePath"] = self.runtime.smsRemovePath ?: @"/auth/mfa/sms/remove";
   context[@"authProviders"] = self.runtime.loginProviders ?: @[];
+  context[@"authLocalPasswordEnabled"] = @(self.runtime.localPasswordEnabled);
   context[@"authUIMode"] = self.runtime.uiMode ?: @"module-ui";
   context[@"authStylesheetPath"] = [self stylesheetPathForRuntime];
   context[@"authTOTPQRCodeScriptPath"] = [self.runtime authUIAssetPathForFilename:@"auth_totp_qr.js"];
@@ -3266,7 +3502,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"submitLabel" : @"Sign In",
       @"hidden" : @[ @{
         @"name" : @"return_to",
-        @"value" : AMTrimmedString(parameters[@"return_to"]),
+        @"value" : AMSafeReturnTo(parameters[@"return_to"]),
       } ],
       @"fields" : @[
         @{
@@ -3295,14 +3531,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       ],
     },
   };
+  NSString *providerError = AMTrimmedString(ctx.session[ALNAuthModuleProviderErrorSessionKey]);
   BOOL rendered = [self renderAuthPageIdentifier:@"login"
                                            title:@"Sign In"
                                          message:AMTrimmedString(ctx.session[ALNAuthModuleVerificationNoticeSessionKey])
-                                          errors:nil
-                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                          errors:([providerError length] > 0
+                                                      ? @[ @{ @"field" : @"", @"message" : providerError } ]
+                                                      : nil)
+                                        formData:@{ @"return_to" : AMSafeReturnTo(parameters[@"return_to"]) }
                                         extraCtx:extraCtx
                                            error:NULL];
   [ctx.session removeObjectForKey:ALNAuthModuleVerificationNoticeSessionKey];
+  if ([providerError length] > 0) {
+    [ctx.session removeObjectForKey:ALNAuthModuleProviderErrorSessionKey];
+    [ctx markSessionDirty];
+  }
   if (!rendered) {
     [self setStatus:500];
     [self renderText:@"render failed\n"];
@@ -3314,7 +3557,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSString *password = AMTrimmedString(parameters[@"password"]);
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *user = [self.runtime authenticateLocalEmail:email password:password error:&error];
   if (user == nil) {
@@ -3401,7 +3644,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                            title:@"Create Account"
                                          message:@""
                                           errors:nil
-                                        formData:@{ @"return_to" : AMTrimmedString(parameters[@"return_to"]) }
+                                        formData:@{ @"return_to" : AMSafeReturnTo(parameters[@"return_to"]) }
                                         extraCtx:@{
                                           @"authFormDescriptor" : @{
                                             @"action" : self.runtime.registerPath ?: @"/auth/register",
@@ -3409,7 +3652,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                             @"submitLabel" : @"Create Account",
                                             @"hidden" : @[ @{
                                               @"name" : @"return_to",
-                                              @"value" : AMTrimmedString(parameters[@"return_to"]),
+                                              @"value" : AMSafeReturnTo(parameters[@"return_to"]),
                                             } ],
                                             @"fields" : @[
                                               @{
@@ -3452,7 +3695,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSString *displayName = AMTrimmedString(parameters[@"display_name"]);
   NSString *password = AMTrimmedString(parameters[@"password"]);
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *user =
       [self.runtime createLocalUserWithEmail:email displayName:displayName password:password source:@"local_registration" error:&error];
@@ -3765,7 +4008,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.mfaManagePath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return [self mfaJSONResponseForContext:ctx returnTo:returnTo];
   }
@@ -3790,7 +4033,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.smsPath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     NSDictionary *payload = [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:&error];
@@ -3843,7 +4086,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
   NSDictionary *parameters = [self requestParameters];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
                                                             phone:parameters[@"phone_number"]
@@ -3894,7 +4137,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *smsState = AMSMSSessionState(ctx);
   NSString *purpose = AMLowerTrimmedString(smsState[@"purpose"]);
   NSString *phone = AMNormalizePhoneNumber(smsState[@"phone"]);
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   NSDictionary *state = [self.runtime issueSMSVerificationForUser:user
                                                             phone:([purpose isEqualToString:@"enrollment"] ? phone : nil)
@@ -3963,7 +4206,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
   NSDictionary *parameters = [self requestParameters];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSString *purpose = AMLowerTrimmedString(AMSMSSessionState(ctx)[@"purpose"]);
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifySMSCode:parameters[@"code"] user:user context:ctx error:&error];
@@ -4035,7 +4278,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSError *error = nil;
   BOOL ok = [self.runtime removeSMSEnrollmentForUser:user context:ctx error:&error];
   if (!ok) {
@@ -4082,7 +4325,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
     return nil;
   }
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   NSDictionary *payload = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return [self totpJSONResponseForContext:ctx provisioning:payload returnTo:returnTo];
@@ -4113,7 +4356,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifyTOTPCode:parameters[@"code"] user:user context:ctx error:&error];
-  NSString *returnTo = AMTrimmedString(parameters[@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   if (payload == nil) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
@@ -4155,6 +4398,75 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return nil;
 }
 
+- (ALNAuthModuleOIDC *)oidcProviderForContext:(ALNContext *)ctx {
+  NSArray *parts = [ctx.request.path componentsSeparatedByString:@"/"];
+  return parts.count >= 2 ? self.runtime.oidcProviders[parts[parts.count - 2]] : nil;
+}
+
+- (id)providerOIDCLogin:(ALNContext *)ctx {
+  ALNAuthModuleOIDC *provider = [self oidcProviderForContext:ctx];
+  if (!provider) { [self setStatus:404]; return nil; }
+  NSError *error = nil;
+  NSString *prompt = AMTrimmedString([self requestParameters][@"prompt"]);
+  NSMutableDictionary *state = [[provider beginLoginWithPrompt:prompt error:&error] mutableCopy];
+  if (!state) { [self setStatus:502]; return @{ @"status": @"error", @"message": @"Provider login unavailable" }; }
+  state[@"return_to"] = AMSafeReturnTo([self requestParameters][@"return_to"]);
+  NSString *authorizeURL = state[@"authorizationURL"];
+  [state removeObjectForKey:@"authorizationURL"];
+  ctx.session[ALNAuthModuleProviderStateSessionKey] = state;
+  [ctx markSessionDirty];
+  if ([self shouldReturnJSON:ctx]) return @{ @"status": @"ok", @"authorize_url": authorizeURL };
+  [self redirectTo:authorizeURL status:302];
+  return nil;
+}
+
+- (id)providerOIDCCallback:(ALNContext *)ctx {
+  ALNAuthModuleOIDC *provider = [self oidcProviderForContext:ctx];
+  if (!provider) { [self setStatus:404]; return nil; }
+  NSDictionary *state = [ctx.session[ALNAuthModuleProviderStateSessionKey] isKindOfClass:[NSDictionary class]] ?
+                        ctx.session[ALNAuthModuleProviderStateSessionKey] : @{};
+  [ctx.session removeObjectForKey:ALNAuthModuleProviderStateSessionKey];
+  [ctx markSessionDirty];
+  NSError *error = nil;
+  NSDictionary *result = [provider completeLoginWithParameters:[self requestParameters] callbackState:state context:ctx error:&error];
+  NSString *failureCode = [error.userInfo[ALNAuthModuleOIDCFailureCodeKey] isKindOfClass:[NSString class]]
+                              ? error.userInfo[ALNAuthModuleOIDCFailureCodeKey]
+                              : @"rejected";
+  NSString *identifier = AMTrimmedString(provider.configuration[@"identifier"]);
+  NSString *failureRedirect = self.runtime.providerFailureRedirects[identifier] ?: self.runtime.failureRedirect;
+  if (!result && [failureRedirect length] > 0 && ![self shouldReturnJSON:ctx]) {
+    // Codes and identifiers are restricted to URL-safe characters.
+    NSString *separator = [failureRedirect rangeOfString:@"?"].location == NSNotFound ? @"?" : @"&";
+    [self redirectTo:[NSString stringWithFormat:@"%@%@error=%@&provider=%@", failureRedirect, separator,
+                                                failureCode, identifier]
+              status:302];
+    return nil;
+  }
+  if (!result && [error.domain isEqual:ALNAuthModuleOIDCErrorDomain] &&
+      error.code == ALNAuthModuleOIDCErrorAdmissionDenied) {
+    NSString *message = error.localizedDescription ?: @"This account is not permitted to sign in.";
+    if ([self shouldReturnJSON:ctx]) {
+      [self setStatus:403];
+      return @{ @"status": @"error", @"code": @"admission_denied", @"message": message };
+    }
+    // Show the message on the stock login page rather than a bare error body.
+    ctx.session[ALNAuthModuleProviderErrorSessionKey] = message;
+    [ctx markSessionDirty];
+    [self redirectTo:self.runtime.loginPath ?: @"/auth/login" status:302];
+    return nil;
+  }
+  if (!result) {
+    [self setStatus:401];
+    return @{ @"status": @"error", @"code": failureCode, @"message": @"Provider login rejected" };
+  }
+  NSString *redirect = AMSafeReturnTo(state[@"return_to"]);
+  if (!redirect.length) redirect = self.runtime.defaultRedirect;
+  if ([self shouldReturnJSON:ctx]) return @{ @"status": @"ok", @"redirect_to": redirect,
+      @"session": [self.runtime sessionPayloadForContext:ctx includeUser:NO error:NULL] };
+  [self redirectTo:redirect status:302];
+  return nil;
+}
+
 - (id)providerStubLogin:(ALNContext *)ctx {
   if (![self.runtime isProviderEnabled:@"stub"]) {
     [self setStatus:404];
@@ -4164,7 +4476,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *providerConfiguration = [self.runtime stubProviderConfigurationForBaseURL:baseURL];
   NSString *state = AMRandomToken(12);
   NSString *nonce = AMRandomToken(12);
-  NSString *returnTo = AMTrimmedString([self requestParameters][@"return_to"]);
+  NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
   ctx.session[ALNAuthModuleProviderStateSessionKey] = @{
     @"state" : state ?: @"",
     @"nonce" : nonce ?: @"",
@@ -4268,7 +4580,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL] ?: @{};
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx
                                                                   user:user
-                                                       defaultRedirect:AMTrimmedString(callbackState[@"return_to"])];
+                                                       defaultRedirect:AMSafeReturnTo(callbackState[@"return_to"])];
   if ([self shouldReturnJSON:ctx]) {
     NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:result[@"session"] ?: @{}];
     payload[@"normalized_identity"] = result[@"normalizedIdentity"] ?: @{};
@@ -4294,6 +4606,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
 
+  if (![runtime isHeadlessUIMode] &&
+      ![[runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
+    [runtime mountUIAssetsForApplication:application];
+  }
   if (![runtime isHeadlessUIMode]) {
     [application registerRouteMethod:@"GET"
                                 path:runtime.loginPath
@@ -4301,67 +4617,79 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                      controllerClass:[ALNAuthModuleController class]
                                action:@"loginForm"];
   }
-  [application registerRouteMethod:@"POST"
-                              path:runtime.loginPath
-                              name:@"auth_login"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"login"];
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:runtime.loginPath
+                                name:@"auth_login"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"login"];
+  }
   [application registerRouteMethod:@"POST"
                               path:runtime.logoutPath
                               name:@"auth_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
-  if (![runtime isHeadlessUIMode]) {
+  if (![runtime isHeadlessUIMode] && runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"GET"
-                                path:runtime.registerPath
-                                name:@"auth_register_form"
-                     controllerClass:[ALNAuthModuleController class]
-                               action:@"registerForm"];
+                                  path:runtime.registerPath
+                                  name:@"auth_register_form"
+                       controllerClass:[ALNAuthModuleController class]
+                                 action:@"registerForm"];
   }
-  [application registerRouteMethod:@"POST"
-                              path:runtime.registerPath
-                              name:@"auth_register"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"register"];
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:runtime.registerPath
+                                name:@"auth_register"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"register"];
+  }
   [application registerRouteMethod:@"GET"
                               path:runtime.sessionPath
                               name:@"auth_session"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"sessionState"];
-  [application registerRouteMethod:@"GET"
-                              path:runtime.verifyPath
-                              name:@"auth_verify"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"verifyEmail"];
-  if (![runtime isHeadlessUIMode]) {
+  if (runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"GET"
+                                path:runtime.verifyPath
+                                name:@"auth_verify"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"verifyEmail"];
+  }
+  if (![runtime isHeadlessUIMode] && runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"GET"
+                                  path:runtime.forgotPasswordPath
+                                  name:@"auth_password_forgot_form"
+                       controllerClass:[ALNAuthModuleController class]
+                                 action:@"forgotPasswordForm"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
                                 path:runtime.forgotPasswordPath
-                                name:@"auth_password_forgot_form"
+                                name:@"auth_password_forgot"
                      controllerClass:[ALNAuthModuleController class]
-                               action:@"forgotPasswordForm"];
+                               action:@"forgotPassword"];
   }
-  [application registerRouteMethod:@"POST"
-                              path:runtime.forgotPasswordPath
-                              name:@"auth_password_forgot"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"forgotPassword"];
-  if (![runtime isHeadlessUIMode]) {
+  if (![runtime isHeadlessUIMode] && runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"GET"
-                                path:runtime.resetPasswordPath
-                                name:@"auth_password_reset_form"
-                     controllerClass:[ALNAuthModuleController class]
-                               action:@"resetPasswordForm"];
+                                  path:runtime.resetPasswordPath
+                                  name:@"auth_password_reset_form"
+                       controllerClass:[ALNAuthModuleController class]
+                                 action:@"resetPasswordForm"];
   }
-  [application registerRouteMethod:@"POST"
-                              path:runtime.resetPasswordPath
-                              name:@"auth_password_reset"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"resetPassword"];
-  [application registerRouteMethod:@"POST"
-                              path:runtime.changePasswordPath
-                              name:@"auth_password_change"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"changePassword"];
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:runtime.resetPasswordPath
+                                name:@"auth_password_reset"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"resetPassword"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:runtime.changePasswordPath
+                                name:@"auth_password_change"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"changePassword"];
+  }
   if (![runtime isHeadlessUIMode]) {
     [application registerRouteMethod:@"GET"
                                 path:runtime.mfaManagePath
@@ -4425,52 +4753,77 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                      controllerClass:[ALNAuthModuleController class]
                                action:@"providerStubCallback"];
   }
+  for (NSString *identifier in [[runtime.oidcProviders allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    for (NSString *prefix in @[ runtime.prefix, runtime.apiPrefix ]) {
+      for (NSString *suffix in @[ @"login", @"callback" ]) {
+        NSString *path = AMPathJoin(prefix, [NSString stringWithFormat:@"provider/%@/%@", identifier, suffix]);
+        NSString *name = [NSString stringWithFormat:@"auth_%@provider_%@_%@",
+                          [prefix isEqual:runtime.apiPrefix] ? @"api_" : @"", identifier, suffix];
+        [application registerRouteMethod:@"GET" path:path name:name controllerClass:[ALNAuthModuleController class]
+                                  action:[suffix isEqual:@"login"] ? @"providerOIDCLogin" : @"providerOIDCCallback"];
+      }
+    }
+  }
   [application beginRouteGroupWithPrefix:runtime.apiPrefix guardAction:nil formats:nil];
   [application registerRouteMethod:@"GET"
                               path:@"/session"
                               name:@"auth_api_session"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"sessionState"];
-  [application registerRouteMethod:@"POST"
-                              path:@"/login"
-                              name:@"auth_api_login"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"login"];
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/login"
+                                name:@"auth_api_login"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"login"];
+  }
   [application registerRouteMethod:@"POST"
                               path:@"/logout"
                               name:@"auth_api_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
-  [application registerRouteMethod:@"POST"
-                              path:@"/register"
-                              name:@"auth_api_register"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"register"];
-  [application registerRouteMethod:@"GET"
-                              path:@"/verify"
-                              name:@"auth_api_verify"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"verifyEmail"];
-  [application registerRouteMethod:@"POST"
-                              path:@"/password/forgot"
-                              name:@"auth_api_password_forgot"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"forgotPassword"];
-  [application registerRouteMethod:@"GET"
-                              path:@"/password/reset"
-                              name:@"auth_api_password_reset_form"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"resetPasswordForm"];
-  [application registerRouteMethod:@"POST"
-                              path:@"/password/reset"
-                              name:@"auth_api_password_reset"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"resetPassword"];
-  [application registerRouteMethod:@"POST"
-                              path:@"/password/change"
-                              name:@"auth_api_password_change"
-                   controllerClass:[ALNAuthModuleController class]
-                             action:@"changePassword"];
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/register"
+                                name:@"auth_api_register"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"register"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"GET"
+                                path:@"/verify"
+                                name:@"auth_api_verify"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"verifyEmail"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/password/forgot"
+                                name:@"auth_api_password_forgot"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"forgotPassword"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"GET"
+                                path:@"/password/reset"
+                                name:@"auth_api_password_reset_form"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"resetPasswordForm"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/password/reset"
+                                name:@"auth_api_password_reset"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"resetPassword"];
+  }
+  if (runtime.localPasswordEnabled) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/password/change"
+                                name:@"auth_api_password_change"
+                     controllerClass:[ALNAuthModuleController class]
+                               action:@"changePassword"];
+  }
   [application registerRouteMethod:@"GET"
                               path:@"/mfa"
                               name:@"auth_api_mfa"
@@ -4698,6 +5051,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       },
       @"response" : @{ @"type" : @"object" },
     };
+  }
+  if (!runtime.localPasswordEnabled) {
+    [apiRouteSchemas removeObjectsForKeys:@[ @"auth_api_login", @"auth_api_register", @"auth_api_verify",
+       @"auth_api_password_forgot", @"auth_api_password_reset_form", @"auth_api_password_reset", @"auth_api_password_change" ]];
+  }
+  for (NSString *identifier in runtime.oidcProviders) {
+    for (NSString *suffix in @[ @"login", @"callback" ]) {
+      apiRouteSchemas[[NSString stringWithFormat:@"auth_api_provider_%@_%@", identifier, suffix]] =
+        @{ @"request": [NSNull null], @"response": @{ @"type": @"object" } };
+    }
   }
   for (NSString *routeName in [apiRouteSchemas allKeys]) {
     NSDictionary *schema = apiRouteSchemas[routeName];

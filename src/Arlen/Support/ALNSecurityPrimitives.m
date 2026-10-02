@@ -54,13 +54,16 @@ BOOL ALNConstantTimeDataEquals(NSData *lhs, NSData *rhs) {
   const unsigned char *lhsBytes = [lhs bytes];
   const unsigned char *rhsBytes = [rhs bytes];
   NSUInteger maxLength = (lhsLength > rhsLength) ? lhsLength : rhsLength;
-  unsigned char diff = (unsigned char)(lhsLength ^ rhsLength);
+  // Keep the full-width length difference: truncating it to a byte would let
+  // lengths that differ by a multiple of 256 compare equal against zero padding.
+  NSUInteger lengthDiff = lhsLength ^ rhsLength;
+  unsigned char diff = 0;
   for (NSUInteger idx = 0; idx < maxLength; idx++) {
     unsigned char lhsByte = (idx < lhsLength) ? lhsBytes[idx] : 0;
     unsigned char rhsByte = (idx < rhsLength) ? rhsBytes[idx] : 0;
     diff |= (unsigned char)(lhsByte ^ rhsByte);
   }
-  return (diff == 0);
+  return (diff == 0 && lengthDiff == 0);
 }
 
 static NSData *ALNHMAC(NSData *input, NSData *key, const EVP_MD *(*digestFactory)(void)) {

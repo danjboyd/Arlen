@@ -22,6 +22,12 @@
 
 @end
 
+// Private ALNPgConnection hook the pool uses to gate re-pooling on the real
+// libpq status; the fake below overrides it.
+@interface ALNPgConnection (Phase20RoutingPoolFocusedHooks)
+- (BOOL)isConnectionUsable;
+@end
+
 @interface Phase20FakePgConnection : ALNPgConnection
 
 @property(nonatomic, assign) BOOL fakeOpen;
@@ -36,6 +42,10 @@
 @implementation Phase20FakePgConnection
 
 - (BOOL)isOpen {
+  return self.fakeOpen;
+}
+
+- (BOOL)isConnectionUsable {
   return self.fakeOpen;
 }
 

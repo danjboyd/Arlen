@@ -1,4 +1,5 @@
 #import "ALNORMModelDescriptor.h"
+#import "ALNSQLDialect.h"
 
 static NSArray<NSString *> *ALNORMModelDescriptorSortedFieldSet(NSArray<NSString *> *fieldNames) {
   NSArray *values = [fieldNames isKindOfClass:[NSArray class]] ? fieldNames : @[];
@@ -50,6 +51,13 @@ static NSArray<NSString *> *ALNORMModelDescriptorSortedFieldSet(NSArray<NSString
     _schemaName = [schemaName copy] ?: @"";
     _tableName = [tableName copy] ?: @"";
     _qualifiedTableName = [qualifiedTableName copy] ?: @"";
+    if ((!ALNSQLDialectIdentifierIsSafe(_schemaName) && _schemaName.length > 0) ||
+        !ALNSQLDialectIdentifierIsSafe(_tableName)) {
+      _qualifiedTableName = (_schemaName.length > 0 && ![_schemaName isEqualToString:@"public"])
+          ? [NSString stringWithFormat:@"%@.%@", ALNSQLDialectIdentifierComponent(_schemaName),
+                                               ALNSQLDialectIdentifierComponent(_tableName)]
+          : ALNSQLDialectIdentifierComponent(_tableName);
+    }
     _relationKind = [relationKind copy] ?: @"table";
     _databaseTarget = [databaseTarget copy] ?: @"";
     _readOnly = readOnly;
@@ -124,7 +132,7 @@ static NSArray<NSString *> *ALNORMModelDescriptorSortedFieldSet(NSArray<NSString
   for (ALNORMFieldDescriptor *field in self.fields) {
     [names addObject:[NSString stringWithFormat:@"%@.%@",
                                                   self.qualifiedTableName ?: self.tableName ?: @"",
-                                                  field.columnName ?: @""]];
+                                                  ALNSQLDialectIdentifierComponent(field.columnName)]];
   }
   return names;
 }

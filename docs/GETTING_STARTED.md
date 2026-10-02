@@ -13,6 +13,12 @@ If you prefer a narrower path, see:
 - `docs/GETTING_STARTED_HTML_FIRST.md`
 - `docs/GETTING_STARTED_DATA_LAYER.md`
 
+For SQL ORM models, see the [ORM guide](ARLEN_ORM.md#sql-property-names).
+Generated properties may use safe aliases for columns such as `State`; use the
+manifest property names or `objectForColumnName:` with the original SQL name.
+Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
+schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
+
 ## 1. Prerequisites
 
 - a clang-built GNUstep toolchain
@@ -136,7 +142,21 @@ From app root:
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 
+New apps ship a request test (`tests/HomeControllerTests.m`, or
+`tests/HomeTests.m` in lite mode). Run it, and any tests you add, with:
+
+```bash
+/path/to/Arlen/bin/arlen test --app
+/path/to/Arlen/bin/arlen generate test Hello --request --route /hello
+```
+
+See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
+`ALNTestClient` API.
+
 ## 7. Choose the Next Guide
+
+For login/logout flows that issue multiple cookies, see
+[Response Headers and Multiple Cookies](RESPONSE_HEADERS.md).
 
 - building JSON-first endpoints: `docs/GETTING_STARTED_API_FIRST.md`
 - building server-rendered pages: `docs/GETTING_STARTED_HTML_FIRST.md`
@@ -177,3 +197,123 @@ If you are working on Arlen itself rather than just building an app with it:
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes
+
+## Optional MCP tools
+
+After ordinary routes and services work, install and explicitly enable the
+[MCP module](MCP_MODULE.md) to expose selected capabilities to MCP clients.
+OpenAPI inclusion does not expose tools. The [catalog example](../examples/mcp_app/README.md)
+shows route and service registration with bearer authentication.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.
+
+OAuth metadata requests use certificate-chain and hostname verification with a 256 KiB response
+limit, a five-second total deadline per document, and redirect/non-200 rejection.
+GNUstep uses a bounded libcurl transport (development headers/library with TLS
+and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
+on startup and maintenance threads without pumping application run-loop callbacks.
+Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
+not GNUstep TLS user defaults. The general-purpose `ALNSynchronousURLRequest` helper
+in `ALNHTTPCompat.h` also uses libcurl on GNUstep: it follows up to ten redirects
+(`ALNSynchronousURLRequestFollowingRedirects` sets an explicit budget), returns HTTP
+error statuses as responses, and reports transport failures with `NSURLErrorDomain`
+codes such as `NSURLErrorTimedOut`. It does not consult shared cookie storage. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
+fetch failures, metadata validation failures, and cooldown. Diagnostics omit
+URLs, credentials, response bodies, and custom loader error details.
+
+For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formParams`; see [Multipart Uploads](MULTIPART_UPLOADS.md) for examples and request limits.
+
+## Background work in separate processes
+
+Configure `ALNPostgresJobAdapter` before registering the jobs module when web
+processes enqueue work for a separate worker. Apply its initial migration, use
+the same database/namespace in each process, and launch `arlen jobs worker`.
+The [Durable Jobs guide](DURABLE_JOBS.md) covers setup, transactional enqueue,
+provider result methods, heartbeat pool capacity, shared queue controls, and
+single-scheduler deployment. The default memory adapter is for development and
+tests; file persistence alone does not provide worker crash recovery.
+
+PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
+other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
+jobs and larger cleanup backlogs are revisited by subsequent worker polls.
+
+For form uploads, configure positive whole-number `requestLimits` in
+`config/app.plist`; bare and quoted decimal values behave identically. Invalid
+limits are rejected during configuration loading. See [Multipart Uploads](MULTIPART_UPLOADS.md)
+for a complete configuration example and buffering limits.
+
+## HTTP and data client contracts
+
+Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
+redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
+The existing synchronous helper defaults remain unchanged. The result API uses
+libcurl on GNUstep and Apple; Apple custom builds must also link `-lcurl`.
+
+`ALNPg` date parameters preserve microseconds within the documented NSDate range;
+use explicit text casts for lossless values outside it. See
+[PostgreSQL timestamp precision](ARLEN_DATA.md#postgresql-timestamp-precision).
+Dataverse callers can configure retry eligibility and backoff inside the client's
+existing bounded loop; see [Custom retry policies](DATAVERSE.md#custom-retry-policies).
+
+## Static asset HTTP behavior
+
+The server automatically emits ETag and Last-Modified for static GET/HEAD,
+handles conditional requests with bodyless 304 responses, preserves HEAD
+representation length, and streams single byte ranges with 206 responses.
+If-None-Match takes precedence over If-Modified-Since. No application middleware
+or additional CLI option is needed. See [Static files](STATIC_FILES.md) for
+range limits, If-Range rules, validator strength, and regression commands.
+
+## Updating generated ORM models
+
+After updating Arlen, regenerate existing SQL ORM model implementations with your
+application's `ALNORMCodegen` generation step and rebuild. Current output safely
+initializes each model descriptor on concurrent first use; older generated code
+must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+
+When automating `arlen module migrate --json`, capture stdout and stderr
+separately. PostgreSQL notices may appear on stderr during repeated migrations;
+parse stdout as JSON and check the exit status. Framework contributors can run
+`bash tools/ci/run_postgres_regressions.sh` for isolated live database coverage;
+see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
+
+If you install `storage`, set `ARLEN_STORAGE_SIGNING_SECRET` (32+ characters)
+before running outside `development` or `test`; the module refuses to start
+without it. See [Storage Module](STORAGE_MODULE.md#signing-secret).
+
+When you move your Arlen framework pin, re-run `arlen module upgrade <name>
+--source <framework>/modules/<name>` for each vendored module, then
+`arlen module doctor`. Module sources can change without a version bump; see
+[Upgrade a Module](MODULES.md#6-upgrade-a-module).
+
+`arlen module add ops` works without jobs, notifications, storage, or search.
+Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
+for authentication requirements when composing a partial module installation.
+
+For company sign-in, add `auth`, configure an OIDC provider and an application
+identity resolver, and explicitly disable stub/password access if your copied
+manifest enables it. Follow the [Entra example and upgrade steps](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Security-header defaults are shared safely across concurrent first requests.
+Explicit response headers and configured CSP remain supported; see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
+On GNUstep, avoid `@synchronized` on instances that several request threads
+share; create an `NSLock` in the initializer instead. See
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+
+Create process-wide lazy objects, such as a shared `NSRegularExpression`, with
+`dispatch_once` rather than `if (x == nil) { x = ...; }`. Concurrent first
+requests can otherwise race, and one thread can free the object another is
+using.

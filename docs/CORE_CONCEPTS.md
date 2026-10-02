@@ -6,7 +6,10 @@ This guide explains Arlen's runtime model at a high level.
 
 1. `ALNHTTPServer` accepts an HTTP request.
 2. Request is parsed into `ALNRequest`.
-3. `ALNRouter` matches method/path to a route.
+3. `ALNRouter` matches method/path to a route: routes for the exact method
+   first, then `ANY` routes. A `HEAD` request that matches neither is answered
+   by the `GET` route; the response keeps the same status and headers,
+   including `Content-Length`, and the server omits the body.
 4. Route invocation metadata is resolved from startup compile output (or lazily compiled when startup compile is disabled).
 5. `ALNApplication` reserves operability built-ins (`/healthz`, `/readyz`, `/livez`, `/metrics`, `/clusterz`) ahead of app route dispatch and still serves docs/OpenAPI built-ins on unmatched paths.
 6. Request contract coercion/validation runs (if configured on the matched route).
@@ -24,6 +27,9 @@ This guide explains Arlen's runtime model at a high level.
 - `ALNController`: base controller with render helpers.
 - `ALNContext`: request-scoped object (`request`, `response`, `params`, `stash`, logging/perf references, validated params/auth/page-state helpers).
 - `ALNRequest`: parsed request model.
+- Response headers retain repeated values in insertion order; session middleware
+  appends its cookie after controller processing. See the
+  [response header contract](RESPONSE_HEADERS.md).
 - `ALNResponse`: mutable response builder.
 
 ## 3. EOC Templates
@@ -158,3 +164,12 @@ Routing compile defaults:
 - Development server: `boomhauer`
 - Production process manager: `propane`
 - `propane` config is called "propane accessories"
+
+## Multipart request contract
+
+Multipart validation runs before controller dispatch and static responses. Text
+fields and typed file parts retain arrival order, with immutable binary data and
+no implicit filesystem writes. The server buffers requests under `requestLimits`;
+malformed forms return 400 and exceeded limits return 413. See
+[Multipart Uploads](MULTIPART_UPLOADS.md) for the supported parsing subset, error
+codes, limits, and object/file ownership contract.

@@ -75,6 +75,30 @@ static NSDictionary *OTJSONObjectFromData(NSData *data) {
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol OTStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *OTStepUpPath(id runtime) {
+  id<OTStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *OTStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = OTStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
+}
+
 static NSString *OTPercentEncodedQueryComponent(NSString *value) {
   NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
   NSMutableCharacterSet *blocked = [allowed mutableCopy];
@@ -608,8 +632,10 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   };
 }
 
+// Optional modules must not emit Objective-C class linker references.
+// A linked but unmounted runtime is also unavailable for this application.
 - (NSDictionary *)jobsSummary {
-  ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+  ALNJobsModuleRuntime *runtime = [NSClassFromString(@"ALNJobsModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -628,7 +654,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (NSDictionary *)notificationsSummary {
-  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  ALNNotificationsModuleRuntime *runtime = [NSClassFromString(@"ALNNotificationsModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -646,7 +672,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (NSDictionary *)storageSummary {
-  ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
+  ALNStorageModuleRuntime *runtime = [NSClassFromString(@"ALNStorageModuleRuntime") sharedRuntime];
   if (runtime.application == nil || runtime.application != self.application) {
     return @{ @"available" : @NO, @"status" : @"informational" };
   }
@@ -897,7 +923,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   self = [super init];
   if (self != nil) {
     _runtime = [ALNOpsModuleRuntime sharedRuntime];
-    _authRuntime = [ALNAuthModuleRuntime sharedRuntime];
+    _authRuntime = [NSClassFromString(@"ALNAuthModuleRuntime") sharedRuntime];
   }
   return self;
 }
@@ -970,9 +996,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
     return NO;
   }
   if ([ctx authAssuranceLevel] < self.runtime.minimumAuthAssuranceLevel) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    OTPercentEncodedQueryComponent(returnTo)];
+    NSString *location = OTStepUpLocation(self.authRuntime, OTPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -1000,7 +1024,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
                            message:@"Additional authentication assurance is required"
                               meta:@{
                                 @"minimumAuthAssuranceLevel" : @(self.runtime.minimumAuthAssuranceLevel),
-                                @"stepUpPath" : [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
+                                @"stepUpPath" : OTStepUpPath(self.authRuntime),
                               }];
     return NO;
   }

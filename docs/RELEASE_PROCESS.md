@@ -120,3 +120,14 @@ GitHub Actions release entrypoint:
 That workflow is triggered on published releases and can also be run manually
 with `workflow_dispatch` when release evidence needs to be regenerated without
 changing the merge-gate workflow contract.
+
+For changes to HTTP/data client contracts, retain the existing required Linux
+quality, sanitizer, and docs check names. Verify the Apple confidence job's
+`client_data_regressions.log` as well: it exercises received HTTP metadata,
+redirect boundaries, retry policies, and microsecond round trips on Apple
+Foundation. Its PostgreSQL database is disposable; no provider writes are used.
+
+The required `linux-quality / quality-gate` includes the isolated PostgreSQL
+regression step (`tools/ci/run_postgres_regressions.sh`). Release validation must
+include its generated-client, migration, search, and repeated server cleanup
+coverage. No additional branch-protection check name is needed for this step.

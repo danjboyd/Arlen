@@ -651,17 +651,17 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
       BOOL guardedOK = (guardedResponse.statusCode == 200);
 
       if (!dictOK || !guardedOK) {
-        @synchronized(state) {
-          NSInteger failures = [state[@"failures"] integerValue];
-          state[@"failures"] = @(failures + 1);
-        }
+        [state[@"lock"] lock];
+        NSInteger failures = [state[@"failures"] integerValue];
+        state[@"failures"] = @(failures + 1);
+        [state[@"lock"] unlock];
       }
     }
 
-    @synchronized(state) {
-      NSInteger completed = [state[@"completed"] integerValue];
-      state[@"completed"] = @(completed + 1);
-    }
+    [state[@"lock"] lock];
+    NSInteger completed = [state[@"completed"] integerValue];
+    state[@"completed"] = @(completed + 1);
+    [state[@"lock"] unlock];
   }
 }
 
@@ -707,6 +707,29 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertTrue([body containsString:@"\"ok\""]);
   XCTAssertTrue([body containsString:@"middleware"]);
   XCTAssertTrue([body containsString:@"yes"]);
+}
+
+- (void)testHeadRequestDispatchesToGetRouteWithMatchingHeaders {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
+  ALNResponse *get = [app dispatchRequest:[self requestForPath:@"/dict"]];
+  ALNRequest *headRequest = [[ALNRequest alloc] initWithMethod:@"HEAD"
+                                                          path:@"/dict"
+                                                   queryString:@""
+                                                       headers:@{}
+                                                          body:[NSData data]];
+  ALNResponse *head = [app dispatchRequest:headRequest];
+  XCTAssertEqual(get.statusCode, head.statusCode);
+  XCTAssertEqualObjects([get headerForName:@"Content-Type"], [head headerForName:@"Content-Type"]);
+  XCTAssertEqualObjects(@"ran", [head headerForName:@"X-Middleware"]);
+  // The body is produced so Content-Length matches GET; the HTTP server omits it on the wire.
+  XCTAssertEqual([get bodyLength], [head bodyLength]);
+
+  ALNRequest *missing = [[ALNRequest alloc] initWithMethod:@"HEAD"
+                                                      path:@"/does-not-exist"
+                                               queryString:@""
+                                                   headers:@{}
+                                                      body:[NSData data]];
+  XCTAssertEqual((NSInteger)404, [app dispatchRequest:missing].statusCode);
 }
 
 - (void)testImplicitJSONForArrayReturn {
@@ -1862,6 +1885,9 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
     @"iterations" : @(120),
     @"completed" : @(0),
     @"failures" : @(0),
+    // Created before the workers start; @synchronized on a fresh instance can
+    // race on first use (gnustep/libobjc2#424).
+    @"lock" : [[NSLock alloc] init],
   } mutableCopy];
 
   for (NSInteger idx = 0; idx < workers; idx++) {
@@ -1873,9 +1899,9 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
   while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
     NSInteger completed = 0;
-    @synchronized(state) {
-      completed = [state[@"completed"] integerValue];
-    }
+    [state[@"lock"] lock];
+    completed = [state[@"completed"] integerValue];
+    [state[@"lock"] unlock];
     if (completed >= workers) {
       break;
     }
@@ -1884,10 +1910,10 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 
   NSInteger completed = 0;
   NSInteger failures = 0;
-  @synchronized(state) {
-    completed = [state[@"completed"] integerValue];
-    failures = [state[@"failures"] integerValue];
-  }
+  [state[@"lock"] lock];
+  completed = [state[@"completed"] integerValue];
+  failures = [state[@"failures"] integerValue];
+  [state[@"lock"] unlock];
 
   XCTAssertEqual(workers, completed);
   XCTAssertEqual((NSInteger)0, failures);
@@ -2207,6 +2233,21 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
   XCTAssertEqual((NSInteger)331, startError.code);
   XCTAssertTrue([startError.localizedDescription containsString:@"csrf.enabled requires session.enabled"]);
+}
+
+- (void)testStartRejectsInvalidCSRFExemptPathPrefixes {
+  for (id prefixes in @[ @[ @"/" ], @[ @"mcp" ], @[ @"/a//b" ], @[ @"/a/../b" ], @[ @"/mcp*" ], @[ @42 ], @"/mcp" ]) {
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : @"test",
+      @"logFormat" : @"json",
+      @"session" : @{ @"enabled" : @(YES), @"secret" : @"unit-test-secret-value-0123456789abcdef" },
+      @"csrf" : @{ @"enabled" : @(YES), @"exemptPathPrefixes" : prefixes },
+    }];
+    NSError *startError = nil;
+    XCTAssertFalse([app startWithError:&startError], @"%@", prefixes);
+    XCTAssertEqual((NSInteger)339, startError.code, @"%@", prefixes);
+    XCTAssertTrue([startError.localizedDescription containsString:@"csrf.exemptPathPrefixes"], @"%@", startError);
+  }
 }
 
 - (void)testStartFailsFastWhenSessionSecretIsWeak {

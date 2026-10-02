@@ -7,6 +7,7 @@
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
+#import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNSecurityPrimitives.h"
 
@@ -78,15 +79,15 @@ static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictio
     if ([configured hasPrefix:@"/"]) {
       return configured;
     }
-    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-    return [cwd stringByAppendingPathComponent:configured];
+    // Relative paths belong to the app, not the process working directory, so the
+    // server and `arlen jobs worker` (which runs from the framework root) agree.
+    return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = SMLowerTrimmedString(application.environment);
   if ([environment isEqualToString:@"test"]) {
     return @"";
   }
-  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-  return [cwd stringByAppendingPathComponent:
+  return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/storage-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
 }
@@ -135,6 +136,17 @@ static NSError *SMError(ALNStorageModuleErrorCode code, NSString *message, NSDic
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:details ?: @{}];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"storage module error";
   return [NSError errorWithDomain:ALNStorageModuleErrorDomain code:code userInfo:userInfo];
+}
+
+static const NSUInteger SMMinimumSigningSecretLength = 32;
+
+static BOOL SMEnvironmentAllowsEphemeralSigningKey(NSString *environment) {
+  NSString *normalized = [SMTrimmedString(environment) lowercaseString];
+  return [normalized isEqualToString:@"development"] || [normalized isEqualToString:@"test"];
+}
+
+static NSData *SMEphemeralSigningKeyData(void) {
+  return ALNSecureRandomData(32);
 }
 
 static NSString *SMPathJoin(NSString *prefix, NSString *suffix) {
@@ -211,6 +223,30 @@ static NSDictionary *SMFormParametersFromBody(NSData *body) {
     parameters[decodedName] = SMQueryDecodeComponent(value);
   }
   return parameters;
+}
+
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol SMStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *SMStepUpPath(id runtime) {
+  id<SMStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *SMStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = SMStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
 }
 
 static NSString *SMPercentEncodedQueryComponent(NSString *value) {
@@ -520,7 +556,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     _defaultDownloadTokenTTLSeconds = 300.0;
     _defaultCleanupIntervalSeconds = 300.0;
     _moduleConfig = @{};
-    _signingKeyData = [@"storage-module-signing-secret" dataUsingEncoding:NSUTF8StringEncoding];
+    _signingKeyData = SMEphemeralSigningKeyData();
     _lock = [[NSLock alloc] init];
     _collectionDefinitionsByIdentifier = [NSMutableDictionary dictionary];
     _collectionMetadataByIdentifier = [NSMutableDictionary dictionary];
@@ -559,6 +595,44 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSDictionary *moduleConfig =
       [application.config[@"storageModule"] isKindOfClass:[NSDictionary class]] ? application.config[@"storageModule"] : @{};
   NSString *signingSecret = SMTrimmedString(moduleConfig[@"signingSecret"]);
+  NSData *signingKeyData = nil;
+  if ([signingSecret length] > 0) {
+    if ([signingSecret length] < SMMinimumSigningSecretLength) {
+      if (error != NULL) {
+        *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"storageModule.signingSecret must be at least %lu characters",
+                                                    (unsigned long)SMMinimumSigningSecretLength],
+                         @{ @"config_key" : @"storageModule.signingSecret", @"reason" : @"weak_secret" });
+      }
+      return NO;
+    }
+    signingKeyData = [signingSecret dataUsingEncoding:NSUTF8StringEncoding];
+  } else if (SMEnvironmentAllowsEphemeralSigningKey(application.environment)) {
+    signingKeyData = SMEphemeralSigningKeyData();
+    [application.logger warn:@"storage signing secret not configured"
+                      fields:@{
+                        @"config_key" : @"storageModule.signingSecret",
+                        @"environment" : application.environment ?: @"",
+                        @"detail" : @"using a random per-process key; storage tokens will not survive a restart. "
+                                    @"Set ARLEN_STORAGE_SIGNING_SECRET or storageModule.signingSecret.",
+                      }];
+  } else {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                       @"storage module requires storageModule.signingSecret (or ARLEN_STORAGE_SIGNING_SECRET) "
+                       @"outside development and test",
+                       @{ @"config_key" : @"storageModule.signingSecret", @"reason" : @"missing_required_secret" });
+    }
+    return NO;
+  }
+  if (signingKeyData == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                       @"storage module could not initialize its signing key",
+                       @{ @"config_key" : @"storageModule.signingSecret" });
+    }
+    return NO;
+  }
 
   [self.lock lock];
   self.application = application;
@@ -589,8 +663,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (self.defaultCleanupIntervalSeconds <= 0.0) {
     self.defaultCleanupIntervalSeconds = 300.0;
   }
-  self.signingKeyData = [[signingSecret length] > 0 ? signingSecret : @"storage-module-signing-secret"
-      dataUsingEncoding:NSUTF8StringEncoding];
+  self.signingKeyData = signingKeyData;
   [self.collectionDefinitionsByIdentifier removeAllObjects];
   [self.collectionMetadataByIdentifier removeAllObjects];
   [self.objectIDsByCollection removeAllObjects];
@@ -1775,9 +1848,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return NO;
   }
   if ([ctx authAssuranceLevel] < 2) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    SMPercentEncodedQueryComponent(returnTo)];
+    NSString *location = SMStepUpLocation(self.authRuntime, SMPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -1943,7 +2014,8 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (id)apiUpload:(ALNContext *)ctx {
   (void)ctx;
-  NSString *token = [self headerValueForName:@"x-upload-token"] ?: [self queryValueForName:@"token"] ?: @"";
+  // Upload tokens are accepted only in the header; query strings end up in logs.
+  NSString *token = [self headerValueForName:@"x-upload-token"];
   NSError *error = nil;
   NSDictionary *object = [self.runtime storeUploadData:self.context.request.body ?: [NSData data]
                                     forUploadSessionID:[self stringParamForName:@"sessionID"] ?: @""
@@ -2243,7 +2315,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     [application configureAuthAssuranceForRouteNamed:routeName
                            minimumAuthAssuranceLevel:2
                      maximumAuthenticationAgeSeconds:0
-                                          stepUpPath:[[ALNAuthModuleRuntime sharedRuntime] totpPath] ?: @"/auth/mfa/totp"
+                                          stepUpPath:SMStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                                error:NULL];
   }
   [application configureRouteNamed:@"storage_api_download"

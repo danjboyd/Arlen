@@ -1,4 +1,9 @@
 #import "ALNApplication.h"
+#import "ALNPositiveInteger.h"
+#import "ALNMigrationStatus.h"
+#import "ALNPgEventStream.h"
+#import "ALNFileResponseInternal.h"
+#import <dispatch/dispatch.h>
 
 #import "ALNConfig.h"
 #import "ALNOpenAPI.h"
@@ -25,6 +30,7 @@
 #import "ALNDataverseClient.h"
 #import "ALNLive.h"
 #import "ALNPlatform.h"
+#import "ALNSPAFallbackController.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -627,6 +633,10 @@ static BOOL ALNInvokeRouteAction(id controller,
 }
 
 @interface ALNApplication ()
+@property(nonatomic, strong) NSNumber *cachedLargestRouteMaxBodyBytes;
+@property(nonatomic, strong) NSLock *migrationReadinessLock;
+@property(nonatomic, copy) NSDictionary *migrationReadiness;
+@property(nonatomic, strong) NSDate *migrationReadinessCheckedAt;
 
 @property(nonatomic, strong, readwrite) ALNRouter *router;
 @property(nonatomic, copy, readwrite) NSDictionary *config;
@@ -639,6 +649,10 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSMutableArray *mutableLifecycleHooks;
 @property(nonatomic, strong) NSMutableArray *mutableMounts;
 @property(nonatomic, strong) NSMutableArray *mutableStaticMounts;
+@property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
+@property(nonatomic, strong) ALNRoute *spaFallbackRoute;
+@property(nonatomic, strong) NSError *spaFallbackConfigError;
+@property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
@@ -1165,6 +1179,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _started = NO;
     _configuredRoutesLoaded = NO;
     _routeCompilationLock = [[NSLock alloc] init];
+    _migrationReadinessLock = [[NSLock alloc] init];
     _mutableDataverseClients = [NSMutableDictionary dictionary];
     _dataverseClientLock = [[NSLock alloc] init];
     ALNLogLevel defaultLogLevel =
@@ -1172,7 +1187,9 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _logger.minimumLevel = ALNLogLevelFromConfigValue(_config[@"logLevel"], defaultLogLevel);
     [self registerBuiltInMiddlewares];
     [self loadConfiguredStaticMounts];
+    [self loadConfiguredSPAFallback];
     [self loadConfiguredPlugins];
+    [self loadConfiguredEventStreamAdapters];
     [self loadConfiguredModules];
   }
   return self;
@@ -1270,6 +1287,18 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 - (BOOL)mountStaticDirectory:(NSString *)directory
                     atPrefix:(NSString *)prefix
              allowExtensions:(NSArray *)allowExtensions {
+  return [self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions options:nil];
+}
+
+- (BOOL)mountStaticDirectory:(NSString *)directory
+                    atPrefix:(NSString *)prefix
+             allowExtensions:(NSArray *)allowExtensions
+                     options:(NSDictionary *)options {
+  NSArray *cacheControlRules =
+      ALNStaticCacheControlRules([options isKindOfClass:[NSDictionary class]] ? options[@"cacheControl"] : nil, NULL);
+  if (cacheControlRules == nil) {
+    return NO;
+  }
   NSString *normalizedPrefix = ALNNormalizeMountPrefix(prefix);
   if ([normalizedPrefix length] == 0) {
     return NO;
@@ -1296,6 +1325,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     @"prefix" : normalizedPrefix,
     @"directory" : normalizedDirectory,
     @"allowExtensions" : extensions ?: @[],
+    @"cacheControlRules" : cacheControlRules,
   }];
   return YES;
 }
@@ -1306,6 +1336,26 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 
 - (NSArray *)middlewares {
   return [NSArray arrayWithArray:self.mutableMiddlewares];
+}
+
+- (NSString *)appRootPath {
+  id configured = self.config[@"appRoot"];
+  if ([configured isKindOfClass:[NSString class]] && [(NSString *)configured length] > 0) {
+    return [(NSString *)configured stringByStandardizingPath];
+  }
+  NSString *environmentRoot = [[NSProcessInfo processInfo] environment][@"ARLEN_APP_ROOT"];
+  if ([environmentRoot length] > 0) {
+    return [environmentRoot stringByStandardizingPath];
+  }
+  return [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
+}
+
+- (NSString *)pathRelativeToAppRoot:(NSString *)path {
+  NSString *candidate = [path isKindOfClass:[NSString class]] ? path : @"";
+  if (ALNPlatformPathIsAbsolute(candidate)) {
+    return [candidate stringByStandardizingPath];
+  }
+  return [[[self appRootPath] stringByAppendingPathComponent:candidate] stringByStandardizingPath];
 }
 
 - (void)addMiddleware:(id<ALNMiddleware>)middleware {
@@ -1887,6 +1937,16 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
         @"missing_session_dependency",
         securityProfile);
   }
+  NSString *exemptProblem = nil;
+  if (csrfEnabled &&
+      [ALNCSRFMiddleware normalizedExemptPathPrefixes:csrf[@"exemptPathPrefixes"] problem:&exemptProblem] == nil) {
+    return ALNSecurityConfigValidationError(
+        339,
+        [NSString stringWithFormat:@"Invalid security configuration: %@", exemptProblem],
+        @"csrf.exemptPathPrefixes",
+        @"invalid_path_prefix",
+        securityProfile);
+  }
 
   BOOL authEnabled = ALNBoolConfigValue(auth[@"enabled"], NO);
   NSString *authBearerSecret = ALNTrimmedStringConfigValue(auth[@"bearerSecret"]);
@@ -2008,12 +2068,14 @@ static NSArray *ALNAllowedRouteConfigKeys(void) {
     @"formats",
     @"guardAction",
     @"policies",
+    @"maxBodyBytes",
   ];
 }
 
 static NSSet *ALNSupportedConfiguredRouteMethods(void) {
   static NSSet *methods = nil;
-  if (methods == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     methods = [[NSSet alloc] initWithArray:@[
       @"ANY",
       @"DELETE",
@@ -2024,7 +2086,7 @@ static NSSet *ALNSupportedConfiguredRouteMethods(void) {
       @"POST",
       @"PUT",
     ]];
-  }
+  });
   return methods;
 }
 
@@ -2185,6 +2247,17 @@ static NSDictionary *ALNValidatedConfiguredRouteRecord(NSDictionary *entry,
     }
   }
 
+  NSNumber *maxBodyBytes = nil;
+  if (entry[@"maxBodyBytes"] != nil) {
+    maxBodyBytes = ALNPositiveInteger(entry[@"maxBodyBytes"]);
+    if (maxBodyBytes == nil) {
+      [details addObject:ALNErrorDetailEntry([prefix stringByAppendingString:@".maxBodyBytes"],
+                                             @"invalid_max_body_bytes",
+                                             @"maxBodyBytes must be a positive integer",
+                                             @{})];
+    }
+  }
+
   Class controllerClass = nil;
   if (controllerName != nil) {
     controllerClass = NSClassFromString(controllerName);
@@ -2216,6 +2289,9 @@ static NSDictionary *ALNValidatedConfiguredRouteRecord(NSDictionary *entry,
   }
   if ([policies count] > 0) {
     record[@"policies"] = policies;
+  }
+  if (maxBodyBytes != nil) {
+    record[@"maxBodyBytes"] = maxBodyBytes;
   }
   return [record copy];
 }
@@ -2581,13 +2657,10 @@ static void ALNRecordRequestMetrics(ALNApplication *application,
 
 static ALNPerfTrace *ALNDisabledPerfTrace(void) {
   static ALNPerfTrace *trace = nil;
-  if (trace == nil) {
-    @synchronized([ALNPerfTrace class]) {
-      if (trace == nil) {
-        trace = [[ALNPerfTrace alloc] initWithEnabled:NO];
-      }
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    trace = [[ALNPerfTrace alloc] initWithEnabled:NO];
+  });
   return trace;
 }
 
@@ -2946,6 +3019,12 @@ static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
   return ALNBoolConfigValue(observability[@"readinessRequiresClusterQuorum"], NO);
 }
 
+static BOOL ALNReadinessRequiresMigrations(ALNApplication *application) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  return ALNBoolConfigValue(observability[@"readinessRequiresMigrations"],
+                            [application.environment isEqualToString:@"production"]);
+}
+
 static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
   if (!application.clusterEnabled) {
     return @"single_node";
@@ -3146,7 +3225,8 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
                                                  BOOL ok,
                                                  BOOL startupReady,
                                                  BOOL readinessRequiresStartup,
-                                                 BOOL readinessRequiresClusterQuorum) {
+                                                 BOOL readinessRequiresClusterQuorum,
+                                                 NSDictionary *migrationCheck) {
   NSDictionary *metricsSnapshot = application.metricsEnabled ? [application.metrics snapshot] : @{};
   NSDictionary *gauges = [metricsSnapshot[@"gauges"] isKindOfClass:[NSDictionary class]]
                              ? metricsSnapshot[@"gauges"]
@@ -3192,6 +3272,9 @@ static NSDictionary *ALNOperationalSignalPayload(ALNApplication *application,
     @"observed_nodes" : quorumSummary[@"observed_nodes"] ?: @(application.clusterObservedNodes),
     @"expected_nodes" : quorumSummary[@"expected_nodes"] ?: @(application.clusterExpectedNodes),
   };
+  if (migrationCheck != nil) {
+    checks[@"schema_migrations"] = migrationCheck;
+  }
 
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"ok"] = @(ok);
@@ -3248,6 +3331,124 @@ static NSDictionary *ALNClusterStatusPayload(ALNApplication *application) {
       }
     }
   };
+}
+
+static const NSInteger ALNApplicationErrorInvalidSPAFallback = 360;
+
+// Local absolute path: leading slash, no `//`, backslash, query, fragment, or whitespace.
+static BOOL ALNSPAPathIsLocal(id value) {
+  if (![value isKindOfClass:[NSString class]]) return NO;
+  NSString *path = value;
+  NSCharacterSet *forbidden = [NSCharacterSet characterSetWithCharactersInString:@"\\?#"];
+  return [path hasPrefix:@"/"] && ![path hasPrefix:@"//"] &&
+         [path rangeOfCharacterFromSet:forbidden].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location == NSNotFound &&
+         [path rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound;
+}
+
+static NSString *ALNSPATrimmedPrefix(NSString *prefix) {
+  NSString *trimmed = prefix;
+  while ([trimmed length] > 1 && [trimmed hasSuffix:@"/"]) {
+    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  }
+  return trimmed;
+}
+
+// Segment-boundary match: `/api` covers `/api` and `/api/x`, not `/apiary`.
+static BOOL ALNSPAPathWithinPrefix(NSString *path, NSString *prefix) {
+  if ([prefix isEqualToString:@"/"]) return YES;
+  return [path isEqualToString:prefix] || [path hasPrefix:[prefix stringByAppendingString:@"/"]];
+}
+
+static NSDictionary *ALNNormalizedSPAFallback(id file, id options, NSString *appRoot, NSString **reason) {
+  NSDictionary *opts = [options isKindOfClass:[NSDictionary class]] ? options : @{};
+  if (options != nil && ![options isKindOfClass:[NSDictionary class]]) {
+    *reason = @"spaFallback must be a dictionary";
+    return nil;
+  }
+  NSString *trimmedFile = [file isKindOfClass:[NSString class]]
+                              ? [file stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                              : @"";
+  if ([trimmedFile length] == 0) {
+    *reason = @"spaFallback.file must be a nonempty path";
+    return nil;
+  }
+  NSString *resolvedFile = ALNPlatformPathIsAbsolute(trimmedFile)
+                               ? [trimmedFile stringByStandardizingPath]
+                               : [[([appRoot length] > 0 ? appRoot
+                                                         : [[NSFileManager defaultManager] currentDirectoryPath])
+                                     stringByAppendingPathComponent:trimmedFile] stringByStandardizingPath];
+  id prefix = opts[@"prefix"] ?: @"/";
+  if (!ALNSPAPathIsLocal(prefix)) {
+    *reason = @"spaFallback.prefix must be a local absolute path";
+    return nil;
+  }
+  id excludes = opts[@"excludePrefixes"] ?: @[];
+  if (![excludes isKindOfClass:[NSArray class]]) {
+    *reason = @"spaFallback.excludePrefixes must be an array of local paths";
+    return nil;
+  }
+  NSMutableArray *normalizedExcludes = [NSMutableArray array];
+  for (id entry in excludes) {
+    if (!ALNSPAPathIsLocal(entry) || [ALNSPATrimmedPrefix(entry) isEqualToString:@"/"]) {
+      *reason = @"spaFallback.excludePrefixes entries must be local paths other than /";
+      return nil;
+    }
+    [normalizedExcludes addObject:ALNSPATrimmedPrefix(entry)];
+  }
+  id cacheControl = opts[@"cacheControl"] ?: @"no-cache";
+  if (![cacheControl isKindOfClass:[NSString class]] || [(NSString *)cacheControl length] == 0 ||
+      [(NSString *)cacheControl rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound) {
+    *reason = @"spaFallback.cacheControl must be a nonempty header value";
+    return nil;
+  }
+  id dotted = opts[@"allowDottedPaths"];
+  BOOL allowDotted = NO;
+  if ([dotted isKindOfClass:[NSNumber class]]) {
+    allowDotted = [dotted boolValue];
+  } else if ([dotted isKindOfClass:[NSString class]]) {
+    NSString *lower = [(NSString *)dotted lowercaseString];
+    if ([@[ @"yes", @"true", @"1" ] containsObject:lower]) {
+      allowDotted = YES;
+    } else if (![@[ @"no", @"false", @"0" ] containsObject:lower]) {
+      *reason = @"spaFallback.allowDottedPaths must be a boolean";
+      return nil;
+    }
+  } else if (dotted != nil) {
+    *reason = @"spaFallback.allowDottedPaths must be a boolean";
+    return nil;
+  }
+  return @{
+    @"file" : resolvedFile,
+    @"prefix" : ALNSPATrimmedPrefix(prefix),
+    @"excludePrefixes" : normalizedExcludes,
+    @"cacheControl" : cacheControl,
+    @"allowDottedPaths" : @(allowDotted),
+  };
+}
+
+// Only HTML navigations that neither a route nor a built-in claimed get the shell.
+static BOOL ALNSPAFallbackEligible(NSDictionary *fallback, ALNRequest *request, NSString *requestFormat) {
+  if (fallback == nil || [requestFormat isEqualToString:@"json"]) return NO;
+  NSString *method = [request.method uppercaseString] ?: @"";
+  if (![method isEqualToString:@"GET"] && ![method isEqualToString:@"HEAD"]) return NO;
+  NSString *accept = [request.headers[@"accept"] isKindOfClass:[NSString class]]
+                         ? [request.headers[@"accept"] lowercaseString]
+                         : @"";
+  // A bare */* is not enough: fetch() and curl should keep getting 404s.
+  if ([accept rangeOfString:@"text/html"].location == NSNotFound) return NO;
+  NSString *path = request.path ?: @"/";
+  NSRange query = [path rangeOfString:@"?"];
+  if (query.location != NSNotFound) path = [path substringToIndex:query.location];
+  if (!ALNSPAPathWithinPrefix(path, fallback[@"prefix"])) return NO;
+  for (NSString *exclude in fallback[@"excludePrefixes"]) {
+    if (ALNSPAPathWithinPrefix(path, exclude)) return NO;
+  }
+  if (![fallback[@"allowDottedPaths"] boolValue] &&
+      [[path lastPathComponent] rangeOfString:@"."].location != NSNotFound) {
+    return NO;
+  }
+  return YES;
 }
 
 static BOOL ALNRequestMethodIsReadOnly(ALNRequest *request) {
@@ -3308,12 +3509,24 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
     NSString *signal = ALNHealthSignalNameForPath(healthPath);
     BOOL startupReady = application.isStarted;
     BOOL ready = YES;
+    NSDictionary *migrationCheck = nil;
     if ([signal isEqualToString:@"ready"]) {
       if (readinessRequiresStartup && !startupReady) {
         ready = NO;
       }
       if (ready && readinessRequiresClusterQuorum && application.clusterEnabled && !clusterQuorumMet) {
         ready = NO;
+      }
+      BOOL readinessRequiresMigrations = ALNReadinessRequiresMigrations(application);
+      if (readinessRequiresMigrations) {
+        NSMutableDictionary *check = [[application currentMigrationReadiness] mutableCopy];
+        check[@"required_for_readyz"] = @YES;
+        migrationCheck = check;
+        if (![check[@"ok"] boolValue]) {
+          ready = NO;
+        }
+      } else {
+        migrationCheck = @{ @"ok" : @YES, @"required_for_readyz" : @NO, @"checked" : @NO };
       }
     }
     response.statusCode = ready ? 200 : 503;
@@ -3325,7 +3538,8 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
                                                           ready,
                                                           startupReady,
                                                           readinessRequiresStartup,
-                                                          readinessRequiresClusterQuorum);
+                                                          readinessRequiresClusterQuorum,
+                                                          migrationCheck);
       NSError *jsonError = nil;
       BOOL ok = [response setJSONBody:payload options:0 error:&jsonError];
       if (!ok) {
@@ -4131,6 +4345,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                          action:record[@"action"]
                                        policies:record[@"policies"]];
     route.source = @"plist";
+    route.maxBodyBytes = [record[@"maxBodyBytes"] unsignedIntegerValue];
   }
 
   self.configuredRoutesLoaded = YES;
@@ -4170,6 +4385,59 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 }
 
+- (void)loadConfiguredSPAFallback {
+  id config = self.config[@"spaFallback"];
+  if (config == nil) {
+    return;
+  }
+  NSString *reason = nil;
+  NSDictionary *options = [config isKindOfClass:[NSDictionary class]] ? config : nil;
+  NSDictionary *normalized = [config isKindOfClass:[NSDictionary class]]
+                                 ? ALNNormalizedSPAFallback(config[@"file"], config, self.config[@"appRoot"], &reason)
+                                 : nil;
+  if (options == nil) {
+    reason = @"spaFallback must be a dictionary";
+  }
+  if (normalized == nil) {
+    self.spaFallbackConfigError =
+        [NSError errorWithDomain:ALNApplicationErrorDomain
+                            code:ALNApplicationErrorInvalidSPAFallback
+                        userInfo:@{ NSLocalizedDescriptionKey : reason ?: @"invalid spaFallback" }];
+    [self.logger error:@"spa fallback disabled" fields:@{ @"reason" : reason ?: @"invalid spaFallback" }];
+    return;
+  }
+  [self installSPAFallback:normalized];
+}
+
+- (BOOL)setSPAFallbackFile:(NSString *)file options:(NSDictionary *)options error:(NSError **)error {
+  NSString *reason = nil;
+  NSDictionary *normalized = ALNNormalizedSPAFallback(file, options ?: @{}, self.config[@"appRoot"], &reason);
+  if (normalized == nil) {
+    if (error != NULL) {
+      *error = [NSError errorWithDomain:ALNApplicationErrorDomain
+                                   code:ALNApplicationErrorInvalidSPAFallback
+                               userInfo:@{ NSLocalizedDescriptionKey : reason ?: @"invalid spaFallback" }];
+    }
+    return NO;
+  }
+  self.spaFallbackConfigError = nil;
+  [self installSPAFallback:normalized];
+  return YES;
+}
+
+- (void)installSPAFallback:(NSDictionary *)normalized {
+  ALNRoute *route = [[ALNRoute alloc] initWithMethod:@"GET"
+                                         pathPattern:@"/*arlen_spa_path"
+                                                name:@"arlen_spa_fallback"
+                                     controllerClass:[ALNSPAFallbackController class]
+                                          actionName:@"shell"
+                                   registrationIndex:NSUIntegerMax];
+  route.source = @"spa_fallback";
+  route.includeInOpenAPI = NO;
+  self.spaFallbackRoute = route;
+  self.spaFallback = normalized;
+}
+
 - (void)loadConfiguredStaticMounts {
   NSArray *mounts = [self.config[@"staticMounts"] isKindOfClass:[NSArray class]]
                         ? self.config[@"staticMounts"]
@@ -4193,7 +4461,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
       continue;
     }
 
-    if (![self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions]) {
+    NSString *cacheControlReason = nil;
+    if (ALNStaticCacheControlRules(entry[@"cacheControl"], &cacheControlReason) == nil) {
+      [self.logger warn:@"static mount skipped"
+                 fields:@{
+                   @"prefix" : prefix ?: @"",
+                   @"directory" : directory ?: @"",
+                   @"reason" : cacheControlReason ?: @"invalid cacheControl",
+                 }];
+      continue;
+    }
+    NSDictionary *options = entry[@"cacheControl"] ? @{ @"cacheControl" : entry[@"cacheControl"] } : nil;
+    if (![self mountStaticDirectory:directory atPrefix:prefix allowExtensions:allowExtensions options:options]) {
       [self.logger warn:@"static mount skipped"
                  fields:@{
                    @"prefix" : prefix ?: @"",
@@ -4201,6 +4480,111 @@ static void ALNFinalizeResponse(ALNApplication *application,
                    @"reason" : @"duplicate/invalid static mount entry",
                  }];
     }
+  }
+}
+
+- (NSUInteger)defaultMaxBodyBytes {
+  NSDictionary *limits = [self.config[@"requestLimits"] isKindOfClass:[NSDictionary class]]
+                             ? self.config[@"requestLimits"]
+                             : @{};
+  id value = limits[@"maxBodyBytes"];
+  return [value respondsToSelector:@selector(unsignedIntegerValue)] && [value unsignedIntegerValue] > 0
+             ? [value unsignedIntegerValue]
+             : 1048576;
+}
+
+- (NSUInteger)largestRouteMaxBodyBytes {
+  // Routes are fixed once started; the server asks on every connection.
+  NSNumber *cached = self.cachedLargestRouteMaxBodyBytes;
+  if (cached != nil) {
+    return [cached unsignedIntegerValue];
+  }
+  NSUInteger largest = 0;
+  for (ALNRoute *route in [self.router allRoutes]) {
+    largest = MAX(largest, route.maxBodyBytes);
+  }
+  for (NSDictionary *entry in self.mutableMounts) {
+    ALNApplication *child = entry[@"application"];
+    if ([child isKindOfClass:[ALNApplication class]]) {
+      largest = MAX(largest, [child largestRouteMaxBodyBytes]);
+    }
+  }
+  if (self.isStarted) {
+    self.cachedLargestRouteMaxBodyBytes = @(largest);
+  }
+  return largest;
+}
+
+- (NSDictionary *)requestLimitsForRequest:(ALNRequest *)request {
+  NSDictionary *base = [self.config[@"requestLimits"] isKindOfClass:[NSDictionary class]]
+                           ? self.config[@"requestLimits"]
+                           : @{};
+  if ([self largestRouteMaxBodyBytes] == 0 || [request.body length] == 0) {
+    return base;
+  }
+  NSUInteger routeLimit = [self maxBodyBytesForMethod:request.method path:request.path];
+  if (routeLimit == [self defaultMaxBodyBytes]) {
+    return base;
+  }
+  // A route override is the whole body budget: multipart parsing uses it as the
+  // body cap and lets one file part use all of it.
+  NSMutableDictionary *limits = [base mutableCopy];
+  limits[@"maxBodyBytes"] = @(routeLimit);
+  NSUInteger fileLimit = [limits[@"maxMultipartFileBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
+                             ? [limits[@"maxMultipartFileBytes"] unsignedIntegerValue]
+                             : 1048576;
+  limits[@"maxMultipartFileBytes"] = @(MAX(fileLimit, routeLimit));
+  return limits;
+}
+
+- (NSUInteger)maxBodyBytesForMethod:(NSString *)method path:(NSString *)path {
+  NSString *requestPath = [path length] > 0 ? path : @"/";
+  NSString *rewritten = nil;
+  NSDictionary *mounted = [self mountedEntryForPath:requestPath rewrittenPath:&rewritten];
+  ALNApplication *child = mounted[@"application"];
+  if ([child isKindOfClass:[ALNApplication class]] && [rewritten length] > 0) {
+    return [child maxBodyBytesForMethod:method path:rewritten];
+  }
+  NSString *upperMethod = [method length] > 0 ? [method uppercaseString] : @"GET";
+  ALNRoute *route = [self.router matchMethod:upperMethod path:requestPath format:nil params:NULL];
+  if (route == nil) {
+    NSString *stripped = nil;
+    (void)ALNExtractPathFormat(requestPath, &stripped);
+    if ([stripped length] > 0 && ![stripped isEqualToString:requestPath]) {
+      route = [self.router matchMethod:upperMethod path:stripped format:nil params:NULL];
+    }
+  }
+  return route.maxBodyBytes > 0 ? route.maxBodyBytes : [self defaultMaxBodyBytes];
+}
+
+// /readyz schema_migrations state (GitHub issue 90). While anything is pending or
+// the database cannot be read, re-check at most every
+// observability.readinessMigrationRecheckSeconds (default 5), so `arlen migrate`
+// flips readiness without a restart. Once all are applied the result is kept:
+// only a new release adds migrations.
+- (NSDictionary *)currentMigrationReadiness {
+  NSLock *lock = self.migrationReadinessLock;
+  [lock lock];
+  @try {
+    NSDictionary *cached = self.migrationReadiness;
+    NSDate *checkedAt = self.migrationReadinessCheckedAt;
+    NSDictionary *observability = ALNObservabilityConfig(self);
+    id recheck = observability[@"readinessMigrationRecheckSeconds"];
+    NSTimeInterval interval = [recheck respondsToSelector:@selector(doubleValue)] ? [recheck doubleValue] : 5.0;
+    if (cached != nil && ([cached[@"ok"] boolValue] || [[NSDate date] timeIntervalSinceDate:checkedAt] < interval)) {
+      return cached;
+    }
+    NSDictionary *status = [ALNMigrationStatus statusAtAppRoot:[self appRootPath] config:self.config ?: @{}];
+    if (![status[@"ok"] boolValue]) {
+      NSArray *pending = [status[@"pending"] isKindOfClass:[NSArray class]] ? status[@"pending"] : @[];
+      [self.logger warn:@"readiness: schema migrations not applied"
+                 fields:@{ @"pending" : pending, @"error" : status[@"error"] ?: @"" }];
+    }
+    self.migrationReadiness = status;
+    self.migrationReadinessCheckedAt = [NSDate date];
+    return status;
+  } @finally {
+    [lock unlock];
   }
 }
 
@@ -4717,6 +5101,27 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     return NO;
   }
+  if (self.spaFallbackConfigError != nil) {
+    if (error != NULL) {
+      *error = self.spaFallbackConfigError;
+    }
+    return NO;
+  }
+  if (self.spaFallback != nil) {
+    // A missing shell is expected while a frontend dev server serves the app.
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.spaFallback[@"file"]]) {
+      [self.logger warn:@"spa fallback file missing"
+                 fields:@{ @"file" : self.spaFallback[@"file"] ?: @"" }];
+    }
+    for (NSDictionary *route in [self routeTable]) {
+      NSString *path = [route[@"path"] isKindOfClass:[NSString class]] ? route[@"path"] : @"";
+      NSString *method = [route[@"method"] isKindOfClass:[NSString class]] ? route[@"method"] : @"";
+      if ([path hasPrefix:@"/*"] && ([method isEqualToString:@"GET"] || [method isEqualToString:@"ANY"])) {
+        [self.logger warn:@"spa fallback shadowed by root wildcard route"
+                   fields:@{ @"route" : route[@"name"] ?: @"", @"path" : path }];
+      }
+    }
+  }
   NSError *routePolicyReferenceError = ALNValidateRoutePolicyReferences(self);
   if (routePolicyReferenceError != nil) {
     if (error != NULL) {
@@ -4791,7 +5196,58 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+// eventStreams.store / eventStreams.broker (GitHub issue 48): PostgreSQL adapters
+// so durable streams replay and fan out across propane workers and hosts.
+- (void)loadConfiguredEventStreamAdapters {
+  NSDictionary *eventStreams = ALNDictionaryConfigValue(self.config, @"eventStreams");
+  NSDictionary *storeConfig = ALNDictionaryConfigValue(eventStreams, @"store");
+  NSDictionary *brokerConfig = ALNDictionaryConfigValue(eventStreams, @"broker");
+  NSString *(^connectionString)(NSDictionary *) = ^NSString *(NSDictionary *section) {
+    NSString *dsn = ALNStringConfigValue(section[@"connectionString"], @"");
+    const char *envDSN = getenv("ARLEN_DATABASE_URL");
+    if ([dsn length] == 0 && envDSN != NULL && envDSN[0] != '\0') {
+      dsn = [NSString stringWithUTF8String:envDSN];
+    }
+    if ([dsn length] == 0) {
+      dsn = ALNStringConfigValue(ALNDictionaryConfigValue(self.config, @"database")[@"connectionString"], @"");
+    }
+    return dsn;
+  };
+  NSError *error = nil;
+  if ([[ALNStringConfigValue(storeConfig[@"adapter"], @"") lowercaseString] isEqualToString:@"postgresql"]) {
+    id poolSize = storeConfig[@"maxConnections"];
+    ALNPgEventStreamStore *store =
+        [[ALNPgEventStreamStore alloc] initWithConnectionString:connectionString(storeConfig)
+                                                      tableName:ALNStringConfigValue(storeConfig[@"tableName"], @"")
+                                                 maxConnections:[poolSize respondsToSelector:@selector(unsignedIntegerValue)]
+                                                                    ? [poolSize unsignedIntegerValue]
+                                                                    : 4
+                                                          error:&error];
+    if (store != nil) {
+      self.eventStreamStore = store;
+    } else {
+      [self.logger warn:@"eventStreams.store disabled"
+                 fields:@{ @"error" : error.localizedDescription ?: @"invalid configuration" }];
+    }
+  }
+  if ([[ALNStringConfigValue(brokerConfig[@"adapter"], @"") lowercaseString] isEqualToString:@"postgresql"]) {
+    ALNPgEventStreamBroker *broker =
+        [[ALNPgEventStreamBroker alloc] initWithConnectionString:connectionString(brokerConfig)
+                                                   notifyChannel:ALNStringConfigValue(brokerConfig[@"channel"], @"")
+                                                           error:&error];
+    if (broker != nil) {
+      self.eventStreamBroker = broker;
+    } else {
+      [self.logger warn:@"eventStreams.broker disabled"
+                 fields:@{ @"error" : error.localizedDescription ?: @"invalid configuration" }];
+    }
+  }
+}
+
 - (void)shutdown {
+  if ([self.eventStreamBroker respondsToSelector:@selector(stop)]) {
+    [(id)self.eventStreamBroker stop];
+  }
   if (!self.isStarted) {
     return;
   }
@@ -4825,10 +5281,14 @@ static void ALNFinalizeResponse(ALNApplication *application,
 - (void)registerBuiltInMiddlewares {
   NSDictionary *securityHeaders = ALNDictionaryConfigValue(self.config, @"securityHeaders");
   BOOL securityHeadersEnabled = ALNBoolConfigValue(securityHeaders[@"enabled"], YES);
+  self.baselineSecurityHeaders = @{};
   if (securityHeadersEnabled) {
     NSString *csp =
         ALNStringConfigValue(securityHeaders[@"contentSecurityPolicy"], @"default-src 'self'");
-    [self addMiddleware:[[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp]];
+    ALNSecurityHeadersMiddleware *middleware =
+        [[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp];
+    self.baselineSecurityHeaders = [middleware responseHeaders];
+    [self addMiddleware:middleware];
   }
 
   NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
@@ -4887,7 +5347,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
           ALNBoolConfigValue(csrf[@"allowQueryParamFallback"], NO);
       [self addMiddleware:[[ALNCSRFMiddleware alloc] initWithHeaderName:headerName
                                                          queryParamName:queryParam
-                                              allowQueryParamFallback:allowQueryParamFallback]];
+                                              allowQueryParamFallback:allowQueryParamFallback
+                                                     exemptPathPrefixes:csrf[@"exemptPathPrefixes"]]];
     }
   }
 
@@ -4899,6 +5360,21 @@ static void ALNFinalizeResponse(ALNApplication *application,
 }
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request {
+  return [self dispatchRequest:request requiringRoute:nil];
+}
+
+- (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(ALNRoute *)requiredRoute {
+  NSError *multipartError = nil;
+  if (![request parseMultipartFormWithLimits:[self requestLimitsForRequest:request] error:&multipartError]) {
+    ALNResponse *rejected = [[ALNResponse alloc] init];
+    rejected.statusCode = multipartError.code == ALNMultipartErrorLimitExceeded ? 413
+                          : multipartError.code == ALNMultipartErrorSpoolFailed ? 500
+                                                                                  : 400;
+    [rejected setTextBody:multipartError.localizedDescription];
+    rejected.committed = YES;
+    return rejected;
+  }
+
   BOOL fdDeltaDebugEnabled = ALNProcessFDDeltaDebugEnabled();
   NSInteger fdDeltaWarnThreshold =
       fdDeltaDebugEnabled ? ALNProcessFDDeltaWarnThreshold() : 0;
@@ -4907,6 +5383,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
   NSString *rewrittenPath = nil;
   NSDictionary *mountedEntry = [self mountedEntryForPath:request.path rewrittenPath:&rewrittenPath];
+  if (requiredRoute && mountedEntry) {
+    ALNResponse *rejected = [[ALNResponse alloc] init];
+    rejected.statusCode = 409;
+    rejected.committed = YES;
+    return rejected;
+  }
   if (mountedEntry != nil) {
     ALNApplication *mountedApp =
         [mountedEntry[@"application"] isKindOfClass:[ALNApplication class]]
@@ -4992,11 +5474,19 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   if ([reservedBuiltInPath length] > 0) {
+    if (requiredRoute) {
+      response.statusCode = 409;
+      response.committed = YES;
+      if (metricsEnabled) [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+      return response;
+    }
     if ([requestFormat length] == 0) {
       requestFormat =
           ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, reservedBuiltInPath);
     }
     (void)ALNApplyBuiltInResponse(self, request, response, reservedBuiltInPath);
+    // Built-ins run before the middleware chain; apply the baseline headers here.
+    [response setHeadersIfMissing:self.baselineSecurityHeaders];
     ALNFinalizeResponse(self,
                         response,
                         trace,
@@ -5083,8 +5573,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
   double benchmarkRouteStageDurationMs = ALNWallClockMilliseconds() - benchmarkRouteStageStartMs;
 
+  if (requiredRoute && matchedRoute != requiredRoute) {
+    response.statusCode = 409;
+    response.committed = YES;
+    if (metricsEnabled) [self.metrics addGauge:@"http_requests_active" delta:-1.0];
+    return response;
+  }
+
+  NSString *builtInPath = routePath;
+  BOOL handledBuiltIn = NO;
   if (matchedRoute == nil) {
-    NSString *builtInPath = routePath;
     if (!routerNeedsFormatExtraction && [retryStrippedPath length] > 0) {
       builtInPath = retryStrippedPath;
     }
@@ -5095,8 +5593,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
       requestFormat =
           ALNRequestPreferredFormatWithoutPathExtension(request, apiOnly, builtInPath);
     }
+    handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, builtInPath);
+    // The SPA shell is considered only after the router and route-miss built-ins
+    // decline, and then runs through the normal matched-route path (middleware).
+    if (!handledBuiltIn && !apiOnly && self.spaFallbackRoute != nil &&
+        ALNSPAFallbackEligible(self.spaFallback, request, requestFormat)) {
+      matchedRoute = self.spaFallbackRoute;
+      matchedParams = @{};
+    }
+  }
+
+  if (matchedRoute == nil) {
     BOOL prefersJSON = [requestFormat isEqualToString:@"json"];
-    BOOL handledBuiltIn = ALNApplyBuiltInResponse(self, request, response, builtInPath);
     if (!handledBuiltIn && (apiOnly || prefersJSON)) {
       NSDictionary *payload = ALNStructuredErrorPayload(404,
                                                         @"not_found",
@@ -5110,6 +5618,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
       [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
       response.committed = YES;
     }
+    // Route misses and route-miss built-ins never reach the middleware chain.
+    [response setHeadersIfMissing:self.baselineSecurityHeaders];
     ALNFinalizeResponse(self,
                         response,
                         trace,

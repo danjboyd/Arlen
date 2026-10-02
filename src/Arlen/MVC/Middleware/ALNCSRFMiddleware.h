@@ -7,6 +7,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// A new random CSRF token (what -[ALNContext csrfToken] stores on first read).
+FOUNDATION_EXPORT NSString *ALNCSRFGenerateToken(void);
+
 @interface ALNCSRFMiddleware : NSObject <ALNMiddleware>
 
 - (instancetype)initWithHeaderName:(nullable NSString *)headerName
@@ -15,6 +18,20 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithHeaderName:(nullable NSString *)headerName
                     queryParamName:(nullable NSString *)queryParamName
          allowQueryParamFallback:(BOOL)allowQueryParamFallback;
+
+// `exemptPathPrefixes` skip the check only for requests that carry no session
+// cookie: with no ambient credential there is nothing to forge. Requests with a
+// session cookie still need a valid token on these paths. Prefixes match the
+// exact path or a path below it (`/mcp` matches `/mcp` and `/mcp/x`).
+- (instancetype)initWithHeaderName:(nullable NSString *)headerName
+                    queryParamName:(nullable NSString *)queryParamName
+         allowQueryParamFallback:(BOOL)allowQueryParamFallback
+                exemptPathPrefixes:(nullable NSArray<NSString *> *)exemptPathPrefixes;
+
+// Normalizes `csrf.exemptPathPrefixes` config. Returns nil and sets `problem`
+// when the value is not an array of literal, non-root absolute paths.
++ (nullable NSArray<NSString *> *)normalizedExemptPathPrefixes:(nullable id)value
+                                                        problem:(NSString *_Nullable *_Nullable)problem;
 
 @end
 

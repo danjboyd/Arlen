@@ -1,5 +1,7 @@
 #import "ALNJSONSerialization.h"
 
+#import <dispatch/dispatch.h>
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +30,15 @@ static ALNJSONBackend gALNJSONBackend =
     ALNJSONBackendFoundation;
 #endif
 static BOOL gALNJSONBackendInitialized = NO;
+
+static NSLock *ALNJSONBackendLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
+}
 
 static void ALNSetError(NSError **error, NSInteger code, NSString *message) {
   if (error == NULL) {
@@ -401,19 +412,25 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 }
 
 + (void)initializeBackendIfNeeded {
-  @synchronized(self) {
+  [ALNJSONBackendLock() lock];
+  @try {
     if (gALNJSONBackendInitialized) {
       return;
     }
     gALNJSONBackend = [self defaultBackend];
     gALNJSONBackendInitialized = YES;
+  } @finally {
+    [ALNJSONBackendLock() unlock];
   }
 }
 
 + (ALNJSONBackend)backend {
   [self initializeBackendIfNeeded];
-  @synchronized(self) {
+  [ALNJSONBackendLock() lock];
+  @try {
     return gALNJSONBackend;
+  } @finally {
+    [ALNJSONBackendLock() unlock];
   }
 }
 
@@ -445,16 +462,22 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   if (effectiveBackend == ALNJSONBackendYYJSON && ![self isYYJSONAvailable]) {
     effectiveBackend = ALNJSONBackendFoundation;
   }
-  @synchronized(self) {
+  [ALNJSONBackendLock() lock];
+  @try {
     gALNJSONBackend = effectiveBackend;
     gALNJSONBackendInitialized = YES;
+  } @finally {
+    [ALNJSONBackendLock() unlock];
   }
 }
 
 + (void)resetBackendForTesting {
-  @synchronized(self) {
+  [ALNJSONBackendLock() lock];
+  @try {
     gALNJSONBackendInitialized = NO;
     gALNJSONBackend = [self defaultBackend];
+  } @finally {
+    [ALNJSONBackendLock() unlock];
   }
 }
 

@@ -52,6 +52,31 @@ extern NSString *const ALNServiceErrorDomain;
 
 @end
 
+// A lease identifies one claim, not merely a job. Tokens must never be reused.
+@interface ALNJobLease : ALNJobEnvelope
+@property(nonatomic, copy, readonly) NSString *leaseToken;
+@property(nonatomic, strong, readonly) NSDate *leaseExpiresAt;
+@property(nonatomic, assign, readonly) NSTimeInterval leaseDurationSeconds;
+- (instancetype)initWithEnvelope:(ALNJobEnvelope *)envelope
+                     leaseToken:(NSString *)leaseToken
+                 leaseExpiresAt:(NSDate *)leaseExpiresAt
+           leaseDurationSeconds:(NSTimeInterval)leaseDurationSeconds;
+@end
+
+@protocol ALNDurableJobAdapter <ALNJobAdapter>
+- (nullable NSArray<ALNJobEnvelope *> *)jobsWithState:(NSString *)state error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)renewJob:(ALNJobLease *)job error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)completeJob:(ALNJobLease *)job result:(nullable id)result
+             error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)retryJob:(ALNJobEnvelope *)job delaySeconds:(NSTimeInterval)delaySeconds
+   failureMessage:(nullable NSString *)failureMessage error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)jobStatusForID:(NSString *)jobID error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)setQueue:(NSString *)queue state:(NSString *)state error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSArray<NSDictionary *> *)queueStatesWithError:(NSError *_Nullable *_Nullable)error;
+- (nullable NSString *)replayJobID:(NSString *)jobID idempotencyKey:(NSString *)idempotencyKey
+                    delaySeconds:(NSTimeInterval)delaySeconds error:(NSError *_Nullable *_Nullable)error;
+@end
+
 typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
   ALNJobWorkerDispositionAcknowledge = 0,
   ALNJobWorkerDispositionRetry = 1,
@@ -62,6 +87,9 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 - (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job
                                error:(NSError *_Nullable *_Nullable)error;
 @optional
+// JSON-compatible result, persisted atomically with fenced completion.
+- (nullable id)jobWorker:(ALNJobWorker *)worker resultForJob:(ALNJobEnvelope *)job;
+
 - (NSTimeInterval)jobWorker:(ALNJobWorker *)worker
            retryDelayForJob:(ALNJobEnvelope *)job
                handlerError:(NSError *_Nullable)handlerError

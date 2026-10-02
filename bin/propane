@@ -610,6 +610,9 @@ worker_args+=("${worker_passthrough[@]}")
 
 export ARLEN_APP_ROOT="$app_root"
 export ARLEN_FRAMEWORK_ROOT="$framework_root"
+# Workers use this to warn when process-local state (websocket channels) cannot
+# reach the other workers.
+export ARLEN_PROPANE_WORKERS="$worker_count"
 export ARLEN_LISTEN_BACKLOG="$listen_backlog"
 export ARLEN_CONNECTION_TIMEOUT_SECONDS="$connection_timeout_seconds"
 export ARLEN_ENABLE_REUSEPORT="$enable_reuse_port"

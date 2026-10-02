@@ -74,6 +74,13 @@ Treat these starters as owned application code:
 The generated folder also includes its own `README.md` with the preset name and
 upgrade note.
 
+### Serving a built SPA from the app root
+
+The generated starter is served from a static path. A production SPA that uses
+history-mode routing (`/explorers/3/map`) needs its shell returned for deep
+links. Configure `spaFallback` rather than a catch-all route; see
+[Static files](STATIC_FILES.md#spa-history-fallback).
+
 ## 6. Upgrade Expectations
 
 Frontend starters are scaffolds, not managed packages. The intended workflow is:

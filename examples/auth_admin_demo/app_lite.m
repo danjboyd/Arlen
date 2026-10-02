@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <dispatch/dispatch.h>
 
 #import "ALNAdminUIModule.h"
 #import "ALNContext.h"
@@ -7,7 +8,8 @@
 
 static NSMutableDictionary *AuthAdminDemoOrderStore(void) {
   static NSMutableDictionary *store = nil;
-  if (store == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     store = [@{
       @"ord-100" : [@{
         @"id" : @"ord-100",
@@ -24,7 +26,7 @@ static NSMutableDictionary *AuthAdminDemoOrderStore(void) {
         @"total_cents" : @2400,
       } mutableCopy],
     } mutableCopy];
-  }
+  });
   return store;
 }
 

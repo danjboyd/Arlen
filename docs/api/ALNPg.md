@@ -30,6 +30,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `includeSQLInDiagnosticsEvents` | `BOOL` | `nonatomic, assign` | Public `includeSQLInDiagnosticsEvents` property available on `ALNPg`. |
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |
+| `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNPg`. |
 
 ## Methods
 
@@ -39,6 +40,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `initWithConnectionString:maxConnections:error:` | `- (nullable instancetype)initWithConnectionString:(NSString *)connectionString maxConnections:(NSUInteger)maxConnections error:(NSError *_Nullable *_Nullable)error;` | Initialize and return a new `ALNPg` instance. | Use as `[[Class alloc] init...]`; treat `nil` as initialization failure. Pass `NSError **` and treat a `nil` result as failure. This method is chainable; continue composing and call `build`/`buildSQL` to finalize. |
 | `acquireConnection:` | `- (nullable ALNPgConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;` | Acquire a pooled database connection instance. | Capture the returned value and propagate errors/validation as needed. |
 | `releaseConnection:` | `- (void)releaseConnection:(ALNPgConnection *)connection;` | Release a pooled database connection back to the adapter. | Call for side effects; this method does not return a value. |
+| `poolDiagnostics` | `- (NSDictionary<NSString *, id> *)poolDiagnostics;` | Perform `pool diagnostics` for `ALNPg`. | Read this value when you need current runtime/request state. |
 | `acquireAdapterConnection:` | `- (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;` | Acquire a protocol-typed adapter connection instance. | Capture the returned value and propagate errors/validation as needed. |
 | `releaseAdapterConnection:` | `- (void)releaseAdapterConnection:(id<ALNDatabaseConnection>)connection;` | Release a protocol-typed adapter connection instance. | Call for side effects; this method does not return a value. |
 | `executeQuery:parameters:error:` | `- (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError *_Nullable *_Nullable)error;` | Execute SQL query and return zero or more result rows. | Pass `NSError **` and treat a `nil` result as failure. |

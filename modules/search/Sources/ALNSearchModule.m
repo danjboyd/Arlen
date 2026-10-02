@@ -475,15 +475,15 @@ static NSString *STResolvedPersistencePath(ALNApplication *application, NSDictio
     if ([configured hasPrefix:@"/"]) {
       return configured;
     }
-    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-    return [cwd stringByAppendingPathComponent:configured];
+    // Relative paths belong to the app, not the process working directory, so the
+    // server and `arlen jobs worker` (which runs from the framework root) agree.
+    return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = STLowerTrimmedString(application.environment);
   if ([environment isEqualToString:@"test"]) {
     return @"";
   }
-  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath] ?: NSTemporaryDirectory();
-  return [cwd stringByAppendingPathComponent:
+  return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/search-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
 }
@@ -526,6 +526,30 @@ static BOOL STWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
     return NO;
   }
   return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+}
+
+// Where to send a user who needs higher assurance: the auth module's configurable
+// step-up target (authModule.paths.stepUp). An older auth module has only
+// totpPath, so fall back to it.
+@protocol STStepUpPathSource <NSObject>
+@optional
+- (nullable NSString *)stepUpPath;
+- (nullable NSString *)totpPath;
+@end
+
+static NSString *STStepUpPath(id runtime) {
+  id<STStepUpPathSource> source = runtime;
+  NSString *path = [source respondsToSelector:@selector(stepUpPath)] ? [source stepUpPath] : nil;
+  if ([path length] == 0 && [source respondsToSelector:@selector(totpPath)]) {
+    path = [source totpPath];
+  }
+  return ([path length] > 0) ? path : @"/auth/mfa/totp";
+}
+
+static NSString *STStepUpLocation(id runtime, NSString *encodedReturnTo) {
+  NSString *path = STStepUpPath(runtime);
+  NSString *separator = [path containsString:@"?"] ? @"&" : @"?";
+  return [NSString stringWithFormat:@"%@%@return_to=%@", path, separator, encodedReturnTo ?: @""];
 }
 
 static NSString *STPercentEncodedQueryComponent(NSString *value) {
@@ -2162,16 +2186,22 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
           self.textSearchConfiguration,
           self.textSearchConfiguration];
     } else if ([queryMode isEqualToString:@"fuzzy"]) {
+      // Compare against word extents so document length does not dilute a typo.
+      // Headline uses matching document words, since the misspelling itself is absent.
       sql = [NSString stringWithFormat:
           @"SELECT record_id, "
-           "GREATEST(ts_rank_cd(to_tsvector('%@', searchable_text), plainto_tsquery('%@', $3)), similarity(searchable_text, $3)) AS score, "
-           "CASE WHEN searchable_text ILIKE ('%%' || $3 || '%%') "
-           "THEN regexp_replace(searchable_text, '(' || regexp_replace($3, '([\\\\.\\\\[\\\\]\\\\(\\\\)\\\\?\\\\+\\\\*\\\\^\\\\$\\\\|])', '\\\\\\\\\\1', 'g') || ')', '<b>\\\\1</b>', 'i') "
-           "ELSE searchable_text END AS highlight "
+           "GREATEST(ts_rank_cd(to_tsvector('%@', searchable_text), plainto_tsquery('%@', $3)), strict_word_similarity($3, searchable_text)) AS score, "
+           "ts_headline('%@', searchable_text, plainto_tsquery('%@', $3) || "
+           "plainto_tsquery('%@', COALESCE((SELECT string_agg(DISTINCT token, ' ') "
+           "FROM regexp_split_to_table(searchable_text, '[^[:alnum:]]+') AS words(token) "
+           "WHERE $3 <<%% token), ''))) AS highlight "
            "FROM %@ "
            "WHERE resource_identifier = $1 AND generation = $2 "
-           "AND (searchable_text %% $3 OR to_tsvector('%@', searchable_text) @@ plainto_tsquery('%@', $3)) "
+           "AND ($3 <<%% searchable_text OR to_tsvector('%@', searchable_text) @@ plainto_tsquery('%@', $3)) "
            "ORDER BY score DESC, record_id ASC",
+          self.textSearchConfiguration,
+          self.textSearchConfiguration,
+          self.textSearchConfiguration,
           self.textSearchConfiguration,
           self.textSearchConfiguration,
           self.tableName,
@@ -2590,7 +2620,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   if ([fixturesPath length] > 0) {
     NSString *resolvedPath = [fixturesPath hasPrefix:@"/"]
                                  ? fixturesPath
-                                 : [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:fixturesPath];
+                                 : [application pathRelativeToAppRoot:fixturesPath];
     NSDictionary *loaded = STJSONDictionaryFromPath(resolvedPath, error);
     if (loaded == nil && error != NULL && *error != nil) {
       return NO;
@@ -6755,9 +6785,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     return NO;
   }
   if ([ctx authAssuranceLevel] < self.runtime.minimumAuthAssuranceLevel) {
-    NSString *location = [NSString stringWithFormat:@"%@?return_to=%@",
-                                                    [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
-                                                    STPercentEncodedQueryComponent(returnTo)];
+    NSString *location = STStepUpLocation(self.authRuntime, STPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
   }
@@ -6782,7 +6810,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                            message:@"Additional authentication assurance is required"
                               meta:@{
                                 @"minimumAuthAssuranceLevel" : @(self.runtime.minimumAuthAssuranceLevel),
-                                @"stepUpPath" : [self.authRuntime totpPath] ?: @"/auth/mfa/totp",
+                                @"stepUpPath" : STStepUpPath(self.authRuntime),
                               }];
     return NO;
   }

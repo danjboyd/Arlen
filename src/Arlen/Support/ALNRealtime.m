@@ -1,5 +1,7 @@
 #import "ALNRealtime.h"
 
+#import <dispatch/dispatch.h>
+
 static NSString *ALNNormalizeChannelName(NSString *value) {
   if (![value isKindOfClass:[NSString class]]) {
     return @"";
@@ -48,11 +50,10 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
 
 + (instancetype)sharedHub {
   static ALNRealtimeHub *shared = nil;
-  @synchronized(self) {
-    if (shared == nil) {
-      shared = [[ALNRealtimeHub alloc] init];
-    }
-  }
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    shared = [[ALNRealtimeHub alloc] init];
+  });
   return shared;
 }
 
@@ -163,7 +164,42 @@ static NSString *ALNNormalizeChannelName(NSString *value) {
   [self.lock unlock];
 }
 
+@synthesize fanout = _fanout;
+
+- (void)setFanout:(id<ALNRealtimeFanout>)fanout {
+  id<ALNRealtimeFanout> previous = nil;
+  [self.lock lock];
+  previous = _fanout;
+  _fanout = fanout;
+  [self.lock unlock];
+  if (previous != nil && previous != fanout) {
+    [previous stop];
+  }
+}
+
+- (id<ALNRealtimeFanout>)fanout {
+  [self.lock lock];
+  id<ALNRealtimeFanout> fanout = _fanout;
+  [self.lock unlock];
+  return fanout;
+}
+
 - (NSUInteger)publishMessage:(NSString *)message onChannel:(NSString *)channel {
+  NSUInteger delivered = [self deliverRemoteMessage:message onChannel:channel];
+  NSString *normalizedChannel = ALNNormalizeChannelName(channel);
+  id<ALNRealtimeFanout> fanout = self.fanout;
+  if (fanout != nil && [normalizedChannel length] > 0) {
+    @try {
+      [fanout hub:self didPublishMessage:([message isKindOfClass:[NSString class]] ? message : @"")
+          onChannel:normalizedChannel];
+    } @catch (NSException *exception) {
+      (void)exception;  // A failing fanout must not break local delivery.
+    }
+  }
+  return delivered;
+}
+
+- (NSUInteger)deliverRemoteMessage:(NSString *)message onChannel:(NSString *)channel {
   NSString *normalizedChannel = ALNNormalizeChannelName(channel);
   NSString *payload = [message isKindOfClass:[NSString class]] ? message : @"";
   if ([normalizedChannel length] == 0) {

@@ -213,4 +213,41 @@
   XCTAssertEqualObjects(@"root", match.route.name);
 }
 
+- (void)testHeadFallsBackToGetRoutesWhenNoHeadRouteMatches {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET" path:@"/api/session" name:@"session" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"GET" path:@"/users/:id" name:@"user" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"GET" path:@"/files/*path" name:@"files" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"POST" path:@"/submit" name:@"submit" controllerClass:[RouterDummyController class] action:@"index"];
+
+  XCTAssertEqualObjects(@"session", [router matchMethod:@"HEAD" path:@"/api/session"].route.name);
+  ALNRouteMatch *user = [router matchMethod:@"head" path:@"/users/42"];
+  XCTAssertEqualObjects(@"user", user.route.name);
+  XCTAssertEqualObjects(@"42", user.params[@"id"]);
+  ALNRouteMatch *files = [router matchMethod:@"HEAD" path:@"/files/a/b.txt"];
+  XCTAssertEqualObjects(@"files", files.route.name);
+  XCTAssertEqualObjects(@"a/b.txt", files.params[@"path"]);
+  XCTAssertNil([router matchMethod:@"HEAD" path:@"/missing"]);
+  XCTAssertNil([router matchMethod:@"HEAD" path:@"/submit"]);
+  // Only HEAD borrows GET routes.
+  XCTAssertNil([router matchMethod:@"OPTIONS" path:@"/api/session"]);
+  XCTAssertNil([router matchMethod:@"POST" path:@"/api/session"]);
+}
+
+- (void)testExplicitHeadAndAnyRoutesWinOverGetFallback {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET" path:@"/doc" name:@"doc_get" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"HEAD" path:@"/doc" name:@"doc_head" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"GET" path:@"/any" name:@"any_get" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"ANY" path:@"/any" name:@"any_any" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"GET" path:@"/static" name:@"static_get" controllerClass:[RouterDummyController class] action:@"index"];
+  [router addRouteMethod:@"HEAD" path:@"/*rest" name:@"head_wildcard" controllerClass:[RouterDummyController class] action:@"index"];
+
+  XCTAssertEqualObjects(@"doc_head", [router matchMethod:@"HEAD" path:@"/doc"].route.name);
+  XCTAssertEqualObjects(@"doc_get", [router matchMethod:@"GET" path:@"/doc"].route.name);
+  XCTAssertEqualObjects(@"any_any", [router matchMethod:@"HEAD" path:@"/any"].route.name);
+  // Any explicit HEAD route, even a wildcard, takes precedence over the GET fallback.
+  XCTAssertEqualObjects(@"head_wildcard", [router matchMethod:@"HEAD" path:@"/static"].route.name);
+}
+
 @end

@@ -7,7 +7,7 @@ cd "$repo_root"
 export GNUSTEP_USER_ROOT="${GNUSTEP_USER_ROOT:-$repo_root/.gnustep}"
 mkdir -p "$GNUSTEP_USER_ROOT"
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 output_dir="${ARLEN_PHASE9I_OUTPUT_DIR:-$repo_root/build/release_confidence/phase9i}"

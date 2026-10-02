@@ -1,4 +1,5 @@
 #import "ALNORMContext.h"
+#import "ALNSQLDialect.h"
 
 #import "ALNORMErrors.h"
 #import "ALNORMFieldDescriptor.h"
@@ -474,11 +475,11 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
                           columns:@[
                             [NSString stringWithFormat:@"%@.%@",
                                                        throughDescriptor.qualifiedTableName ?: @"",
-                                                       throughTargetField.columnName ?: @""]
+                                                       ALNSQLDialectIdentifierComponent(throughTargetField.columnName)]
                           ]];
     [subquery whereField:[NSString stringWithFormat:@"%@.%@",
                                                      throughDescriptor.qualifiedTableName ?: @"",
-                                                     throughSourceField.columnName ?: @""]
+                                                     ALNSQLDialectIdentifierComponent(throughSourceField.columnName)]
                 operator:@"="
                    value:sourceValue];
 

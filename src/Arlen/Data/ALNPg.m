@@ -8,11 +8,13 @@
 #import <ctype.h>
 #import <stdlib.h>
 #import <stdint.h>
+#import <math.h>
 #import <string.h>
 #if defined(_WIN32)
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <poll.h>
 #endif
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
@@ -51,6 +53,13 @@ NSString *const ALNPgQueryEventSQLKey = @"sql";
 
 typedef struct pg_conn PGconn;
 typedef struct pg_result PGresult;
+// Layout-compatible with libpq's PGnotify (libpq-fe.h is not included).
+typedef struct ALNPGnotify {
+  char *relname;
+  int be_pid;
+  char *extra;
+  struct ALNPGnotify *next;
+} ALNPGnotify;
 typedef unsigned int ALNOid;
 
 typedef enum {
@@ -99,6 +108,10 @@ static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
+static int (*ALNPQconsumeInput)(PGconn *conn) = NULL;
+static ALNPGnotify *(*ALNPQnotifies)(PGconn *conn) = NULL;
+static int (*ALNPQsocket)(const PGconn *conn) = NULL;
+static void (*ALNPQfreemem)(void *ptr) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
 static void (*ALNPQfinish)(PGconn *conn) = NULL;
 static char *(*ALNPQerrorMessage)(const PGconn *conn) = NULL;
@@ -286,6 +299,12 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
+    // LISTEN/NOTIFY support (waitForNotificationsWithTimeout:); optional so a
+    // minimal libpq still serves ordinary queries.
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQconsumeInput, handle, "PQconsumeInput");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQnotifies, handle, "PQnotifies");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQsocket, handle, "PQsocket");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQfreemem, handle, "PQfreemem");
 
     if (!ok) {
       gLibpqLoadError =
@@ -809,15 +828,36 @@ static NSString *ALNPgHexStringFromData(NSData *data) {
   return hex;
 }
 
+static NSDate *ALNPgDateWithReferenceInterval(NSTimeInterval interval) {
+#if defined(GNUSTEP)
+  // Some GNUstep tagged-date runtimes misrepresent an exact zero reference
+  // interval as two seconds. NSCalendarDate is a Foundation NSDate subclass
+  // that retains zero correctly and avoids that tagged representation.
+  if (interval == 0) return [[NSCalendarDate alloc] initWithTimeIntervalSinceReferenceDate:0];
+#endif
+  return [NSDate dateWithTimeIntervalSinceReferenceDate:interval];
+}
+
 static NSString *ALNPgTimestampStringFromDate(NSDate *value) {
   if (![value isKindOfClass:[NSDate class]]) {
     return @"";
   }
+  // Split before rounding: multiplying an epoch-sized double by a million
+  // needlessly loses precision. floor also handles dates before the epoch.
+  NSTimeInterval interval = [value timeIntervalSinceReferenceDate];
+  double seconds = floor(interval);
+  long microseconds = lround((interval - seconds) * 1000000.0);
+  if (microseconds == 1000000) {
+    seconds += 1;
+    microseconds = 0;
+  }
   NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
   formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+  formatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
   formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
-  return [formatter stringFromDate:value] ?: @"";
+  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
+  NSString *whole = [formatter stringFromDate:ALNPgDateWithReferenceInterval(seconds)];
+  return whole ? [NSString stringWithFormat:@"%@.%06ldZ", whole, microseconds] : @"";
 }
 
 static NSString *ALNPgJSONStringFromObject(id value, NSError **error) {
@@ -1072,7 +1112,8 @@ static NSDate *ALNPgUTCDate(NSInteger year,
   components.minute = minute;
   components.second = second;
 
-  NSDate *date = [calendar dateFromComponents:components];
+  NSDate *date = (year == 2001 && month == 1 && day == 1 && hour == 0 && minute == 0 && second == 0)
+      ? ALNPgDateWithReferenceInterval(0) : [calendar dateFromComponents:components];
   if (date == nil) {
     return nil;
   }
@@ -1085,7 +1126,7 @@ static NSDate *ALNPgUTCDate(NSInteger year,
   }
 
   if (fractionalSeconds != 0.0) {
-    return [date dateByAddingTimeInterval:fractionalSeconds];
+    return ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate + fractionalSeconds);
   }
   return date;
 }
@@ -1188,7 +1229,7 @@ static NSDate *ALNPgDateFromTimestampString(NSString *value) {
 
   if (hasOffset) {
     NSInteger offset = ((offsetHours * 60 * 60) + (offsetMinutes * 60) + offsetSeconds) * sign;
-    date = [date dateByAddingTimeInterval:-(NSTimeInterval)offset];
+    date = ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate - (NSTimeInterval)offset);
   }
   return date;
 }
@@ -1837,6 +1878,64 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 - (void)dealloc {
   [self close];
+}
+
+- (NSArray<NSDictionary *> *)drainNotifications {
+  NSMutableArray<NSDictionary *> *notifications = [NSMutableArray array];
+  ALNPGnotify *notify = NULL;
+  while ((notify = ALNPQnotifies(_conn)) != NULL) {
+    NSString *channel = notify->relname != NULL ? [NSString stringWithUTF8String:notify->relname] : @"";
+    NSString *payload = notify->extra != NULL ? [NSString stringWithUTF8String:notify->extra] : @"";
+    [notifications addObject:@{ @"channel" : channel ?: @"", @"payload" : payload ?: @"", @"pid" : @(notify->be_pid) }];
+    ALNPQfreemem(notify);
+  }
+  return notifications;
+}
+
+- (NSArray<NSDictionary *> *)waitForNotificationsWithTimeout:(NSTimeInterval)timeout error:(NSError **)error {
+  NSError *openError = [self checkOpenError];
+  if (openError != nil) {
+    if (error != NULL) *error = openError;
+    return nil;
+  }
+  if (ALNPQconsumeInput == NULL || ALNPQnotifies == NULL || ALNPQsocket == NULL || ALNPQfreemem == NULL) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed, @"libpq lacks LISTEN/NOTIFY support", nil, nil);
+    }
+    return nil;
+  }
+  NSArray<NSDictionary *> *queued = [self drainNotifications];
+  if ([queued count] > 0) {
+    return queued;
+  }
+  int socketFD = ALNPQsocket(_conn);
+  if (socketFD < 0) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed, @"PostgreSQL connection has no socket", nil, nil);
+    }
+    return nil;
+  }
+#if defined(_WIN32)
+  fd_set readable;
+  FD_ZERO(&readable);
+  FD_SET((SOCKET)socketFD, &readable);
+  struct timeval wait = { (long)timeout, (long)((timeout - floor(timeout)) * 1000000.0) };
+  (void)select(0, &readable, NULL, NULL, &wait);
+#else
+  struct pollfd pollDescriptor = { .fd = socketFD, .events = POLLIN, .revents = 0 };
+  (void)poll(&pollDescriptor, 1, (int)MAX(0.0, timeout * 1000.0));
+#endif
+  if (ALNPQconsumeInput(_conn) != 1) {
+    const char *message = ALNPQerrorMessage(_conn);
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorConnectionFailed,
+                              @"lost PostgreSQL connection while waiting for notifications",
+                              message != NULL ? [NSString stringWithUTF8String:message] : nil,
+                              nil);
+    }
+    return nil;
+  }
+  return [self drainNotifications];
 }
 
 - (void)close {
@@ -3129,6 +3228,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign, readwrite) NSUInteger maxConnections;
 @property(nonatomic, strong) NSMutableArray *idleConnections;
 @property(nonatomic, assign) NSUInteger inUseConnections;
+@property(nonatomic, strong) NSCondition *poolCondition;
+@property(nonatomic, assign) NSUInteger acquireWaitCount;
+@property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
+@property(nonatomic, assign) NSUInteger poolExhaustedCount;
 
 @end
 
@@ -3181,10 +3284,24 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return [ALNPostgresDialect sharedDialect];
 }
 
+- (instancetype)init {
+  self = [super init];
+  if (self != nil) {
+    // Created before the pool is shared; libobjc2's first @synchronized on an
+    // instance can race (gnustep/libobjc2#424). Guards pool bookkeeping only
+    // (slot count and idle list). Connects, on-borrow liveness checks and
+    // release-time rollbacks run outside it, so one slow checkout does not
+    // stall every other borrower and diagnostics listeners never run under
+    // it. acquireTimeout waiters block on it for a released slot.
+    _poolCondition = [[NSCondition alloc] init];
+  }
+  return self;
+}
+
 - (instancetype)initWithConnectionString:(NSString *)connectionString
                            maxConnections:(NSUInteger)maxConnections
                                     error:(NSError **)error {
-  self = [super init];
+  self = [self init];
   if (!self) {
     return nil;
   }
@@ -3223,74 +3340,137 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 }
 
 - (void)dealloc {
-  @synchronized(self) {
+  [self.poolCondition lock];
+  @try {
     for (ALNPgConnection *connection in self.idleConnections) {
       [connection close];
     }
     [self.idleConnections removeAllObjects];
+  } @finally {
+    [self.poolCondition unlock];
   }
+}
+
+- (void)configurePooledConnection:(ALNPgConnection *)connection {
+  connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
+  connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
+  connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
+  connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
+  connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
+  connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
+}
+
+// Give back a slot reserved by acquireConnection: whose connection could not
+// be handed out, and wake any acquireTimeout waiter.
+- (void)returnReservedSlot {
+  [self.poolCondition lock];
+  if (self.inUseConnections > 0) {
+    self.inUseConnections -= 1;
+  }
+  [self.poolCondition broadcast];
+  [self.poolCondition unlock];
 }
 
 - (ALNPgConnection *)acquireConnection:(NSError **)error {
   ALNPgClearError(error);
-  @synchronized(self) {
-    while ([self.idleConnections count] > 0) {
-      ALNPgConnection *connection = [self.idleConnections lastObject];
-      [self.idleConnections removeLastObject];
+  NSTimeInterval timeout = self.acquireTimeout;
+  NSDate *deadline = nil;
+  NSTimeInterval waited = 0;
+
+  while (YES) {
+    ALNPgConnection *candidate = nil;
+    BOOL createNew = NO;
+
+    // Reserve a slot: either an idle connection or room to open a new one.
+    // The slot counts as in use from here until it is handed out or returned.
+    [self.poolCondition lock];
+    @try {
+      while (YES) {
+        if ([self.idleConnections count] > 0) {
+          candidate = [self.idleConnections lastObject];
+          [self.idleConnections removeLastObject];
+          self.inUseConnections += 1;
+          break;
+        }
+        if (self.inUseConnections < self.maxConnections) {
+          self.inUseConnections += 1;
+          createNew = YES;
+          break;
+        }
+        if (timeout <= 0 || (deadline != nil && [deadline timeIntervalSinceNow] <= 0)) {
+          self.poolExhaustedCount += 1;
+          if (error != NULL) {
+            NSString *message =
+                (deadline != nil)
+                    ? [NSString stringWithFormat:@"connection pool exhausted after waiting %.3fs",
+                                                 waited]
+                    : @"connection pool exhausted";
+            *error = ALNPgMakeErrorWithDiagnostics(ALNPgErrorPoolExhausted,
+                                                   message,
+                                                   nil,
+                                                   nil,
+                                                   @{
+                                                     @"max_connections" : @(self.maxConnections),
+                                                     @"acquire_timeout_seconds" : @(timeout),
+                                                     @"acquire_wait_seconds" : @(waited),
+                                                   });
+          }
+          return nil;
+        }
+        if (deadline == nil) {
+          deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
+          self.acquireWaitCount += 1;
+        }
+        // The loop re-checks the pool after every wakeup, so spurious wakeups
+        // and a slot taken first by another borrower are both harmless.
+        NSDate *sliceStarted = [NSDate date];
+        (void)[self.poolCondition waitUntilDate:deadline];
+        NSTimeInterval slice = -[sliceStarted timeIntervalSinceNow];
+        waited += slice;
+        self.acquireWaitSecondsTotal += slice;
+      }
+    } @finally {
+      [self.poolCondition unlock];
+    }
+
+    BOOL handedOut = NO;
+    @try {
+      if (createNew) {
+        NSError *connectionError = nil;
+        ALNPgConnection *connection =
+            [[ALNPgConnection alloc] initWithConnectionString:self.connectionString
+                                                        error:&connectionError];
+        if (connection == nil) {
+          if (error != NULL) {
+            *error = connectionError;
+          }
+          return nil;
+        }
+        [self configurePooledConnection:connection];
+        handedOut = YES;
+        return connection;
+      }
+
       // Drop a locally-known-dead idle connection with zero round-trip
       // before doing any further work. This self-heals the pool: dead
-      // connections are discarded here and the create-new path below
-      // refills capacity, so the pool recovers its size instead of
-      // handing out poison. Works even when liveness checks are disabled.
-      if (![connection isConnectionUsable]) {
-        [connection close];
-        continue;
-      }
-      connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
-      connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
-      connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
-      connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
-      connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
-      connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
-      if (self.connectionLivenessChecksEnabled) {
+      // connections are discarded here and the create-new path refills
+      // capacity, so the pool recovers its size instead of handing out
+      // poison. Works even when liveness checks are disabled.
+      if ([candidate isConnectionUsable]) {
+        [self configurePooledConnection:candidate];
         NSError *livenessError = nil;
-        if (![connection checkConnectionLiveness:&livenessError]) {
-          [connection close];
-          continue;
+        if (!self.connectionLivenessChecksEnabled ||
+            [candidate checkConnectionLiveness:&livenessError]) {
+          handedOut = YES;
+          return candidate;
         }
       }
-      self.inUseConnections += 1;
-      return connection;
-    }
-
-    NSUInteger total = self.inUseConnections + [self.idleConnections count];
-    if (total >= self.maxConnections) {
-      if (error != NULL) {
-        *error = ALNPgMakeError(ALNPgErrorPoolExhausted,
-                                @"connection pool exhausted",
-                                nil,
-                                nil);
+      [candidate close];
+    } @finally {
+      if (!handedOut) {
+        [self returnReservedSlot];
       }
-      return nil;
     }
-
-    NSError *connectionError = nil;
-    ALNPgConnection *connection =
-        [[ALNPgConnection alloc] initWithConnectionString:self.connectionString error:&connectionError];
-    if (connection == nil) {
-      if (error != NULL) {
-        *error = connectionError;
-      }
-      return nil;
-    }
-    connection.preparedStatementReusePolicy = self.preparedStatementReusePolicy;
-    connection.preparedStatementCacheLimit = self.preparedStatementCacheLimit;
-    connection.builderCompilationCacheLimit = self.builderCompilationCacheLimit;
-    connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
-    connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
-    connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
-    self.inUseConnections += 1;
-    return connection;
   }
 }
 
@@ -3298,10 +3478,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   if (connection == nil) {
     return;
   }
-  @synchronized(self) {
-    if (self.inUseConnections > 0) {
-      self.inUseConnections -= 1;
-    }
+  BOOL reusable = NO;
+  @try {
     if (connection.isOpen && [connection hasActiveTransaction]) {
       NSError *rollbackError = nil;
       if (![connection rollbackTransaction:&rollbackError]) {
@@ -3314,11 +3492,37 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     // here poisons the pool and every subsequent borrower fails the same way
     // until the worker is restarted. isConnectionUsable asks libpq directly,
     // so a dead connection is torn down instead of recirculated.
-    if ([connection isConnectionUsable]) {
-      [self.idleConnections addObject:connection];
-    } else {
+    reusable = [connection isConnectionUsable];
+    if (!reusable) {
       [connection close];
     }
+  } @finally {
+    [self.poolCondition lock];
+    if (self.inUseConnections > 0) {
+      self.inUseConnections -= 1;
+    }
+    if (reusable) {
+      [self.idleConnections addObject:connection];
+    }
+    [self.poolCondition broadcast];
+    [self.poolCondition unlock];
+  }
+}
+
+- (NSDictionary<NSString *, id> *)poolDiagnostics {
+  [self.poolCondition lock];
+  @try {
+    return @{
+      @"max_connections" : @(self.maxConnections),
+      @"in_use_connections" : @(self.inUseConnections),
+      @"idle_connections" : @([self.idleConnections count]),
+      @"acquire_timeout_seconds" : @(self.acquireTimeout),
+      @"acquire_wait_count" : @(self.acquireWaitCount),
+      @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
+      @"pool_exhausted_count" : @(self.poolExhaustedCount),
+    };
+  } @finally {
+    [self.poolCondition unlock];
   }
 }
 

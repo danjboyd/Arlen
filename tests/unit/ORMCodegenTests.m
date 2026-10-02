@@ -1,8 +1,16 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dlfcn.h>
+#import <objc/runtime.h>
 
 #import "../shared/ALNTestSupport.h"
 #import "ArlenORM/ArlenORM.h"
+
+@interface ReservedRuntimePublicReservedModel : ALNORMModel
+@property(nonatomic, copy) NSString *stateValue3;
+@property(nonatomic, copy) NSString *descriptionValue;
+@property(nonatomic, copy) NSString *displayName;
+@end
 
 @interface ORMCodegenTests : XCTestCase
 @end
@@ -105,6 +113,81 @@
     }
   }
   return nil;
+}
+
+- (void)testGeneratedDescriptorsHaveStableIdentityOnConcurrentFirstUse {
+  // Two independent models catch accidental sharing of a once token/cache.
+  NSMutableArray *relations = [NSMutableArray array];
+  NSMutableArray *columns = [NSMutableArray array];
+  NSMutableArray *keys = [NSMutableArray array];
+  for (NSString *table in @[@"widgets", @"gadgets"]) {
+    [relations addObject:@{ @"schema": @"public", @"table": table, @"relation_kind": @"table" }];
+    [columns addObject:@{ @"schema": @"public", @"table": table, @"column": @"id",
+                         @"data_type": @"uuid", @"ordinal": @1, @"nullable": @NO }];
+    [keys addObject:@{ @"schema": @"public", @"table": table, @"columns": @[@"id"] }];
+  }
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:
+      @{ @"relations": relations, @"columns": columns, @"primary_keys": keys }
+      classPrefix:@"Cold" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+  if (artifacts == nil) return;
+  NSString *root = ALNTestRepoRoot();
+  NSString *tmp = ALNTestTemporaryDirectory(@"orm_cold_descriptor");
+  XCTAssertNotNil(tmp);
+  if (tmp == nil) return;
+  @try {
+    NSString *implementation = [tmp stringByAppendingPathComponent:@"ColdGeneratedModels.m"];
+    NSString *binary = [tmp stringByAppendingPathComponent:@"cold-descriptor-probe"];
+    XCTAssertTrue(ALNTestWriteUTF8File([tmp stringByAppendingPathComponent:@"ColdGeneratedModels.h"],
+                                      artifacts[@"header"], &error), @"%@", error);
+    XCTAssertTrue(ALNTestWriteUTF8File(implementation, artifacts[@"implementation"], &error), @"%@", error);
+    NSString *includeFlags = [self syntaxOnlyIncludeFlagsWithRepoRoot:root temporaryDir:tmp];
+    NSMutableString *sanitizers = [NSMutableString string];
+#if __has_feature(address_sanitizer)
+    [sanitizers appendString:@" -fsanitize=address -fno-omit-frame-pointer"];
+#endif
+#if __has_feature(undefined_behavior_sanitizer)
+    [sanitizers appendString:@" -fsanitize=undefined"];
+#endif
+#if __has_feature(thread_sanitizer)
+    [sanitizers appendString:@" -fsanitize=thread"];
+#endif
+#if defined(__APPLE__)
+    NSString *compiler = @"xcrun clang -fobjc-arc -fblocks -pthread";
+    NSString *archive = [root stringByAppendingPathComponent:@"build/apple/lib/libArlenFramework.a"];
+    NSString *libraries = @"-framework Foundation -framework CoreFoundation -L\"${ARLEN_OPENSSL_PREFIX:-$(brew --prefix openssl@3)}/lib\" -lcrypto -lcurl";
+#else
+    NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -pthread",
+        ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
+    NSString *archive = [root stringByAppendingPathComponent:@"build/lib/libArlenFramework.a"];
+    NSString *libraries = @"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl -ldl";
+#endif
+    NSString *compile = [NSString stringWithFormat:@"%@ %@ -Wno-nullability-completeness %@ %@ %@ %@ -o %@ %@",
+        compiler, sanitizers, includeFlags, ALNTestShellQuote(implementation),
+        ALNTestShellQuote([root stringByAppendingPathComponent:@"tests/fixtures/phase26/orm_descriptor_first_use_probe.m"]),
+        ALNTestShellQuote(archive), ALNTestShellQuote(binary), libraries];
+    // Keep preload runtimes out of compiler/config utilities. The child binary
+    // links its own sanitizer runtime and retains ASAN_OPTIONS/UBSAN_OPTIONS.
+    NSString *command = [NSString stringWithFormat:@"LD_PRELOAD='' XCTEST_LD_PRELOAD='' bash -c %@",
+        ALNTestShellQuote(compile)];
+    int code = 0;
+    NSString *output = ALNTestRunShellCapture(command, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    if (code != 0) return;
+    command = [NSString stringWithFormat:
+        @"set -e; ulimit -c 0; export LD_PRELOAD='' XCTEST_LD_PRELOAD=''; %@ 1; "
+         "for trial in {1..20}; do %@ 32; done",
+        ALNTestShellQuote(binary), ALNTestShellQuote(binary)];
+    output = ALNTestRunShellCapture(command, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqual((NSUInteger)21,
+        [[output componentsSeparatedByString:@"cold descriptor identity and ownership passed"] count] - 1,
+        @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:NULL];
+  }
 }
 
 - (void)testDescriptorsReflectAssociationsAndReadOnlySemantics {
@@ -232,9 +315,222 @@
   XCTAssertFalse([users.relations[0] isInferred]);
 }
 
-- (void)testGeneratedArtifactsCompileSyntaxOnly {
+- (NSDictionary *)reservedMetadata {
   NSError *error = nil;
-  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self fixtureMetadata]
+  NSDictionary *metadata = ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_reserved_names.json", &error);
+  XCTAssertNil(error);
+  return metadata;
+}
+
+- (void)testReservedPropertyNamesAndOverrides {
+  NSDictionary *metadata = [self reservedMetadata];
+  NSError *error = nil;
+  NSArray *models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved" error:&error];
+  XCTAssertNil(error);
+  ALNORMModelDescriptor *model = [models firstObject];
+  NSDictionary *expected = @{ @"State": @"stateValue3", @"Description": @"descriptionValue",
+      @"class": @"classValue", @"hash": @"hashValue", @"context": @"contextValue",
+      @"descriptor": @"descriptorValue", @"field_values": @"fieldValuesValue",
+      @"new": @"fieldNew", @"copy": @"fieldCopy", @"init": @"fieldInit" };
+  for (NSString *column in expected) {
+    ALNORMFieldDescriptor *field = [model fieldForColumnName:column];
+    XCTAssertEqualObjects(expected[column], field.propertyName);
+    XCTAssertEqualObjects(field, [model fieldForPropertyName:expected[column]]);
+  }
+  XCTAssertEqualObjects(@"state", [model fieldForColumnName:@"State"].name);
+  XCTAssertEqualObjects((@[@"state"]), [model relationNamed:@"target"].sourceFieldNames);
+  NSDictionary *overrides = @{ @"public.reserved": @{ @"property_names": @{ @"State": @"taxState" } } };
+  models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved"
+      databaseTarget:nil descriptorOverrides:overrides error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"taxState", [[models firstObject] fieldForColumnName:@"State"].propertyName);
+  for (NSDictionary *mapping in @[ @{ @"State": @"state" }, @{ @"State": @"context" },
+      @{ @"State": @"stateValue" }, @{ @"State": @"newThing" }, @{ @"State": @"bad-name" },
+      @{ @"missing": @"safeName" }, @{ @"State": @"same", @"Description": @"Same" } ]) {
+    error = nil;
+    models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Reserved"
+        databaseTarget:nil descriptorOverrides:@{ @"public.reserved": @{ @"property_names": mapping } } error:&error];
+    XCTAssertNil(models);
+    XCTAssertNotNil(error);
+    XCTAssertEqualObjects(@"public.reserved", error.userInfo[@"entity_name"]);
+  }
+  NSMutableDictionary *reversed = [metadata mutableCopy];
+  reversed[@"columns"] = [metadata[@"columns"] reverseObjectEnumerator].allObjects;
+  XCTAssertEqualObjects([ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata classPrefix:@"Reserved" error:NULL],
+                       [ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Reserved" error:NULL]);
+  NSMutableArray *columns = [metadata[@"columns"] mutableCopy];
+  [columns addObject:@{ @"schema": @"public", @"table": @"reserved", @"column": @"STATE", @"data_type": @"text" }];
+  reversed[@"columns"] = columns;
+  XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Reserved" error:&error]);
+  XCTAssertNotNil(error);
+}
+
+- (void)testReservedContractCoversORMBaseAccessors {
+  unsigned int count = 0;
+  Method *methods = class_copyMethodList([ALNORMModel class], &count);
+  for (unsigned int index = 0; index < count; index++) {
+    NSString *selector = NSStringFromSelector(method_getName(methods[index]));
+    if ([selector hasPrefix:@"."]) continue;
+    NSString *property = selector;
+    if ([selector containsString:@":"]) {
+      if (![selector hasPrefix:@"set"] || ![selector hasSuffix:@":"] ||
+          [[selector componentsSeparatedByString:@":"] count] != 2) continue;
+      property = [selector substringWithRange:NSMakeRange(3, selector.length - 4)];
+      property = [NSString stringWithFormat:@"%@%@", [[property substringToIndex:1] lowercaseString],
+                                             [property substringFromIndex:1]];
+    }
+    NSError *error = nil;
+    NSDictionary *overrides = @{ @"public.reserved": @{ @"property_names": @{ @"State": property } } };
+    XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+        classPrefix:@"Reserved" databaseTarget:nil descriptorOverrides:overrides error:&error], @"%@", selector);
+    XCTAssertNotNil(error, @"%@", selector);
+  }
+  free(methods);
+}
+
+- (void)testGeneratedHelperCollisionsAreRejected {
+  NSError *error = nil;
+  NSDictionary *overrides = @{ @"public.reserved": @{ @"relations": @[
+      @{ @"name": @"someTarget", @"kind": @"belongs_to", @"target_entity_name": @"public.targets" },
+      @{ @"name": @"sometarget", @"kind": @"belongs_to", @"target_entity_name": @"public.targets" }
+  ] } };
+  XCTAssertNil([ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+      classPrefix:@"Reserved" databaseTarget:nil descriptorOverrides:overrides error:&error]);
+  XCTAssertEqualObjects(@"relationSometarget", error.userInfo[@"selector"]);
+}
+
+- (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
+      classPrefix:@"ReservedRuntime" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(artifacts);
+  if (artifacts == nil) return;
+  NSString *tmp = ALNTestTemporaryDirectory(@"orm_reserved_runtime");
+  NSString *header = [tmp stringByAppendingPathComponent:@"ReservedRuntimeGeneratedModels.h"];
+  NSString *implementation = [tmp stringByAppendingPathComponent:@"ReservedRuntimeGeneratedModels.m"];
+  NSString *library = [tmp stringByAppendingPathComponent:@"reserved.so"];
+  XCTAssertTrue(ALNTestWriteUTF8File(header, artifacts[@"header"], &error));
+  XCTAssertTrue(ALNTestWriteUTF8File(implementation, artifacts[@"implementation"], &error));
+  NSString *root = ALNTestRepoRoot();
+  NSString *flags = [self syntaxOnlyIncludeFlagsWithRepoRoot:root temporaryDir:tmp];
+#if defined(__APPLE__)
+  NSString *compiler = @"xcrun clang -fobjc-arc -fblocks -bundle -undefined dynamic_lookup";
+#else
+  // Sanitizer lanes preload libasan into every child; gnustep-config then
+  // prints nothing, so name the runtime contract explicitly like the
+  // syntax-only tests do instead of depending on its output.
+  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -shared -fPIC",
+      ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
+#endif
+  NSString *command = [NSString stringWithFormat:@"cd %@ && %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -Wno-nullability-completeness %@ %@ -o %@",
+      ALNTestShellQuote(tmp), compiler, flags, ALNTestShellQuote(implementation), ALNTestShellQuote(library)];
+  int exitCode = 0;
+  NSString *output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  if (exitCode != 0) return;
+  // Objective-C classes remain registered for the test process lifetime.
+  NSString *testBinary = [[NSBundle bundleForClass:[self class]] executablePath];
+  void *testHandle = dlopen([testBinary fileSystemRepresentation], RTLD_NOW | RTLD_GLOBAL);
+  XCTAssertTrue(testHandle != NULL);
+  void *handle = dlopen([library fileSystemRepresentation], RTLD_NOW | RTLD_GLOBAL);
+  XCTAssertTrue(handle != NULL, @"%s", dlerror());
+  if (handle == NULL) return;
+  Class cls = NSClassFromString(@"ReservedRuntimePublicReservedModel");
+  XCTAssertTrue([cls isSubclassOfClass:[ALNORMModel class]]);
+  ReservedRuntimePublicReservedModel *model = [cls modelFromRow:@{ @"id": @"1", @"State": @"Ohio", @"Description": @"Example" } error:&error];
+  XCTAssertNotNil(model);
+  XCTAssertNil(error);
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  XCTAssertEqualObjects(@"Ohio", model.stateValue3);
+  XCTAssertEqualObjects(@"Example", model.descriptionValue);
+  XCTAssertEqualObjects(@"Ohio", [model objectForColumnName:@"State"]);
+  XCTAssertEqualObjects(@"Ohio", [model objectForFieldName:@"state"]);
+  XCTAssertNotNil(model.descriptor);
+  XCTAssertNil(model.context);
+  model.stateValue3 = @"Maine";
+  model.displayName = @"Display";
+  XCTAssertEqual(ALNORMModelStateDirty, model.state);
+  XCTAssertTrue([model.dirtyFieldNames containsObject:@"state"]);
+  XCTAssertEqualObjects(@"Maine", [model objectForColumnName:@"State"]);
+  XCTAssertEqualObjects(@"Display", [model objectForColumnName:@"display_name"]);
+  [model markClean];
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  XCTAssertEqual((NSUInteger)0, model.dirtyFieldNames.count);
+  ALNORMModel *target = [NSClassFromString(@"ReservedRuntimePublicTargetsModel") modelFromRow:@{ @"id": @"Maine" } error:&error];
+  XCTAssertTrue([model markRelationLoaded:@"target" value:target pivotRows:nil error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([model isRelationLoaded:@"target"]);
+  XCTAssertEqualObjects(target, [model relationObjectForName:@"target"]);
+  XCTAssertEqualObjects(@"Maine", model.stateValue3);
+  XCTAssertEqual(ALNORMModelStateLoaded, model.state);
+  [model markDetached];
+  XCTAssertEqual(ALNORMModelStateDetached, model.state);
+}
+
+- (void)testQuotedPhysicalNamesAndAliasCollisions {
+  NSError *error = nil;
+  NSDictionary *metadata = ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", &error);
+  NSArray *models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:metadata classPrefix:@"Quoted" error:&error];
+  XCTAssertNil(error);
+  ALNORMModelDescriptor *model = [models firstObject];
+  XCTAssertEqualObjects(@"targetId", [model fieldForColumnName:@"Target ID"].propertyName);
+  XCTAssertEqualObjects(@"stateValue", [model fieldForColumnName:@"State"].propertyName);
+  XCTAssertEqualObjects(@"unitWellNotes", [model fieldForColumnName:@"Unit/Well Notes"].propertyName);
+  XCTAssertEqualObjects(@" leading ", [model fieldForPropertyName:@"leading"].columnName);
+  NSMutableDictionary *reversed = [metadata mutableCopy];
+  reversed[@"columns"] = [metadata[@"columns"] reverseObjectEnumerator].allObjects;
+  XCTAssertEqualObjects([ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata classPrefix:@"Quoted" error:NULL],
+                       [ALNORMCodegen renderArtifactsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:NULL]);
+  NSMutableArray *columns = [metadata[@"columns"] mutableCopy];
+  [columns addObject:@{ @"schema": @"ot", @"table": @"CompulsoryUnitProjects", @"column": @"Unit_Name", @"data_type": @"text" }];
+  reversed[@"columns"] = columns;
+  XCTAssertNil([ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:&error]);
+  XCTAssertEqual(ALNORMErrorIdentifierCollision, error.code);
+  error = nil;
+  models = [ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" databaseTarget:nil
+      descriptorOverrides:@{ @"ot.CompulsoryUnitProjects": @{
+          @"field_names": @{ @"Unit_Name": @"alternateUnitName" },
+          @"property_names": @{ @"Target ID": @"legacyId" } } } error:&error];
+  XCTAssertNil(error);
+  model = [models firstObject];
+  XCTAssertEqualObjects(@"Target ID", [model fieldForPropertyName:@"legacyId"].columnName);
+  XCTAssertEqualObjects(@"Unit_Name", [model fieldNamed:@"alternateUnitName"].columnName);
+  unichar nul = 0;
+  NSMutableDictionary *badColumn = [columns[0] mutableCopy];
+  badColumn[@"column"] = [NSString stringWithCharacters:&nul length:1];
+  reversed[@"columns"] = @[ badColumn ];
+  XCTAssertNil([ALNORMCodegen modelDescriptorsFromSchemaMetadata:reversed classPrefix:@"Quoted" error:&error]);
+}
+
+- (void)testQuotedGeneratedArtifactsCompileSyntaxOnly {
+  [self assertGeneratedArtifactsCompile:[ALNTestJSONDictionaryAtRelativePath(@"tests/fixtures/phase26/orm_quoted_identifiers.json", NULL) copy]];
+}
+
+- (void)testQuotedSchemaAndTableNamesCompile {
+  NSMutableDictionary *metadata = [[self reservedMetadata] mutableCopy];
+  for (NSString *collection in @[@"relations", @"columns", @"primary_keys", @"unique_constraints", @"foreign_keys"]) {
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSDictionary *raw in metadata[collection] ?: @[]) {
+      NSMutableDictionary *row = [raw mutableCopy];
+      row[@"schema"] = @"Legacy.Schema";
+      row[@"table"] = [row[@"table"] stringByAppendingString:@" \"Table\""];
+      if (row[@"referenced_schema"]) row[@"referenced_schema"] = @"Legacy.Schema";
+      if (row[@"referenced_table"]) row[@"referenced_table"] = [row[@"referenced_table"] stringByAppendingString:@" \"Table\""];
+      [rows addObject:row];
+    }
+    metadata[collection] = rows;
+  }
+  [self assertGeneratedArtifactsCompile:metadata];
+}
+
+- (void)testGeneratedArtifactsCompileSyntaxOnly {
+  [self assertGeneratedArtifactsCompile:[self fixtureMetadata]];
+}
+
+- (void)assertGeneratedArtifactsCompile:(NSDictionary *)metadata {
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:metadata
                                                                  classPrefix:@"ALNORMX"
                                                                        error:&error];
   XCTAssertNil(error);
@@ -260,7 +556,7 @@
   NSString *command = [NSString stringWithFormat:
       @"set -euo pipefail && "
        "cd %@ && "
-       "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+       "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fblocks -fsyntax-only "
        "%@ %@",
       ALNTestShellQuote(repoRoot),
       includeFlags,
@@ -271,7 +567,7 @@
        "cd %@ && "
        "%@ && "
        "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-       "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
+       "clang $(gnustep-config --objc-flags) %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -fsyntax-only "
        "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
       ALNTestShellQuote(repoRoot),
       ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
@@ -326,7 +622,7 @@
     NSString *command = [NSString stringWithFormat:
         @"set -euo pipefail && "
          "cd %@ && "
-         "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fsyntax-only "
+         "xcrun clang -isysroot \"$(xcrun --show-sdk-path)\" -arch arm64 -fobjc-arc -fblocks -fsyntax-only "
          "%@ %@",
         ALNTestShellQuote(repoRoot),
         includeFlags,
@@ -337,7 +633,7 @@
          "cd %@ && "
          "%@ && "
          "LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' "
-         "clang $(gnustep-config --objc-flags) %@ -fsyntax-only "
+         "clang $(gnustep-config --objc-flags) %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -fsyntax-only "
          "%@ $(find modules -mindepth 2 -maxdepth 2 -type d -name Sources -printf ' -I%%p') %@",
         ALNTestShellQuote(repoRoot),
         ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),

@@ -56,6 +56,9 @@ typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
 @property(nonatomic, assign) NSUInteger maximumAuthenticationAgeSeconds;
 @property(nonatomic, copy) NSString *stepUpPath;
 @property(nonatomic, assign) BOOL includeInOpenAPI;
+// Request body cap for this route in bytes, checked against Content-Length
+// before the body is read; 0 uses requestLimits.maxBodyBytes (GitHub issue 87).
+@property(nonatomic, assign) NSUInteger maxBodyBytes;
 @property(nonatomic, strong, nullable) NSMethodSignature *compiledActionSignature;
 @property(nonatomic, strong, nullable) NSMethodSignature *compiledGuardSignature;
 @property(nonatomic, assign, nullable) IMP compiledActionIMP;

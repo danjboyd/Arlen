@@ -92,6 +92,12 @@ Idempotency contract:
   - `ALNInMemoryJobAdapter`
   - `ALNFileJobAdapter`
 
+Production jobs use [`ALNPostgresJobAdapter`](DURABLE_JOBS.md) and the extended
+`ALNDurableJobAdapter` contract. The worker selects fenced completion and
+heartbeats automatically. PostgreSQL rejects ID-only acknowledgement, so its
+acceptance suite is `make ci-durable-jobs`, rather than the legacy ID-only adapter
+conformance suite. Memory/file adapter compatibility is unchanged.
+
 ## 5. Cache Baseline
 
 `ALNCacheAdapter` supports:
@@ -217,7 +223,7 @@ An optional worker contract for scheduled/asynchronous execution:
 Recommended production direction by service area:
 
 - Cache: use Redis or Memcached; reserve in-memory cache for development and tests.
-- Jobs: use a durable queue backend (Redis streams, PostgreSQL queue table, or dedicated broker) for multi-process reliability.
+- Jobs: use the first-party [PostgreSQL durable queue](DURABLE_JOBS.md) for multi-process reliability, or implement an external backend with equivalent lease/fencing guarantees.
 - Mail: use SMTP/API provider adapters with provider-side retries and bounce tracking.
 - Attachments: store payload bytes in object storage and keep metadata in relational records.
 - I18n: keep locale catalogs versioned and deploy them with app releases.

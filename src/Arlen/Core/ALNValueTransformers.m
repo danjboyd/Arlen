@@ -1,4 +1,5 @@
 #import "ALNValueTransformers.h"
+#import <dispatch/dispatch.h>
 
 NSString *const ALNValueTransformerErrorDomain = @"Arlen.ValueTransformer.Error";
 NSString *const ALNValueTransformerNameKey = @"transformer";
@@ -29,9 +30,10 @@ typedef NS_ENUM(NSInteger, ALNBuiltInTransformerKind) {
 
 static NSMutableSet *ALNRegisteredTransformerNames(void) {
   static NSMutableSet *names = nil;
-  if (names == nil) {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
     names = [[NSMutableSet alloc] init];
-  }
+  });
   return names;
 }
 

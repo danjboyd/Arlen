@@ -166,13 +166,29 @@
       "summary": "Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics."
     },
     "ALNFileJobAdapter": {
-      "summary": "Filesystem-backed job queue adapter for durable local/edge deployments."
+      "summary": "Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery."
     },
     "ALNFileMailAdapter": {
       "summary": "Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing."
     },
     "ALNFileSystemAttachmentAdapter": {
       "summary": "Filesystem-backed attachment adapter for durable binary storage."
+    },
+    "ALNOAuthResourceServer": {
+      "summary": "Opt-in OAuth access-token verifier, verified principal, protected-resource discovery and shared REST/MCP authorization middleware."
+    },
+    "ALNPostgresJobAdapter": {
+      "summary": "PostgreSQL durable queue with transactional enqueue, fenced renewable leases, retained results, replay, and shared queue controls. See docs/DURABLE_JOBS.md."
+    },
+    "ALNDurableJobAdapter": {
+      "summary": "Durable jobs contract for fenced completion, renewal, status/results, replay, and shared queue controls."
+    },
+    "ALNJobLease": {
+      "summary": "Immutable job claim carrying an ownership token, initial expiration, and heartbeat duration."
+    },
+    "ALNHTTPClientResult": {
+      "summary": "Complete final HTTP response returned by `ALNSynchronousHTTPResult`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).",
+      "usage_example": "ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 3, ALNHTTPRedirectLimitReturnResponse, &error);\nif (result) {\n  NSData *body = result.body;\n  NSString *phrase = result.receivedReasonPhrase; // nil for HTTP/2 or HTTP/3\n}"
     }
   },
   "properties": {
@@ -209,11 +225,20 @@
     "ALNApplication|clusterNodeID": {
       "purpose": "Node identifier used for distributed-runtime diagnostics and headers."
     },
+    "ALNResponse|headers": {
+      "purpose": "Legacy dictionary of normalized names and first values. Use response header methods for validated mutations and repeated values."
+    },
     "ALNResponse|fileBodyPath": {
       "purpose": "Existing regular file path to stream after Arlen preflights the descriptor before successful headers are sent."
     },
     "ALNResponse|fileBodyLength": {
       "purpose": "Expected byte count for a file streaming response; also drives `Content-Length` for GET and HEAD."
+    },
+    "ALNResponse|fileBodyOffset": {
+      "purpose": "Starting byte offset for streamed file responses; defaults to zero."
+    },
+    "ALNResponse|fileBodyFullLength": {
+      "purpose": "Full file size for identity validation when fileBodyLength selects a range; zero falls back to fileBodyLength."
     },
     "ALNResponse|fileBodyDevice": {
       "purpose": "Optional device identity used to reject stale or replaced file streaming targets before headers are sent."
@@ -226,9 +251,51 @@
     },
     "ALNResponse|fileBodyMTimeNanoseconds": {
       "purpose": "Optional file modification timestamp nanoseconds used to reject changed streaming targets before headers are sent."
+    },
+    "ALNHTTPClientResult|response": {
+      "purpose": "Final response URL, numeric status, and headers."
+    },
+    "ALNHTTPClientResult|body": {
+      "purpose": "Complete final response body, including a redirect body when stopped at its budget."
+    },
+    "ALNHTTPClientResult|receivedReasonPhrase": {
+      "purpose": "Actual HTTP/1.x phrase including spacing; empty string for an empty phrase, nil when the protocol transmits none. Never synthesized."
+    },
+    "ALNHTTPClientResult|stoppedAtRedirectLimit": {
+      "purpose": "YES when a followable redirect was returned because the configured redirect budget was exhausted."
+    },
+    "ALNDataverseClient|retryDelayProvider": {
+      "purpose": "Optional retry eligibility/delay block. Receives request, zero-based retry index, response or transport error. nil preserves defaults; target.maxRetries remains the hard cap."
+    },
+    "ALNDataverseClient|retrySleeper": {
+      "purpose": "Optional injected sleeper receiving the policy delay; nil uses NSThread. Configure before concurrent use."
     }
   },
   "methods": {
+    "ALNResponse|setHeadersIfMissing:": {
+      "purpose": "Set only response header names that have no current value.",
+      "usage": "Existing first and repeated values are preserved. Invalid header input is ignored."
+    },
+    "ALNResponse|setHeader:value:": {
+      "purpose": "Replace all values for a case-insensitive response header name.",
+      "usage": "Use before transmission. Invalid names or CR/LF/NUL input leave the response unchanged; use appendHeader:value: to preserve other cookies."
+    },
+    "ALNResponse|appendHeader:value:": {
+      "purpose": "Append a separate field line for an explicitly supported repeatable header.",
+      "usage": "Use for Set-Cookie, WWW-Authenticate, Proxy-Authenticate, Link, Warning, Vary, or Cache-Control. NO means invalid input or an unsupported name; state is unchanged. Framing headers cannot be appended."
+    },
+    "ALNResponse|headerValuesForName:": {
+      "purpose": "Return all values for a case-insensitive header name in insertion order.",
+      "usage": "Use to inspect multiple cookies. The returned array is an immutable snapshot; an absent header returns an empty array."
+    },
+    "ALNResponse|headerForName:": {
+      "purpose": "Return the first response header value for a case-insensitive name, or nil.",
+      "usage": "Use headerValuesForName: when every repeated value is needed; this accessor does not combine values."
+    },
+    "ALNResponse|removeHeaderForName:": {
+      "purpose": "Remove every value for a case-insensitive header name and invalidate serialization.",
+      "usage": "Use the response method instead of mutating headers directly. Default Content-Length and Content-Type may be regenerated during serialization."
+    },
     "ALNPasswordHash|defaultArgon2idOptions": {
       "purpose": "Return Arlen's default Argon2id cost, salt-length, and digest-length policy.",
       "usage": "Use as the baseline policy, then copy and raise costs to match deployment hardware."
@@ -272,6 +339,30 @@
     "ALNPasswordHash|argon2Version": {
       "purpose": "Return the vendored Argon2 upstream version identifier used by this Arlen build.",
       "usage": "Use for diagnostics, support bundles, or build provenance reporting."
+    },
+    "ALNOAuthResourceServer|initWithConfiguration:documentLoader:authorizationPolicy:error:": {
+      "purpose": "Validate and freeze resource-server trust configuration and application policy.",
+      "usage": "Pass nil documentLoader for bounded Foundation HTTPS fetching; inject a controlled loader for tests. Register the instance as a plugin, or assign it to MCP before installing. A nil result indicates invalid configuration."
+    },
+    "ALNOAuthResourceServer|principalForAccessToken:error:": {
+      "purpose": "Validate access-token signature and claims and return an immutable normalized principal.",
+      "usage": "This cryptographic method does not invoke request policy. Use the installed middleware for authorization and suspension checks; do not log the token."
+    },
+    "ALNOIDCClient|verifyRS256Token:jwk:error:": {
+      "purpose": "Verify only the RS256 signature with a caller-selected trusted RSA JWK.",
+      "usage": "This low-level primitive does not establish an identity or validate JWT headers/claims. Use ALNOAuthResourceServer for access tokens or verifyIDToken for login tokens."
+    },
+    "ALNOAuthResourceServer|refreshSigningKeysWithError:": {
+      "purpose": "Refresh trusted discovery/JWKS with bounded single-flight fetching and cooldown.",
+      "usage": "Call before startup or on one dedicated application maintenance worker. Never call from a serialized HTTP loop. NO can mean cooldown or fetch failure; use isReady to check whether the existing snapshot is still fresh."
+    },
+    "ALNOAuthResourceServer|isReady": {
+      "purpose": "Check for a fresh trusted discovery/JWKS snapshot without network I/O.",
+      "usage": "Integrate into private application readiness. This does not verify every incoming key ID, client sign-in or application permissions. The built-in /readyz is not automatically changed."
+    },
+    "ALNHTTPClientResult|init": {
+      "purpose": "Unavailable. Results are constructed by the synchronous transport.",
+      "usage": "Call `ALNSynchronousHTTPResult(request, maxRedirects, policy, &error)`."
     }
   }
 }

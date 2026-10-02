@@ -125,26 +125,14 @@
 }
 
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
-  NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
-  task.arguments = @[ @"-lc", command ?: @"" ];
-  NSPipe *stdoutPipe = [NSPipe pipe];
-  NSPipe *stderrPipe = [NSPipe pipe];
-  task.standardOutput = stdoutPipe;
-  task.standardError = stderrPipe;
-  [task launch];
-  [task waitUntilExit];
+  NSDictionary *result = ALNTestRunShellCaptureStreams(command);
   if (exitCode != NULL) {
-    *exitCode = task.terminationStatus;
+    *exitCode = [result[@"status"] intValue];
   }
-  NSData *stdoutData = [[stdoutPipe fileHandleForReading] readDataToEndOfFile];
-  NSData *stderrData = [[stderrPipe fileHandleForReading] readDataToEndOfFile];
-  NSMutableData *combined = [NSMutableData dataWithData:stdoutData ?: [NSData data]];
-  if ([stderrData length] > 0) {
-    [combined appendData:stderrData];
+  if ([result[@"status"] intValue] != 0) {
+    return [NSString stringWithFormat:@"%@\n%@", result[@"stdout"], result[@"stderr"]];
   }
-  NSString *output = [[NSString alloc] initWithData:combined encoding:NSUTF8StringEncoding];
-  return output ?: @"";
+  return result[@"stdout"];
 }
 
 - (NSDictionary *)parseJSONDictionary:(NSString *)output {
@@ -303,8 +291,25 @@
   return @"";
 }
 
+/// These tests do not wait for a process to bind a port; they wait for
+/// boomhauer to transpile templates, compile the scaffolded app -- including
+/// whichever modules the test installed -- link it, and only then serve. The
+/// budget therefore tracks build time, which scales with the size of the module
+/// sources and with how loaded the machine is, not with anything the server
+/// does at startup.
+///
+/// The previous 30s was tight enough that ordinary growth in
+/// modules/auth/Sources/ALNAuthModule.m pushed the build past it, turning any
+/// change to that file into a spurious failure here. A timeout is a blunt
+/// instrument for a build, so this one is generous: a real hang still fails, it
+/// just takes longer to say so.
+static const NSTimeInterval ALNTestServerBuildAndBootTimeout = 180.0;
+static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
+
 - (BOOL)waitForServerOnPort:(int)port path:(NSString *)path {
-  for (NSInteger attempt = 0; attempt < 150; attempt++) {
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:ALNTestServerBuildAndBootTimeout];
+  NSDate *started = [NSDate date];
+  while ([deadline timeIntervalSinceNow] > 0) {
     int exitCode = 0;
     NSDictionary *response = [self curlJSONAtPort:port
                                              path:path
@@ -318,8 +323,13 @@
     if (exitCode == 0 && statusCode > 0) {
       return YES;
     }
-    usleep(200000);
+    usleep(ALNTestServerPollIntervalMicroseconds);
   }
+  // Say that this was a timeout. The bare assertion failure that follows
+  // otherwise looks identical to the server answering wrongly, which is a
+  // different problem entirely.
+  NSLog(@"waitForServerOnPort: gave up on port %d path %@ after %.0fs", port, path,
+        -[started timeIntervalSinceNow]);
   return NO;
 }
 
@@ -561,7 +571,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -1091,10 +1101,7 @@
     XCTAssertEqualObjects(providerAdminEmail, adminSessionPayload[@"session"][@"user"][@"email"]);
     XCTAssertEqualObjects(@2, adminSessionPayload[@"session"][@"aal"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     (void)[self deleteUserByEmail:localAdminEmail dsn:dsn];
     (void)[self deleteUserByEmail:providerAdminEmail dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
@@ -1167,7 +1174,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && PGOPTIONS=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export PGOPTIONS=%@ ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      [self shellQuoted:[NSString stringWithFormat:@"-c search_path=%@", isolatedSchema]],
                                                      quotedRepoRoot,
@@ -1207,10 +1214,7 @@
     XCTAssertTrue([registerResponse[@"body"] containsString:@"./bin/arlen module migrate --env development"]);
     XCTAssertFalse([registerResponse[@"body"] containsString:@"query did not return rows"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     [self dropPostgresSchemaNamed:isolatedSchema dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
@@ -1286,7 +1290,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -1342,10 +1346,7 @@
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)404, [providerAPIStart[@"status"] integerValue]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
@@ -1418,7 +1419,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -1476,10 +1477,7 @@
     NSDictionary *providerPayload = [self parseJSONDictionary:providerStart[@"body"]];
     XCTAssertTrue([[providerPayload[@"authorize_url"] description] containsString:@"provider/stub/authorize"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
@@ -1614,7 +1612,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -1714,10 +1712,7 @@
     XCTAssertTrue([securityPage[@"body"] containsString:@"SMS"]);
     XCTAssertFalse([securityPage[@"body"] containsString:@"Manual setup key"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     (void)[self deleteUserByEmail:userEmail dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
@@ -1788,7 +1783,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -1863,10 +1858,7 @@
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)404, [missingSMSAPI[@"status"] integerValue]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     (void)[self deleteUserByEmail:userEmail dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
@@ -1949,7 +1941,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -2194,10 +2186,7 @@
     XCTAssertEqualObjects(@NO, mfaPayload[@"mfa"][@"sms"][@"enrolled"]);
     XCTAssertEqualObjects(@NO, mfaPayload[@"mfa"][@"sms"][@"verified"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     (void)[self deleteUserByEmail:userEmail dsn:dsn];
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
@@ -2322,7 +2311,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -2374,10 +2363,7 @@
     XCTAssertTrue([registerPage[@"body"] containsString:@"Phase15 Hook Brand"]);
     XCTAssertTrue([registerPage[@"body"] containsString:@"context:register"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
@@ -2456,7 +2442,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[ @"-lc",
-                          [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ --no-watch --port %d >%@ 2>&1",
+                          [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
                                                      quotedRepoRoot,
                                                      quotedBoomhauer,
@@ -2506,10 +2492,7 @@
     XCTAssertFalse([registerPage[@"body"] containsString:@"Template not found"]);
     XCTAssertTrue([registerPage[@"body"] containsString:@"auth-card"]);
   } @finally {
-    if (server != nil && [server isRunning]) {
-      kill(server.processIdentifier, SIGTERM);
-      [server waitUntilExit];
-    }
+    XCTAssertTrue(ALNTestStopServerTask(server));
     [[NSFileManager defaultManager] removeItemAtPath:cookieJar error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:serverLog error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];

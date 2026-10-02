@@ -556,6 +556,20 @@ static NSError *ALNMigrationValidationError(NSString *migrationPath,
   return versions;
 }
 
++ (NSSet<NSString *> *)appliedMigrationVersionsWithDatabase:(id<ALNDatabaseAdapter>)database
+                                             databaseTarget:(NSString *)databaseTarget
+                                                      error:(NSError **)error {
+  NSString *tableName = [self migrationsTableNameForDatabaseTarget:databaseTarget error:error];
+  if ([tableName length] == 0) {
+    return nil;
+  }
+  id<ALNSQLDialect> dialect = ALNMigrationDialectForDatabase(database, error);
+  if (dialect == nil) {
+    return nil;
+  }
+  return [self appliedVersionSetWithDatabase:database dialect:dialect tableName:tableName error:error];
+}
+
 + (NSArray<NSString *> *)pendingMigrationFilesAtPath:(NSString *)migrationsPath
                                              database:(id<ALNDatabaseAdapter>)database
                                        databaseTarget:(NSString *)databaseTarget

@@ -539,3 +539,14 @@ Minimum mandatory test layers:
 1. JSON schema/validation feature expansion unrelated to serializer migration.
 2. Wire-format changes to existing API envelopes.
 3. Rewriting endpoint/business logic solely for benchmark tuning.
+
+## Static HTTP contract follow-up (issue #30)
+
+Static GET/HEAD now carry weak metadata ETags and Last-Modified, apply HTTP
+precondition precedence, preserve HEAD representation lengths, and support
+single byte ranges. File transfer offsets and selected lengths are independent
+of full-file identity validation. POSIX fallback reads use explicit offsets to
+avoid shared descriptor seek positions. See `docs/STATIC_FILES.md` for the
+contract and limitations. Regression coverage lives in HTTPIntegrationTests and
+runs in the existing quality gate; downstream qualification remains separately
+owned by the reporting application.

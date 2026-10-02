@@ -34,6 +34,7 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `maximumAuthenticationAgeSeconds` | `NSUInteger` | `nonatomic, assign` | Public `maximumAuthenticationAgeSeconds` property available on `ALNRoute`. |
 | `stepUpPath` | `NSString *` | `nonatomic, copy` | Public `stepUpPath` property available on `ALNRoute`. |
 | `includeInOpenAPI` | `BOOL` | `nonatomic, assign` | Public `includeInOpenAPI` property available on `ALNRoute`. |
+| `maxBodyBytes` | `NSUInteger` | `nonatomic, assign` | Public `maxBodyBytes` property available on `ALNRoute`. |
 | `compiledActionSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledActionSignature` property available on `ALNRoute`. |
 | `compiledGuardSignature` | `NSMethodSignature *` | `nonatomic, strong, nullable` | Public `compiledGuardSignature` property available on `ALNRoute`. |
 | `compiledActionIMP` | `IMP` | `nonatomic, assign, nullable` | Public `compiledActionIMP` property available on `ALNRoute`. |

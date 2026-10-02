@@ -98,6 +98,100 @@ default in generated models. Historical SQL descriptor snapshots are serialized
 through `ALNORMDescriptorSnapshot`, and `ALNORMSchemaDrift` fails closed when
 current descriptors diverge from a checked-in history contract.
 
+### Concurrent first use
+
+Generated SQL models initialize each class's descriptor exactly once with
+`dispatch_once`. Concurrent first callers receive the same fully initialized,
+strongly retained descriptor, without application warm-up. Generated source
+imports libdispatch explicitly; the supported Arlen toolchains already provide it.
+
+To adopt the initialization fix, regenerate existing model implementations via
+`ALNORMCodegen renderArtifactsFromSchemaMetadata:classPrefix:error:` (or the
+variant accepting overrides), then rebuild the application. See the
+[migration note](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+Model/context mutation still follows its existing ownership contract.
+
+### SQL property names
+
+SQL codegen reserves ORM lifecycle/runtime names, standard NSObject names,
+Objective-C method families and language keywords. Conflicting properties get a
+`Value` suffix (`State` → `stateValue`, `Description` → `descriptionValue`).
+Names that would remain in an ARC method family use a `field` prefix instead
+(`new` → `fieldNew`). Existing field/column names and explicit aliases are reserved
+before allocation; a collision adds a suffix starting at `2`. For example, with
+`State` and `state_value`, the former becomes `stateValue2`. Allocation is stable
+when schema metadata input order is reversed.
+
+Only `propertyName` changes: `State` still has logical field name `state` and SQL
+column name `State`. Queries, relationship keys and column/field lookup retain
+those names. `objectForPropertyName:` and generated accessors use the alias.
+The manifest records all three names. Case-folded logical field collisions are
+rejected, as are duplicate generated helper selectors.
+
+For a stable application-specific API, pass an entity override to the existing
+`descriptorOverrides:` codegen methods:
+
+```objc
+@{ @"public.tax_rates": @{
+    @"property_names": @{ @"State": @"taxState" }
+} }
+```
+
+Keys inside `property_names` are exact SQL column names. Unknown columns,
+reserved/invalid aliases and aliases overlapping another field, column or
+property produce an error identifying the entity and offending mapping.
+The reserved-name contract is fixed rather than discovered from host categories;
+applications adding methods to generated models must choose nonconflicting names.
+See [migration notes](ARLEN_ORM_MIGRATIONS.md#generated-property-naming-update)
+before regenerating existing models.
+
+### Quoted SQL identifiers
+
+SQL ORM descriptors preserve physical schema, table, and column names exactly,
+including case, spaces, punctuation, embedded quotes, and leading/trailing
+whitespace. Supply the original name as metadata (`Target ID`), without adding
+SQL quote delimiters. Empty names and names containing NUL are rejected.
+Generated properties use deterministic ASCII aliases: `Target ID` becomes
+`targetId`, `Unit/Well Notes` becomes `unitWellNotes`, and `State` retains its
+reserved-name alias `stateValue`. Existing ordinary names keep their generated APIs.
+
+`property_names` changes only the Objective-C property. If distinct SQL columns
+normalize to the same logical field (for example `Unit Name` and `Unit_Name`),
+codegen fails with `ALNORMErrorIdentifierCollision`. Resolve that ambiguity with
+an exact-column `field_names` override; schema renames are unnecessary:
+
+```objc
+@{ @"ot.CompulsoryUnitProjects": @{
+    @"field_names": @{ @"Unit_Name": @"alternateUnitName" },
+    @"property_names": @{ @"Target ID": @"legacyId" }
+} }
+```
+
+`field_names` sets the logical query/relationship field and its default property;
+`property_names` can then provide a separate nonreserved accessor. Both mappings
+must use known exact SQL column keys and valid, unambiguous aliases. Primary and
+foreign keys reflected from physical metadata resolve to the resulting logical
+fields. Explicit relation overrides should use those logical field names.
+
+The ORM encodes each physical component before passing it to the SQL builder.
+The builder parses qualified identifier paths into components and quotes each
+component for the selected dialect, doubling embedded delimiters. A literal dot
+inside a name remains part of that name. Descriptor `schemaName`, `tableName`,
+and `columnName` retain raw names; `entityName` and `qualifiedTableName` encode
+components requiring quotes, e.g. `legacy."Project.Table"`. Use this encoded
+entity name as the descriptor override key. Ordinary entity keys are unchanged.
+
+These names are trusted schema/descriptor data. Resolve request-selected fields
+through model descriptors or an application allowlist; do not build physical
+identifiers from arbitrary request input. Identifier APIs never evaluate names
+as SQL expressions. Values remain bound parameters. Existing explicit trusted
+expression APIs retain their trust contract.
+
+PostgreSQL coverage includes insert/generated-key hydration, find, query,
+changeset update, reload, delete, upsert, composite keys, and joined relations.
+MSSQL identifier/OUTPUT compilation is regression-tested; live quoted-name
+persistence qualification in this change is PostgreSQL-only.
+
 Phase `28A-28D` adds a first consumer-contract bridge for React / TypeScript
 apps without making TypeScript the canonical ORM source. `ALNORMTypeScriptCodegen`
 consumes:

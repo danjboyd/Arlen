@@ -76,7 +76,8 @@ Generator behavior:
 - `endpoint`: same controller output with endpoint-oriented defaults (`--route` required)
 - `model`: `src/Models/<Name>Repository.{h,m}`
 - `migration`: `db/migrations/<timestamp>_<name>.sql`
-- `test`: `tests/<Name>Tests.m`
+- `test`: `tests/<Name>Tests.m`; a placeholder XCTest, or with `--request` an
+  `ALNTestClient` request test that GETs `--route` (default `/`) and expects `200`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
@@ -123,6 +124,8 @@ Named targets:
           requiredEnvironmentKeys = ("ARLEN_DATABASE_URL", "ARLEN_SESSION_SECRET");
         };
         init = { runtimeUser = "arlen"; runtimeGroup = "arlen"; };
+        sharedPaths = ("storage/media");
+        prePackageCommands = ("npm --prefix frontend ci", "npm --prefix frontend run build");
         transport = {
           sshHost = "deploy@myapp.example.com";
           sshCommand = "ssh";
@@ -152,9 +155,13 @@ Named targets:
 
 - requires a named target from `config/deploy.plist`
 - creates deterministic Linux/Debian-style host scaffolding for that target
-- runs against the local filesystem; it does not SSH to `transport.sshHost`
-- for remote targets, run it on the target host or against an intentionally
- mounted/staged representation of that host layout before remote push/release
+- by default runs against the local filesystem; it does not SSH to
+ `transport.sshHost`
+- `--remote` (SSH targets only): creates the release/shared/log/tmp layout on
+ the target host over SSH with `mkdir -p`, and writes the generated artifacts
+ locally. Alternatively, run `arlen deploy init <target>` on the host itself.
+- also creates `shared/<path>` for each `sharedPaths` entry; activation links
+ them into every release (see [Deployment](DEPLOYMENT.md#43-project-deployment-configuration))
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
@@ -164,6 +171,9 @@ Named targets:
 - honors target runtime metadata:
  - `runtime.gnustepScript`
  - `runtime.requiresEnvWrapper`
+ - for SSH targets, remote `release`/`status`/`doctor`/`logs`/`rollback` also
+ source `runtime.gnustepScript` before running the packaged `arlen` when
+ `runtime.requiresEnvWrapper` is on
 - does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
 
 `arlen deploy target sample`
@@ -191,9 +201,12 @@ Named targets:
 `arlen deploy push`
 
 - builds a local immutable release under `releases/<release-id>/`
-- when `[target]` has SSH transport metadata, fails before build/upload with
- `deploy_target_not_initialized` until `arlen deploy init <target>` has
- generated the target host artifacts
+- when `[target]` has SSH transport metadata, checks the release layout on the
+ host over SSH and fails before build/upload with
+ `deploy_target_not_initialized` (naming the missing host paths) until it
+ exists (`arlen deploy init <target> --remote`). Missing local generated
+ artifacts are regenerated automatically. If SSH is unreachable it fails with
+ `deploy_target_transport_failed`.
 - when `[target]` has SSH transport metadata, stages the local release under
  `build/deploy/targets/<target>/local-releases/` and uploads it to the remote
  target release path over SSH/tar streaming
@@ -239,9 +252,8 @@ Named targets:
 `arlen deploy release`
 
 - reuses an existing release artifact for the selected `--release-id`, or builds it first if missing
-- when `[target]` has SSH transport metadata, fails before build/upload or
- activation with `deploy_target_not_initialized` until
- `arlen deploy init <target>` has generated the target host artifacts
+- when `[target]` has SSH transport metadata, runs the same host layout check
+ as `deploy push` before build/upload or activation
 - when `[target]` has SSH transport metadata:
  - builds or reuses the local staged release
  - uploads it to the remote target
@@ -338,6 +350,9 @@ Common options:
 - `--database-target <name>`: declared database target name (default `default`)
 - `--require-env-key <NAME>`: record a required environment key without storing its value in the release
 - `--allow-remote-rebuild`: allow the best-effort GNUstep cross-profile rebuild path
+- `--require-clean`: refuse to build when the app is not a git checkout or has
+  uncommitted changes in packaged paths (see [Deployment](DEPLOYMENT.md), release
+  metadata)
 - `--remote-build-check-command <shell>`: shell command used to validate the target build chain for experimental remote rebuild targets
 - `--certification-manifest <path>`: override certification manifest path
 - `--json-performance-manifest <path>`: override JSON performance manifest path
@@ -410,6 +425,10 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 - installs a local vendored module into `modules/<identifier>`
 - updates `config/modules.plist` deterministically
 - `--source <path>` points at a module directory containing `module.plist`
+- records the installed tree's SHA-256 `contentDigest` alongside `version` in
+  the lock entry
+- re-running `add` for an installed module is a `noop` only when the vendored
+  files match the source; otherwise it fails with `module_already_installed`
 - `--force` replaces an existing install in place
 - `--json` emits machine-readable workflow output
 - first-party modules currently available in-tree:
@@ -433,6 +452,13 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- warns (without failing) about vendored module content:
+ - `module_locally_modified`: files differ from the recorded `contentDigest`
+ - `module_content_untracked`: the lock entry predates `contentDigest`
+ - `module_framework_copy_differs`: the vendored copy differs from
+   `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
+   framework checkout, or the running `arlen` binary's checkout), typically
+   after moving the framework pin without re-running `module upgrade`
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -449,7 +475,19 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 
 `arlen module upgrade <name> --source <path> [--force] [--json]`
 
-- replaces the vendored module files and updates the modules lock entry version metadata
+- compares file contents, not just `version`, and updates the lock entry's
+  `version` and `contentDigest`
+- `status: "noop"`: the vendored files already match `--source`
+- `status: "updated"` with `reason`:
+ - `version_changed`: the source declares a different version
+ - `content_changed`: same version, different sources, and the vendored copy
+   is unedited since install (it still matches the recorded `contentDigest`)
+ - `forced`: `--force` was passed
+- exits 1 with error code `content_differs` when the vendored copy was edited
+  locally (`locally_modified: true`), or when the files differ at the same
+  version and the lock has no `contentDigest` (`locally_modified: false`); the
+  JSON payload lists `differing_files`, and nothing is changed
+- `--force` replaces the vendored copy regardless
 
 `arlen module eject auth-ui [--force] [--json]`
 
@@ -490,7 +528,7 @@ First-party module surfaces after install:
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
-- `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`
+- `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
 
@@ -534,6 +572,16 @@ Generated artifacts:
 - `<output-dir>/<prefix>Schema.h`
 - `<output-dir>/<prefix>Schema.m`
 - `<manifest>`
+
+SQL ORM model generation through `ALNORMCodegen` has a separate
+[property naming contract](ARLEN_ORM.md#sql-property-names): reserved properties
+are aliased, and API callers can pass `property_names` descriptor overrides.
+Quoted physical SQL names are preserved by ORM codegen and persistence. Use
+`field_names` to resolve logical-name normalization collisions and
+`property_names` for accessor aliases; see
+[quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
+These are library options, not additional `schema-codegen` CLI flags. The
+separate typed-schema generator retains its existing identifier restrictions.
 
 ### `arlen dataverse-codegen [--input <metadata.json>] [--env <name>] [--target <name>] [--service-root <url>] [--tenant-id <id>] [--client-id <id>] [--client-secret <secret>] [--entity <logical_name>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--force]`
 
@@ -696,6 +744,16 @@ Build and run the first-party jobs worker loop for the current app root.
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 
+For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
+before jobs module configuration and apply
+`tools/migrations/jobs/001_postgres_jobs.sql`. The worker automatically renews
+and fences supported leases. Each PostgreSQL dequeue cleans up at most 100
+expired final attempts and skips busy job/queue rows so unrelated work remains
+claimable. Use `--run-scheduler` in only one process; other
+workers consume the shared queue without it. See [Durable Jobs](DURABLE_JOBS.md)
+for the database/dependency contract, transaction API, shared pause/drain, and
+persistent result polling. No new worker CLI flags are required.
+
 ### `arlen propane [manager args...]`
 
 Run production manager (`propane`) for the current app root.
@@ -728,6 +786,23 @@ forms are inspected from the same effective route table.
 Run framework tests.
 
 - default: equivalent to `--all`
+
+### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
+
+Build and run the current app's own XCTest tests (`tests/**/*.m`), in process,
+through `tools/run_app_tests.sh`:
+
+- builds the app as `boomhauer` does, then `boomhauer --build-tests` links the
+  app's objects and tests into `.boomhauer/build/tests/AppTests.xctest`
+- the file defining `main` is recompiled with `main` renamed so the test client
+  can capture the app's route registration; app code needs no changes
+- runs the framework's vendored `xctest` (built on first use), else `xctest`
+  from `PATH`, with an isolated GNUstep defaults home under `.boomhauer/test-home`
+- `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`
+- exit status is the runner's: non-zero when any test fails
+- GNUstep on Linux only for now
+
+See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 ### `arlen perf`
 
@@ -816,6 +891,10 @@ Load and print merged runtime config.
 - `--json`: deterministic pretty JSON output (sorted keys when runtime supports `NSJSONWritingSortedKeys`)
 
 ## `boomhauer` Script (`bin/boomhauer`)
+
+The HTTP runtime transmits repeated response headers as separate lines, including
+multiple cookies on GET and HEAD responses. See [Response Headers](RESPONSE_HEADERS.md)
+for the append API, session middleware behavior, and framing restrictions.
 
 Usage:
 
@@ -1093,6 +1172,7 @@ Lifecycle diagnostics:
  - use the vendored patched runner by default so Apple-style `-only-testing`
  / `-skip-testing` arguments work before the system package catches up
  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+- `make ci-durable-jobs`: isolated PostgreSQL/XCTest acceptance for concurrency, leases, crash/outage recovery, transactional enqueue, and durable results
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused pure-unit lanes that do not depend on `-only-testing`
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused live-backend lanes with explicit DSN/transport requirement logging
 - `make phase20-focused`: run the full focused lane set without relying on stock `xctest -only-testing`
@@ -1127,7 +1207,7 @@ Lifecycle diagnostics:
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and fault-injection checks
 - `make ci-sanitizers`: run the ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
 - `make ci-soak`: run the long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
-- `make ci-phase38-fd-regression`: run the opt-in FD regression evidence lane, preserving soak artifacts plus an FD summary under `build/release_confidence/phase38/fd_regression`
+- `make ci-fd-regression`: run the opt-in FD regression evidence lane, preserving soak artifacts plus an FD summary under `build/release_confidence/phase38/fd_regression`
 - `make ci-chaos-restart`: run the `propane` chaos/restart lane against the tech demo, warming the app build before manager startup with app-root-compatible framework flags and retaining manager stdout/stderr plus lifecycle artifacts under `build/release_confidence/phase10m/chaos_restart`
 - `make ci-fault-injection`: run the runtime seam fault-injection matrix and generate artifacts under `build/release_confidence/phase9i`
 - `make ci-release-certification`: run enterprise release checklist and generate certification artifacts under `build/release_confidence/phase9j`
@@ -1160,7 +1240,7 @@ Lifecycle diagnostics:
  - `ARLEN_PHASE9I_MODES` selects modes (`concurrent,serialized` by default)
  - `ARLEN_PHASE9I_SCENARIOS` selects optional scenario subset (comma-separated)
  - `ARLEN_PHASE9I_OUTPUT_DIR` overrides artifact output directory
-- `tools/ci/run_phase9j_release_certification.sh`: explicit release-certification gate entrypoint
+- `tools/ci/run_release_certification.sh`: explicit release-certification gate entrypoint
  - `ARLEN_PHASE9J_RELEASE_ID` sets the release-candidate id in generated pack metadata
  - `ARLEN_PHASE9J_OUTPUT_DIR` overrides artifact output directory
  - `ARLEN_PHASE9J_SKIP_GATES=1` skips gate execution and regenerates certification from existing artifacts
@@ -1218,7 +1298,7 @@ Lifecycle diagnostics:
 - `make deploy-smoke`: validate deployment runbook with automated release smoke
 - `tools/deploy/validate_operability.sh`: validate text/JSON health/readiness/metrics operability contracts against a running server
 - `make phase29-confidence`: fail-closed deploy confidence lane covering manifest-backed deploy flows plus reserved operability endpoint regression smoke
-- `make phase31-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
+- `make windows-confidence`: packaged release/deploy parity lane covering `deploy doctor --base-url`, packaged `jobs-worker --once`, and `.exe` helper fallback checks
 - `make phase32-confidence`: target-aware deploy lane covering remote rebuild gating, rollback/status deployment metadata, unsupported-target rejection, and the packaged `propane_handoff` contract
 - `tools/deploy/build_release.sh --dry-run --json`: emit deploy release planning payload for coding-agent automation
  - enforces certification manifest by default (`build/release_confidence/phase9j/manifest.json`)
@@ -1283,3 +1363,95 @@ Retry wrappers:
 DB-backed tests are skipped unless this environment variable is set:
 
 - `ARLEN_PG_TEST_DSN`: PostgreSQL connection string for migration/adapter tests
+
+## Optional MCP module
+
+`arlen module add mcp` vendors the optional MCP module; it remains disabled until
+`mcp.enabled = YES` and tool registrations are supplied. There is no automatic
+route export or consumer upgrade. From the framework checkout, `make mcp-example`
+builds the read-only example and `make mcp-check` runs focused unit and real HTTP
+checks. See [MCP Module](MCP_MODULE.md) for runtime configuration and protocol limits.
+
+## OAuth-protected MCP and REST
+
+Use the opt-in OAuth resource server and Entra preset for company API access.
+See the [configuration and administrator runbook](OAUTH_RESOURCE_SERVER.md) for a protected
+example, client preregistration, public discovery routes, and live acceptance
+requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
+fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
+
+For serialized request runtimes, configure `refreshOnRequest: false` and
+`preflightOnStart: true`, schedule key maintenance on an application worker, and
+wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
+framework tests require no tenant or public deployment.
+
+OAuth metadata requests use certificate-chain and hostname verification with a 256 KiB response
+limit, a five-second total deadline per document, and redirect/non-200 rejection.
+GNUstep uses a bounded libcurl transport (development headers/library with TLS
+and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
+on startup and maintenance threads without pumping application run-loop callbacks.
+Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
+not GNUstep TLS user defaults. Use a dedicated maintenance worker. Refresh errors distinguish discovery/JWKS
+fetch failures, metadata validation failures, and cooldown. Diagnostics omit
+URLs, credentials, response bodies, and custom loader error details.
+
+Multipart uploads use the application `requestLimits` policy. `ARLEN_MAX_BODY_BYTES` sets the total body cap; per-part limits require configuration. See [Multipart Uploads](MULTIPART_UPLOADS.md).
+
+`arlen config` normalizes all documented `requestLimits` values to JSON numbers,
+including multipart limits. Bare and quoted decimal plist values are supported.
+Invalid limits fail configuration loading with the offending key in the error.
+
+## HTTP and data client contracts
+
+Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
+redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
+The existing synchronous helper defaults remain unchanged. The result API uses
+libcurl on GNUstep and Apple; Apple custom builds must also link `-lcurl`.
+
+`ALNPg` date parameters preserve microseconds within the documented NSDate range;
+use explicit text casts for lossless values outside it. See
+[PostgreSQL timestamp precision](ARLEN_DATA.md#postgresql-timestamp-precision).
+Dataverse callers can configure retry eligibility and backoff inside the client's
+existing bounded loop; see [Custom retry policies](DATAVERSE.md#custom-retry-policies).
+
+## Static asset HTTP behavior
+
+The server automatically emits ETag and Last-Modified for static GET/HEAD,
+handles conditional requests with bodyless 304 responses, preserves HEAD
+representation length, and streams single byte ranges with 206 responses.
+If-None-Match takes precedence over If-Modified-Since. No application middleware
+or additional CLI option is needed. See [Static files](STATIC_FILES.md) for
+range limits, If-Range rules, validator strength, and regression commands.
+
+## Generated ORM runtime compatibility
+
+SQL models produced by `ALNORMCodegen` use thread-safe, once-only descriptor
+initialization. Upgrading the framework binary alone does not update generated
+`.m` files: rerun the application's model-generation step and rebuild. There is
+no new CLI flag or startup warm-up requirement. See
+[ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
+
+## Capturing JSON output
+
+For commands such as `arlen module migrate --json`, parse stdout as JSON and
+retain stderr separately for diagnostics. PostgreSQL can emit notices on stderr
+when an idempotent migration encounters an existing relation. Do not merge
+`2>&1` into the JSON input. Check the process exit status before consuming the
+payload.
+
+`module add ops` does not require installing jobs, notifications, storage, search,
+or auth. `boomhauer --prepare-only` can build these partial installations. Ops
+access checks still apply; see [Ops Module](OPS_MODULE.md).
+
+After `module add auth`, configure real OIDC providers and the resolver hook in
+`authModule`; provider login needs no separate CLI command. Updating an existing
+app requires updating its copied auth module sources/templates. See
+[Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
+
+Both `boomhauer` and `propane` use the same concurrent-safe security-header
+defaults. No new CLI option or propane accessory is required; see
+[Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
+
+`boomhauer` and `propane` need no new option or propane accessory for the
+libobjc2 first-use lock workaround; see
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).

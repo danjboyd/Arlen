@@ -40,9 +40,19 @@ write_summary() {
   python3 - "$staged_summary_path" "$status" "$exit_code" "$reason" "$log_path" <<'PY'
 import json
 import sys
+import re
+from pathlib import Path
 from datetime import datetime, timezone
 
 summary_path, status, exit_code, reason, log_path = sys.argv[1:]
+started = warnings = assertion_failures = 0
+runtime_probe_completed = False
+with Path(summary_path).with_name("tsan.log").open(errors="replace") as log:
+    for line in log:
+        started += len(re.findall(r"XCTest:\s+(test\w+)\.\.\.", line))
+        warnings += line.count("WARNING: ThreadSanitizer")
+        assertion_failures += line.count("Assertion FAILED")
+        runtime_probe_completed |= "ci: tsan runtime probe complete" in line
 payload = {
     "version": "phase9h-tsan-run-v1",
     "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -50,6 +60,12 @@ payload = {
     "exit_code": int(exit_code),
     "reason": reason,
     "log_path": log_path,
+    "unit_methods_started": started,
+    "sanitizer_warnings": warnings,
+    "unit_assertion_failures": assertion_failures,
+    "tsan_excluded_tests": [],
+    "runtime_probe_completed": runtime_probe_completed,
+    "coverage_note": "Method starts are reported; other service-dependent opt-in tests may return early.",
 }
 with open(summary_path, "w", encoding="utf-8") as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
@@ -68,9 +84,9 @@ fi
 
 tsan_so="$(clang -print-file-name=libtsan.so)"
 if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then
-  echo "ci: tsan experimental skipped (libtsan.so unavailable)" | tee -a "$staged_log_path"
-  write_summary "skipped" "0" "libtsan_unavailable"
-  exit 0
+  echo "ci: tsan experimental unavailable (libtsan.so missing)" | tee -a "$staged_log_path"
+  write_summary "unavailable" "77" "libtsan_unavailable"
+  exit 77
 fi
 
 tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer}"
@@ -99,6 +115,7 @@ set +e
   python3 ./tools/ci/runtime_concurrency_probe.py \
     --binary ./build/boomhauer \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}" || exit $?
+  echo "ci: tsan runtime probe complete"
 } 2>&1 | tee -a "$staged_log_path"
 tsan_rc=${PIPESTATUS[0]}
 set -e

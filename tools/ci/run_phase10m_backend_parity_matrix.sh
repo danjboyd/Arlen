@@ -11,7 +11,7 @@ json_fixtures_dir="${ARLEN_PHASE10M_JSON_FIXTURES_DIR:-tests/fixtures/performanc
 allow_fail="${ARLEN_PHASE10M_PARITY_ALLOW_FAIL:-0}"
 
 set +u
-source /usr/GNUstep/System/Library/Makefiles/GNUstep.sh
+source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 args=(
