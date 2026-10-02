@@ -380,6 +380,10 @@ For a serialized runtime, the recommended configuration is:
 ```
 
 These keys belong inside the existing OAuth resource-server configuration.
+In an old-style plist (`app.plist`), write them as usual: `jwksMaxAgeSeconds =
+300;` and `refreshOnRequest = NO;` arrive as strings and are accepted. Numbers
+must be plain digits and booleans `YES`/`NO` or `true`/`false`; anything else
+is still a configuration error.
 `preflightOnStart` defaults to false and `refreshOnRequest` defaults to true for
 compatibility. Preflight performs bounded discovery/JWKS retrieval before the
 application starts; failure prevents startup. It is not a sign-in compatibility
