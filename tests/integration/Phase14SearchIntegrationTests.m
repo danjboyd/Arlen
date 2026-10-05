@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 #import <stdlib.h>
 
 #import "ALNAdminUIModule.h"
@@ -263,9 +264,7 @@ static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase14SearchOrde
 }
 
 - (void)testSearchQueryAndReindexStatusSurfaceThroughAdminAndOps {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self application];
   [app addMiddleware:[[Phase14SearchAuthMiddleware alloc] init]];
   [self registerModulesForApplication:app];

@@ -1161,16 +1161,19 @@ Lifecycle diagnostics:
 - `make build-tests`: build unit + integration bundles through the incremental
  object/archive/template graph without running XCTest
 - `make test-unit` / `make test-integration`: run XCTest bundles with repo-local GNUstep defaults home (`.gnustep-home`)
- - default to the repo-local patched runner at
- `vendor/tools-xctest/obj/xctest` while GNUstep/tools-xctest PR 5 is pending
- upstream
+ - default to the vendored runner at `vendor/tools-xctest/obj/xctest` (a
+ tagged release of the maintained fork `danjboyd/tools-xctest`); test bundles
+ compile and link against the same vendored `libXCTest`
  - honor `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
  - honor `ARLEN_XCTEST` as the runner override
  - honor `ARLEN_XCTEST_LD_LIBRARY_PATH` when the selected runner needs a non-system `libXCTest`
+ - enforce a per-test time limit of `ARLEN_TEST_TIMEOUT` seconds (default `300`, `0` disables; optional `ARLEN_TEST_TIMEOUT_MAX` caps tests that raise their own allowance)
+ - write a JUnit report per run to `ARLEN_TEST_RESULTS_DIR` (default `test-results`; `ARLEN_TEST_JUNIT=0` disables), with failing tests' attachments beside it
+ - pass these runner options only with the vendored runner, or when `ARLEN_XCTEST_CI_ARGS=1` says the selected runner supports them
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
- - use the vendored patched runner by default so Apple-style `-only-testing`
- / `-skip-testing` arguments work before the system package catches up
+ - use the vendored runner by default so Apple-style `-only-testing`
+ / `-skip-testing` arguments work regardless of the host's packaged `xctest`
  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
 - `make ci-durable-jobs`: isolated PostgreSQL/XCTest acceptance for concurrency, leases, crash/outage recovery, transactional enqueue, and durable results
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused pure-unit lanes that do not depend on `-only-testing`

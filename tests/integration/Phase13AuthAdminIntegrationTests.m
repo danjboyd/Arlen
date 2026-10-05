@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -124,7 +125,18 @@
   return YES;
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSDictionary *result = ALNTestRunShellCaptureStreams(command);
   if (exitCode != NULL) {
     *exitCode = [result[@"status"] intValue];
@@ -473,9 +485,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthAndAdminModulesInstallMigrateAndServeSharedFlows {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1112,9 +1122,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthRegisterShowsActionableSetupGuidanceWhenModuleMigrationsAreMissing {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1224,9 +1232,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleHidesAndUnregistersDisabledProviderAffordances {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1355,9 +1361,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleHeadlessModeKeepsAPIAndProviderRoutesWhileSuppressingHTMLPages {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1486,9 +1490,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleFragmentsRenderInsideAppOwnedAccountSecurityPage {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1722,9 +1724,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleHidesSMSSurfacesWhenDisabledByDefault {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -1868,9 +1868,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleSupportsSMSFactorManagementAndKeepsTOTPPreferred {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -2196,9 +2194,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testAuthModuleModuleUIUsesAppLayoutHookAndPartialOverrides {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];
@@ -2372,9 +2368,7 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
 
 - (void)testGeneratedAppUIAuthPagesRenderAfterEjectScaffold {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *quotedRepoRoot = [self shellQuoted:repoRoot];

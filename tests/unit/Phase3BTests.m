@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <stdlib.h>
 
@@ -243,9 +244,7 @@
 
 - (void)testAdapterConformanceHarnessForPgAndGDL2CompatibilityAdapter {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *pg = [[ALNPg alloc] initWithConnectionString:dsn

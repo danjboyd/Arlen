@@ -1,15 +1,17 @@
 # CI Alignment
 
-Last updated: 2026-09-25
+Last updated: 2026-10-05
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
 
-CI checkouts must include submodules while Arlen carries the temporary
-`vendor/tools-xctest` runner. That submodule pins GNUstep/tools-xctest PR 5 for
-Apple-style `-only-testing` / `-skip-testing` support. Periodically check
-upstream `tools-xctest`; once that behavior is available upstream, remove the
-submodule and switch the default runner back to upstream `xctest`.
+CI checkouts must include submodules. `vendor/tools-xctest` pins a tagged
+release of `danjboyd/tools-xctest`, the maintained fork of the dormant
+GNUstep/tools-xctest. It is Arlen's canonical GNUstep XCTest runner: test
+bundles compile against its headers, link its `libXCTest`, and run under its
+`xctest`, so CI does not depend on the runner host's packaged `tools-xctest`
+version. If upstream becomes active again, merging the fork back may be
+considered; until then the fork is the contract.
 
 Arlen also vendors `gnustep-cli-new` at `vendor/gnustep-cli-new` 
 platform-runner standardization. This pin records the exact Windows
@@ -153,6 +155,17 @@ The current workflow policy is:
  on rerunning the entire lane
 - timeouts are explicit so hung jobs fail as infrastructure/tooling signals
  instead of lingering indefinitely
+- every XCTest run has a per-test time limit (`ARLEN_TEST_TIMEOUT`, default
+ 300 seconds), so a hung test fails by name long before the job timeout
+- every XCTest run writes a JUnit report under `test-results`;
+ `linux-quality`, `linux-sanitizers`, and `release-certification` publish a
+ summary of failed and skipped tests to the job page with
+ `tools/ci/junit_report.py` (failures also become annotations) and upload the
+ reports and failure attachments with their other artifacts
+- lanes that provision PostgreSQL fail if any test skipped for a missing
+ `ARLEN_PG_TEST_DSN`, so a broken database wiring cannot pass as green
+
+These are steps inside the existing jobs; no required check names change.
 
 This keeps required lanes focused on actionable failures and reduces stale
 runner churn.

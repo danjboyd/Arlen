@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 #import <dispatch/dispatch.h>
 
 #import "../ALNTestRequirements.h"
@@ -191,9 +192,7 @@
 
 // Issue #52: bounded wait for a released connection, same contract as ALNPg.
 - (void)testMSSQLAcquireTimeoutWaitsForReleaseAndOtherwiseFailsAsPoolExhausted {
-  if (![self requireMSSQLTransportForSelector:_cmd]) {
-    return;
-  }
+  XCTSkipUnless([self requireMSSQLTransportForSelector:_cmd], @"this build lacks ODBC transport support for MSSQL");
   NSError *error = nil;
   ALNMSSQL *pool = [[ALNMSSQL alloc]
       initWithConnectionString:@"Driver={Definitely Missing Driver};Server=localhost;Database=master;"
@@ -239,13 +238,9 @@
 }
 
 - (void)testMSSQLAdapterConformanceSuiteRunsWhenExplicitTestDSNIsProvided {
-  if (![self requireMSSQLTransportForSelector:_cmd]) {
-    return;
-  }
+  XCTSkipUnless([self requireMSSQLTransportForSelector:_cmd], @"this build lacks ODBC transport support for MSSQL");
   NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_MSSQL_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn
@@ -264,13 +259,9 @@
 }
 
 - (void)testMSSQLAdapterMaterializesTypedCommonScalarsWhenExplicitTestDSNIsProvided {
-  if (![self requireMSSQLTransportForSelector:_cmd]) {
-    return;
-  }
+  XCTSkipUnless([self requireMSSQLTransportForSelector:_cmd], @"this build lacks ODBC transport support for MSSQL");
   NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_MSSQL_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn
@@ -313,13 +304,9 @@
 }
 
 - (void)testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided {
-  if (![self requireMSSQLTransportForSelector:_cmd]) {
-    return;
-  }
+  XCTSkipUnless([self requireMSSQLTransportForSelector:_cmd], @"this build lacks ODBC transport support for MSSQL");
   NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_MSSQL_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn

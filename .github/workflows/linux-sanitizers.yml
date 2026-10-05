@@ -37,6 +37,11 @@ jobs:
         run: |
           bash ./tools/ci/run_linux_sanitizer_matrix.sh
 
+      - name: Summarize XCTest results
+        if: always()
+        run: |
+          python3 ./tools/ci/junit_report.py test-results --title "linux-sanitizers XCTest results"
+
       - name: Upload sanitizer confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
@@ -52,6 +57,7 @@ jobs:
             build/release_confidence/phase10m/chaos_restart/**
             build/release_confidence/phase10m/static_analysis/**
             build/sanitizers/phase10m_thread_race/**
+            test-results/**
           if-no-files-found: warn
 
   thread-race-nightly:

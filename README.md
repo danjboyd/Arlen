@@ -210,15 +210,21 @@ Prerequisites:
 - clang-built GNUstep toolchain installed
 - `tools-xctest` installed (provides `xctest`)
 - initialized submodules (`git submodule update --init --recursive`) so the
-  repo-local patched `vendor/tools-xctest` runner and the pinned
+  vendored `vendor/tools-xctest` runner and the pinned
   `vendor/gnustep-cli-new` Windows provisioning source are available
 
 Contributor test-runner default:
-- Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default while
-  GNUstep/tools-xctest PR 5 is pending upstream, so focused reruns such as
+- Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default (a tagged
+  release of the maintained fork `danjboyd/tools-xctest`), and test bundles
+  compile and link against that vendored `libXCTest`, so focused reruns such as
   `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
   honor Apple-style `-only-testing` filters
-- set `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
+- every run enforces a per-test time limit (`ARLEN_TEST_TIMEOUT`, default 300
+  seconds) and writes a JUnit report under `test-results/`; see
+  `docs/TESTING_WORKFLOW.md`
+- set `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest` and
+  system `libXCTest` (it must be the fork at the same release or newer, since
+  tests use fork features such as `XCTSkip` and per-test time limits)
 - set `ARLEN_XCTEST=/path/to/xctest` and, when needed,
   `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj` to test a
   different runner

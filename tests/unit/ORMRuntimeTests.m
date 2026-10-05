@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import "../shared/ALNDatabaseTestSupport.h"
 #import "../shared/ALNTestSupport.h"
@@ -1188,9 +1189,7 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
 
 - (void)testLivePostgresInsertHydratesGeneratedPrimaryKeyBeforeDependentWrites {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1329,7 +1328,7 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
 
 - (void)testLivePostgresQuotedIdentifiersCRUDCompositeKeysAndJoins {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn == nil) return;
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
   XCTAssertNotNil(database);
