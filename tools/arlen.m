@@ -3199,6 +3199,46 @@ static BOOL IsModuleInstalledAtAppRoot(NSString *appRoot, NSString *identifier, 
   return (ModuleLockEntryIndex(entries, identifier) >= 0);
 }
 
+// Copied module files keep the framework checkout's mtimes, which can be older
+// than the app's existing objects, so incremental builds would link stale module
+// code. Stamp every copied file with the install time.
+static BOOL TouchModuleTree(NSString *path, NSError **error) {
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSDictionary *attributes = @{ NSFileModificationDate : [NSDate date] };
+  for (NSString *relative in [fm enumeratorAtPath:path]) {
+    NSString *file = [path stringByAppendingPathComponent:relative];
+    NSDictionary *existing = [fm attributesOfItemAtPath:file error:NULL];
+    if (![existing[NSFileType] isEqual:NSFileTypeRegular]) {
+      continue;
+    }
+    if (![fm setAttributes:attributes ofItemAtPath:file error:error]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+// The app owns `enabled` and any keys Arlen does not manage; an upgrade only
+// moves the identifier, path, version and digest.
+static NSDictionary *ModuleLockEntryMergingExisting(NSDictionary *existing, NSDictionary *updated) {
+  if (![existing isKindOfClass:[NSDictionary class]]) {
+    return updated;
+  }
+  NSMutableDictionary *merged = [existing mutableCopy];
+  for (NSString *key in @[ @"identifier", @"path", @"version" ]) {
+    merged[key] = updated[key];
+  }
+  if (updated[@"contentDigest"] != nil) {
+    merged[@"contentDigest"] = updated[@"contentDigest"];
+  } else {
+    [merged removeObjectForKey:@"contentDigest"];
+  }
+  if (merged[@"enabled"] == nil) {
+    merged[@"enabled"] = updated[@"enabled"];
+  }
+  return merged;
+}
+
 static NSDictionary *ModuleLockEntryForDefinition(ALNModuleDefinition *definition,
                                                   NSString *relativePath,
                                                   NSString *contentDigest) {
@@ -10031,7 +10071,7 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
       fprintf(stderr, "arlen module: %s\n", [[error localizedDescription] UTF8String]);
       return 1;
     }
-    if (!CopyDirectoryTree(sourcePath, destinationPath, &error)) {
+    if (!CopyDirectoryTree(sourcePath, destinationPath, &error) || !TouchModuleTree(destinationPath, &error)) {
       if (asJSON) {
         return EmitMachineError(@"module", upgradeMode ? @"upgrade" : @"add",
                                 @"module_copy_failed",
@@ -10046,7 +10086,7 @@ static int CommandModuleAddOrUpgrade(NSArray *args, BOOL upgradeMode) {
 
   NSDictionary *lockEntry = ModuleLockEntryForDefinition(definition, relativeInstallPath, sourceDigest);
   if (existingIndex >= 0) {
-    entries[(NSUInteger)existingIndex] = lockEntry;
+    entries[(NSUInteger)existingIndex] = ModuleLockEntryMergingExisting(entries[(NSUInteger)existingIndex], lockEntry);
   } else {
     [entries addObject:lockEntry];
   }

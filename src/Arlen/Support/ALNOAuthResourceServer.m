@@ -5,6 +5,7 @@
 #import "ALNJSONSerialization.h"
 #import "ALNLogger.h"
 #import "ALNSecurityPrimitives.h"
+#import "ALNPositiveInteger.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRequest.h"
@@ -49,6 +50,22 @@ static BOOL Path(NSString *path) {
 static BOOL Number(id x) {
   return [x isKindOfClass:[NSNumber class]] && strcmp([x objCType], @encode(BOOL)) != 0 && isfinite([x doubleValue]);
 }
+// Old-style plists deliver bare numbers and YES/NO as strings. Convert the forms
+// a plist can produce and leave anything else for validation to reject.
+static void NormalizePlistValues(NSMutableDictionary *c) {
+  for (NSString *key in @[@"jwksMaxAgeSeconds", @"refreshCooldownSeconds"]) {
+    if ([c[key] isKindOfClass:[NSString class]]) {
+      NSNumber *number = ALNPositiveInteger(c[key]);
+      if (number) c[key] = number;
+    }
+  }
+  for (NSString *key in @[@"refreshOnRequest", @"preflightOnStart", @"allowApplicationPermissions"]) {
+    if (![c[key] isKindOfClass:[NSString class]]) continue;
+    NSString *text = [[c[key] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([@[@"yes", @"true"] containsObject:text]) c[key] = @YES;
+    else if ([@[@"no", @"false"] containsObject:text]) c[key] = @NO;
+  }
+}
 static NSDictionary *Part(NSString *part) {
   NSData *data = ALNDataFromBase64URLString(part);
   id value = data ? [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
@@ -83,6 +100,7 @@ static NSDictionary *Part(NSString *part) {
   if (!(self = [super init])) return nil;
   if (!D(configuration)) return Fail(error, @"OAuth configuration must be an object");
   NSMutableDictionary *c = [configuration mutableCopy];
+  NormalizePlistValues(c);
   for (NSString *key in @[@"issuer", @"discoveryURL", @"resourceURL", @"authorizationServer"]) if (!HTTPS(c[key])) return Fail(error, @"OAuth requires explicit trusted HTTPS issuer, discovery, resource and authorization server URLs");
   if (!S(c[@"audience"])) return Fail(error, @"OAuth audience is required");
   c[@"algorithms"] = c[@"algorithms"] ?: @[@"RS256"];

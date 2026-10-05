@@ -248,6 +248,82 @@
   return codes;
 }
 
+// GitHub issue 106: upgrade keeps the app's enabled flag and stamps copied files
+// with the install time, so incremental builds recompile them.
+- (void)testModuleUpgradeKeepsEnabledFlagAndStampsCopiedFiles {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-enabled-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"phase13-module-enabled-src"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"framework"];
+    NSString *source = [frameworkRoot stringByAppendingPathComponent:@"modules/alpha"];
+    NSString *sourceFile = [source stringByAppendingPathComponent:@"Sources/AlphaModule.m"];
+    NSString *installedFile = [appRoot stringByAppendingPathComponent:@"modules/alpha/Sources/AlphaModule.m"];
+    NSString *lockPath = [appRoot stringByAppendingPathComponent:@"config/modules.plist"];
+    XCTAssertTrue([self writeFile:[source stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 1\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    NSString *output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+                                                                                                ALNTestShellQuote(source)]
+                                                              appRoot:appRoot
+                                                             repoRoot:repoRoot
+                                                        frameworkRoot:frameworkRoot]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+
+    // The app disables the module, as InvitoContext does for mcp.
+    NSMutableDictionary *lock = [[NSDictionary dictionaryWithContentsOfFile:lockPath] mutableCopy];
+    NSMutableArray *modules = [lock[@"modules"] mutableCopy];
+    NSMutableDictionary *alpha = [modules[0] mutableCopy];
+    alpha[@"enabled"] = @"0";
+    modules[0] = alpha;
+    lock[@"modules"] = modules;
+    XCTAssertTrue([lock writeToFile:lockPath atomically:YES]);
+
+    // A newer release whose files carry an old checkout mtime.
+    XCTAssertTrue([self writeFile:[source stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"2.0.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:sourceFile content:@"// release 2\n"]);
+    NSDate *old = [NSDate dateWithTimeIntervalSince1970:1577836800];  // 2020-01-01
+    for (NSString *file in @[ sourceFile, [source stringByAppendingPathComponent:@"module.plist"] ]) {
+      XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : old } ofItemAtPath:file error:NULL]);
+    }
+
+    NSDate *beforeUpgrade = [NSDate dateWithTimeIntervalSinceNow:-2];
+    output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"upgrade alpha --source %@ --json",
+                                                                                      ALNTestShellQuote(source)]
+                                                    appRoot:appRoot
+                                                   repoRoot:repoRoot
+                                              frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqualObjects(@"updated", [self parseJSONDictionary:output][@"status"], @"%@", output);
+
+    NSDictionary *upgraded = [NSDictionary dictionaryWithContentsOfFile:lockPath][@"modules"][0];
+    XCTAssertEqualObjects(@"2.0.0", upgraded[@"version"]);
+    XCTAssertFalse([upgraded[@"enabled"] boolValue], @"%@", upgraded);
+    XCTAssertEqualObjects(@"// release 2\n", [NSString stringWithContentsOfFile:installedFile encoding:NSUTF8StringEncoding error:NULL]);
+    NSDate *installedAt = [[NSFileManager defaultManager] attributesOfItemAtPath:installedFile error:NULL][NSFileModificationDate];
+    XCTAssertTrue([installedAt compare:beforeUpgrade] != NSOrderedAscending, @"%@ vs %@", installedAt, beforeUpgrade);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testModuleUpgradeDetectsSameVersionContentChanges {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-digest-app"];

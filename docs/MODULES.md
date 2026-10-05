@@ -117,6 +117,10 @@ compares file contents:
   the command exits 1 with `content_differs` and lists the differing files;
   review them, then re-run with `--force`
 
+An upgrade keeps the app's own settings in the lock entry, such as `enabled =
+0`, and stamps the copied files with the install time so the next incremental
+build recompiles them.
+
 Before Arlen recorded `contentDigest`, `module upgrade` reported `noop` whenever
 the version matched, even when the module sources had changed. Apps that
 vendored modules and upgraded that way may still carry old module code; run
@@ -219,6 +223,8 @@ hook).
 send step-up there.
 `auth` moved to `1.5.0` for provider `assurance` mapping from `amr`/`acr`
 (GitHub issue 98).
+`mcp` moved to `1.0.2` so a disabled module stays inert at startup (GitHub issue
+105).
 
 ## MCP tools
 

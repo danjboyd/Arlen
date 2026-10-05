@@ -225,6 +225,10 @@ static NSString *Encode(NSString *value) {
 }
 - (BOOL)applicationWillStart:(ALNApplication *)application error:(NSError **)error {
   if (self.registrationError) { if (error) *error = self.registrationError; return NO; }
+  // The module system registers every loaded module as a lifecycle hook, so this
+  // runs even when mcp.enabled is NO and registration returned before setting a
+  // path. A module that did not install is inert.
+  if (!self.installed) return YES;
   NSMutableSet *routeNames = [NSMutableSet set];
   for (ALNRoute *route in [application.router allRoutes]) {
     BOOL reserved = [route.pathPattern isEqual:self.path] || [route.pathPattern hasPrefix:[self.path stringByAppendingString:@"/"]];

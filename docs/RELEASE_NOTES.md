@@ -2,6 +2,21 @@
 
 ## Upcoming Release Candidate
 
+- The MCP module no longer crashes the app at startup when it is loaded but
+  `mcp.enabled` is NO; a module that did not install is inert. The `mcp` module
+  moves to `1.0.2` (GitHub issue 105).
+
+- `arlen module upgrade` keeps the app's settings in the module lock entry
+  instead of resetting `enabled` to YES, and stamps the copied files with the
+  install time so incremental builds no longer link stale module objects
+  (GitHub issue 106). See [CLI reference](CLI_REFERENCE.md).
+
+- `ALNOAuthResourceServer` accepts old-style plist string forms in its
+  configuration: digits for `jwksMaxAgeSeconds` and `refreshCooldownSeconds`,
+  and `YES`/`NO` or `true`/`false` for `refreshOnRequest`, `preflightOnStart`
+  and `allowApplicationPermissions`. This covers an `mcp.oauth` block in
+  `app.plist` (GitHub issue 107).
+
 - `ALNHTTPClient`, an outbound HTTP client for calling third-party APIs from app
   code. Every request and redirect hop must go to a host on an allowlist fixed
   at construction; each request has one total deadline and a response size
