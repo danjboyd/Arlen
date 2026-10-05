@@ -112,6 +112,19 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertNil(tools[0][@"inputSchema"][@"properties"][@"id"][@"source"]);
   XCTAssertEqualObjects((@[@"id"]), tools[0][@"inputSchema"][@"required"]);
 }
+// GitHub issue 105: the module system registers every loaded module as a
+// lifecycle hook, so a disabled module's applicationWillStart: still runs.
+- (void)testDisabledModuleIsInertWhenRegisteredAsALifecycleHook {
+  for (NSDictionary *mcp in @[ @{}, @{ @"enabled": @NO }, @{ @"enabled": @"NO", @"path": @"/tools" } ]) {
+    [self configure:@{ @"mcp": mcp }];
+    NSError *error = nil;
+    XCTAssertTrue([self.module registerWithApplication:self.app error:&error], @"%@ %@", mcp, error);
+    XCTAssertTrue([self.app registerLifecycleHook:self.module]);
+    XCTAssertTrue([self.app startWithError:&error], @"%@ %@", mcp, error);
+    XCTAssertEqual(404, [self send:@{} headers:nil method:@"POST" path:@"/mcp"].statusCode);
+    XCTAssertEqual(200, [self send:[NSData data] headers:nil method:@"GET" path:@"/unlisted"].statusCode);
+  }
+}
 - (void)testInitializationVersionNegotiationAndNotifications {
   [self routeTool]; [self install];
   NSDictionary *reply = [self rpc:@"initialize" params:@{@"protocolVersion":@"future", @"capabilities":@{@"sampling":@{}}, @"clientInfo":@{@"name":@"test", @"version":@"1"}} headers:@{@"mcp-protocol-version":@""}];
