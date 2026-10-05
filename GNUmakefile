@@ -720,8 +720,11 @@ build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 vendored-xctest: $(VENDORED_XCTEST)
 
-$(VENDORED_XCTEST):
->source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
+# Rebuild from clean whenever the submodule's sources change (a submodule bump
+# refreshes their mtimes), so a stale runner from an older pin is never reused.
+VENDORED_XCTEST_SOURCES := $(wildcard $(VENDORED_TOOLS_XCTEST_DIR)/GNUmakefile $(VENDORED_TOOLS_XCTEST_DIR)/main.m $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/*.[hm] $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/GNUmakefile*)
+$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)
+>source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
 
 test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck

@@ -225,6 +225,8 @@
   XCTAssertTrue([makefile containsString:@"XCTEST_COMPILE_FLAGS := -I$(VENDORED_TOOLS_XCTEST_DIR)"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_LINK_DIRS := -L$(VENDORED_XCTEST_LIB_DIR)"]);
   XCTAssertTrue([makefile containsString:@"$(XCTEST_LINKED_TEST_BINS): | $(XCTEST_RUNNER_PREREQ)"]);
+  // A submodule bump must rebuild the vendored runner rather than reuse a stale one.
+  XCTAssertTrue([makefile containsString:@"$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
