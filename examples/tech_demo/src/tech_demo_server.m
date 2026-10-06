@@ -624,6 +624,67 @@ static ALNApplication *BuildApplication(NSString *environment, NSString *appRoot
                       name:@"healthz"
            controllerClass:[HealthController class]
                     action:@"check"];
+
+  // Publish the JSON endpoints in /openapi.json so the docs UI at /openapi
+  // has operations to try.
+  NSError *routeError = nil;
+  BOOL configured = [app configureRouteNamed:@"tech_demo_api_catalog"
+                               requestSchema:nil
+                              responseSchema:@{
+                                @"type" : @"array",
+                                @"items" : @{
+                                  @"type" : @"object",
+                                  @"properties" : @{
+                                    @"id" : @{ @"type" : @"string" },
+                                    @"name" : @{ @"type" : @"string" },
+                                    @"price" : @{ @"type" : @"number" },
+                                  },
+                                  @"required" : @[ @"id", @"name", @"price" ]
+                                }
+                              }
+                                     summary:@"List catalog items"
+                                 operationID:@"techDemoCatalog"
+                                        tags:@[ @"tech-demo" ]
+                               requiredScopes:nil
+                                requiredRoles:nil
+                              includeInOpenAPI:YES
+                                        error:&routeError];
+  configured = configured &&
+               [app configureRouteNamed:@"tech_demo_api_summary"
+                          requestSchema:@{
+                            @"type" : @"object",
+                            @"properties" : @{
+                              @"view" : @{
+                                @"type" : @"string",
+                                @"source" : @"query",
+                                @"description" : @"Echoed back under query, e.g. full",
+                              },
+                            },
+                          }
+                         responseSchema:@{
+                           @"type" : @"object",
+                           @"properties" : @{
+                             @"ok" : @{ @"type" : @"boolean" },
+                             @"framework" : @{ @"type" : @"string" },
+                             @"server" : @{ @"type" : @"string" },
+                             @"path" : @{ @"type" : @"string" },
+                             @"query" : @{ @"type" : @"object" },
+                             @"remoteAddress" : @{ @"type" : @"string" },
+                           },
+                           @"required" : @[ @"ok", @"framework", @"server", @"path", @"query" ]
+                         }
+                                summary:@"Summarize the current request"
+                            operationID:@"techDemoSummary"
+                                   tags:@[ @"tech-demo" ]
+                          requiredScopes:nil
+                           requiredRoles:nil
+                         includeInOpenAPI:YES
+                                   error:&routeError];
+  if (!configured) {
+    fprintf(stderr, "tech-demo-server: failed configuring API routes: %s\n",
+            [[routeError localizedDescription] UTF8String]);
+    return nil;
+  }
   return app;
 }
 

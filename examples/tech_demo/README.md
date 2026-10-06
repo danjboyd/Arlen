@@ -60,6 +60,9 @@ This imports the POSIX networking headers plus the main Arlen framework headers.
   - implicit JSON from `NSArray`
 - `GET /tech-demo/api/summary?view=full`
   - implicit JSON from `NSDictionary`
+- `GET /openapi`
+  - interactive OpenAPI explorer; the two `/tech-demo/api/*` routes are
+    configured with response schemas and published in `/openapi.json`
 - `GET /static/tech_demo.css`
   - static asset served by `tech-demo-server` from `examples/tech_demo/public/`
 
@@ -70,6 +73,6 @@ It exercises the pieces needed for real apps:
 - route dispatch and controller actions
 - template rendering with first-class layouts, named slots, and partial collections
 - fragment-first live UI with keyed updates, region hydration, and runtime-served JS
-- implicit JSON API responses
+- implicit JSON API responses, with response contracts and OpenAPI docs
 - static asset serving in dev mode
 - request metadata and query handling

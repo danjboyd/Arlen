@@ -4462,6 +4462,15 @@
   XCTAssertTrue([body containsString:@"\"query\""]);
 }
 
+- (void)testTechDemoOpenAPIListsJSONEndpoints {
+  NSString *body = [self requestPath:@"/openapi.json"
+                        serverBinary:@"./build/tech-demo-server"
+                           envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
+  XCTAssertTrue([body containsString:@"\"/tech-demo/api/catalog\""]);
+  XCTAssertTrue([body containsString:@"\"/tech-demo/api/summary\""]);
+  XCTAssertTrue([body containsString:@"techDemoSummary"]);
+}
+
 - (void)testAPIReferenceAppStatusAndSwaggerDocs {
   NSString *statusBody = [self requestPath:@"/api/reference/status"
                               serverBinary:@"./build/api-reference-server"
