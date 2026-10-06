@@ -14,7 +14,9 @@ being tracked here.
   works under the default `default-src 'self'` Content-Security-Policy. Its
   pages previously used inline style and script, which the default policy
   blocked, leaving the explorer unstyled with an empty operation list. The CSS
-  and JS are now served from `/openapi/assets/*` (GitHub issue 121).
+  and JS are now served from `/openapi/assets/*` (GitHub issue 121). The
+  development exception page likewise loads its stylesheet from
+  `/arlen/dev-error.css` instead of an inline `<style>` block.
 
 - Arlen is now licensed under LGPL-2.1-or-later. The previous grant (LGPL-2.0,
   version 2 or any later version) already allowed this; `LICENSE` now carries

@@ -2479,6 +2479,18 @@ static NSString *ALNOpenAPIDocsUIStyle(ALNApplication *application) {
   return style;
 }
 
+// Served from /arlen/dev-error.css rather than inline so the page stays styled
+// under the default `default-src 'self'` CSP.
+static NSString *ALNDevelopmentErrorPageCSS(void) {
+  return @"body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}"
+         "h1{margin-top:0;}"
+         "pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}"
+         "code{background:#1b1b1b;padding:2px 4px;}"
+         "table{border-collapse:collapse;width:100%;}"
+         "td{border:1px solid #333;padding:6px;vertical-align:top;}"
+         ".muted{color:#aaa;}";
+}
+
 static NSString *ALNOpenAPIViewerCSS(void) {
   return @"body{font-family:Menlo,Consolas,monospace;padding:18px;background:#0f172a;color:#e2e8f0;}h1{margin-top:0;}pre{white-space:pre-wrap;background:#111827;padding:14px;border:1px solid #334155;border-radius:6px;}a{color:#38bdf8;}";
 }
@@ -3617,6 +3629,17 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
     return YES;
   }
 
+  if ([routePath isEqualToString:@"/arlen/dev-error.css"] ||
+      [requestPath isEqualToString:@"/arlen/dev-error.css"]) {
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:@"text/css; charset=utf-8"];
+    if (!headRequest) {
+      [response setTextBody:ALNDevelopmentErrorPageCSS()];
+    }
+    response.committed = YES;
+    return YES;
+  }
+
   if ([routePath isEqualToString:@"/arlen/live.js"] || [requestPath isEqualToString:@"/arlen/live.js"]) {
     response.statusCode = 200;
     [response setHeader:@"Content-Type" value:@"application/javascript; charset=utf-8"];
@@ -3751,7 +3774,7 @@ static NSString *ALNDevelopmentErrorPageHTML(NSString *requestID,
   NSMutableString *html = [NSMutableString string];
   [html appendString:@"<!doctype html><html><head><meta charset='utf-8'>"];
   [html appendString:@"<title>Arlen Development Exception</title>"];
-  [html appendString:@"<style>body{font-family:Menlo,Consolas,monospace;background:#111;color:#eee;padding:24px;}h1{margin-top:0;}pre{background:#1b1b1b;border:1px solid #333;padding:12px;overflow:auto;}code{background:#1b1b1b;padding:2px 4px;}table{border-collapse:collapse;width:100%;}td{border:1px solid #333;padding:6px;vertical-align:top;} .muted{color:#aaa;}</style>"];
+  [html appendString:@"<link rel='stylesheet' href='/arlen/dev-error.css'>"];
   [html appendString:@"</head><body>"];
   [html appendString:@"<h1>Arlen Development Exception</h1>"];
   [html appendFormat:@"<p><strong>Request ID:</strong> <code>%@</code></p>", ALNEscapeHTML(requestID)];

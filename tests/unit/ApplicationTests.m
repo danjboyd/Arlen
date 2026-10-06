@@ -1190,6 +1190,19 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
                                          encoding:NSUTF8StringEncoding];
   XCTAssertTrue([body containsString:@"Arlen Development Exception"]);
   XCTAssertTrue([body containsString:@"Request ID"]);
+  // The default CSP (`default-src 'self'`) blocks inline style, so the page
+  // links a same-origin stylesheet instead.
+  XCTAssertFalse([body containsString:@"<style"]);
+  XCTAssertTrue([body containsString:@"/arlen/dev-error.css"]);
+
+  ALNResponse *css = [app dispatchRequest:[self requestForPath:@"/arlen/dev-error.css"
+                                                    queryString:@""
+                                                        headers:@{}]];
+  XCTAssertEqual((NSInteger)200, css.statusCode);
+  XCTAssertEqualObjects(@"text/css; charset=utf-8", [css headerForName:@"Content-Type"]);
+  NSString *cssBody = [[NSString alloc] initWithData:css.bodyData
+                                            encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([cssBody containsString:@".muted{"]);
 }
 
 - (void)testPerformanceHeadersCanBeDisabled {
