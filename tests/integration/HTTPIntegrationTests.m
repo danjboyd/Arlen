@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -152,7 +153,18 @@
   return ALNTestGNUstepSourceCommandForRepoRoot(repoRoot);
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
   task.arguments = @[ @"-lc", command ];
@@ -4149,6 +4161,8 @@
 }
 
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
+  // Rebuilds framework artifacts; well past the lane default per-test limit.
+  ALNTestSetExecutionTimeAllowance(self, 900);
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-boomhauer-sanitized-override"];
   NSString *frameworkRoot = [self createTempDirectoryWithPrefix:@"arlen-framework-root"];

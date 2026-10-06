@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import "../shared/ALNTestSupport.h"
 
@@ -94,7 +95,18 @@
   return parsed;
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   return ALNTestRunShellCapture(command, exitCode);
 }
 
@@ -208,7 +220,13 @@
   XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -ldl"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_PLATFORM_LINK_LIBS := -lws2_32"]);
   XCTAssertTrue([makefile containsString:@"BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)"]);
-  XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest"]);
+  XCTAssertTrue([makefile containsString:@"XCTEST_LINK_LIBS := $(XCTEST_LINK_DIRS) $(BASE_LINK_LIBS) -lXCTest"]);
+  // Bundles compile against and link the vendored libXCTest the runner loads.
+  XCTAssertTrue([makefile containsString:@"XCTEST_COMPILE_FLAGS := -I$(VENDORED_TOOLS_XCTEST_DIR)"]);
+  XCTAssertTrue([makefile containsString:@"XCTEST_LINK_DIRS := -L$(VENDORED_XCTEST_LIB_DIR)"]);
+  XCTAssertTrue([makefile containsString:@"$(XCTEST_LINKED_TEST_BINS): | $(XCTEST_RUNNER_PREREQ)"]);
+  // A submodule bump must rebuild the vendored runner rather than reuse a stale one.
+  XCTAssertTrue([makefile containsString:@"$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
@@ -218,9 +236,16 @@
   XCTAssertTrue([makefile containsString:@"define xctest_runtime_env"]);
   XCTAssertTrue([makefile containsString:@"test-unit-filter: $(UNIT_TEST_BIN)"]);
   XCTAssertTrue([makefile containsString:@"test-integration-filter: $(INTEGRATION_TEST_BIN)"]);
-  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(UNIT_TEST_BUNDLE)"]);
-  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(INTEGRATION_TEST_BUNDLE)"]);
-  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"define xctest_run"]);
+  XCTAssertTrue([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(1) $(call xctest_ci_args,$(1))"]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_run,$(UNIT_TEST_BUNDLE))"]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_run,$(INTEGRATION_TEST_BUNDLE))"]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_run,$(BROWSER_ERROR_AUDIT_TEST_BUNDLE))"]);
+  // Every bundle run reports JUnit and enforces a per-test time limit.
+  XCTAssertFalse([makefile containsString:@"$(xctest_runtime_env) \"$(ARLEN_XCTEST)\" $(UNIT_TEST_BUNDLE)"]);
+  XCTAssertTrue([makefile containsString:@"ARLEN_TEST_TIMEOUT ?= 300"]);
+  XCTAssertTrue([makefile containsString:@"-junit-report \"$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml\""]);
+  XCTAssertTrue([makefile containsString:@"-default-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT))"]);
   XCTAssertTrue([makefile containsString:@"-only-testing:$(1)/$(strip $(TEST))"]);
   XCTAssertTrue([makefile containsString:@"-skip-testing:$(1)/$(strip $(SKIP_TEST))"]);
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
@@ -384,7 +409,10 @@
                                "POSTGRESQL_INCLUDE_FLAGS=$(POSTGRESQL_INCLUDE_FLAGS)|"
                                "ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|"
                                "FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS="
-                               "$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)"]);
+                               "$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)|"
+                               "XCTEST_COMPILE_FLAGS=$(XCTEST_COMPILE_FLAGS)"]);
+  XCTAssertTrue([makefile containsString:
+                              @"clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD"]);
   XCTAssertTrue([makefile containsString:
                               @"BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags."
                                "$(BUILD_FLAGS_SENTINEL_HASH)"]);

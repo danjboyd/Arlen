@@ -178,8 +178,9 @@ If CI migrates to a first-party source-built GNUstep toolchain, install it into 
 
 Optional contributor override:
 
-- Arlen vendors GNUstep/tools-xctest at `vendor/tools-xctest` and pins the
-  Apple-style filter patch from PR 5 until that support is available upstream
+- Arlen vendors the maintained fork `danjboyd/tools-xctest` (upstream
+  GNUstep/tools-xctest is dormant) at `vendor/tools-xctest`, pinned to a
+  release tag; test bundles compile and link against its `libXCTest`
 - `make test-unit`, `make test-integration`, and focused filter targets build
   and use `vendor/tools-xctest/obj/xctest` by default
 - set `ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest`

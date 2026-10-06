@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import "../shared/ALNDatabaseTestSupport.h"
 #import "../shared/ALNTestSupport.h"
@@ -21,7 +22,18 @@
       @"set ARLEN_PG_TEST_DSN to run PostgreSQL CLI integration coverage");
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSDictionary *result = ALNTestRunShellCaptureStreams(command);
   if (exitCode != NULL) {
     *exitCode = [result[@"status"] intValue];
@@ -109,9 +121,7 @@
 
 - (void)testArlenMigrateCommandAppliesPendingMigrations {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectory];
@@ -211,9 +221,7 @@
 
 - (void)testArlenSchemaCodegenGeneratesTypedHelpers {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectory];
@@ -380,9 +388,7 @@
 
 - (void)testArlenSchemaCodegenTypedContractsCompileAndDecodeDeterministically {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectory];
@@ -704,9 +710,7 @@
 
 - (void)testArlenMigrateCommandSupportsNamedDatabaseTargetsAndFailureRetry {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectory];
@@ -933,9 +937,7 @@
 
 - (void)testArlenSchemaCodegenSupportsNamedDatabaseTargets {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectory];
@@ -1074,9 +1076,7 @@
 
 - (void)testDatabaseRouterReadWriteRoutingAcrossLiveAdapters {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectory];

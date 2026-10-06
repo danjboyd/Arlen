@@ -1,5 +1,6 @@
 # GNUstep and general build output
 build/
+test-results/
 dist/
 obj/
 /obj*/

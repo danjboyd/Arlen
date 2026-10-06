@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <stdlib.h>
 
@@ -44,9 +45,7 @@
 }
 
 - (void)testDefaultMountConfigurationIsDeterministic {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:nil];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
@@ -64,9 +63,7 @@
 }
 
 - (void)testHTMLAndJSONContractsReflectRoleAndStepUpRequirements {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{
       @"paths" : @{
