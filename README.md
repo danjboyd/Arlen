@@ -1,447 +1,187 @@
 # Arlen
 
+**A batteries-included web framework for Objective-C.**
+
 [![License: LGPL-2.0-or-later](https://img.shields.io/badge/license-LGPL--2.0--or--later-blue.svg)](LICENSE)
 [![Linux Quality](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml/badge.svg?branch=main)](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml)
+![Platforms: Linux | macOS | Windows (preview)](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(preview)-lightgrey.svg)
 
-Arlen is a GNUstep-native Objective-C web framework with an MVC runtime, EOC templates (`.html.eoc`), and a developer server (`boomhauer`).
+Arlen is a free, open-source web framework for Objective-C. It runs natively on
+GNUstep (Linux) and the Apple runtime (macOS). It's in the spirit of
+Mojolicious and Rails: one coherent toolchain that takes you from
+`arlen new` to a supervised production deployment. You don't have to assemble
+an HTTP layer from a dozen unrelated libraries.
 
-Arlen is designed to solve the same class of problems as frameworks like
-Mojolicious while staying idiomatic to Objective-C/GNUstep conventions.
-
-The project is still young, but the core shipped surface is already real:
-server-rendered HTML and JSON app paths, OpenAPI output, first-party auth/admin
-/jobs/storage modules, [durable PostgreSQL jobs](docs/DURABLE_JOBS.md), a PostgreSQL-first data layer, realtime support, and a
-managed production runtime (`propane`). Linux with a clang-built GNUstep
-toolchain is the primary production target. macOS has a verified Apple-runtime
-path, and Windows `CLANG64` is currently a preview target.
+You get server-rendered HTML with compiled templates, JSON APIs with generated
+OpenAPI docs, a PostgreSQL-first data layer, and realtime WebSocket/SSE. Auth
+with passkeys and OIDC, admin and job dashboards, and a production process
+manager are first-party modules, not plugins you have to vet.
 
 ## Hello, Arlen
 
-What an Arlen app looks like — a controller and the EOC template it renders:
+A controller that serves an HTML page and a JSON endpoint:
 
 ```objc
-@interface HomeController : ALNController
-@end
-
 @implementation HomeController
+
+// GET / — render an EOC template inside the app layout
 - (id)index:(ALNContext *)ctx {
-  NSDictionary *viewContext = @{
-    @"pageTitle": @"Hello, Arlen",
-    @"items": @[@"controller dispatch", @"EOC templates", @"implicit JSON"]
-  };
-  [self renderTemplate:@"home/index" context:viewContext error:NULL];
+  [self renderTemplate:@"home/index"
+               context:@{ @"title" : @"Hello, Arlen",
+                          @"items" : @[ @"routing", @"templates", @"JSON" ] }
+                 error:NULL];
   return nil;
 }
+
+// GET /api/greet/:name — return a dictionary and Arlen renders JSON
+- (id)greet:(ALNContext *)ctx {
+  return @{ @"hello" : [self stringParamForName:@"name"] ?: @"world" };
+}
+
 @end
 ```
 
 ```html
 <%@ layout "layouts/main" %>
-<h1><%= $pageTitle %></h1>
+<h1><%= $title %></h1>
 <ul>
   <%@ render "partials/_item" collection:$items as:"item" %>
 </ul>
 ```
 
-That route is wired up for you by `arlen new MyApp`; the
-[First App Guide](docs/FIRST_APP_GUIDE.md) takes you from there.
-
-## Start Here
-
-**New to Arlen** — pick the path that matches your platform:
-
-- [First App Guide](docs/FIRST_APP_GUIDE.md) — the shortest full-app walkthrough.
-- [Getting Started](docs/GETTING_STARTED.md) — Linux/GNUstep evaluation path; the primary production target.
-- [Getting Started on macOS](docs/GETTING_STARTED_MACOS.md) — Apple-runtime path.
-- [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md) — pick a track by role or use case.
-
-**Building apps:**
-
-- [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md) — the long-form walkthrough.
-- [EOC Guide](docs/EOC_GUIDE.md) — server-rendered pages with EOC templates.
-- [Lite Mode Guide](docs/LITE_MODE_GUIDE.md) — single-file apps without scaffolding.
-
-**Full documentation:** the [Docs Index](docs/README.md) groups everything by intent (Building Apps, Modules, Data Layer, Operations and Deployment, Reference, Migration Guides, Examples).
-
-Static assets support automatic cache revalidation, HEAD metadata, and single
-byte ranges. See [Static files](docs/STATIC_FILES.md) for the HTTP contract.
-
-Generated SQL ORM models support safe concurrent first use of their descriptors;
-see the [regeneration guidance](docs/ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update) when upgrading existing generated code.
+EOC templates (`.html.eoc`) compile to Objective-C at build time. Output is
+HTML-escaped by default, and template errors report the file and line.
 
 ## Quick Start
 
-If you are evaluating Arlen on Linux/GNUstep, make sure you have:
-
-- a clang-built GNUstep toolchain
-- initialized submodules via `git submodule update --init --recursive`
-- `tools-xctest` available if you plan to run the full test suite
-
-Linux/GNUstep evaluation path:
+You need a **clang-built GNUstep toolchain** on Linux, or full Xcode plus
+Homebrew `openssl@3` on macOS. `arlen doctor` checks your setup and explains anything that's
+missing.
 
 ```bash
-source tools/source_gnustep_env.sh
+git clone --recursive https://github.com/danjboyd/Arlen.git
+cd Arlen
+source tools/source_gnustep_env.sh   # Linux; skip on macOS
 ./bin/arlen doctor
-make all
-./bin/test --smoke-only
-```
+make all                             # macOS: ./bin/build-apple
 
-macOS Apple-runtime path:
-
-```bash
-./bin/arlen doctor
-./bin/build-apple
-./bin/test --smoke-only
-```
-
-Create and run your first app:
-
-```bash
-mkdir -p ~/arlen-apps
-cd ~/arlen-apps
+# create and run an app
+mkdir -p ~/arlen-apps && cd ~/arlen-apps
 /path/to/Arlen/bin/arlen new MyApp
 cd MyApp
 /path/to/Arlen/bin/arlen boomhauer --port 3000
 ```
 
-Then open `http://127.0.0.1:3000/`.
+Open <http://127.0.0.1:3000/>. Then try `/healthz` and the interactive API
+explorer at `/openapi`.
 
-If you already use a managed GNUstep toolchain on Linux, you can source its
-env script first instead. The Arlen helper resolves `GNUSTEP_SH`,
-`GNUSTEP_MAKEFILES`, `gnustep-config`, and finally `/usr/GNUstep`. On macOS,
-use the Apple builder documented in `docs/GETTING_STARTED_MACOS.md`.
-For the current native Windows preview entry path and packaged-release
-contract, see `docs/WINDOWS_CLANG64.md`.
+Next, add a route:
 
-If `./bin/arlen doctor` fails, stop there and fix the reported GNUstep
-toolchain issue before expecting `make all` or app scaffolds to work.
+```bash
+/path/to/Arlen/bin/arlen generate endpoint Hello --route /hello --method GET --template
+```
 
-The default full scaffold gives you:
+Prefer a single file? `arlen new MyApp --lite` puts the controller, routes, and
+`main()` in one `app_lite.m` (see the [Lite Mode Guide](docs/LITE_MODE_GUIDE.md)).
 
-- `src/main.m`
-- `src/Controllers/HomeController.{h,m}`
-- `templates/layouts/main.html.eoc`
-- `templates/index.html.eoc`
-- `config/app.plist`
+## Start Here
+
+- **[First App Guide](docs/FIRST_APP_GUIDE.md)**: the shortest walkthrough to a real app.
+- [Getting Started (Linux)](docs/GETTING_STARTED.md) · [Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md) · [Windows CLANG64 preview](docs/WINDOWS_CLANG64.md)
+- [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md): HTML-first, API-first, or data-layer-first.
+- [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md): the long-form guide to building apps.
+- [EOC Template Guide](docs/EOC_GUIDE.md) · [Modules](docs/MODULES.md) · [Deployment](docs/DEPLOYMENT.md) · [API Reference](docs/API_REFERENCE.md)
+- **Coming from another framework?** See the guides for [Rails](docs/ARLEN_FOR_RAILS.md),
+  [Django](docs/ARLEN_FOR_DJANGO.md), [Laravel](docs/ARLEN_FOR_LARAVEL.md),
+  [Express/NestJS](docs/ARLEN_FOR_EXPRESS_NESTJS.md), [FastAPI](docs/ARLEN_FOR_FASTAPI.md),
+  and [Mojolicious](docs/ARLEN_FOR_MOJOLICIOUS.md).
+
+The [Docs Index](docs/README.md) organizes everything by what you're trying to do.
+
+## Features
+
+| | |
+|---|---|
+| **HTTP and MVC** | Routing with path params, controllers, middleware, sessions, CSRF, rate limiting, security headers, static files with caching and ranges, multipart uploads |
+| **Templates** | EOC (`.html.eoc`) compiled to Objective-C: layouts, partials, collection rendering, forms, auto-escaping, file/line diagnostics |
+| **JSON APIs** | Implicit JSON from controller return values, OpenAPI generation, interactive API explorer, JSON-first scaffolds, generated TypeScript clients and validators |
+| **Auth** | Passwords, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC login (including Microsoft Entra), OAuth resource server; headless, stock-UI, or ejected-UI modes |
+| **Data** | PostgreSQL-first migrations, schema codegen, typed SQL builder, optional ORM, MSSQL preview, Dataverse client and codegen |
+| **Realtime** | WebSocket, SSE, live HTML fragments with a built-in `live.js`, durable event streams with replay |
+| **Background work** | Durable PostgreSQL jobs with transactional enqueue, fenced leases, and crash recovery |
+| **First-party modules** | `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search` (PostgreSQL, Meilisearch, OpenSearch), plus an MCP server module |
+| **Tooling** | `arlen` CLI for scaffolding, generators, and module management; `arlen doctor`; in-process `ALNTestClient` for app tests |
+| **Runtime and deploy** | `boomhauer` dev server with rebuild-on-change; `propane` production manager with worker supervision and graceful reloads; `arlen deploy` with named targets over SSH |
+
+Adding a module takes one command:
+
+```bash
+arlen module add auth && arlen module migrate --env development
+```
 
 ## Why Arlen
 
-Arlen is for teams that want a batteries-included web framework in
-Objective-C/GNUstep instead of a thin HTTP layer plus a long list of unrelated
-libraries. The goal is to let you scaffold a real app, serve HTML or JSON, add
-auth and operational surfaces, work against a serious data layer, and ship with
-one coherent toolchain.
+- **Native Objective-C, end to end.** Your app is a compiled binary. You keep
+  Foundation, ARC, and the language you already know, with no interpreter or
+  VM underneath.
+- **One framework, not a parts list.** HTML, JSON, auth, jobs, admin, search,
+  realtime, and deployment are designed together and tested together.
+- **Explicit and deterministic.** Routes are registered in code, templates
+  compile to readable Objective-C, and generated code uses stable names. When
+  something breaks, the diagnostics point at a file and a line.
+- **Free software.** LGPL-2.0-or-later, the same license family as GNUstep
+  Base. You can build proprietary apps on Arlen.
 
-## Good Fit If
+**Arlen is probably not for you if** you need a large third-party plugin
+ecosystem today, sandboxed or untrusted templates (EOC templates are trusted
+code), or a GCC-built GNUstep stack.
 
-- you want to stay native to Objective-C and GNUstep for web work
-- you want one framework for server-rendered HTML, JSON APIs, or mixed apps
-- you want built-in modules for auth, admin, jobs, notifications, storage, ops, and search
-- you want first-party tooling for OpenAPI, migrations, schema/SQL codegen, and production runtime management
-- you prefer explicit, deterministic behavior over heavy convention or hidden magic
+## Examples
 
-## Probably Not A Fit If
+- [Basic App](examples/basic_app/README.md): the smallest app.
+- [API-First Reference](examples/api_reference/README.md): JSON endpoints and OpenAPI.
+- [Auth + Admin Demo](examples/auth_admin_demo/README.md): composing the auth and admin modules.
+- [Multi-Module Demo](examples/multi_module_demo/README.md): `admin-ui`, `search`, and `ops` together.
+- [React/TypeScript Reference](examples/react_typescript_reference/README.md): generated TypeScript contracts with a React frontend.
+- [Tech Demo](examples/tech_demo/README.md): the full tour, including live UI. Run `./bin/tech-demo` and open <http://127.0.0.1:3110/tech-demo>.
 
-- you need a large third-party ecosystem today
-- you need untrusted template execution or sandboxed template code; EOC templates are trusted code
-- you want a non-GNUstep stack or a generic GCC-oriented GNUstep setup
-- you want the smallest possible microframework and plan to assemble everything yourself
-
-## What Ships Today
-
-- `HTML-first and JSON-first paths`: EOC templates, layouts, partials, forms, controller rendering helpers, and API endpoints in the same app.
-- `API tooling`: OpenAPI generation, interactive docs, and JSON-first scaffolds.
-- `Auth and security`: sessions, CSRF, rate limiting, MFA, recovery codes, passkeys/WebAuthn, and OIDC/provider login.
-- `First-party modules`: `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, and `search`.
-- `Realtime and live UI`: WebSocket and SSE support, live fragment responses, built-in `/arlen/live.js`, keyed collection helpers, live regions, controller helpers for live updates/navigation, and a durable event-stream seam with append/replay/auth contracts plus websocket/SSE/poll integration.
-- `Data layer`: PostgreSQL-first migrations, schema codegen, typed SQL helpers, an optional SQL ORM foundation with quoted legacy identifier support, optional MSSQL support, and a runtime-inactive Dataverse Web API client/query/codegen surface.
-- `Runtime`: `boomhauer` for development and `propane` for production worker supervision, reloads, and cluster controls.
-- `Diagnostics and verification`: `arlen doctor`, build diagnostics, focused regression lanes, and live-backed integration coverage.
-
-## Notable Built-In Capabilities
-
-- interactive OpenAPI explorer and generated API docs
-- passkey/WebAuthn MFA and OIDC login flows
-- built-in admin, ops, storage, notifications, jobs, and search surfaces
-- WebSocket/SSE support plus production runtime management with `propane`
-- typed schema and SQL code generation rather than only raw SQL strings
-- Dataverse metadata/codegen and OData helpers without forcing Dataverse through the SQL adapter seam
-
-## Quick Evaluation Path
-
-- `5 minutes`: run the quick start, then hit `/`, `/healthz`, and `/openapi`.
-- `15 minutes`: add a second endpoint with `arlen generate endpoint Hello --route /hello --method GET --template` and see how the controller/template flow feels.
-- `30 minutes`: try a first-party module such as `auth`, or open one of the example apps listed below.
-
-## Example Apps
-
-- [Basic App Smoke Guide](examples/basic_app/README.md): smallest app-owned smoke path.
-- [API-First Reference App](examples/api_reference/README.md): JSON/OpenAPI-heavy reference surface.
-- [Dataverse Reference](examples/dataverse_reference/README.md): app-level Dataverse config, controller helpers, and codegen flow.
-- [Arlen ORM Reference](examples/arlen_orm_reference/README.md): optional SQL and Dataverse ORM reference surface.
-- [React/TypeScript Reference](examples/react_typescript_reference/README.md): descriptor-first React/TypeScript workspace showing generated validators, query contracts, module/resource metadata, and optional React helpers.
-- [Reference Server (TypeScript Integration)](examples/typescript_reference_server/README.md): live backend used by the generated TypeScript integration and React reference lanes.
-- [Auth + Admin Demo](examples/auth_admin_demo/README.md): modules, auth, and admin composition.
-- [Multi-Module Demo](examples/multi_module_demo/README.md): broader multi-module app surface (`admin-ui` + `search` + `ops`).
-- [Search Module Playbook](examples/search_module_playbook/README.md): scaffold-first path for app-owned search resources and engine swaps.
-- [Tech Demo](examples/tech_demo/README.md): larger end-to-end example with Arlen UI/runtime features, including `/tech-demo/live`.
+More examples, covering the ORM, Dataverse, search, and GSWeb migration, live in [`examples/`](examples/).
 
 ## Status
 
-For readers evaluating maturity: Arlen is young, but it is no longer a minimal
-scaffold.
+Arlen is young but no longer a sketch. The core framework, runtime, and all
+first-party modules ship and are covered by required Linux CI with sanitizer
+and docs lanes.
 
-- Core framework and runtime are complete through the current first-party scope: HTML/JSON request handling, EOC templates, data-layer fundamentals, auth/security hardening, realtime/event-stream support, and deployment/runtime management.
-- First-party modules (`auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search`) are shipping.
-- A public-release test confidence scaffold (acceptance harness, golden-render catalog, regression-intake enforcement) is in place.
-- Linux with clang-built GNUstep is the authoritative production baseline.
-- macOS has a verified Apple-runtime path.
-- Windows `CLANG64` is available as a preview path, not the primary production target.
-- A capability-level maturity snapshot lives in [docs/STATUS.md](docs/STATUS.md). Engineering history and milestone detail live under [docs/internal/](docs/internal/).
+| Platform | Status |
+|---|---|
+| Linux, clang-built GNUstep | **Production baseline.** This is the authoritative target. |
+| macOS, Apple runtime | Verified. Recommended for development on a Mac. |
+| Windows, CLANG64 | Preview. |
 
-## Requirements and Setup Details
+There are no tagged releases yet. Track `main` and read
+[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for changes. The capability-level
+maturity snapshot (shipped, preview, in flight) is in
+[docs/STATUS.md](docs/STATUS.md). Engineering history lives under
+[docs/internal/](docs/internal/).
 
-If you are evaluating Arlen rather than contributing to the framework itself,
-the quick start above plus the example apps and docs index are usually enough
-for a first pass. The rest of this section covers the more detailed local
-toolchain and contributor workflow.
+## Contributing
 
-Prerequisites:
-- clang-built GNUstep toolchain installed
-- `tools-xctest` installed (provides `xctest`)
-- initialized submodules (`git submodule update --init --recursive`) so the
-  repo-local patched `vendor/tools-xctest` runner and the pinned
-  `vendor/gnustep-cli-new` Windows provisioning source are available
-
-Contributor test-runner default:
-- Arlen builds and uses `vendor/tools-xctest/obj/xctest` by default while
-  GNUstep/tools-xctest PR 5 is pending upstream, so focused reruns such as
-  `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
-  honor Apple-style `-only-testing` filters
-- set `ARLEN_USE_VENDORED_XCTEST=0` to fall back to the system `xctest`
-- set `ARLEN_XCTEST=/path/to/xctest` and, when needed,
-  `ARLEN_XCTEST_LD_LIBRARY_PATH=/path/to/tools-xctest/XCTest/obj` to test a
-  different runner
-
-Initialize GNUstep in your shell:
-
-```bash
-source tools/source_gnustep_env.sh
-```
-
-Run bootstrap diagnostics before building:
-
-```bash
-./bin/arlen doctor
-```
-
-Contributor and CI notes:
-
-- [TSAN reliability investigation](docs/internal/TSAN_RELIABILITY_2026-09-21.md): restored test coverage, current GNUstep findings, and promotion criteria.
-- Arlen CI expects a clang-built GNUstep toolchain, not a generic GCC-oriented distro stack.
-- The workflow bootstrap entry point is `tools/ci/install_ci_dependencies.sh`.
-- The current documented required checks for `main` are `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.
-- Apple and Windows CI lanes are intentionally visible but non-required while
-  Linux/GNUstep remains the authoritative production baseline.
-- Release certification is intentionally isolated in
-  `release-certification / release-certification` instead of the merge gate.
-- Current self-hosted runners use `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled` with the clang-built GNUstep toolchain installed at `/usr/GNUstep`.
-- Local contributor shells can use `tools/source_gnustep_env.sh`, which also
-  supports managed toolchains that export `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
-- Use `ARLEN_CI_GNUSTEP_STRATEGY=apt` or `bootstrap` only when provisioning a runner that does not already carry that toolchain.
-
-Build framework tools and dev server:
-
-```bash
-make all
-```
-
-Build policy: Arlen enforces ARC across first-party Objective-C compile paths (`-fobjc-arc` required).
-`EXTRA_OBJC_FLAGS` is additive only and cannot disable ARC.
-Changing compile toggles or `EXTRA_OBJC_FLAGS` invalidates cached repo build artifacts so sanitizer-built tools are not silently reused in normal lanes.
-For app-root non-watch flows, `boomhauer --prepare-only` and `--print-routes`
-now preserve the underlying non-zero build exit status and write diagnostics to
-`.boomhauer/last_build_error.log` plus `.boomhauer/last_build_error.meta` so
-automation does not treat stale binaries as a successful prepare.
-
-Run the built-in development server:
-
-```bash
-./bin/boomhauer
-```
-
-Create and run your first app with the CLI:
-
-```bash
-mkdir -p ~/arlen-apps
-cd ~/arlen-apps
-/path/to/Arlen/bin/arlen new MyApp
-cd MyApp
-/path/to/Arlen/bin/arlen boomhauer --port 3000
-```
-
-Full-mode scaffolds now default to composition-first EOC:
-- `templates/layouts/main.html.eoc` owns the app shell
-- `templates/index.html.eoc` opts into that shell with `<%@ layout "layouts/main" %>`
-- `templates/partials/_nav.html.eoc` and `templates/partials/_feature.html.eoc` demonstrate partial includes and collection rendering
-
-Module quick path:
-
-```bash
-/path/to/Arlen/build/arlen module add auth
-/path/to/Arlen/build/arlen module add admin-ui
-/path/to/Arlen/build/arlen module add jobs
-/path/to/Arlen/build/arlen module add notifications
-/path/to/Arlen/build/arlen module add storage
-/path/to/Arlen/build/arlen module add ops
-/path/to/Arlen/build/arlen module add search
-/path/to/Arlen/build/arlen module doctor --json
-/path/to/Arlen/build/arlen module assets --output-dir build/module_assets
-/path/to/Arlen/build/arlen module migrate --env development
-```
-
-Run `module migrate --env <env>` before the first local `auth` registration or
-login attempt. Missing auth tables now surface an actionable module-migrate
-message instead of a generic database error.
-
-See `examples/multi_module_demo/README.md` for the canonical app-owned
-`admin-ui` + `search` + `ops` composition path on top of the first-party
-module stack.
-
-First-party module surfaces:
-- `auth` keeps `/auth/api/...` stable, now exposes explicit MFA `flow`/`mfa` JSON plus `/auth/api/mfa` factor discovery for headless clients, supports optional disabled-by-default SMS/Twilio Verify MFA, and lets apps choose `headless`, `module-ui`, or `generated-app-ui` ownership for `/auth/...`
-- `admin-ui` ships HTML under `/admin/...` and JSON under `/admin/api/...`
-- `jobs` ships protected HTML under `/jobs/...` and JSON under `/jobs/api/...`
-- `notifications` ships user HTML under `/notifications/...`, admin HTML under `/notifications/...`, and JSON under `/notifications/api/...`
-- `storage` ships protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed downloads under `/storage/api/download/:token`
-- `ops` ships protected HTML under `/ops/...` and JSON/OpenAPI under `/ops/api/...`
-- `search` ships public query HTML/JSON under `/search/...` and protected reindex routes under `/search/api/...`
-
-Auth UI ownership quick path:
-- `module-ui`: default stock auth pages with optional app layout/context hook
-- server-rendered EOC apps can now also embed coarse auth fragments such as the MFA enrollment/challenge/recovery panels inside app-owned pages
-- `headless`: set `authModule.ui.mode = "headless"` and use `/auth/api/...` from your SPA or native client
-- `generated-app-ui`: run `/path/to/Arlen/build/arlen module eject auth-ui --json` to scaffold `templates/auth/...`, `templates/auth/fragments/...`, factor-management pages, and `public/auth/auth.css` plus the local QR asset
-
-Run tests and quality gate:
-
-```bash
-./bin/test
-make check
-make ci-perf-smoke
-make ci-benchmark-contracts
-make ci-quality
-make ci-fault-injection
-make ci-release-certification
-make test-data-layer
-make browser-error-audit
-```
-
-
-Live PostgreSQL regression coverage for generated clients, migration JSON,
-search, and auth server cleanup runs in the required Linux quality gate.
-Contributors can run `bash tools/ci/run_postgres_regressions.sh`; see the
-[testing workflow](docs/TESTING_WORKFLOW.md#live-postgresql-regression-gate).
-
-The `GNUmakefile` exposes additional confidence lanes tied to historical
-milestone work (search the `Makefile` for `*-confidence` targets). Those lanes
-are intended for contributors validating specific subsystems and are not part
-of the standard quality gate above.
-
-`make ci-perf-smoke` is the lighter local/manual macro perf subset. The
-self-hosted quality workflow already runs the broader multi-profile macro perf
-matrix through `make ci-quality`, pinned to
-`tests/performance/baselines/iep-apt` on the current `iep-apt` runner.
-
-`make browser-error-audit` generates a browser-reviewable gallery of representative
-build/runtime error surfaces under `build/browser-error-audit/index.html`.
-
-Run the technology demo:
-
-```bash
-./bin/tech-demo
-```
-
-Then open `http://127.0.0.1:3110/tech-demo`.
-
-Run deployment smoke validation:
-
-```bash
-make deploy-smoke
-```
-
-## Documentation
-
-Start with the [Docs Index](docs/README.md).
-
-Best next reads for evaluation:
-
-- [First App Guide](docs/FIRST_APP_GUIDE.md)
-- [Getting Started](docs/GETTING_STARTED.md)
-- [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md)
-- [Response Headers and Multiple Cookies](docs/RESPONSE_HEADERS.md)
-- [Modules](docs/MODULES.md)
-- [Auth Module](docs/AUTH_MODULE.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md)
-- [Arlen for X Migration Guides](docs/ARLEN_FOR_X_INDEX.md)
-- [API Reference](docs/API_REFERENCE.md)
-
-Generate browser-friendly HTML docs:
-
-```bash
-make docs-api
-make docs-html
-make docs-serve
-```
-
-Open `build/docs/index.html` in a browser.
-
-For the broader guide set, examples, historical roadmap material, and specs,
-use [docs/README.md](docs/README.md) and [docs/STATUS.md](docs/STATUS.md).
-
-Optional integrations: [MCP tools over Streamable HTTP](docs/MCP_MODULE.md).
-
-HTTP integrations can use [received response details and redirect policies](docs/HTTP_CLIENT.md),
-[Dataverse retry policies](docs/DATAVERSE.md#custom-retry-policies), and
-[PostgreSQL microsecond round trips](docs/ARLEN_DATA.md#postgresql-timestamp-precision).
+Contributions are welcome: bug reports, small reproductions, doc fixes, and
+focused patches. [CONTRIBUTING.md](CONTRIBUTING.md) covers toolchain setup,
+the test and quality targets, and PR conventions. Report security issues
+privately through [SECURITY.md](SECURITY.md). This project follows a
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Naming
 
-- Development server: `boomhauer`
-- Production manager: `propane`
-- All `propane` settings are referred to as "propane accessories"
+Arlen and its tools are named after characters from *King of the Hill*:
+
+- `boomhauer` is the development server.
+- `propane` is the production manager. All of its settings are called "propane accessories."
 
 ## License
 
-Arlen is licensed under the GNU Lesser General Public License, version 2 or (at your option) any later version (LGPL-2.0-or-later), aligned with GNUstep Base library licensing.
-
-## OAuth-protected MCP and REST
-
-Use the opt-in OAuth resource server and Entra preset for company API access.
-See the [configuration and administrator runbook](docs/OAUTH_RESOURCE_SERVER.md) for a protected
-example, client preregistration, public discovery routes, and live acceptance
-requirements. `mcp.oauth` requires OAuth bearer credentials without HS256/session
-fallback; REST routes and MCP calls reuse Arlen scope, role, and application policies.
-
-For serialized request runtimes, configure `refreshOnRequest: false` and
-`preflightOnStart: true`, schedule key maintenance on an application worker, and
-wire `isReady` into private readiness. The OAuth runbook documents the tradeoff;
-framework tests require no tenant or public deployment.
-
-GNUstep OAuth metadata transport requires libcurl development files with TLS and
-asynchronous DNS (Debian/Ubuntu: `libcurl4-openssl-dev`). See the
-[getting-started guide](docs/GETTING_STARTED.md).
-
-Multipart forms provide ordered fields and binary uploads; see [Multipart Uploads](docs/MULTIPART_UPLOADS.md) for APIs and memory limits.
-
-The ops dashboard supports partial module installations; see [Ops Module](docs/OPS_MODULE.md).
-
-The auth module supports configurable OIDC browser login, including Entra, with
-application-owned identity resolution. See [OIDC setup](docs/AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
-
-Security-header defaults are safe on concurrent first requests; see
-[Response Headers](docs/RESPONSE_HEADERS.md#concurrent-security-headers).
-
-Framework locks are safe on concurrent first use under GNUstep libobjc2; see
-[Toolchain Matrix](docs/TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+Arlen is licensed under the GNU Lesser (Library) General Public License,
+version 2 or (at your option) any later version, matching GNUstep Base. See
+[LICENSE](LICENSE).

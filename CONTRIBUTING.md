@@ -62,6 +62,44 @@ For a single test method (XCTest filter syntax):
 make test-unit-filter TEST=PgTests/testReleaseConnectionDiscardsDeadButOpenConnection
 ```
 
+Other lanes reviewers may ask for: `make check`, `make ci-perf-smoke` (lighter
+local macro perf subset), `make ci-benchmark-contracts`,
+`make ci-fault-injection`, `make ci-release-certification`, `make deploy-smoke`,
+and `make browser-error-audit` (renders a gallery of build/runtime error pages
+under `build/browser-error-audit/index.html`). Live PostgreSQL regressions run
+with `bash tools/ci/run_postgres_regressions.sh`. The `GNUmakefile` also has
+subsystem `*-confidence` targets that aren't part of the standard gate.
+
+### Test runner
+
+The make targets build and use the vendored `vendor/tools-xctest` runner by
+default, so Apple-style `-only-testing` filters work. Set
+`ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest`, or
+`ARLEN_XCTEST=/path/to/xctest` (plus `ARLEN_XCTEST_LD_LIBRARY_PATH` if needed)
+to point at a different runner. See
+[`docs/TESTING_WORKFLOW.md`](docs/TESTING_WORKFLOW.md) and
+[`docs/TOOLCHAIN_MATRIX.md`](docs/TOOLCHAIN_MATRIX.md).
+
+### Build policy
+
+ARC (`-fobjc-arc`) is required on every first-party Objective-C compile path.
+`EXTRA_OBJC_FLAGS` can only add flags and can't disable ARC. Changing compile
+toggles or `EXTRA_OBJC_FLAGS` invalidates cached build artifacts, so
+sanitizer-built tools are never silently reused in normal lanes.
+
+### CI
+
+- Required checks on `main`: `linux-quality / quality-gate`,
+  `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.
+- Apple and Windows lanes run visibly but aren't required. Release
+  certification runs separately in `release-certification`.
+- CI expects a clang-built GNUstep toolchain at `/usr/GNUstep`. Runners use
+  `ARLEN_CI_GNUSTEP_STRATEGY=preinstalled`. Use `apt` or `bootstrap` only when
+  provisioning a fresh runner. The bootstrap entry point is
+  `tools/ci/install_ci_dependencies.sh`.
+- Lane details and branch-protection guidance are in
+  [`docs/CI_ALIGNMENT.md`](docs/CI_ALIGNMENT.md).
+
 ## Pull request conventions
 
 - **Branches**: short, descriptive, kebab-case. Prefixes used in this repo:
