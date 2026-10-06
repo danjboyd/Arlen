@@ -93,6 +93,10 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
   - `/openapi/viewer` (lightweight fallback)
   - `/openapi/swagger` (self-hosted swagger-style docs UI)
 - `openapi.docsUIStyle` controls `/openapi` rendering (`interactive`, `viewer`, or `swagger`).
+- The docs UI pages load their CSS and JS from `/openapi/assets/*` rather than
+  inline blocks, so they work under the default `default-src 'self'`
+  Content-Security-Policy. The assets follow the same `openapi.enabled` and
+  `openapi.docsUIEnabled` switches as the pages.
 
 ## 7. Realtime and Composition
 

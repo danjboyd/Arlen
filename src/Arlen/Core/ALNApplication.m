@@ -2479,44 +2479,27 @@ static NSString *ALNOpenAPIDocsUIStyle(ALNApplication *application) {
   return style;
 }
 
-static NSString *ALNOpenAPIBasicViewerHTML(void) {
-  return @"<!doctype html><html><head><meta charset='utf-8'>"
-         "<title>Arlen OpenAPI Viewer</title>"
-         "<style>body{font-family:Menlo,Consolas,monospace;padding:18px;background:#0f172a;color:#e2e8f0;}h1{margin-top:0;}pre{white-space:pre-wrap;background:#111827;padding:14px;border:1px solid #334155;border-radius:6px;}a{color:#38bdf8;}</style>"
-         "</head><body><h1>Arlen OpenAPI Viewer</h1>"
-         "<p>Spec source: <a href='/openapi.json'>/openapi.json</a> · <a href='/openapi'>Interactive explorer</a> · <a href='/openapi/swagger'>Swagger UI</a></p>"
-         "<pre id='spec'>Loading...</pre>"
-         "<script>fetch('/openapi.json').then(r=>r.json()).then(j=>{document.getElementById('spec').textContent=JSON.stringify(j,null,2);}).catch(e=>{document.getElementById('spec').textContent='Failed to load /openapi.json: '+e;});</script>"
-         "</body></html>";
+static NSString *ALNOpenAPIViewerCSS(void) {
+  return @"body{font-family:Menlo,Consolas,monospace;padding:18px;background:#0f172a;color:#e2e8f0;}h1{margin-top:0;}pre{white-space:pre-wrap;background:#111827;padding:14px;border:1px solid #334155;border-radius:6px;}a{color:#38bdf8;}";
 }
 
-static NSString *ALNOpenAPIInteractiveDocsHTML(void) {
-  return @"<!doctype html><html><head><meta charset='utf-8'>"
-         "<title>Arlen OpenAPI Explorer</title>"
-         "<style>"
-         "body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#0b1220;color:#e2e8f0;}"
+static NSString *ALNOpenAPIViewerJavaScript(void) {
+  return @"fetch('/openapi.json').then(r=>r.json()).then(j=>{document.getElementById('spec').textContent=JSON.stringify(j,null,2);}).catch(e=>{document.getElementById('spec').textContent='Failed to load /openapi.json: '+e;});";
+}
+
+static NSString *ALNOpenAPIExplorerCSS(void) {
+  return @"body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#0b1220;color:#e2e8f0;}"
          "header{padding:16px 22px;border-bottom:1px solid #1f2a44;background:#101a2d;}"
          "h1{margin:0;font-size:22px;}main{padding:18px;display:grid;gap:12px;max-width:960px;}"
          ".row{display:grid;gap:8px;}label{font-size:12px;color:#93a3c5;}"
          "select,input,textarea,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #2a3a5f;background:#0f172a;color:#e2e8f0;}"
          "button{background:#0ea5e9;border-color:#0284c7;color:#071226;font-weight:700;cursor:pointer;}"
          "button:hover{background:#38bdf8;}pre{margin:0;white-space:pre-wrap;background:#0f172a;border:1px solid #2a3a5f;border-radius:8px;padding:12px;}"
-         ".muted{color:#9fb0d0;font-size:13px;}a{color:#67e8f9;}#params .param{display:grid;gap:6px;margin-bottom:8px;}"
-         "</style></head><body>"
-         "<header><h1>Arlen OpenAPI Explorer</h1>"
-         "<div class='muted'>FastAPI-style try-it-out flow for generated OpenAPI specs.</div>"
-         "<div class='muted'><a href='/openapi.json'>Raw OpenAPI JSON</a> · <a href='/openapi/viewer'>Lightweight viewer</a> · <a href='/openapi/swagger'>Swagger UI</a></div>"
-         "</header>"
-         "<main>"
-         "<div class='row'><label for='operation'>Operation</label><select id='operation'></select></div>"
-         "<div id='operationMeta' class='muted'></div>"
-         "<div id='params' class='row'></div>"
-         "<div class='row'><label for='requestBody'>JSON Request Body (optional)</label><textarea id='requestBody' rows='8' placeholder='{\"example\":true}'></textarea></div>"
-         "<div><button id='tryBtn'>Try It Out</button></div>"
-         "<div class='row'><label>Response</label><pre id='response'>Select an operation and click Try It Out.</pre></div>"
-         "</main>"
-         "<script>"
-         "const opSelect=document.getElementById('operation');"
+         ".muted{color:#9fb0d0;font-size:13px;}a{color:#67e8f9;}#params .param{display:grid;gap:6px;margin-bottom:8px;}";
+}
+
+static NSString *ALNOpenAPIDocsJavaScript(void) {
+  return @"const opSelect=document.getElementById('operation');"
          "const opMeta=document.getElementById('operationMeta');"
          "const paramsRoot=document.getElementById('params');"
          "const reqBody=document.getElementById('requestBody');"
@@ -2556,16 +2539,11 @@ static NSString *ALNOpenAPIInteractiveDocsHTML(void) {
          "let resText='';try{const res=await fetch(url,init);const text=await res.text();resText='HTTP '+res.status+' '+res.statusText+'\\n\\n'+text;}"
          "catch(err){resText='Request failed: '+err;}responsePre.textContent=resText;}"
          "opSelect.addEventListener('change',renderSelection);tryBtn.addEventListener('click',tryOperation);"
-         "loadSpec().catch(err=>{responsePre.textContent='Failed to load /openapi.json: '+err;});"
-         "</script>"
-         "</body></html>";
+         "loadSpec().catch(err=>{responsePre.textContent='Failed to load /openapi.json: '+err;});";
 }
 
-static NSString *ALNOpenAPISwaggerDocsHTML(void) {
-  return @"<!doctype html><html><head><meta charset='utf-8'>"
-         "<title>Arlen Swagger UI</title>"
-         "<style>"
-         "body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f8fafc;color:#0f172a;}"
+static NSString *ALNOpenAPISwaggerCSS(void) {
+  return @"body{font-family:Arial,Helvetica,sans-serif;margin:0;background:#f8fafc;color:#0f172a;}"
          "header{padding:14px 20px;background:#0ea5e9;color:#06243a;box-shadow:0 1px 3px rgba(2,6,23,0.14);}"
          "h1{margin:0;font-size:24px;font-weight:700;}"
          ".sub{margin-top:4px;font-size:13px;color:#08314d;}"
@@ -2579,8 +2557,46 @@ static NSString *ALNOpenAPISwaggerDocsHTML(void) {
          "a{color:#0369a1;text-decoration:none;}a:hover{text-decoration:underline;}"
          "pre{margin:0;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;}"
          ".opmeta{font-size:13px;color:#475569;}"
-         "#params .param{display:grid;gap:6px;margin-bottom:8px;}"
-         "</style></head><body>"
+         "#params .param{display:grid;gap:6px;margin-bottom:8px;}";
+}
+
+static NSString *ALNOpenAPIBasicViewerHTML(void) {
+  return @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>Arlen OpenAPI Viewer</title>"
+         "<link rel='stylesheet' href='/openapi/assets/viewer.css'>"
+         "</head><body><h1>Arlen OpenAPI Viewer</h1>"
+         "<p>Spec source: <a href='/openapi.json'>/openapi.json</a> · <a href='/openapi'>Interactive explorer</a> · <a href='/openapi/swagger'>Swagger UI</a></p>"
+         "<pre id='spec'>Loading...</pre>"
+         "<script src='/openapi/assets/viewer.js'></script>"
+         "</body></html>";
+}
+
+static NSString *ALNOpenAPIInteractiveDocsHTML(void) {
+  return @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>Arlen OpenAPI Explorer</title>"
+         "<link rel='stylesheet' href='/openapi/assets/explorer.css'>"
+         "</head><body>"
+         "<header><h1>Arlen OpenAPI Explorer</h1>"
+         "<div class='muted'>FastAPI-style try-it-out flow for generated OpenAPI specs.</div>"
+         "<div class='muted'><a href='/openapi.json'>Raw OpenAPI JSON</a> · <a href='/openapi/viewer'>Lightweight viewer</a> · <a href='/openapi/swagger'>Swagger UI</a></div>"
+         "</header>"
+         "<main>"
+         "<div class='row'><label for='operation'>Operation</label><select id='operation'></select></div>"
+         "<div id='operationMeta' class='muted'></div>"
+         "<div id='params' class='row'></div>"
+         "<div class='row'><label for='requestBody'>JSON Request Body (optional)</label><textarea id='requestBody' rows='8' placeholder='{\"example\":true}'></textarea></div>"
+         "<div><button id='tryBtn'>Try It Out</button></div>"
+         "<div class='row'><label>Response</label><pre id='response'>Select an operation and click Try It Out.</pre></div>"
+         "</main>"
+         "<script src='/openapi/assets/docs.js'></script>"
+         "</body></html>";
+}
+
+static NSString *ALNOpenAPISwaggerDocsHTML(void) {
+  return @"<!doctype html><html><head><meta charset='utf-8'>"
+         "<title>Arlen Swagger UI</title>"
+         "<link rel='stylesheet' href='/openapi/assets/swagger.css'>"
+         "</head><body>"
          "<header><h1>Arlen Swagger UI</h1><div class='sub'>Self-hosted Swagger-style docs wired to generated /openapi.json.</div></header>"
          "<main>"
          "<div class='panel'><a href='/openapi.json'>Raw OpenAPI JSON</a> · <a href='/openapi'>Interactive explorer</a> · <a href='/openapi/viewer'>Lightweight viewer</a></div>"
@@ -2588,42 +2604,44 @@ static NSString *ALNOpenAPISwaggerDocsHTML(void) {
          "<div class='panel row'><label for='requestBody'>JSON Request Body (optional)</label><textarea id='requestBody' rows='8' placeholder='{\"example\":true}'></textarea><div><button id='tryBtn'>Try It Out</button></div></div>"
          "<div class='panel row'><label>Response</label><pre id='response'>Select an operation and click Try It Out.</pre></div>"
          "</main>"
-         "<script>"
-         "const opSelect=document.getElementById('operation');"
-         "const opMeta=document.getElementById('operationMeta');"
-         "const paramsRoot=document.getElementById('params');"
-         "const reqBody=document.getElementById('requestBody');"
-         "const responsePre=document.getElementById('response');"
-         "const tryBtn=document.getElementById('tryBtn');"
-         "let operations=[];"
-         "function clearParams(){while(paramsRoot.firstChild){paramsRoot.removeChild(paramsRoot.firstChild);}}"
-         "function selectedOp(){const idx=Number(opSelect.value||'-1');return (idx>=0&&idx<operations.length)?operations[idx]:null;}"
-         "function renderParams(op){clearParams();(op.parameters||[]).forEach((p,idx)=>{"
-         "const wrap=document.createElement('div');wrap.className='param';"
-         "const lbl=document.createElement('label');lbl.textContent=(p.in||'param')+': '+p.name+(p.required?' *':'');"
-         "const input=document.createElement('input');input.type='text';input.dataset.paramIndex=String(idx);input.placeholder=p.description||'';"
-         "wrap.appendChild(lbl);wrap.appendChild(input);paramsRoot.appendChild(wrap);});}"
-         "function renderSelection(){const op=selectedOp();if(!op){opMeta.textContent='';clearParams();return;}"
-         "opMeta.textContent=(op.summary||op.description||'')+' ['+op.method.toUpperCase()+' '+op.path+']';renderParams(op);}"
-         "function applyParams(op){let path=op.path;const query=[];const paramInputs=paramsRoot.querySelectorAll('input[data-param-index]');"
-         "paramInputs.forEach(input=>{const idx=Number(input.dataset.paramIndex);const def=op.parameters[idx]||{};const val=input.value||'';"
-         "if((def.in||'')==='path'){path=path.replace('{'+def.name+'}',encodeURIComponent(val));}"
-         "else if((def.in||'')==='query'&&val.length>0){query.push(encodeURIComponent(def.name)+'='+encodeURIComponent(val));}"
-         "});if(query.length>0){path+=(path.includes('?')?'&':'?')+query.join('&');}return path;}"
-         "async function loadSpec(){const res=await fetch('/openapi.json');if(!res.ok){throw new Error('HTTP '+res.status);}"
-         "const spec=await res.json();const paths=spec.paths||{};operations=[];"
-         "Object.keys(paths).sort().forEach(path=>{const item=paths[path]||{};Object.keys(item).forEach(method=>{const lower=method.toLowerCase();"
-         "if(!['get','post','put','patch','delete','head','options'].includes(lower)){return;}"
-         "const op=item[method]||{};operations.push({path,method:lower,summary:op.summary||'',description:op.description||'',parameters:op.parameters||[]});});});"
-         "opSelect.innerHTML='';operations.forEach((op,idx)=>{const opt=document.createElement('option');opt.value=String(idx);opt.textContent=op.method.toUpperCase()+' '+op.path+(op.summary?' - '+op.summary:'');opSelect.appendChild(opt);});"
-         "if(operations.length===0){responsePre.textContent='No operations found in /openapi.json';}renderSelection();}"
-         "async function tryOperation(){const op=selectedOp();if(!op){return;}const url=applyParams(op);const init={method:op.method.toUpperCase(),headers:{}};"
-         "const bodyRaw=reqBody.value.trim();if(bodyRaw.length>0&&op.method!=='get'&&op.method!=='head'){init.headers['Content-Type']='application/json';init.body=bodyRaw;}"
-         "let resText='';try{const res=await fetch(url,init);const text=await res.text();resText='HTTP '+res.status+' '+res.statusText+'\\n\\n'+text;}catch(err){resText='Request failed: '+err;}responsePre.textContent=resText;}"
-         "opSelect.addEventListener('change',renderSelection);tryBtn.addEventListener('click',tryOperation);"
-         "loadSpec().catch(err=>{responsePre.textContent='Failed to load /openapi.json: '+err;});"
-         "</script>"
+         "<script src='/openapi/assets/docs.js'></script>"
          "</body></html>";
+}
+
+// The docs UI pages load their CSS and JS from these same-origin assets rather
+// than inline blocks, so they work under the default `default-src 'self'` CSP.
+static BOOL ALNOpenAPIDocsAssetForPath(NSString *path,
+                                       NSString **contentType,
+                                       NSString **body) {
+  static NSString *const kCSS = @"text/css; charset=utf-8";
+  static NSString *const kJS = @"application/javascript; charset=utf-8";
+  NSString *type = nil;
+  NSString *text = nil;
+  if ([path isEqualToString:@"/openapi/assets/explorer.css"]) {
+    type = kCSS;
+    text = ALNOpenAPIExplorerCSS();
+  } else if ([path isEqualToString:@"/openapi/assets/swagger.css"]) {
+    type = kCSS;
+    text = ALNOpenAPISwaggerCSS();
+  } else if ([path isEqualToString:@"/openapi/assets/viewer.css"]) {
+    type = kCSS;
+    text = ALNOpenAPIViewerCSS();
+  } else if ([path isEqualToString:@"/openapi/assets/docs.js"]) {
+    type = kJS;
+    text = ALNOpenAPIDocsJavaScript();
+  } else if ([path isEqualToString:@"/openapi/assets/viewer.js"]) {
+    type = kJS;
+    text = ALNOpenAPIViewerJavaScript();
+  } else {
+    return NO;
+  }
+  if (contentType != NULL) {
+    *contentType = type;
+  }
+  if (body != NULL) {
+    *body = text;
+  }
+  return YES;
 }
 
 static void ALNRecordRequestMetrics(ALNApplication *application,
@@ -3662,6 +3680,22 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
       } else {
         [response setTextBody:ALNOpenAPIInteractiveDocsHTML()];
       }
+    }
+    response.committed = YES;
+    return YES;
+  }
+
+  NSString *assetContentType = nil;
+  NSString *assetBody = nil;
+  BOOL docsAssetPath =
+      ALNOpenAPIDocsAssetForPath(routePath, &assetContentType, &assetBody) ||
+      ALNOpenAPIDocsAssetForPath(requestPath, &assetContentType, &assetBody);
+  if (docsAssetPath && ALNOpenAPIEnabled(application) &&
+      ALNOpenAPIDocsUIEnabled(application)) {
+    response.statusCode = 200;
+    [response setHeader:@"Content-Type" value:assetContentType];
+    if (!headRequest) {
+      [response setTextBody:assetBody];
     }
     response.committed = YES;
     return YES;

@@ -10,6 +10,12 @@ First tagged release. [Status](STATUS.md) describes everything this release
 ships; the entries below are the changes made since release candidates started
 being tracked here.
 
+- The OpenAPI docs UI (`/openapi`, `/openapi/viewer`, `/openapi/swagger`)
+  works under the default `default-src 'self'` Content-Security-Policy. Its
+  pages previously used inline style and script, which the default policy
+  blocked, leaving the explorer unstyled with an empty operation list. The CSS
+  and JS are now served from `/openapi/assets/*` (GitHub issue 121).
+
 - Arlen is now licensed under LGPL-2.1-or-later. The previous grant (LGPL-2.0,
   version 2 or any later version) already allowed this; `LICENSE` now carries
   the unmodified LGPL-2.1 text so license scanners detect it.

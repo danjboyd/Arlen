@@ -492,6 +492,11 @@ Useful keys:
 
 Use route metadata plus these app-level keys to shape your generated API docs.
 
+The docs UI works under the default `securityHeaders.contentSecurityPolicy`
+(`default-src 'self'`): its pages load CSS and JS from `/openapi/assets/*`
+instead of inline blocks. If you set a stricter policy, keep `'self'` allowed
+for `style-src`, `script-src`, and `connect-src` on those routes.
+
 ## 9. Compatibility, Plugins, and Propane Accessories
 
 Other scaffolded sections:

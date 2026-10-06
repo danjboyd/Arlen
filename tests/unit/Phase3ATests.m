@@ -173,6 +173,28 @@ static NSInteger gPhase3APluginStopCount = 0;
   return parsed ?: @{};
 }
 
+// The default CSP (`default-src 'self'`) blocks inline style and script, so
+// the docs UI pages must load both from same-origin assets.
+- (void)assertNoInlineStyleOrScript:(NSString *)html {
+  XCTAssertFalse([html containsString:@"<style"], @"inline <style> in: %@", html);
+  XCTAssertFalse([html containsString:@"<script>"], @"inline <script> in: %@", html);
+}
+
+- (void)assertDocsAssetAtPath:(NSString *)path
+                        inApp:(ALNApplication *)app
+                  contentType:(NSString *)contentType
+                     contains:(NSString *)snippet {
+  ALNResponse *asset = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                               path:path
+                                                        queryString:@""
+                                                            headers:@{}]];
+  XCTAssertEqual((NSInteger)200, asset.statusCode, @"%@", path);
+  XCTAssertEqualObjects(contentType, [asset headerForName:@"Content-Type"], @"%@", path);
+  NSString *body = [[NSString alloc] initWithData:asset.bodyData
+                                         encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([body containsString:snippet], @"%@ missing %@", path, snippet);
+}
+
 - (ALNApplication *)buildAppWithPluginConfig:(BOOL)usePluginConfig {
   return [self buildAppWithPluginConfig:usePluginConfig docsStyle:nil];
 }
@@ -401,6 +423,9 @@ static NSInteger gPhase3APluginStopCount = 0;
                                               encoding:NSUTF8StringEncoding];
   XCTAssertTrue([docsBody containsString:@"Arlen OpenAPI Explorer"]);
   XCTAssertTrue([docsBody containsString:@"Try It Out"]);
+  XCTAssertTrue([docsBody containsString:@"/openapi/assets/explorer.css"]);
+  XCTAssertTrue([docsBody containsString:@"/openapi/assets/docs.js"]);
+  [self assertNoInlineStyleOrScript:docsBody];
 
   ALNResponse *viewer = [app dispatchRequest:[self requestWithMethod:@"GET"
                                                                 path:@"/openapi/viewer"
@@ -410,6 +435,31 @@ static NSInteger gPhase3APluginStopCount = 0;
   NSString *viewerBody = [[NSString alloc] initWithData:viewer.bodyData
                                                encoding:NSUTF8StringEncoding];
   XCTAssertTrue([viewerBody containsString:@"Arlen OpenAPI Viewer"]);
+  XCTAssertTrue([viewerBody containsString:@"/openapi/assets/viewer.css"]);
+  XCTAssertTrue([viewerBody containsString:@"/openapi/assets/viewer.js"]);
+  [self assertNoInlineStyleOrScript:viewerBody];
+
+  [self assertDocsAssetAtPath:@"/openapi/assets/explorer.css"
+                         inApp:app
+                   contentType:@"text/css; charset=utf-8"
+                      contains:@"#params .param"];
+  [self assertDocsAssetAtPath:@"/openapi/assets/docs.js"
+                         inApp:app
+                   contentType:@"application/javascript; charset=utf-8"
+                      contains:@"fetch('/openapi.json')"];
+  [self assertDocsAssetAtPath:@"/openapi/assets/viewer.css"
+                         inApp:app
+                   contentType:@"text/css; charset=utf-8"
+                      contains:@"pre{"];
+  [self assertDocsAssetAtPath:@"/openapi/assets/viewer.js"
+                         inApp:app
+                   contentType:@"application/javascript; charset=utf-8"
+                      contains:@"fetch('/openapi.json')"];
+  ALNResponse *missingAsset = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                      path:@"/openapi/assets/missing.js"
+                                                               queryString:@""
+                                                                   headers:@{}]];
+  XCTAssertEqual((NSInteger)404, missingAsset.statusCode);
 
   NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"phase3a-openapi.json"];
   NSError *exportError = nil;
@@ -432,7 +482,13 @@ static NSInteger gPhase3APluginStopCount = 0;
                                               encoding:NSUTF8StringEncoding];
   XCTAssertTrue([docsBody containsString:@"Arlen Swagger UI"]);
   XCTAssertTrue([docsBody containsString:@"Try It Out"]);
-  XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+  XCTAssertTrue([docsBody containsString:@"/openapi/assets/swagger.css"]);
+  XCTAssertTrue([docsBody containsString:@"/openapi/assets/docs.js"]);
+  [self assertNoInlineStyleOrScript:docsBody];
+  [self assertDocsAssetAtPath:@"/openapi/assets/swagger.css"
+                         inApp:app
+                   contentType:@"text/css; charset=utf-8"
+                      contains:@".panel{"];
 
   ALNResponse *swagger = [app dispatchRequest:[self requestWithMethod:@"GET"
                                                                  path:@"/openapi/swagger"
