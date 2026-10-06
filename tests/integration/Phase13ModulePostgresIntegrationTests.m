@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import "../shared/ALNDatabaseTestSupport.h"
 #import "../shared/ALNTestSupport.h"
@@ -34,7 +35,18 @@
   return YES;
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSDictionary *result = ALNTestRunShellCaptureStreams(command);
   if (exitCode != NULL) {
     *exitCode = [result[@"status"] intValue];
@@ -60,9 +72,7 @@
 
 - (void)testModuleMigrateAppliesAndUpgradesNamespacedMigrations {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-pg"];

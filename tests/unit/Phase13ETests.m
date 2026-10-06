@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <stdlib.h>
 #import <string.h>
@@ -230,7 +231,18 @@ static NSUInteger gPhase15UIContextCalls = 0;
   return result;
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/bash";
   task.arguments = @[ @"-lc", command ?: @"" ];
@@ -566,9 +578,7 @@ static NSUInteger gPhase15UIContextCalls = 0;
 }
 
 - (void)testDisabledProviderIsNotRegisteredAsRoute {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{
       @"providers" : @{
@@ -599,9 +609,7 @@ static ALNContext *ALNTestStandInContext(void) {
 /// An unvalidated `return_to` made every successful sign-in an open redirect.
 /// The post-login target must stay same-origin.
 - (void)testPostLoginRedirectRejectsOffOriginTargets_OPEN_REDIRECT {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
   }];
@@ -626,9 +634,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testPostLoginRedirectKeepsSameOriginTargets_OPEN_REDIRECT {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
   }];
@@ -644,9 +650,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testPostLoginRedirectFallsBackWhenTargetIsEmpty_OPEN_REDIRECT {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
   }];
@@ -661,9 +665,7 @@ static ALNContext *ALNTestStandInContext(void) {
 
 /// CR/LF in a redirect target is header splitting, not just an odd path.
 - (void)testPostLoginRedirectRejectsControlCharacters_OPEN_REDIRECT {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{ @"defaultRedirect" : @"/dashboard" },
   }];
@@ -677,9 +679,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testSMSRoutesAreNotRegisteredWhenSMSIsDisabled {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{}];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
@@ -700,9 +700,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testSMSRoutesRegisterWhenEnabled {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{
       @"mfa" : @{
@@ -730,9 +728,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testHeadlessModeDoesNotRegisterInteractiveHTMLRoutes {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"authModule" : @{
       @"ui" : @{
@@ -758,9 +754,7 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 - (void)testTrustedEmailClaimCreatesSessionAndDeliversReusableSignInEmail {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"csrf" : @{ @"enabled" : @NO },
   }];

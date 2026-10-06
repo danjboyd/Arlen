@@ -92,6 +92,42 @@ shutdown waits. A focused integration regression should fail with command, port,
 stdout/stderr, and process-status diagnostics rather than requiring an outer
 `timeout` wrapper to kill a hung test.
 
+### Test runner contract
+
+Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
+
+- **Per-test time limits.** Each test, including its set up and teardown, gets
+  `ARLEN_TEST_TIMEOUT` seconds (default `300`; `0` disables). A test that runs
+  out of time fails by name, the reports are finished, and the run stops. A test
+  that legitimately needs longer raises its own limit with
+  `ALNTestSetExecutionTimeAllowance(self, seconds)` from
+  `tests/ALNXCTestCompat.h`; `ARLEN_TEST_TIMEOUT_MAX` optionally caps those.
+- **JUnit reports.** Each run writes
+  `test-results/<Bundle>[--only-<filter>][--skip-<filter>].xml`
+  (`ARLEN_TEST_RESULTS_DIR` moves them; `ARLEN_TEST_JUNIT=0` turns them off).
+  They live outside `build/` because integration tests run `make clean`
+  mid-suite; each run replaces only its own report and attachments.
+  `python3 tools/ci/junit_report.py` summarizes them, and CI publishes the
+  summary to the job page and uploads the reports.
+- **Failure attachments.** Integration helpers that shell out
+  (`runShellCapture:exitCode:`) attach the command, exit status, and output to
+  the running test with `ALNTestAttachCommandOutput`. Attachments are kept only
+  for failing tests, under `test-results/<report>-attachments/`, and the
+  JUnit report links them.
+- **Skips, not silent passes.** A test that needs an external service
+  (`ARLEN_PG_TEST_DSN`, `ARLEN_MSSQL_TEST_DSN`, `ARLEN_REDIS_TEST_URL`, an ODBC
+  transport) calls `XCTSkipUnless(...)` instead of returning early, so the
+  result reads "skipped" rather than "passed". Lanes that provision PostgreSQL
+  (`run_postgres_regressions.sh`, `run_orm_identifier_regressions.sh`) run
+  `junit_report.py --fail-on-skip-matching ARLEN_PG_TEST_DSN` and fail if any
+  test skipped for want of the DSN they provided.
+
+Test bundles compile against and link the vendored `libXCTest`, so these
+features do not depend on the host's packaged `tools-xctest`. The Windows
+preview lane still builds against its toolchain's XCTest (issue #116);
+`tests/ALNXCTestCompat.h` keeps the shared helpers compiling there and falls
+back to the previous behavior.
+
 ## 1. Focused Lanes
 
 Use the smallest lane that honestly exercises the bug:

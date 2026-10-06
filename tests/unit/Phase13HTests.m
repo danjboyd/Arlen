@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
@@ -224,9 +225,7 @@ static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase13HOrderStor
 }
 
 - (void)testResourceRegistrationOrderAndMetadataStayDeterministic {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"adminUI" : @{
       @"resourceProviders" : @{
@@ -259,9 +258,7 @@ static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase13HOrderStor
 }
 
 - (void)testResourceActionAndPolicyHooksAreResolvedFromSameResourceDefinition {
-  if ([[self pgTestDSN] length] == 0) {
-    return;
-  }
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"adminUI" : @{
       @"resourceProviders" : @{

@@ -72,12 +72,15 @@ This repository is in early scaffold stage. Priority is delivering a stable v1 t
   `vendor/tools-xctest` runner through the make targets by default; do not use
   upstream/system `xctest` for focused testing unless explicitly validating the
   fallback path.
-- While GNUstep/tools-xctest PR 5 is pending upstream, Arlen vendors a patched
-  `tools-xctest` submodule for Apple-style `-only-testing` /
-  `-skip-testing` filter support. Periodically check upstream `tools-xctest`;
-  once the PR or equivalent behavior is incorporated in released upstream,
-  decommission the submodule and return the default runner path to upstream
-  `xctest` as-is.
+- Upstream GNUstep/tools-xctest is dormant, so Arlen's canonical runner is the
+  maintained fork at `https://github.com/danjboyd/tools-xctest`, vendored at
+  `vendor/tools-xctest` and pinned to a release tag. Test bundles compile
+  against, link, and run with that vendored `libXCTest` by default. Fork
+  features (Apple-style filters, `XCTSkip`, expectations, per-test time limits,
+  JUnit reports, attachments, `-list-tests`) may be used in tests and make
+  targets. Bump the submodule only to a tagged fork release. If upstream
+  becomes active again, consider merging the fork back; until then, do not plan
+  to return to upstream `xctest`.
 - Before running tests, initialize GNUstep tooling in the shell with `source /path/to/Arlen/tools/source_gnustep_env.sh` or source the active GNUstep toolchain env directly.
 - Keep test code XCTest-compatible to preserve a future path to Apple XCTest/macOS targets.
 

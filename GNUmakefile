@@ -69,15 +69,36 @@ VENDORED_TOOLS_XCTEST_DIR := $(ROOT_DIR)/vendor/tools-xctest
 VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
 VENDORED_XCTEST_LIB_DIR := $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/obj
 ARLEN_USE_VENDORED_XCTEST ?= 1
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+# Windows lanes still build against the toolchain's XCTest (see issue #116).
+ARLEN_USE_VENDORED_XCTEST := 0
+endif
 ifeq ($(ARLEN_USE_VENDORED_XCTEST),1)
 ARLEN_XCTEST ?= $(VENDORED_XCTEST)
 ARLEN_XCTEST_LD_LIBRARY_PATH ?= $(VENDORED_XCTEST_LIB_DIR)
 XCTEST_RUNNER_PREREQ := $(VENDORED_XCTEST)
+# Bundles compile against and link the same libXCTest that the runner loads.
+XCTEST_COMPILE_FLAGS := -I$(VENDORED_TOOLS_XCTEST_DIR)
+XCTEST_LINK_DIRS := -L$(VENDORED_XCTEST_LIB_DIR)
+# The fork's reporting and per-test time-limit options.
+ARLEN_XCTEST_CI_ARGS ?= 1
 else
 ARLEN_XCTEST ?= xctest
 ARLEN_XCTEST_LD_LIBRARY_PATH ?=
 XCTEST_RUNNER_PREREQ :=
+XCTEST_COMPILE_FLAGS :=
+XCTEST_LINK_DIRS :=
+ARLEN_XCTEST_CI_ARGS ?= 0
 endif
+# JUnit reports (with failure attachments beside them) land here, one per run.
+# Kept outside build/: the integration suite runs `make clean` mid-run.
+ARLEN_TEST_RESULTS_DIR ?= $(ROOT_DIR)/test-results
+ARLEN_TEST_JUNIT ?= 1
+# Per-test time limit in seconds (0 disables). A test that exceeds it fails by
+# name and the run stops; slow tests raise their own executionTimeAllowance.
+ARLEN_TEST_TIMEOUT ?= 300
+# Optional ceiling on any test's own executionTimeAllowance.
+ARLEN_TEST_TIMEOUT_MAX ?=
 TEST ?=
 SKIP_TEST ?=
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
@@ -182,7 +203,7 @@ FEATURE_FLAGS += -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1
 endif
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)
-BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|ARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)|POSTGRESQL_INCLUDE_FLAGS=$(POSTGRESQL_INCLUDE_FLAGS)|ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS=$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)
+BUILD_FLAGS_SENTINEL_INPUT := GNUSTEP_SH=$(GNUSTEP_SH)|ARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)|POSTGRESQL_INCLUDE_FLAGS=$(POSTGRESQL_INCLUDE_FLAGS)|ARC_REQUIRED_FLAG=$(ARC_REQUIRED_FLAG)|PIC_FLAG=$(PIC_FLAG)|FEATURE_FLAGS=$(FEATURE_FLAGS)|THIRD_PARTY_FEATURE_FLAGS=$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)|XCTEST_COMPILE_FLAGS=$(XCTEST_COMPILE_FLAGS)
 BUILD_FLAGS_SENTINEL_HASH := $(shell if command -v shasum >/dev/null 2>&1; then printf '%s\n' '$(BUILD_FLAGS_SENTINEL_INPUT)' | shasum -a 256 | awk '{print $$1}'; else printf '%s\n' '$(BUILD_FLAGS_SENTINEL_INPUT)' | sha256sum | awk '{print $$1}'; fi)
 BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags.$(BUILD_FLAGS_SENTINEL_HASH)
 ifneq ($(findstring -fno-objc-arc,$(EXTRA_OBJC_FLAGS)),)
@@ -206,7 +227,7 @@ ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 ARLEN_PLATFORM_LINK_LIBS := -lws2_32 -lbcrypt
 endif
 BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)
-XCTEST_LINK_LIBS := $(BASE_LINK_LIBS) -lXCTest
+XCTEST_LINK_LIBS := $(XCTEST_LINK_DIRS) $(BASE_LINK_LIBS) -lXCTest
 
 ROOT_TEMPLATE_MANIFEST := $(GEN_DIR)/manifest.json
 ROOT_TRANSPILE_STATE := $(GEN_DIR)/.transpile.state
@@ -252,6 +273,21 @@ endef
 
 define xctest_filter_args
 $(if $(strip $(TEST)),-only-testing:$(1)/$(strip $(TEST))) $(if $(strip $(SKIP_TEST)),-skip-testing:$(1)/$(strip $(SKIP_TEST)))
+endef
+
+# Report name for a run of bundle $(1); focused runs get their own report.
+define xctest_report_name
+$(basename $(notdir $(1)))$(if $(strip $(TEST)),--only-$(subst /,.,$(strip $(TEST))))$(if $(strip $(SKIP_TEST)),--skip-$(subst /,.,$(strip $(SKIP_TEST))))
+endef
+
+define xctest_ci_args
+$(if $(filter 1,$(ARLEN_XCTEST_CI_ARGS)),$(if $(filter 1,$(ARLEN_TEST_JUNIT)),-junit-report "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml") $(if $(filter-out 0,$(strip $(ARLEN_TEST_TIMEOUT))),-default-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT))) $(if $(strip $(ARLEN_TEST_TIMEOUT_MAX)),-maximum-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT_MAX))))
+endef
+
+# Runs xctest on bundle $(1) with the runtime environment and CI arguments;
+# callers append filter arguments.
+define xctest_run
+mkdir -p "$(ARLEN_TEST_RESULTS_DIR)" && rm -rf "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml" "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1))-attachments" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(1) $(call xctest_ci_args,$(1))
 endef
 
 define xctest_runtime_env
@@ -441,7 +477,7 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 
 $(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+>@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
 $(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
@@ -684,57 +720,60 @@ build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 
 vendored-xctest: $(VENDORED_XCTEST)
 
-$(VENDORED_XCTEST):
->source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
+# Rebuild from clean whenever the submodule's sources change (a submodule bump
+# refreshes their mtimes), so a stale runner from an older pin is never reused.
+VENDORED_XCTEST_SOURCES := $(wildcard $(VENDORED_TOOLS_XCTEST_DIR)/GNUmakefile $(VENDORED_TOOLS_XCTEST_DIR)/main.m $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/*.[hm] $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/GNUmakefile*)
+$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)
+>source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
 
 test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(UNIT_TEST_BUNDLE))
 
 test-unit-filter: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-unit-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(UNIT_TEST_BUNDLE) $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(UNIT_TEST_BUNDLE)) $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))
 
 test-integration: $(INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(INTEGRATION_TEST_BUNDLE))
 
 test-integration-filter: $(INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >if [ -z "$(strip $(TEST)$(SKIP_TEST))" ]; then echo "test-integration-filter: set TEST=TestClass[/testMethod] or SKIP_TEST=TestClass[/testMethod]" >&2; exit 2; fi
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(INTEGRATION_TEST_BUNDLE) $(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(INTEGRATION_TEST_BUNDLE)) $(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))
 
 browser-error-audit: $(BROWSER_ERROR_AUDIT_TEST_BIN) boomhauer $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" ARLEN_BROWSER_ERROR_AUDIT_OUTPUT_DIR="$(ROOT_DIR)/build/browser-error-audit" && $(call xctest_run,$(BROWSER_ERROR_AUDIT_TEST_BUNDLE))
 >@echo "browser-error-audit: open $(ROOT_DIR)/build/browser-error-audit/index.html"
 
 phase20-sql-builder-tests: $(PHASE20_SQL_BUILDER_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_SQL_BUILDER_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE20_SQL_BUILDER_TEST_BUNDLE))
 
 phase20-schema-tests: $(PHASE20_SCHEMA_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_SCHEMA_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE20_SCHEMA_TEST_BUNDLE))
 
 phase20-postgres-live-tests: $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE20_POSTGRES_LIVE_TEST_BUNDLE))
 
 phase20-mssql-live-tests: $(PHASE20_MSSQL_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE20_MSSQL_LIVE_TEST_BUNDLE))
 
 phase20-routing-tests: $(PHASE20_ROUTING_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE20_ROUTING_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE20_ROUTING_TEST_BUNDLE))
 
 phase20-focused: phase20-sql-builder-tests phase20-schema-tests phase20-routing-tests phase20-postgres-live-tests phase20-mssql-live-tests
 
 phase21-template-tests: $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE21_TEMPLATE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE21_TEMPLATE_TEST_BUNDLE))
 
 phase21-protocol-tests:
 >bash ./tools/ci/run_phase21_protocol_corpus.sh
@@ -749,7 +788,7 @@ phase21-confidence:
 
 phase23-dataverse-tests: $(PHASE23_DATAVERSE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE23_DATAVERSE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE23_DATAVERSE_TEST_BUNDLE))
 
 phase23-live-smoke: $(PHASE23_LIVE_SMOKE_TOOL)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
@@ -764,7 +803,7 @@ phase23-confidence:
 
 phase25-live-tests: $(PHASE25_LIVE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE25_LIVE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE25_LIVE_TEST_BUNDLE))
 
 phase25-focused: phase25-live-tests
 
@@ -773,23 +812,23 @@ phase25-confidence:
 
 phase26-orm-tests: $(PHASE26_ORM_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE26_ORM_TEST_BUNDLE))
 
 phase26-orm-unit: $(PHASE26_ORM_UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_UNIT_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE26_ORM_UNIT_TEST_BUNDLE))
 
 phase26-orm-generated: $(PHASE26_ORM_GENERATED_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_GENERATED_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE26_ORM_GENERATED_TEST_BUNDLE))
 
 phase26-orm-integration: $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE26_ORM_INTEGRATION_TEST_BUNDLE))
 
 phase26-orm-backend-parity: $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE))
 
 phase26-orm-perf: $(PHASE26_ORM_PERF_TOOL)
 >ARLEN_PHASE26_PERF_OUTPUT="$${ARLEN_PHASE26_PERF_OUTPUT:-$(ROOT_DIR)/build/release_confidence/phase26/perf/perf_smoke.json}" $(PHASE26_ORM_PERF_TOOL)
@@ -802,7 +841,7 @@ phase26-confidence:
 
 phase27-search-tests: $(PHASE27_SEARCH_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(PHASE27_SEARCH_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE27_SEARCH_TEST_BUNDLE))
 
 phase27-focused: phase27-search-tests
 
@@ -1067,9 +1106,13 @@ $(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(OBJ_DIR)/modules/jobs/Sources/ALNJobs
 
 .PHONY: durable-jobs-tests ci-durable-jobs
 durable-jobs-tests: $(DURABLE_JOBS_BIN) $(BUILD_DIR)/durable-job-probe $(XCTEST_RUNNER_PREREQ)
->source tools/source_gnustep_env.sh && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(DURABLE_JOBS_BUNDLE)
+>source tools/source_gnustep_env.sh && $(call xctest_run,$(DURABLE_JOBS_BUNDLE))
 
 ci-durable-jobs:
 >bash tools/ci/run_durable_jobs.sh
+
+# Test bundles link the vendored libXCTest, so build it first.
+XCTEST_LINKED_TEST_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN) $(BROWSER_ERROR_AUDIT_TEST_BIN) $(PHASE20_SQL_BUILDER_TEST_BIN) $(PHASE20_SCHEMA_TEST_BIN) $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(PHASE20_MSSQL_LIVE_TEST_BIN) $(PHASE20_ROUTING_TEST_BIN) $(PHASE21_TEMPLATE_TEST_BIN) $(PHASE23_DATAVERSE_TEST_BIN) $(PHASE25_LIVE_TEST_BIN) $(PHASE26_ORM_TEST_BIN) $(PHASE26_ORM_UNIT_TEST_BIN) $(PHASE26_ORM_GENERATED_TEST_BIN) $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(PHASE27_SEARCH_TEST_BIN) $(DURABLE_JOBS_BIN)
+$(XCTEST_LINKED_TEST_BINS): | $(XCTEST_RUNNER_PREREQ)
 
 -include $(DURABLE_JOBS_OBJ:.o=.d) $(DURABLE_JOB_PROBE_OBJ:.o=.d)

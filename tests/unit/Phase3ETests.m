@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <stdlib.h>
 
@@ -408,9 +409,7 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 
 - (void)testRedisCacheAdapterConformanceSuiteWhenConfigured {
   NSString *url = [self redisTestURL];
-  if ([url length] == 0) {
-    return;
-  }
+  XCTSkipUnless([url length] > 0, @"ARLEN_REDIS_TEST_URL is not set");
 
   NSString *namespacePrefix =
       [NSString stringWithFormat:@"arlen:test:%@", [[NSUUID UUID] UUIDString] ?: @"phase3e"];
