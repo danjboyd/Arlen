@@ -13,6 +13,13 @@ Arlen uses semantic versioning:
 ArlenData (`src/Arlen/Data` + `src/ArlenData`) follows the same semantic-versioning policy.
 Data-layer release details live in `docs/ARLEN_DATA.md`.
 
+While Arlen is on `0.x`, minor releases may still change public API; such
+changes are called out in the release notes with migration guidance.
+
+The framework version lives in `ALNModuleSystemFrameworkVersion`
+(`src/Arlen/Core/ALNModuleSystem.m`). It always names the latest released
+version: bump it only in the release commit, never between releases.
+
 ## 2. Deprecation Lifecycle
 
 Deprecations are explicit and time-bounded:
@@ -26,7 +33,7 @@ Deprecations are explicit and time-bounded:
 
 For SQL/data-layer transitional SQL APIs:
 
-- Keep compatibility through at least two 4.x minor releases.
+- Keep compatibility through at least two minor releases.
 - Publish replacement migration snippets in `docs/internal/SQL_BUILDER_PHASE4_MIGRATION.md`.
 - Track active transitional API status in `docs/STATUS.md`.
 - Permit removals only at a major release boundary.
@@ -80,6 +87,26 @@ tools/deploy/rollback_release.sh --releases-dir /path/to/app/releases --release-
 Release notes must include a link to:
 
 - `docs/KNOWN_RISK_REGISTER.md`
+
+### Cutting a Release
+
+1. On a branch, rename `## Unreleased` in `docs/RELEASE_NOTES.md` to
+   `## X.Y.Z — YYYY-MM-DD`, add a fresh `## Unreleased` section above it, and
+   set `ALNModuleSystemFrameworkVersion` to `X.Y.Z`.
+2. Run `python3 tools/ci/check_release_version.py --repo-root .` (also part of
+   `make ci-docs`) and `make ci-release-certification`.
+3. Merge through the normal required checks.
+4. Tag the merge commit and publish the GitHub release, using the release-notes
+   section as the body:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Arlen X.Y.Z"
+   git push origin vX.Y.Z
+   gh release create vX.Y.Z --verify-tag --title "Arlen X.Y.Z" --notes-file <notes.md>
+   ```
+
+Publishing the release triggers `release-certification`, which first rejects a
+tag that does not match `ALNModuleSystemFrameworkVersion`.
 
 ## 4. Perf Trend Artifacts
 

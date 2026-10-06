@@ -163,7 +163,9 @@ Open a bug report from the GitHub Issues tab. Useful reports include:
 
 - For setup or toolchain trouble, start with `./bin/arlen doctor` and the
   guides under [`docs/`](docs/).
-- For design questions, open an issue describing the problem before writing
-  code.
+- For questions, ideas, and show-and-tell, use
+  [GitHub Discussions](https://github.com/danjboyd/Arlen/discussions).
+- For a design proposal you intend to implement, open an issue describing the
+  problem before writing code.
 
 Thanks for helping make Arlen better.
