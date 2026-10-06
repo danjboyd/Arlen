@@ -39,10 +39,10 @@ done
 source "$framework_root/tools/source_gnustep_env.sh" >/dev/null
 
 # Prefer the framework's vendored runner (Apple-style -only-testing filters),
-# building it on first use; fall back to the toolchain's xctest.
+# building or refreshing it as needed; fall back to the toolchain's xctest.
 runner="$framework_root/vendor/tools-xctest/obj/xctest"
 runner_lib_dir=""
-if [[ ! -x "$runner" && -f "$framework_root/vendor/tools-xctest/GNUmakefile" ]]; then
+if [[ -f "$framework_root/vendor/tools-xctest/GNUmakefile" ]]; then
   make -C "$framework_root" vendored-xctest >/dev/null
 fi
 if [[ -x "$runner" ]]; then

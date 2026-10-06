@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -80,7 +81,18 @@
   return updated;
 }
 
+// Kept with the test's results (saved only if the test fails).
 - (NSString *)runShellCapture:(NSString *)command exitCode:(int *)exitCode {
+  int status = 0;
+  NSString *output = [self runShellCaptureUnattached:command exitCode:&status];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  ALNTestAttachCommandOutput(self, command, output, status);
+  return output;
+}
+
+- (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   return ALNTestRunShellCapture(command, exitCode);
 }
 
@@ -4805,6 +4817,8 @@
 }
 
 - (void)testPhase11SanitizerMatrixProducesExpectedPack {
+  // Runs the sanitizer matrix generator end to end.
+  ALNTestSetExecutionTimeAllowance(self, 900);
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-sanitizers"];
   XCTAssertNotNil(outputRoot);

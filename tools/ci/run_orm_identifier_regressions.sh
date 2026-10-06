@@ -19,7 +19,13 @@ mkdir "$orm_pg_tmp/socket"
 "$pg_bin/pg_ctl" -D "$orm_pg_tmp/data" -l "$orm_pg_tmp/server.log" \
   -o "-k $orm_pg_tmp/socket -c listen_addresses=''" -w start
 export ARLEN_PG_TEST_DSN="host=$orm_pg_tmp/socket dbname=postgres user=arlen_orm_test"
+export ARLEN_TEST_RESULTS_DIR="$repo_root/test-results/orm-identifier-regressions"
+rm -rf "$ARLEN_TEST_RESULTS_DIR"
 make phase26-orm-generated phase26-orm-unit phase20-sql-builder-tests
 
 # Mandatory driver round trips share this disposable database.
 make test-unit-filter TEST=PgTests
+
+# This lane provisions PostgreSQL, so a DSN skip means the wiring broke.
+python3 tools/ci/junit_report.py "$ARLEN_TEST_RESULTS_DIR" --title "ORM identifier regressions" \
+  --fail-on-skip-matching ARLEN_PG_TEST_DSN

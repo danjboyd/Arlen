@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../ALNXCTestCompat.h"
 #import <dispatch/dispatch.h>
 
 #import <stdlib.h>
@@ -500,9 +501,7 @@
 
 - (void)testConnectionAndPreparedStatements {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:4 error:&error];
@@ -616,7 +615,7 @@
 
 - (void)testPostgresTimestampMicrosecondRoundTrips {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn.length == 0) return;
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   NSError *error = nil;
   ALNPgConnection *connection = [[ALNPgConnection alloc] initWithConnectionString:dsn error:&error];
   XCTAssertNotNil(connection);
@@ -695,9 +694,7 @@
 
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -746,9 +743,7 @@
 
 - (void)testPostgresTypeCodecFixtureCoversLiveCommonScalarAndArrayRows {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSDictionary *fixture = [self phase20TypeCodecFixture];
   NSArray<NSDictionary *> *cases = [fixture[@"cases"] isKindOfClass:[NSArray class]] ? fixture[@"cases"] : @[];
@@ -797,9 +792,7 @@
 
 - (void)testPostgresWrapperParametersAndRelationAwareCodegenRoundTripAgainstLiveSchema {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -898,9 +891,7 @@
 
 - (void)testCommandsWithReturningReportAffectedRowsForDirectAndPreparedExecution {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -957,9 +948,7 @@
 
 - (void)testPostgresResultWrappersBatchExecutionAndSavepointsAgainstLiveConnection {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
-  if (dsn == nil) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1057,9 +1046,7 @@
 
 - (void)testTransactionHelperCommitAndRollback {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1116,9 +1103,7 @@
 
 - (void)testParameterizedSelectRegressionCoversDirectAndPreparedQueries {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1168,9 +1153,7 @@
 
 - (void)testLongProjectionParameterizedSelectPreservesUTF8Parameters {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1322,9 +1305,7 @@
 
 - (void)testPreparedCommandUTF8ParameterStressRemainsStable {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1418,9 +1399,7 @@
 
 - (void)testPhase4EConformanceScenariosExecuteAgainstPostgres {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSDictionary<NSString *, NSDictionary *> *scenarios = [self phase4EConformanceScenarioLookup];
   NSArray<NSString *> *requiredScenarioIDs = @[
@@ -1686,9 +1665,7 @@
 
 - (void)testSQLBuilderAdvancedExpressionsAndLateralJoinsExecuteAgainstPostgres {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1848,9 +1825,7 @@
 
 - (void)testSQLBuilderExpressionTemplatesWithIdentifierBindingsExecuteAgainstPostgres {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -1923,9 +1898,7 @@
 
 - (void)testPostgresSQLBuilderAdvancedUpsertAssignmentsAndWhereExecute {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2028,9 +2001,7 @@
 
 - (void)testSQLBuilderPhase4BFeaturesExecuteAgainstPostgres {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2319,9 +2290,7 @@
 
 - (void)testBuilderExecutionEmitsStructuredEventsAndUsesCaches {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2420,9 +2389,7 @@
 
 - (void)testBuilderExecutionErrorEventsIncludeSQLStateAndStayRedactedByDefault {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2490,9 +2457,7 @@
 
 - (void)testConnectionInterruptionReturnsDeterministicErrorAndPoolRecovers {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2534,9 +2499,7 @@
 
 - (void)testTransactionAbortPathRollsBackAndConnectionRemainsUsable {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2593,9 +2556,7 @@
 
 - (void)testBuilderCacheEvictionChurnAndSoakExecutionRemainDeterministic {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2710,9 +2671,7 @@
 
 - (void)testQueryErrorsIncludeSQLStateDiagnostics {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2738,9 +2697,7 @@
 
 - (void)testMigrationRunnerAppliesPendingFiles {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2818,9 +2775,7 @@
 
 - (void)testMigrationRunnerAppliesMultiStatementFile {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2892,9 +2847,7 @@
 
 - (void)testMigrationRunnerRollsBackFailedMultiStatementFileAndReportsFileName {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -2970,9 +2923,7 @@
 
 - (void)testMigrationRunnerRejectsCommentOnlyFile {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -3026,9 +2977,7 @@
 
 - (void)testMigrationRunnerRejectsTopLevelTransactionControlStatements {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -3097,9 +3046,7 @@
 
 - (void)testMigrationRunnerAllowsDoBlockContainingBeginEndKeywords {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -3164,9 +3111,7 @@
 
 - (void)testMigrationRunnerPreservesFileContextForCommandsForbiddenInsideTransactions {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -3233,9 +3178,7 @@
 
 - (void)testPoolLivenessChecksRecycleClosedIdleConnections {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
@@ -3274,9 +3217,7 @@
 
 - (void)testPreparedStatementCacheEvictsOldestShapeInsteadOfFallingBackForever {
   NSString *dsn = [self pgTestDSN];
-  if ([dsn length] == 0) {
-    return;
-  }
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
 
   NSError *error = nil;
   ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];

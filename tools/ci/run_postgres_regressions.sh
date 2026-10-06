@@ -23,6 +23,8 @@ export ARLEN_PG_TEST_DSN="postgresql://arlen_regression@/postgres?host=$regressi
 printf 'source %q\n' "$GNUSTEP_SH" > "$regression_tmp/GNUstep.sh"
 export GNUSTEP_SH="$regression_tmp/GNUstep.sh"
 mkdir -p build/release_confidence/postgres_regressions
+export ARLEN_TEST_RESULTS_DIR="$repo_root/test-results/postgres-regressions"
+rm -rf "$ARLEN_TEST_RESULTS_DIR"
 for test_class in GNUstepResolutionTests TestSupportTests Phase27SearchTests; do
   make test-unit-filter TEST="$test_class" 2>&1 | tee "build/release_confidence/postgres_regressions/$test_class.log"
 done
@@ -31,6 +33,9 @@ for test_class in PostgresIntegrationTests Phase13ModulePostgresIntegrationTests
 done
 # A second auth run detects accumulation of child servers and their DB sessions.
 make test-integration-filter TEST=Phase13AuthAdminIntegrationTests 2>&1 | tee build/release_confidence/postgres_regressions/auth-repeat.log
+# This lane provisions PostgreSQL, so a DSN skip means the wiring broke.
+python3 tools/ci/junit_report.py "$ARLEN_TEST_RESULTS_DIR" --title "PostgreSQL regressions" \
+  --fail-on-skip-matching ARLEN_PG_TEST_DSN
 # Inspect only servers belonging to this cluster; unrelated developer apps are untouched.
 python3 - <<'CHECK_PROCESSES'
 import os

@@ -72,9 +72,15 @@ subsystem `*-confidence` targets that aren't part of the standard gate.
 
 ### Test runner
 
-The make targets build and use the vendored `vendor/tools-xctest` runner by
-default, so Apple-style `-only-testing` filters work. Set
-`ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest`, or
+The make targets build and use the vendored `vendor/tools-xctest` runner, a
+tagged release of the maintained fork
+[`danjboyd/tools-xctest`](https://github.com/danjboyd/tools-xctest), and test
+bundles link against its `libXCTest`. That gives Apple-style `-only-testing`
+filters, `XCTSkip`, and per-test time limits (`ARLEN_TEST_TIMEOUT`, default 300
+seconds). Every run writes a JUnit report under `test-results/`.
+
+Set `ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest` and `libXCTest`
+instead; it must be the fork at the same release or newer. Set
 `ARLEN_XCTEST=/path/to/xctest` (plus `ARLEN_XCTEST_LD_LIBRARY_PATH` if needed)
 to point at a different runner. See
 [`docs/TESTING_WORKFLOW.md`](docs/TESTING_WORKFLOW.md) and

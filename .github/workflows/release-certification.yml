@@ -39,6 +39,11 @@ jobs:
         run: |
           bash ./tools/ci/run_release_certification.sh
 
+      - name: Summarize XCTest results
+        if: always()
+        run: |
+          python3 ./tools/ci/junit_report.py test-results --title "release-certification XCTest results"
+
       - name: Upload release certification artifacts
         if: github.event_name == 'workflow_dispatch' || failure() || success()
         uses: actions/upload-artifact@v4
@@ -47,6 +52,7 @@ jobs:
           path: |
             build/perf
             build/release_confidence
+            test-results
             tests/performance/baselines
             tests/performance/policies
           if-no-files-found: warn
