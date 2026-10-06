@@ -19,6 +19,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Check release version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 ./tools/ci/check_release_version.py --repo-root . --tag "$RELEASE_TAG"
+
       - name: Install build dependencies
         env:
           ARLEN_CI_GNUSTEP_STRATEGY: preinstalled

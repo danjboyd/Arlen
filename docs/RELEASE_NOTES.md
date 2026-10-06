@@ -1,6 +1,18 @@
 # Release Notes
 
-## Upcoming Release Candidate
+## Unreleased
+
+- No changes yet.
+
+## 0.1.0 — 2026-10-06
+
+First tagged release. [Status](STATUS.md) describes everything this release
+ships; the entries below are the changes made since release candidates started
+being tracked here.
+
+- Arlen is now licensed under LGPL-2.1-or-later. The previous grant (LGPL-2.0,
+  version 2 or any later version) already allowed this; `LICENSE` now carries
+  the unmodified LGPL-2.1 text so license scanners detect it.
 
 - The MCP module no longer crashes the app at startup when it is loaded but
   `mcp.enabled` is NO; a module that did not install is inert. The `mcp` module

@@ -3,6 +3,7 @@
 **A batteries-included web framework for Objective-C.**
 
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/license-LGPL--2.1--or--later-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/danjboyd/Arlen)](https://github.com/danjboyd/Arlen/releases)
 [![Linux Quality](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml/badge.svg?branch=main)](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml)
 ![Platforms: Linux | macOS | Windows (preview)](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(preview)-lightgrey.svg)
 
@@ -159,8 +160,10 @@ and docs lanes.
 | macOS, Apple runtime | Verified. Recommended for development on a Mac. |
 | Windows, CLANG64 | Preview. |
 
-There are no tagged releases yet. Track `main` and read
-[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for changes. The capability-level
+The current release is **v0.1.0**. Arlen follows semantic versioning; while it
+is on `0.x`, minor releases may still change public API, with migration notes.
+See [Releases](https://github.com/danjboyd/Arlen/releases) and
+[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md). The capability-level
 maturity snapshot (shipped, preview, in flight) is in
 [docs/STATUS.md](docs/STATUS.md). Engineering history lives under
 [docs/internal/](docs/internal/).
