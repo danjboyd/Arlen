@@ -2,7 +2,7 @@
 
 **A batteries-included web framework for Objective-C.**
 
-[![License: LGPL-2.0-or-later](https://img.shields.io/badge/license-LGPL--2.0--or--later-blue.svg)](LICENSE)
+[![License: LGPL-2.1-or-later](https://img.shields.io/badge/license-LGPL--2.1--or--later-blue.svg)](LICENSE)
 [![Linux Quality](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml/badge.svg?branch=main)](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml)
 ![Platforms: Linux | macOS | Windows (preview)](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(preview)-lightgrey.svg)
 
@@ -129,7 +129,7 @@ arlen module add auth && arlen module migrate --env development
 - **Explicit and deterministic.** Routes are registered in code, templates
   compile to readable Objective-C, and generated code uses stable names. When
   something breaks, the diagnostics point at a file and a line.
-- **Free software.** LGPL-2.0-or-later, the same license family as GNUstep
+- **Free software.** LGPL-2.1-or-later, the same license family as GNUstep
   Base. You can build proprietary apps on Arlen.
 
 **Arlen is probably not for you if** you need a large third-party plugin
@@ -182,6 +182,10 @@ Arlen and its tools are named after characters from *King of the Hill*:
 
 ## License
 
-Arlen is licensed under the GNU Lesser (Library) General Public License,
-version 2 or (at your option) any later version, matching GNUstep Base. See
-[LICENSE](LICENSE).
+Copyright (C) 2026 Daniel Boyd.
+
+Arlen is free software: you can redistribute it and/or modify it under the
+terms of the GNU Lesser General Public License as published by the Free
+Software Foundation, either version 2.1 of the License, or (at your option) any
+later version (LGPL-2.1-or-later), the same license family as GNUstep Base.
+See [LICENSE](LICENSE) for the full text.
