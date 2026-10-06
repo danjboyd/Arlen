@@ -168,7 +168,11 @@ maturity snapshot (shipped, preview, in flight) is in
 [docs/STATUS.md](docs/STATUS.md). Engineering history lives under
 [docs/internal/](docs/internal/).
 
-## Contributing
+## Community and Contributing
+
+Questions, ideas, and things you've built go in
+[GitHub Discussions](https://github.com/danjboyd/Arlen/discussions). Bugs go in
+[Issues](https://github.com/danjboyd/Arlen/issues).
 
 Contributions are welcome: bug reports, small reproductions, doc fixes, and
 focused patches. [CONTRIBUTING.md](CONTRIBUTING.md) covers toolchain setup,
