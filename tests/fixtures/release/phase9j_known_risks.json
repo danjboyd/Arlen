@@ -1,6 +1,6 @@
 {
   "version": "phase9j-known-risk-register-v1",
-  "lastUpdated": "2026-09-21",
+  "lastUpdated": "2026-10-06",
   "risks": [
     {
       "id": "phase9j-risk-tsan-nonblocking",
@@ -9,7 +9,7 @@
       "severity": "medium",
       "owner": "runtime-core",
       "targetDate": "2026-12-31",
-      "notes": "Library-wide suppressions demonstrably hid a deliberate application race through Foundation. On 2026-09-21 all 14 TSAN-only test returns were removed, registry initialization lock ordering was corrected, and suppressions narrowed to three Objective-C runtime function patterns. GNUstep queue mutex-lifetime/lock-order and CLI findings are now visible; the full TSAN lane is not clean. Retained raw reproducers, positive-control race detection, explicit unavailable status, and coverage summaries prevent a misleading green result. Keep non-blocking pending runtime classification/fixes and two consecutive clean runs of the new configuration; see docs/internal/TSAN_RELIABILITY_2026-09-21.md."
+      "notes": "Library-wide suppressions demonstrably hid a deliberate application race through Foundation. On 2026-09-21 all 14 TSAN-only test returns were removed, registry initialization lock ordering was corrected, and suppressions narrowed to three Objective-C runtime function patterns. GNUstep queue mutex-lifetime/lock-order and CLI findings are now visible; the full TSAN lane is not clean. Retained raw reproducers, positive-control race detection, explicit unavailable status, and coverage summaries prevent a misleading green result. Keep non-blocking pending runtime classification/fixes and two consecutive clean runs of the new configuration; see docs/internal/TSAN_RELIABILITY_2026-09-21.md. Reviewed 2026-10-06: the nightly thread-race lane failed on every scheduled run from 2026-10-01 through 2026-10-06, so the risk stays active and non-blocking with the same target date."
     },
     {
       "id": "phase9j-risk-benchmark-ladder",
