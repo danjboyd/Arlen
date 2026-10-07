@@ -94,6 +94,7 @@ The required merge gate should reflect the current authoritative baseline:
 - docs quality gate
  - generated API reference freshness
  - docs navigation/roadmap consistency
+ - no new sleep-based waits in tests (`tools/ci/check_test_sleeps.py`)
  - browser-doc build output
 
 Additional lanes should stay visible but non-blocking unless the support
@@ -215,6 +216,14 @@ The current workflow policy is:
  reports and failure attachments with their other artifacts
 - lanes that provision PostgreSQL fail if any test skipped for a missing
  `ARLEN_PG_TEST_DSN`, so a broken database wiring cannot pass as green
+- `linux-quality` runs `make test-inventory`, which fails when the unit or
+ integration bundle discovers a different set of tests than the baseline in
+ `tests/fixtures/test_inventory/` (update it with
+ `make update-test-inventory`), so a dropped test cannot pass as green
+- no lane retries a failed test: `linux-quality` runs
+ `tools/ci/test_xctest_repetition_policy.py`, which fails if
+ `-retry-tests-on-failure` appears in the build or CI wiring. Repetition
+ (`ITERATIONS`, `UNTIL_FAILURE`) is for local and nightly flake hunting only
 
 These are steps inside the existing jobs; no required check names change.
 

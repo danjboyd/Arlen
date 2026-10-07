@@ -3,6 +3,7 @@
 #import "ALNPostgresJobAdapter.h"
 #import "ALNJobsModule.h"
 #import "ALNApplication.h"
+#import "../shared/ALNTestWait.h"
 #include <signal.h>
 #include <poll.h>
 #include <dispatch/dispatch.h>
@@ -17,6 +18,7 @@
 @implementation DJRuntime
 - (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job error:(NSError **)error {
   if (self.duringHandler) self.duringHandler(job);
+  // sleep-ok: stands in for a job that takes `duration` to run.
   [NSThread sleepForTimeInterval:self.duration];
   if (self.fail) {
     if (error) *error = [NSError errorWithDomain:@"synthetic" code:1 userInfo:@{NSLocalizedDescriptionKey:@"synthetic failure"}];
@@ -223,9 +225,7 @@
   return task;
 }
 - (NSArray *)finishProbe:(NSTask *)task {
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20];
-  while (task.isRunning && [deadline timeIntervalSinceNow] > 0) [NSThread sleepForTimeInterval:0.02];
-  if (task.isRunning) { kill(task.processIdentifier,SIGKILL); XCTFail(@"job probe timed out"); }
+  if (!ALNTestWaitForTaskExit(task, 20)) { kill(task.processIdentifier,SIGKILL); XCTFail(@"job probe timed out"); }
   [task waitUntilExit];
   XCTAssertEqual((task.terminationStatus),(0));
   NSData *data = [[task.standardOutput fileHandleForReading] readDataToEndOfFile];
@@ -453,15 +453,13 @@
     @autoreleasepool { completed = [other completeJob:job result:@"too late" error:&completionError]; }
   });
   @try {
-    BOOL waiting = NO;
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
-    while (!waiting && [deadline timeIntervalSinceNow] > 0) {
+    BOOL waiting = ALNTestWaitUntil(5, 0.01, ^BOOL {
       NSArray *rows = [self.db executeQuery:@"SELECT count(*) AS waiting FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%arlen_jobs%'"
-          parameters:@[] error:&error];
-      waiting = [rows[0][@"waiting"] integerValue] > 0;
-      if (!waiting) [NSThread sleepForTimeInterval:0.01];
-    }
+          parameters:@[] error:NULL];
+      return [rows[0][@"waiting"] integerValue] > 0;
+    });
     XCTAssertTrue(waiting,@"completion must encounter the held row lock");
+    // sleep-ok: holds the row lock until the lease expires.
     [NSThread sleepForTimeInterval:0.8];
   } @finally {
     XCTAssertTrue([blocker commitTransaction:&error]);

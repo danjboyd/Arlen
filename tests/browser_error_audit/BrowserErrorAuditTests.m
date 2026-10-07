@@ -9,6 +9,8 @@
 #import <sys/socket.h>
 #import <unistd.h>
 
+#import "../shared/ALNTestWait.h"
+
 @interface BrowserErrorAuditTests : XCTestCase
 @end
 
@@ -374,12 +376,11 @@
     @"failed" : @(NO)
   };
 
-  BOOL ready = NO;
-  NSDictionary *lastCapture = nil;
+  __block NSDictionary *lastCapture = nil;
   NSDictionary *headers =
       ([readinessAccept length] > 0) ? @{ @"Accept" : readinessAccept } : @{};
-  for (NSInteger attempt = 0; attempt < 240; attempt++) {
-    NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%d%@", port, readinessPath ?: @"/"];
+  NSString *url = [NSString stringWithFormat:@"http://127.0.0.1:%d%@", port, readinessPath ?: @"/"];
+  BOOL ready = ALNTestWaitUntil(90.0, 0.25, ^BOOL {
     lastCapture = [self captureURL:url headers:headers];
     NSString *body = [lastCapture[@"body_text"] isKindOfClass:[NSString class]]
                          ? lastCapture[@"body_text"]
@@ -387,13 +388,9 @@
     NSInteger status = [lastCapture[@"status"] respondsToSelector:@selector(integerValue)]
                            ? [lastCapture[@"status"] integerValue]
                            : 0;
-    if ([lastCapture[@"curl_exit_code"] integerValue] == 0 && status == readinessStatus &&
-        ([readinessBodyContains length] == 0 || [body containsString:readinessBodyContains])) {
-      ready = YES;
-      break;
-    }
-    usleep(250000);
-  }
+    return [lastCapture[@"curl_exit_code"] integerValue] == 0 && status == readinessStatus &&
+           ([readinessBodyContains length] == 0 || [body containsString:readinessBodyContains]);
+  });
 
   if (!ready) {
     NSString *logExcerpt = [self serverLogExcerptAtPath:logPath];
@@ -424,10 +421,7 @@
   NSTask *task = [handle[@"task"] isKindOfClass:[NSTask class]] ? handle[@"task"] : nil;
   if (task != nil && [task isRunning]) {
     (void)kill(task.processIdentifier, SIGTERM);
-    for (NSInteger attempt = 0; attempt < 20 && [task isRunning]; attempt++) {
-      usleep(100000);
-    }
-    if ([task isRunning]) {
+    if (!ALNTestWaitForTaskExit(task, 2.0)) {
       (void)kill(task.processIdentifier, SIGKILL);
     }
     [task waitUntilExit];

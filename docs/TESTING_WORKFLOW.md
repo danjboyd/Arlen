@@ -121,6 +121,51 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
   (`run_postgres_regressions.sh`, `run_orm_identifier_regressions.sh`) run
   `junit_report.py --fail-on-skip-matching ARLEN_PG_TEST_DSN` and fail if any
   test skipped for want of the DSN they provided.
+- **Waits, not sleeps.** A test that waits for something (a server answering,
+  a child process exiting, a file or log line appearing, a counter reaching a
+  value) waits for that signal with `tests/shared/ALNTestWait.h` instead of
+  sleeping for a guessed interval:
+  - `ALNTestWaitUntil(timeout, interval, ^BOOL { ... })` checks a condition
+    until it holds or the timeout passes, and returns whether it held.
+  - `ALNTestWaitForTaskExit(task, timeout)` waits for an `NSTask` to exit.
+  - `ALNTestWaitForTCPPort(port, timeout)` waits for `127.0.0.1:port` to accept
+    connections. Don't use it on a `--once` server, which would serve the
+    probe as its one connection; send the real request in a wait instead.
+
+  The waits are built on `XCTestExpectation` and `XCTWaiter`, so they return as
+  soon as the condition holds and work the same under Apple XCTest. They record
+  no failure themselves: assert on the result with context.
+  `tools/ci/check_test_sleeps.py` (part of `docs-quality / docs-gate`) fails on
+  any new `usleep`, `sleep`, `sleepForTimeInterval:`, or `runUntilDate:` in
+  `tests/`. Mark a delay that is the point of the test, such as letting a TTL
+  expire, with a `// sleep-ok: <reason>` comment on or just above the call.
+  Older sleeps are counted per file in
+  `tests/fixtures/testing/test_sleep_baseline.json`; when you convert some, run
+  `python3 tools/ci/check_test_sleeps.py --repo-root . --update-baseline`,
+  which lowers the counts and never raises them.
+- **Test inventory.** `make test-inventory` lists the tests the unit and
+  integration bundles discover (`xctest -list-tests`, without running them)
+  into `test-results/inventory/<Bundle>.tests.txt` and compares them with the
+  committed baseline in `tests/fixtures/test_inventory/`. It fails when a
+  baseline test is no longer discovered (its file left the bundle's sources,
+  its signature stopped matching a test method, or its class stopped linking)
+  and when a discovered test is missing from the baseline. After adding,
+  removing, or renaming tests on purpose, run `make update-test-inventory` and
+  commit the baseline changes with them. `linux-quality` runs the check.
+- **Repetition for flake hunting, never retries.** `ITERATIONS=<n>` runs each
+  selected test n times, and `UNTIL_FAILURE=1` repeats each test until its
+  first failure (at most `ITERATIONS`, or 100). Both work with every XCTest make
+  target and are meant for local runs and nightly diagnostics:
+
+  ```bash
+  make test-integration-filter TEST=HTTPIntegrationTests/testBlobEndpointSendfileModeMatchesBinaryPayload ITERATIONS=200 UNTIL_FAILURE=1
+  ```
+
+  The JUnit report counts every repetition. The runner's
+  `-retry-tests-on-failure` is deliberately not exposed: a retried pass hides
+  exactly the races and lifecycle bugs the sanitizer and reliability lanes
+  exist to catch. `tools/ci/test_xctest_repetition_policy.py` (run by
+  `linux-quality`) fails if it appears in the build or CI wiring.
 
 Test bundles compile against and link the vendored `libXCTest`, so these
 features do not depend on the host's packaged `tools-xctest`. The Windows
@@ -523,6 +568,14 @@ Run `python3 tools/ci/test_tsan_reliability.py` for harness checks (also run by
 for raw/suppressed Foundation reproducers and the deliberate application race
 control, or `bash tools/ci/run_linux_thread_race_nightly.sh` for the complete
 lane. Findings can make these commands fail on the current GNUstep toolchain.
+
+To hunt an intermittent TSAN finding in the unit suite, set
+`ARLEN_TSAN_UNIT_ITERATIONS=<n>` (and optionally
+`ARLEN_TSAN_UNIT_UNTIL_FAILURE=1`) for either script; they pass `ITERATIONS` /
+`UNTIL_FAILURE` to the instrumented `make test-unit`. Both are off by default
+because repeating the whole suite under TSAN multiplies the lane's runtime; for
+one suspect test, a focused TSAN-instrumented `make test-unit-filter` run with
+`ITERATIONS` is cheaper.
 
 Nightly artifacts are uploaded on success and failure, including coverage
 counts, raw/suppressed probe logs, and toolchain details. Missing TSAN fails with

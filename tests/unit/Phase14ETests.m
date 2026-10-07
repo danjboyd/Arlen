@@ -158,6 +158,7 @@
   XCTAssertNil([runtime payloadForDownloadToken:[token stringByAppendingString:@"x"] error:&error]);
   XCTAssertNotNil(error);
 
+  // sleep-ok: lets the download token outlive its TTL.
   usleep(300000);
   error = nil;
   XCTAssertNil([runtime payloadForDownloadToken:token error:&error]);

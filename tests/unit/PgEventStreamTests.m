@@ -175,6 +175,7 @@
     XCTAssertTrue(appended.livePublishSucceeded, @"%@", error);
     XCTAssertTrue([onB waitForCount:1 timeout:5.0]);
     XCTAssertEqualObjects([appended.committedEvent dictionaryRepresentation], [onB.events[0] dictionaryRepresentation]);
+    // sleep-ok: gives a wrongly echoed copy time to arrive before checking it didn't.
     [NSThread sleepForTimeInterval:0.5];
     XCTAssertEqual((NSUInteger)1, [onA count], @"the publishing process gets one copy");
 

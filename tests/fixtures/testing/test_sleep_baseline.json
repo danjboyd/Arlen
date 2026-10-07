@@ -1,0 +1,6 @@
+{
+  "description": "Unannotated sleeps in tests that predate tools/ci/check_test_sleeps.py. Counts may only go down; see docs/TESTING_WORKFLOW.md.",
+  "files": {
+    "tests/phase24/Phase24WindowsRuntimeParityTests.m": 9
+  }
+}

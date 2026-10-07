@@ -9,6 +9,7 @@
 #import <sys/socket.h>
 
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface DeploymentIntegrationTests : XCTestCase
 @end
@@ -1537,7 +1538,7 @@
     [server launch];
 
     @try {
-      usleep(200000);
+      XCTAssertTrue(ALNTestWaitForTCPPort(port, 10.0), @"health server did not listen on port %d", port);
       NSString *runtimeCommand = @"printf 'runtime restarted\\n'";
       NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
                                                           @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "

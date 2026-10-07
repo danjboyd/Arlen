@@ -100,6 +100,16 @@ fi
 export TSAN_OPTIONS="$tsan_options"
 export XCTEST_LD_PRELOAD="$tsan_so"
 
+# Opt-in flake hunting for the TSAN unit run (issue #113). Off by default:
+# repeating the whole unit suite under TSAN multiplies the lane's runtime.
+unit_repeat_args=()
+if [[ -n "${ARLEN_TSAN_UNIT_ITERATIONS:-}" ]]; then
+  unit_repeat_args+=("ITERATIONS=$ARLEN_TSAN_UNIT_ITERATIONS")
+fi
+if [[ "${ARLEN_TSAN_UNIT_UNTIL_FAILURE:-0}" == "1" ]]; then
+  unit_repeat_args+=("UNTIL_FAILURE=1")
+fi
+
 set +e
 {
   echo "ci: tsan log path $log_path"
@@ -108,10 +118,11 @@ set +e
     echo "ci: tsan suppressions $tsan_suppressions_file"
   fi
   echo "ci: tsan iterations ${ARLEN_TSAN_RUNTIME_ITERS:-1}"
+  echo "ci: tsan unit test repetition ${unit_repeat_args[*]:-none}"
   make clean || exit $?
   make EXTRA_OBJC_FLAGS= EOC_TOOL="$bootstrap_eocc" eocc transpile module-transpile || exit $?
   make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" boomhauer arlen || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" test-unit || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" "${unit_repeat_args[@]}" test-unit || exit $?
   python3 ./tools/ci/runtime_concurrency_probe.py \
     --binary ./build/boomhauer \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}" || exit $?

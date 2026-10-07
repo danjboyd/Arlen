@@ -1179,10 +1179,14 @@ Lifecycle diagnostics:
  - write a JUnit report per run to `ARLEN_TEST_RESULTS_DIR` (default `test-results`; `ARLEN_TEST_JUNIT=0` disables), with failing tests' attachments beside it
  - pass these runner options only with the vendored runner, or when `ARLEN_XCTEST_CI_ARGS=1` says the selected runner supports them
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
+ - flake hunting, with these and every other XCTest target: `ITERATIONS=<n>` runs each selected test n times, and `UNTIL_FAILURE=1` repeats each test until it fails (at most `ITERATIONS`, or 100); both need the vendored runner (or `ARLEN_XCTEST_CI_ARGS=1`), and failing tests are never retried
  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
  - use the vendored runner by default so Apple-style `-only-testing`
  / `-skip-testing` arguments work regardless of the host's packaged `xctest`
  - example: `make test-unit-filter TEST=RuntimeTests/testRenderAndIncludeNormalizeUnsuffixedTemplateReferences`
+- `make test-inventory`: list the tests the unit and integration bundles discover (`xctest -list-tests`, without running them) into `test-results/inventory/` and compare them with `tests/fixtures/test_inventory/`; fails when a baseline test is no longer discovered or a discovered test is not in the baseline
+ - requires the vendored runner (`ARLEN_USE_VENDORED_XCTEST=1`, the default on Linux)
+- `make update-test-inventory`: rewrite `tests/fixtures/test_inventory/` from the current bundles after intended test additions, removals, or renames
 - `make ci-durable-jobs`: isolated PostgreSQL/XCTest acceptance for concurrency, leases, crash/outage recovery, transactional enqueue, and durable results
 - `make phase20-sql-builder-tests` / `make phase20-schema-tests` / `make phase20-routing-tests`: focused pure-unit lanes that do not depend on `-only-testing`
 - `make phase20-postgres-live-tests` / `make phase20-mssql-live-tests`: focused live-backend lanes with explicit DSN/transport requirement logging
@@ -1323,13 +1327,14 @@ Lifecycle diagnostics:
  - after a successful runtime action, health validation polls `/healthz` until `--health-startup-timeout` expires; timeout errors report `deployment_state=activated_health_unverified`
  - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
-- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + release-version consistency + HTML artifact/link checks)
+- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + release-version consistency + no new sleep-based test waits + HTML artifact/link checks)
 - `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`
 - `tools/ci/run_docs_quality.sh`: docs-quality CI entrypoint used by `make ci-docs` and workflow gate
 - `tools/ci/check_roadmap_consistency.py`: validates that `README.md`, `docs/STATUS.md`, and historical aggregate/index docs stay aligned with the authoritative per-phase roadmap headers
 - `tools/ci/check_docs_navigation.py`: validates newcomer-facing docs sections, key links, and required guide files
 - `tools/ci/check_benchmark_contracts.py`: validates the imported comparative benchmark manifests/config contract pack and the source-of-truth bridge notes in `docs/COMPARATIVE_BENCHMARKING.md`
 - `tools/ci/check_release_version.py`: validates that `ALNModuleSystemFrameworkVersion`, the latest released section of `docs/RELEASE_NOTES.md`, and (with `--tag`) the release tag all name the same version
+- `tools/ci/check_test_sleeps.py`: fails on new `usleep`/`sleep`/`sleepForTimeInterval:`/`runUntilDate:` calls in `tests/` that lack a `// sleep-ok: <reason>` comment, against the per-file counts in `tests/fixtures/testing/test_sleep_baseline.json`; `--update-baseline` lowers those counts after sleeps are converted to `tests/shared/ALNTestWait.h` waits
 - `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` / `ArlenORM.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)
