@@ -47,6 +47,7 @@ Common targets used in CI and by reviewers:
 | `make all`               | Build the framework, tools, and bundled binaries.     |
 | `make test-unit`         | Run the XCTest-based unit suite.                      |
 | `make test-integration`  | Run integration tests (some require fixtures/DBs).    |
+| `make test-inventory`    | Check discovered tests against the committed list.    |
 | `make test-data-layer`   | Run PostgreSQL-backed data-layer tests.               |
 | `make ci-quality`        | The quality gate run in Linux CI.                     |
 | `make ci-sanitizers`     | ASan/UBSan sanitizer lanes.                           |
@@ -82,6 +83,11 @@ tagged release of the maintained fork
 bundles link against its `libXCTest`. That gives Apple-style `-only-testing`
 filters, `XCTSkip`, and per-test time limits (`ARLEN_TEST_TIMEOUT`, default 300
 seconds). Every run writes a JUnit report under `test-results/`.
+
+CI also checks that the unit and integration bundles discover exactly the tests
+listed in `tests/fixtures/test_inventory/`, so a test can't disappear
+unnoticed. When you add, remove, or rename tests, run
+`make update-test-inventory` and commit the updated lists with your change.
 
 Set `ARLEN_USE_VENDORED_XCTEST=0` to use the system `xctest` and `libXCTest`
 instead; it must be the fork at the same release or newer. Set

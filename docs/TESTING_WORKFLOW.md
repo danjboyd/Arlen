@@ -121,6 +121,15 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
   (`run_postgres_regressions.sh`, `run_orm_identifier_regressions.sh`) run
   `junit_report.py --fail-on-skip-matching ARLEN_PG_TEST_DSN` and fail if any
   test skipped for want of the DSN they provided.
+- **Test inventory.** `make test-inventory` lists the tests the unit and
+  integration bundles discover (`xctest -list-tests`, without running them)
+  into `test-results/inventory/<Bundle>.tests.txt` and compares them with the
+  committed baseline in `tests/fixtures/test_inventory/`. It fails when a
+  baseline test is no longer discovered (its file left the bundle's sources,
+  its signature stopped matching a test method, or its class stopped linking)
+  and when a discovered test is missing from the baseline. After adding,
+  removing, or renaming tests on purpose, run `make update-test-inventory` and
+  commit the baseline changes with them. `linux-quality` runs the check.
 - **Repetition for flake hunting, never retries.** `ITERATIONS=<n>` runs each
   selected test n times, and `UNTIL_FAILURE=1` repeats each test until its
   first failure (at most `ITERATIONS`, or 100). Both work with every XCTest make

@@ -15,22 +15,31 @@ ROOT = Path(__file__).resolve().parents[2]
 RETRY_FLAG = "-retry-tests-on-failure"
 
 
-def dry_run(*args):
+# Prints, without running it, the runner command a filtered unit run would use.
+# The probe target has no prerequisites, so this needs no build, GNUstep
+# environment, or checked-out submodule (`make -n` would still recurse into the
+# vendored runner's build).
+PROBE = ("arlen-repetition-probe: ; @:$(info $(call xctest_run,$(UNIT_TEST_BUNDLE))"
+         " $(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME)))")
+
+
+def runner_command(*args):
     env = {key: value for key, value in os.environ.items()
            if key not in ("ITERATIONS", "UNTIL_FAILURE", "TEST", "SKIP_TEST", "MAKEFLAGS")}
-    return subprocess.run(["make", "--no-print-directory", "-n", *args], cwd=ROOT, env=env,
+    return subprocess.run(["make", "--no-print-directory", "--eval", PROBE,
+                           "arlen-repetition-probe", *args], cwd=ROOT, env=env,
                           capture_output=True, text=True, timeout=60, check=False)
 
 
 class RepetitionPassthroughTests(unittest.TestCase):
     def test_iterations_and_until_failure_reach_the_runner(self):
-        result = dry_run("test-unit-filter", "TEST=Foo/testBar", "ITERATIONS=25", "UNTIL_FAILURE=1")
+        result = runner_command("TEST=Foo/testBar", "ITERATIONS=25", "UNTIL_FAILURE=1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("-test-iterations 25 -run-tests-until-failure", result.stdout)
         self.assertIn("-only-testing:ArlenUnitTests/Foo/testBar", result.stdout)
 
     def test_default_run_does_not_repeat(self):
-        result = dry_run("test-unit")
+        result = runner_command()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("-test-iterations", result.stdout)
         self.assertNotIn("-run-tests-until-failure", result.stdout)
@@ -39,7 +48,7 @@ class RepetitionPassthroughTests(unittest.TestCase):
         for args in (("ITERATIONS=0",), ("ITERATIONS=many",), ("UNTIL_FAILURE=yes",),
                      ("ITERATIONS=3", "ARLEN_USE_VENDORED_XCTEST=0")):
             with self.subTest(args=args):
-                result = dry_run("test-unit", *args)
+                result = runner_command(*args)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
 
 
