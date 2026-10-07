@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- No changes yet.
+- XCTest make targets accept `ITERATIONS=<n>` and `UNTIL_FAILURE=1` to repeat
+  tests when hunting flakes, and the TSAN lane can repeat its unit run with
+  `ARLEN_TSAN_UNIT_ITERATIONS` (GitHub issue 113). Failed tests are never
+  retried; a new `linux-quality` check keeps `-retry-tests-on-failure` out of
+  the build and CI wiring.
 
 ## 0.1.0 — 2026-10-07
 

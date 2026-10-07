@@ -101,6 +101,25 @@ ARLEN_TEST_TIMEOUT ?= 300
 ARLEN_TEST_TIMEOUT_MAX ?=
 TEST ?=
 SKIP_TEST ?=
+# Flake hunting (vendored runner only): ITERATIONS=<n> runs each selected test
+# n times; UNTIL_FAILURE=1 repeats each test until it fails (at most
+# ITERATIONS, or 100). Retrying failed tests is deliberately not exposed: it
+# would hide the races and lifecycle bugs these runs exist to find (#113).
+ITERATIONS ?=
+UNTIL_FAILURE ?=
+ifneq ($(strip $(ITERATIONS)),)
+ifneq ($(shell printf '%s' '$(strip $(ITERATIONS))' | grep -Ex '[1-9][0-9]*'),$(strip $(ITERATIONS)))
+$(error ITERATIONS must be a positive integer)
+endif
+endif
+ifneq ($(filter-out 0 1,$(strip $(UNTIL_FAILURE))),)
+$(error UNTIL_FAILURE must be 0 or 1)
+endif
+ifneq ($(strip $(ITERATIONS))$(filter 1,$(strip $(UNTIL_FAILURE))),)
+ifneq ($(ARLEN_XCTEST_CI_ARGS),1)
+$(error ITERATIONS and UNTIL_FAILURE need the vendored tools-xctest runner, or ARLEN_XCTEST_CI_ARGS=1 for a runner that supports them)
+endif
+endif
 ifneq ($(filter $(ARLEN_ENABLE_YYJSON),0 1),$(ARLEN_ENABLE_YYJSON))
 $(error ARLEN_ENABLE_YYJSON must be 0 or 1)
 endif
@@ -281,7 +300,11 @@ $(basename $(notdir $(1)))$(if $(strip $(TEST)),--only-$(subst /,.,$(strip $(TES
 endef
 
 define xctest_ci_args
-$(if $(filter 1,$(ARLEN_XCTEST_CI_ARGS)),$(if $(filter 1,$(ARLEN_TEST_JUNIT)),-junit-report "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml") $(if $(filter-out 0,$(strip $(ARLEN_TEST_TIMEOUT))),-default-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT))) $(if $(strip $(ARLEN_TEST_TIMEOUT_MAX)),-maximum-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT_MAX))))
+$(if $(filter 1,$(ARLEN_XCTEST_CI_ARGS)),$(if $(filter 1,$(ARLEN_TEST_JUNIT)),-junit-report "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml") $(if $(filter-out 0,$(strip $(ARLEN_TEST_TIMEOUT))),-default-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT))) $(if $(strip $(ARLEN_TEST_TIMEOUT_MAX)),-maximum-test-execution-time-allowance $(strip $(ARLEN_TEST_TIMEOUT_MAX))) $(call xctest_repeat_args))
+endef
+
+define xctest_repeat_args
+$(if $(strip $(ITERATIONS)),-test-iterations $(strip $(ITERATIONS))) $(if $(filter 1,$(strip $(UNTIL_FAILURE))),-run-tests-until-failure)
 endef
 
 # Runs xctest on bundle $(1) with the runtime environment and CI arguments;
