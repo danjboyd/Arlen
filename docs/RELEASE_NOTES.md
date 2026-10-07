@@ -9,10 +9,24 @@
   integration, browser-audit, and durable-jobs suites now use them. The
   docs gate runs `tools/ci/check_test_sleeps.py`, which rejects new sleeps in
   `tests/` unless marked `// sleep-ok: <reason>` (GitHub issue 114).
+
 - Fixed the intermittent `testBlobEndpointSendfileModeMatchesBinaryPayload`
   failure. The HTTP integration helpers passed request URLs to the shell
   unquoted, so the `&` in `?size=8192&mode=sendfile` sent curl to the
   background and the test read whatever it had written so far.
+
+- CI now notices tests that silently stop being discovered. `make
+  test-inventory` compares what the unit and integration bundles discover
+  (`xctest -list-tests`) with the committed lists in
+  `tests/fixtures/test_inventory/`, and `linux-quality` fails on any
+  difference. After adding, removing, or renaming tests, run
+  `make update-test-inventory` and commit the result (GitHub issue 115).
+
+- XCTest make targets accept `ITERATIONS=<n>` and `UNTIL_FAILURE=1` to repeat
+  tests when hunting flakes, and the TSAN lane can repeat its unit run with
+  `ARLEN_TSAN_UNIT_ITERATIONS` (GitHub issue 113). Failed tests are never
+  retried; a new `linux-quality` check keeps `-retry-tests-on-failure` out of
+  the build and CI wiring.
 
 ## 0.1.0 — 2026-10-07
 
