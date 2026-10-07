@@ -1,3 +1,10 @@
+// Minimal XCTest bundle runner for the Windows preview lanes
+// (phase24-windows-db-smoke, phase24-windows-runtime-tests), which can't use
+// the vendored tools-xctest fork yet: its `-host` support doesn't compile
+// under MSYS2 CLANG64, and the make wiring assumes Linux paths. Replace this
+// with $(ARLEN_XCTEST) once a Windows runner can verify the fork; see GitHub
+// issue #116 and "Windows Test Runner" in docs/CI_ALIGNMENT.md.
+
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
