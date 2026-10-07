@@ -164,6 +164,10 @@ The current workflow policy is:
  reports and failure attachments with their other artifacts
 - lanes that provision PostgreSQL fail if any test skipped for a missing
  `ARLEN_PG_TEST_DSN`, so a broken database wiring cannot pass as green
+- `linux-quality` runs `make test-inventory`, which fails when the unit or
+ integration bundle discovers a different set of tests than the baseline in
+ `tests/fixtures/test_inventory/` (update it with
+ `make update-test-inventory`), so a dropped test cannot pass as green
 
 These are steps inside the existing jobs; no required check names change.
 

@@ -8,6 +8,8 @@ export ARLEN_PHASE5E_SOAK_ITERS="${ARLEN_PHASE5E_SOAK_ITERS:-240}"
 
 python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root "$repo_root"
 python3 ./tools/ci/test_junit_report.py
+python3 ./tools/ci/test_check_test_inventory.py
+make test-inventory
 bash ./tools/ci/run_phase5a_quality.sh
 bash ./tools/ci/run_runtime_concurrency_gate.sh
 bash ./tools/ci/run_phase9i_fault_injection.sh

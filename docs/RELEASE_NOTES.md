@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- No changes yet.
+- CI now notices tests that silently stop being discovered. `make
+  test-inventory` compares what the unit and integration bundles discover
+  (`xctest -list-tests`) with the committed lists in
+  `tests/fixtures/test_inventory/`, and `linux-quality` fails on any
+  difference. After adding, removing, or renaming tests, run
+  `make update-test-inventory` and commit the result (GitHub issue 115).
 
 ## 0.1.0 — 2026-10-07
 
