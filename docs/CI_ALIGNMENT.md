@@ -168,6 +168,10 @@ The current workflow policy is:
  integration bundle discovers a different set of tests than the baseline in
  `tests/fixtures/test_inventory/` (update it with
  `make update-test-inventory`), so a dropped test cannot pass as green
+- no lane retries a failed test: `linux-quality` runs
+ `tools/ci/test_xctest_repetition_policy.py`, which fails if
+ `-retry-tests-on-failure` appears in the build or CI wiring. Repetition
+ (`ITERATIONS`, `UNTIL_FAILURE`) is for local and nightly flake hunting only
 
 These are steps inside the existing jobs; no required check names change.
 

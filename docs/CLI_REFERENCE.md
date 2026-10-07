@@ -1179,6 +1179,7 @@ Lifecycle diagnostics:
  - write a JUnit report per run to `ARLEN_TEST_RESULTS_DIR` (default `test-results`; `ARLEN_TEST_JUNIT=0` disables), with failing tests' attachments beside it
  - pass these runner options only with the vendored runner, or when `ARLEN_XCTEST_CI_ARGS=1` says the selected runner supports them
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
+ - flake hunting, with these and every other XCTest target: `ITERATIONS=<n>` runs each selected test n times, and `UNTIL_FAILURE=1` repeats each test until it fails (at most `ITERATIONS`, or 100); both need the vendored runner (or `ARLEN_XCTEST_CI_ARGS=1`), and failing tests are never retried
  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
  - use the vendored runner by default so Apple-style `-only-testing`
  / `-skip-testing` arguments work regardless of the host's packaged `xctest`

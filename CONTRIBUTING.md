@@ -63,6 +63,10 @@ For a single test method (XCTest filter syntax):
 make test-unit-filter TEST=PgTests/testReleaseConnectionDiscardsDeadButOpenConnection
 ```
 
+To chase a flaky test, repeat it: `ITERATIONS=200` runs it 200 times, and
+`UNTIL_FAILURE=1` stops at the first failure. Required CI checks never retry
+failed tests.
+
 Other lanes reviewers may ask for: `make check`, `make ci-perf-smoke` (lighter
 local macro perf subset), `make ci-benchmark-contracts`,
 `make ci-fault-injection`, `make ci-release-certification`, `make deploy-smoke`,
