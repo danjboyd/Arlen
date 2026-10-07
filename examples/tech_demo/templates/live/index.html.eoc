@@ -3,7 +3,7 @@
 <% NSString *statusFilter = $statusFilter ?: @""; %>
 <%@ slot "sidebar" %>
 <div class="callout">
-  <strong>Phase 25 Live UI</strong>
+  <strong>Live UI</strong>
   <p>This page uses framework-served <code>/arlen/live.js</code> with ordinary HTML links, forms, fragments, and keyed collection updates.</p>
 </div>
 <div class="callout">

@@ -18,6 +18,14 @@ OpenAPI docs, a PostgreSQL-first data layer, and realtime WebSocket/SSE. Auth
 with passkeys and OIDC, admin and job dashboards, and a production process
 manager are first-party modules, not plugins you have to vet.
 
+<p align="center">
+  <img src="docs/images/tech-demo.gif" width="900"
+       alt="Arlen tech demo: EOC-rendered pages, route params, implicit JSON, and a live UI table filtering and a keyed feed updating in place">
+</p>
+<p align="center"><sub>The bundled tech demo (<code>./bin/tech-demo</code>): compiled
+templates, route params, implicit JSON, and live fragments updating without a
+page reload.</sub></p>
+
 ## Hello, Arlen
 
 A controller that serves an HTML page and a JSON endpoint:

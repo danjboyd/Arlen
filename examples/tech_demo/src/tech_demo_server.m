@@ -135,7 +135,7 @@ static NSDictionary *TechDemoLivePageContext(ALNContext *ctx) {
   NSMutableDictionary *context = [NSMutableDictionary dictionaryWithDictionary:
                                                           TechDemoLiveOrdersContext(ctx.request.queryParams ?: @{})];
   context[@"pageTitle"] = @"Arlen Technology Demo";
-  context[@"tagline"] = @"Phase 25 live fragments, keyed streams, deferred regions, and realtime fanout";
+  context[@"tagline"] = @"Live fragments, keyed streams, deferred regions, and realtime fanout";
   context[@"feedItems"] = TechDemoInitialFeedItems();
   return [NSDictionary dictionaryWithDictionary:context];
 }
