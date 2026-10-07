@@ -1327,13 +1327,14 @@ Lifecycle diagnostics:
  - after a successful runtime action, health validation polls `/healthz` until `--health-startup-timeout` expires; timeout errors report `deployment_state=activated_health_unverified`
  - packages `app/db/migrations` and the prepared app binary at `app/.boomhauer/build/boomhauer-app` so the documented release migrate and `framework/bin/propane` workflows run from the artifact itself
 - `arlen generate frontend <Name> --preset <vanilla-spa|progressive-mpa>`: scaffold frontend starter templates with built-in API wiring examples
-- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + release-version consistency + HTML artifact/link checks)
+- `make ci-docs`: run docs quality gate (API docs regen consistency + roadmap summary consistency + newcomer-doc navigation checks + imported comparative benchmark-contract consistency + release-version consistency + no new sleep-based test waits + HTML artifact/link checks)
 - `make ci-benchmark-contracts`: validate the imported lightweight comparative benchmark fixtures under `tests/fixtures/benchmarking/`
 - `tools/ci/run_docs_quality.sh`: docs-quality CI entrypoint used by `make ci-docs` and workflow gate
 - `tools/ci/check_roadmap_consistency.py`: validates that `README.md`, `docs/STATUS.md`, and historical aggregate/index docs stay aligned with the authoritative per-phase roadmap headers
 - `tools/ci/check_docs_navigation.py`: validates newcomer-facing docs sections, key links, and required guide files
 - `tools/ci/check_benchmark_contracts.py`: validates the imported comparative benchmark manifests/config contract pack and the source-of-truth bridge notes in `docs/COMPARATIVE_BENCHMARKING.md`
 - `tools/ci/check_release_version.py`: validates that `ALNModuleSystemFrameworkVersion`, the latest released section of `docs/RELEASE_NOTES.md`, and (with `--tag`) the release tag all name the same version
+- `tools/ci/check_test_sleeps.py`: fails on new `usleep`/`sleep`/`sleepForTimeInterval:`/`runUntilDate:` calls in `tests/` that lack a `// sleep-ok: <reason>` comment, against the per-file counts in `tests/fixtures/testing/test_sleep_baseline.json`; `--update-baseline` lowers those counts after sleeps are converted to `tests/shared/ALNTestWait.h` waits
 - `make docs-api`: regenerate API reference markdown from `Arlen.h` / `ArlenData.h` / `ArlenORM.h` exports
 - `make docs-html`: generate browser-friendly docs under `build/docs`
 - `make docs-serve`: serve generated docs locally (default `http://127.0.0.1:4173`, override via `DOCS_PORT`)

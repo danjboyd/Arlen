@@ -584,6 +584,7 @@ static NSUInteger OAuthCalls;
   NSDictionary *config = [self config];
   NSDictionary *documents = [self.documents copy];
   self.server = [[ALNOAuthResourceServer alloc] initWithConfiguration:config documentLoader:^NSDictionary *(NSURL *url, NSError **error) {
+    // sleep-ok: simulated fetch latency, which the test measures.
     [NSThread sleepForTimeInterval:0.15];
     return documents[url.absoluteString];
   } authorizationPolicy:nil error:NULL];

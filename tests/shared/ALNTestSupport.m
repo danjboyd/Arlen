@@ -1,4 +1,5 @@
 #import "ALNTestSupport.h"
+#import "ALNTestWait.h"
 #import <signal.h>
 
 #import <ctype.h>
@@ -373,10 +374,7 @@ BOOL ALNTestStopServerTask(NSTask *task) {
   }
   if ([task isRunning]) {
     kill(task.processIdentifier, SIGTERM);
-    for (NSUInteger attempt = 0; attempt < 100 && [task isRunning]; attempt++) {
-      [NSThread sleepForTimeInterval:0.05];
-    }
-    if ([task isRunning]) {
+    if (!ALNTestWaitForTaskExit(task, 5.0)) {
       kill(task.processIdentifier, SIGKILL);
     }
   }

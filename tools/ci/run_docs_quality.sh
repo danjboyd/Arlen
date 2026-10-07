@@ -21,6 +21,7 @@ python3 ./tools/ci/check_roadmap_consistency.py --repo-root "$repo_root"
 python3 ./tools/ci/check_docs_navigation.py --repo-root "$repo_root"
 python3 ./tools/ci/check_benchmark_contracts.py --repo-root "$repo_root"
 python3 ./tools/ci/check_release_version.py --repo-root "$repo_root"
+python3 ./tools/ci/check_test_sleeps.py --repo-root "$repo_root"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if ! git diff --quiet -- docs/API_REFERENCE.md docs/api; then

@@ -315,6 +315,7 @@
         [failuresLock unlock];
         return;
       }
+      // sleep-ok: holds the connection so borrowers overlap.
       usleep(20000);
       [pool releaseConnection:connection];
     });
@@ -480,6 +481,7 @@
                                          } @finally {
                                            [stateLock unlock];
                                          }
+                                         // sleep-ok: holds the worker so concurrency overlaps.
                                          usleep(30000);
                                          [stateLock lock];
                                          @try {

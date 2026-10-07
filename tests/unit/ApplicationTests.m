@@ -14,6 +14,7 @@
 #import "ALNRoute.h"
 #import "ALNRouter.h"
 #import "ALNAuthSession.h"
+#import "../shared/ALNTestWait.h"
 #import "../shared/ALNWebTestSupport.h"
 
 @interface AppHeaderMiddleware : NSObject <ALNMiddleware>
@@ -1909,17 +1910,12 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
                            withObject:state];
   }
 
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
-  while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
-    NSInteger completed = 0;
+  (void)ALNTestWaitUntil(20.0, 0.02, ^BOOL {
     [state[@"lock"] lock];
-    completed = [state[@"completed"] integerValue];
+    NSInteger finished = [state[@"completed"] integerValue];
     [state[@"lock"] unlock];
-    if (completed >= workers) {
-      break;
-    }
-    usleep(20000);
-  }
+    return finished >= workers;
+  });
 
   NSInteger completed = 0;
   NSInteger failures = 0;
