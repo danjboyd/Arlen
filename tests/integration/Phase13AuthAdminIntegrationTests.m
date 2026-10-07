@@ -12,6 +12,7 @@
 
 #import "ALNTOTP.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface Phase13AuthAdminIntegrationTests : XCTestCase
 @end
@@ -316,12 +317,11 @@
 /// instrument for a build, so this one is generous: a real hang still fails, it
 /// just takes longer to say so.
 static const NSTimeInterval ALNTestServerBuildAndBootTimeout = 180.0;
-static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
+static const NSTimeInterval ALNTestServerPollInterval = 0.2;
 
 - (BOOL)waitForServerOnPort:(int)port path:(NSString *)path {
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:ALNTestServerBuildAndBootTimeout];
   NSDate *started = [NSDate date];
-  while ([deadline timeIntervalSinceNow] > 0) {
+  BOOL answered = ALNTestWaitUntil(ALNTestServerBuildAndBootTimeout, ALNTestServerPollInterval, ^BOOL {
     int exitCode = 0;
     NSDictionary *response = [self curlJSONAtPort:port
                                              path:path
@@ -331,11 +331,10 @@ static const useconds_t ALNTestServerPollIntervalMicroseconds = 200000;
                                           payload:nil
                                   followRedirects:NO
                                          exitCode:&exitCode];
-    NSInteger statusCode = [response[@"status"] integerValue];
-    if (exitCode == 0 && statusCode > 0) {
-      return YES;
-    }
-    usleep(ALNTestServerPollIntervalMicroseconds);
+    return exitCode == 0 && [response[@"status"] integerValue] > 0;
+  });
+  if (answered) {
+    return YES;
   }
   // Say that this was a timeout. The bare assertion failure that follows
   // otherwise looks identical to the server answering wrongly, which is a

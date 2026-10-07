@@ -345,6 +345,8 @@ UNIT_TEST_OBJS := $(call objs_from,$(UNIT_TEST_SRCS))
 INTEGRATION_TEST_OBJS := $(call objs_from,$(INTEGRATION_TEST_SRCS))
 BROWSER_ERROR_AUDIT_TEST_OBJS := $(call objs_from,$(BROWSER_ERROR_AUDIT_SRCS))
 TEST_SHARED_OBJS := $(call objs_from,$(TEST_SHARED_SRCS))
+# For bundles that link only the wait helpers, not all of tests/shared.
+TEST_WAIT_OBJS := $(call objs_from,tests/shared/ALNTestWait.m)
 PHASE20_SQL_BUILDER_TEST_OBJS := $(call objs_from,$(PHASE20_SQL_BUILDER_TEST_SRCS))
 PHASE20_SCHEMA_TEST_OBJS := $(call objs_from,$(PHASE20_SCHEMA_TEST_SRCS))
 PHASE20_POSTGRES_LIVE_TEST_OBJS := $(call objs_from,$(PHASE20_POSTGRES_LIVE_TEST_SRCS))
@@ -632,9 +634,9 @@ $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FR
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
-$(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_TEST_OBJS)
+$(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_WAIT_OBJS)
 >@mkdir -p $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_WAIT_OBJS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-browser-error-audit.plist $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_SQL_BUILDER_TEST_BIN): $(PHASE20_SQL_BUILDER_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
@@ -1099,7 +1101,7 @@ DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
 $(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
-$(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
+$(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(TEST_WAIT_OBJS) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenDurableJobsTests/g' tests/Info-gnustep-unit.plist > $(DURABLE_JOBS_BUNDLE)/Resources/Info-gnustep.plist

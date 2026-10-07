@@ -116,6 +116,7 @@
                                                 error:&error];
   XCTAssertNotNil(session);
   XCTAssertNil(error);
+  // sleep-ok: lets the upload session outlive its 0.2s expiry.
   usleep(300000);
   XCTAssertNil([runtime storeUploadData:[@"png!" dataUsingEncoding:NSUTF8StringEncoding]
                      forUploadSessionID:session[@"sessionID"]

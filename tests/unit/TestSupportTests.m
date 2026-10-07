@@ -3,6 +3,7 @@
 #import <signal.h>
 #import <errno.h>
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface TestSupportTests : XCTestCase
 @end
@@ -62,15 +63,40 @@
   [task launch];
   int pid = task.processIdentifier;
   @try {
-    for (NSUInteger i = 0; i < 100 && ![[NSFileManager defaultManager] fileExistsAtPath:ready]; i++) {
-      [NSThread sleepForTimeInterval:0.02];
-    }
-    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:ready]);
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.02, ^BOOL {
+      return [[NSFileManager defaultManager] fileExistsAtPath:ready];
+    }));
   } @finally {
     XCTAssertTrue(ALNTestStopServerTask(task));
     [[NSFileManager defaultManager] removeItemAtPath:[ready stringByDeletingLastPathComponent] error:NULL];
   }
   XCTAssertEqual(-1, kill(pid, 0));
   XCTAssertEqual(ESRCH, errno);
+}
+- (void)testWaitUntilReturnsOnceTheConditionHolds {
+  __block NSUInteger checks = 0;
+  NSDate *started = [NSDate date];
+  XCTAssertTrue(ALNTestWaitUntil(10.0, 0.01, ^BOOL {
+    checks += 1;
+    return checks >= 3;
+  }));
+  XCTAssertEqual((NSUInteger)3, checks);
+  XCTAssertLessThan(-[started timeIntervalSinceNow], 5.0);
+}
+- (void)testWaitUntilReturnsNoWhenTheConditionNeverHolds {
+  NSDate *started = [NSDate date];
+  XCTAssertFalse(ALNTestWaitUntil(0.2, 0.02, ^BOOL {
+    return NO;
+  }));
+  XCTAssertGreaterThanOrEqual(-[started timeIntervalSinceNow], 0.2);
+}
+- (void)testWaitForTaskExitReapsTheTask {
+  NSTask *task = [[NSTask alloc] init];
+  task.launchPath = @"/bin/sh";
+  task.arguments = @[ @"-c", @"exit 3" ];
+  [task launch];
+  XCTAssertTrue(ALNTestWaitForTaskExit(task, 10.0));
+  XCTAssertFalse([task isRunning]);
+  XCTAssertEqual(3, task.terminationStatus);
 }
 @end

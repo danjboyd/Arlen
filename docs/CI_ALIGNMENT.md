@@ -43,6 +43,7 @@ The required merge gate should reflect the current authoritative baseline:
 - docs quality gate
  - generated API reference freshness
  - docs navigation/roadmap consistency
+ - no new sleep-based waits in tests (`tools/ci/check_test_sleeps.py`)
  - browser-doc build output
 
 Additional lanes should stay visible but non-blocking unless the support

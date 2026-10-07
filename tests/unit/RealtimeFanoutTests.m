@@ -137,6 +137,7 @@
     XCTAssertTrue([onB waitForCount:1 timeout:5.0], @"%@", [onB snapshot]);
     XCTAssertEqualObjects(@[ @"records.7:reply-1" ], [onB snapshot]);
     // The publisher's own subscribers get exactly one copy (no echo back from PostgreSQL).
+    // sleep-ok: gives a wrongly echoed copy time to arrive before checking it didn't.
     [NSThread sleepForTimeInterval:0.5];
     XCTAssertEqualObjects(@[ @"records.7:reply-1" ], [onA snapshot]);
 

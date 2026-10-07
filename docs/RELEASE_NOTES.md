@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-- No changes yet.
+- Tests wait for real signals instead of sleeping for guessed intervals.
+  `tests/shared/ALNTestWait.h` adds `ALNTestWaitUntil`,
+  `ALNTestWaitForTaskExit`, and `ALNTestWaitForTCPPort`, built on
+  `XCTestExpectation`/`XCTWaiter`; 26 sleep-and-poll waits in the unit,
+  integration, browser-audit, and durable-jobs suites now use them. The
+  docs gate runs `tools/ci/check_test_sleeps.py`, which rejects new sleeps in
+  `tests/` unless marked `// sleep-ok: <reason>` (GitHub issue 114).
+- Fixed the intermittent `testBlobEndpointSendfileModeMatchesBinaryPayload`
+  failure. The HTTP integration helpers passed request URLs to the shell
+  unquoted, so the `&` in `?size=8192&mode=sendfile` sent curl to the
+  background and the test read whatever it had written so far.
 
 ## 0.1.0 — 2026-10-07
 

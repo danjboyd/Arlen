@@ -121,6 +121,28 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
   (`run_postgres_regressions.sh`, `run_orm_identifier_regressions.sh`) run
   `junit_report.py --fail-on-skip-matching ARLEN_PG_TEST_DSN` and fail if any
   test skipped for want of the DSN they provided.
+- **Waits, not sleeps.** A test that waits for something (a server answering,
+  a child process exiting, a file or log line appearing, a counter reaching a
+  value) waits for that signal with `tests/shared/ALNTestWait.h` instead of
+  sleeping for a guessed interval:
+  - `ALNTestWaitUntil(timeout, interval, ^BOOL { ... })` checks a condition
+    until it holds or the timeout passes, and returns whether it held.
+  - `ALNTestWaitForTaskExit(task, timeout)` waits for an `NSTask` to exit.
+  - `ALNTestWaitForTCPPort(port, timeout)` waits for `127.0.0.1:port` to accept
+    connections. Don't use it on a `--once` server, which would serve the
+    probe as its one connection; send the real request in a wait instead.
+
+  The waits are built on `XCTestExpectation` and `XCTWaiter`, so they return as
+  soon as the condition holds and work the same under Apple XCTest. They record
+  no failure themselves: assert on the result with context.
+  `tools/ci/check_test_sleeps.py` (part of `docs-quality / docs-gate`) fails on
+  any new `usleep`, `sleep`, `sleepForTimeInterval:`, or `runUntilDate:` in
+  `tests/`. Mark a delay that is the point of the test, such as letting a TTL
+  expire, with a `// sleep-ok: <reason>` comment on or just above the call.
+  Older sleeps are counted per file in
+  `tests/fixtures/testing/test_sleep_baseline.json`; when you convert some, run
+  `python3 tools/ci/check_test_sleeps.py --repo-root . --update-baseline`,
+  which lowers the counts and never raises them.
 
 Test bundles compile against and link the vendored `libXCTest`, so these
 features do not depend on the host's packaged `tools-xctest`. The Windows

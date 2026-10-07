@@ -11,6 +11,7 @@
 #import <sys/socket.h>
 
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface HTTPIntegrationTests : XCTestCase
 @end
@@ -203,15 +204,7 @@
 }
 
 - (BOOL)waitForTaskExit:(NSTask *)task timeoutSeconds:(NSTimeInterval)timeoutSeconds {
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeoutSeconds];
-  while ([task isRunning]) {
-    if ([[NSDate date] compare:deadline] != NSOrderedAscending) {
-      return NO;
-    }
-    usleep(100000);
-  }
-  [task waitUntilExit];
-  return YES;
+  return ALNTestWaitForTaskExit(task, timeoutSeconds);
 }
 
 - (BOOL)terminateTask:(NSTask *)task timeoutSeconds:(NSTimeInterval)timeoutSeconds {
@@ -243,24 +236,64 @@
                                 port:(int)port
                             attempts:(NSInteger)attempts
                              success:(BOOL *)success {
-  NSString *body = @"";
-  for (NSInteger attempt = 0; attempt < attempts; attempt++) {
+  NSString *command =
+      [NSString stringWithFormat:@"curl -fsS 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
+  __block NSString *body = @"";
+  BOOL answered = ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
     int curlCode = 0;
-    NSString *command =
-        [NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d%@", port, path ?: @"/"];
     body = [self runShellCapture:command exitCode:&curlCode];
-    if (curlCode == 0) {
-      if (success != NULL) {
-        *success = YES;
-      }
-      return body;
-    }
-    usleep(200000);
-  }
+    return curlCode == 0;
+  });
   if (success != NULL) {
-    *success = NO;
+    *success = answered;
   }
   return body;
+}
+
+// The time budget for a wait that used to make `attempts` checks 200ms apart,
+// with headroom for the checks themselves.
+- (NSTimeInterval)pollTimeoutForAttempts:(NSInteger)attempts {
+  return MAX(1.0, (NSTimeInterval)attempts * 0.3);
+}
+
+// Runs `command` (a curl) until it exits 0 with `needle` in its output, and
+// returns that output; nil if that doesn't happen within `timeout`.
+- (NSString *)waitForCurl:(NSString *)command
+               containing:(NSString *)needle
+                  timeout:(NSTimeInterval)timeout {
+  __block NSString *matched = nil;
+  (void)ALNTestWaitUntil(timeout, 0.25, ^BOOL {
+    int curlCode = 0;
+    NSString *body = [self runShellCapture:command exitCode:&curlCode];
+    if (curlCode == 0 && [body containsString:needle]) {
+      matched = body;
+      return YES;
+    }
+    return NO;
+  });
+  return matched;
+}
+
+// Whether the text file at `path` comes to contain every string in `needles`
+// within `timeout`.
+- (BOOL)waitForFile:(NSString *)path
+      containingAll:(NSArray<NSString *> *)needles
+            timeout:(NSTimeInterval)timeout {
+  return ALNTestWaitUntil(timeout, 0.2, ^BOOL {
+    NSError *readError = nil;
+    NSString *snapshot = [NSString stringWithContentsOfFile:path
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:&readError];
+    if (readError != nil || snapshot == nil) {
+      return NO;
+    }
+    for (NSString *needle in needles) {
+      if (![snapshot containsString:needle]) {
+        return NO;
+      }
+    }
+    return YES;
+  });
 }
 
 - (NSArray *)childPIDsForParent:(pid_t)parentPID {
@@ -291,14 +324,11 @@
 - (NSArray *)waitForChildPIDsForParent:(pid_t)parentPID
                           minimumCount:(NSUInteger)minimumCount
                               attempts:(NSInteger)attempts {
-  NSArray *last = @[];
-  for (NSInteger idx = 0; idx < attempts; idx++) {
+  __block NSArray *last = @[];
+  (void)ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
     last = [self childPIDsForParent:parentPID];
-    if ([last count] >= minimumCount) {
-      return last;
-    }
-    usleep(200000);
-  }
+    return [last count] >= minimumCount;
+  });
   return last;
 }
 
@@ -343,18 +373,19 @@
                          excluding:(pid_t)excludedPID
                          attempts:(NSInteger)attempts {
   NSString *needle = token ?: @"";
-  for (NSInteger idx = 0; idx < attempts; idx++) {
-    NSArray *info = [self childProcessInfoForParent:parentPID];
-    for (NSDictionary *entry in info) {
+  __block pid_t found = (pid_t)0;
+  (void)ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
+    for (NSDictionary *entry in [self childProcessInfoForParent:parentPID]) {
       pid_t pid = (pid_t)[entry[@"pid"] intValue];
       NSString *args = [entry[@"args"] isKindOfClass:[NSString class]] ? entry[@"args"] : @"";
       if (pid > 0 && pid != excludedPID && [args containsString:needle]) {
-        return pid;
+        found = pid;
+        return YES;
       }
     }
-    usleep(200000);
-  }
-  return (pid_t)0;
+    return NO;
+  });
+  return found;
 }
 
 - (NSString *)requestWithServerEnv:(NSString *)envPrefix
@@ -364,8 +395,8 @@
                          serverCode:(int *)serverCode {
   NSString *prefix = ([envPrefix length] > 0) ? [NSString stringWithFormat:@"%@ ", envPrefix] : @"";
   NSString *binary = ([serverBinary length] > 0) ? serverBinary : @"./build/boomhauer";
-  NSString *body = @"";
-  int localCurlCode = 1;
+  __block NSString *body = @"";
+  __block int localCurlCode = 1;
   int localServerCode = 1;
 
   for (NSInteger launchAttempt = 0; launchAttempt < 5; launchAttempt++) {
@@ -381,19 +412,14 @@
     server.standardError = stderrPipe;
     [server launch];
 
-    usleep(250000);
+    // A --once server serves a single connection, so the request itself is
+    // the readiness check (a TCP probe would use up that connection).
     NSString *formattedCurl = [NSString stringWithFormat:curlCommand, port];
     localCurlCode = 1;
-    for (NSInteger attempt = 0; attempt < 20; attempt++) {
+    (void)ALNTestWaitUntil(10.0, 0.2, ^BOOL {
       body = [self runShellCapture:formattedCurl exitCode:&localCurlCode];
-      if (localCurlCode == 0) {
-        break;
-      }
-      if (![server isRunning]) {
-        break;
-      }
-      usleep(200000);
-    }
+      return localCurlCode == 0 || ![server isRunning];
+    });
 
     if ([server isRunning]) {
       if (localCurlCode == 0) {
@@ -450,7 +476,7 @@
   NSString *body =
       [self requestWithServerEnv:envPrefix
                      serverBinary:serverBinary
-                        curlBody:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%%d%@", path]
+                        curlBody:[NSString stringWithFormat:@"curl -fsS 'http://127.0.0.1:%%d%@'", path]
                         curlCode:&curlCode
                        serverCode:&serverCode];
   XCTAssertEqual(0, curlCode);
@@ -609,24 +635,15 @@
     [server launch];
 
     @try {
-      BOOL ready = NO;
-      NSString *healthBody = @"";
-      int curlCode = 1;
-      NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:20.0];
-      while ([[NSDate date] compare:deadline] == NSOrderedAscending) {
-        NSString *command =
-            [NSString stringWithFormat:@"curl --max-time 2 -fsS http://127.0.0.1:%d/healthz",
-                                       port];
-        healthBody = [self runShellCapture:command exitCode:&curlCode];
-        if (curlCode == 0) {
-          ready = YES;
-          break;
-        }
-        if (![server isRunning]) {
-          break;
-        }
-        usleep(200000);
-      }
+      __block NSString *healthBody = @"";
+      __block int curlCode = 1;
+      NSString *healthCommand =
+          [NSString stringWithFormat:@"curl --max-time 2 -fsS http://127.0.0.1:%d/healthz", port];
+      (void)ALNTestWaitUntil(20.0, 0.2, ^BOOL {
+        healthBody = [self runShellCapture:healthCommand exitCode:&curlCode];
+        return curlCode == 0 || ![server isRunning];
+      });
+      BOOL ready = (curlCode == 0);
       if (!ready) {
         (void)[self terminateTask:server timeoutSeconds:5.0];
         NSString *stdoutText = [self capturedOutputFromPipe:stdoutPipe];
@@ -2765,6 +2782,7 @@
             break;
           }
           shouldRetryFreshServer = YES;
+          // sleep-ok: backoff before retrying a transient network failure.
           usleep(200000);
         }
       }
@@ -2794,6 +2812,7 @@
     if (!shouldRetryFreshServer) {
       break;
     }
+    // sleep-ok: backoff before starting a fresh server.
     usleep(200000);
   }
 
@@ -4624,21 +4643,14 @@
         [self waitForChildPIDsForParent:server.processIdentifier minimumCount:2 attempts:60];
     XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
     pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
-	    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+    XCTAssertEqual(0, kill(killedPID, SIGKILL));
 
-	    BOOL respawned = NO;
-	    for (NSInteger attempt = 0; attempt < 80; attempt++) {
-	      NSString *snapshot = [NSString stringWithContentsOfFile:lifecycleLog
-	                                                     encoding:NSUTF8StringEncoding
-	                                                        error:nil];
-	      if ([snapshot containsString:@"event=worker_exited"] &&
-	          [snapshot containsString:@"event=worker_started"] &&
-	          [snapshot containsString:@"reason=respawn_after_exit"]) {
-	        respawned = YES;
-	        break;
-	      }
-	      usleep(200000);
-	    }
+    BOOL respawned = [self waitForFile:lifecycleLog
+                         containingAll:@[
+                           @"event=worker_exited", @"event=worker_started",
+                           @"reason=respawn_after_exit"
+                         ]
+                               timeout:30.0];
     XCTAssertTrue(respawned);
 
     BOOL secondOK = NO;
@@ -4735,22 +4747,16 @@
     XCTAssertTrue([clusterBody containsString:@"\"expected_nodes\":2"] ||
                   [clusterBody containsString:@"\"expected_nodes\": 2"]);
 
-    BOOL headerSeen = NO;
-    for (NSInteger attempt = 0; attempt < 60; attempt++) {
+    NSString *headersCommand =
+        [NSString stringWithFormat:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz", port];
+    BOOL headerSeen = ALNTestWaitUntil(20.0, 0.2, ^BOOL {
       int curlCode = 0;
-      NSString *headers = [self runShellCapture:[NSString stringWithFormat:
-                                                             @"curl -sS -D - -o /dev/null http://127.0.0.1:%d/healthz",
-                                                             port]
-                                        exitCode:&curlCode];
-      if (curlCode == 0 &&
-          [headers containsString:@"X-Arlen-Cluster: phase3h-cluster"] &&
-          [headers containsString:@"X-Arlen-Node: phase3h-node"] &&
-          [headers containsString:@"X-Arlen-Worker-Pid:"]) {
-        headerSeen = YES;
-        break;
-      }
-      usleep(200000);
-    }
+      NSString *headers = [self runShellCapture:headersCommand exitCode:&curlCode];
+      return curlCode == 0 &&
+             [headers containsString:@"X-Arlen-Cluster: phase3h-cluster"] &&
+             [headers containsString:@"X-Arlen-Node: phase3h-node"] &&
+             [headers containsString:@"X-Arlen-Worker-Pid:"];
+    });
     XCTAssertTrue(headerSeen);
 
     XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
@@ -5140,39 +5146,17 @@
     pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
     XCTAssertEqual(0, kill(killedPID, SIGKILL));
 
-    BOOL respawned = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
+    BOOL respawned = ALNTestWaitUntil(40.0, 0.2, ^BOOL {
       NSArray *workers = [self childPIDsForParent:server.processIdentifier];
-      BOOL killedStillPresent = NO;
-      for (NSNumber *candidate in workers) {
-        if ([candidate intValue] == (int)killedPID) {
-          killedStillPresent = YES;
-          break;
-        }
-      }
-      if ([workers count] >= 2 && !killedStillPresent) {
-        respawned = YES;
-        break;
-      }
-      usleep(200000);
-    }
+      return [workers count] >= 2 && ![workers containsObject:@((NSInteger)killedPID)];
+    });
     XCTAssertTrue(respawned);
 
     XCTAssertEqual(0, kill(server.processIdentifier, SIGHUP));
-    BOOL reloadLifecycleSeen = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
-      NSError *snapshotError = nil;
-      NSString *snapshot = [NSString stringWithContentsOfFile:lifecycleLog
-                                                     encoding:NSUTF8StringEncoding
-                                                        error:&snapshotError];
-      if (snapshotError == nil &&
-          [snapshot containsString:@"event=manager_reload_started"] &&
-          [snapshot containsString:@"event=manager_reload_completed"]) {
-        reloadLifecycleSeen = YES;
-        break;
-      }
-      usleep(200000);
-    }
+    BOOL reloadLifecycleSeen =
+        [self waitForFile:lifecycleLog
+            containingAll:@[ @"event=manager_reload_started", @"event=manager_reload_completed" ]
+                  timeout:40.0];
     XCTAssertTrue(reloadLifecycleSeen);
 
     BOOL healthyAfterReload = NO;
@@ -5343,46 +5327,43 @@
 
   @try {
     NSString *escapeSequence = [NSString stringWithFormat:@"%c", 0x1B];
-    BOOL errorPageSeen = NO;
-    for (NSInteger attempt = 0; attempt < 240; attempt++) {
-      int curlCode = 0;
-      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
-                                    exitCode:&curlCode];
-      if (curlCode == 0 && [body containsString:@"Boomhauer Build Failed"]) {
-        XCTAssertTrue([body containsString:@"http-equiv='refresh'"]);
-        XCTAssertTrue([body containsString:@"Boomhauer retries automatically every 1 seconds"]);
-        XCTAssertTrue([body containsString:@"Last failed at:"]);
-        XCTAssertTrue([body containsString:@"<pre class='diagnostic-output'>"]);
-        XCTAssertTrue([body containsString:@"WATCH_BUILD_TOGGLE"]);
-        XCTAssertFalse([body containsString:escapeSequence]);
-        errorPageSeen = YES;
-        break;
-      }
-      usleep(250000);
+    NSString *errorPage =
+        [self waitForCurl:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
+               containing:@"Boomhauer Build Failed"
+                  timeout:90.0];
+    XCTAssertNotNil(errorPage);
+    if (errorPage != nil) {
+      XCTAssertTrue([errorPage containsString:@"http-equiv='refresh'"]);
+      XCTAssertTrue([errorPage containsString:@"Boomhauer retries automatically every 1 seconds"]);
+      XCTAssertTrue([errorPage containsString:@"Last failed at:"]);
+      XCTAssertTrue([errorPage containsString:@"<pre class='diagnostic-output'>"]);
+      XCTAssertTrue([errorPage containsString:@"WATCH_BUILD_TOGGLE"]);
+      XCTAssertFalse([errorPage containsString:escapeSequence]);
     }
-    XCTAssertTrue(errorPageSeen);
 
-    BOOL jsonErrorSeen = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
+    NSString *jsonCommand = [NSString
+        stringWithFormat:@"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
+                         port];
+    __block NSString *jsonError = nil;
+    (void)ALNTestWaitUntil(45.0, 0.25, ^BOOL {
       int jsonCurlCode = 0;
-      NSString *jsonBody = [self runShellCapture:[NSString stringWithFormat:
-                                                     @"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
-                                                     port]
-                                        exitCode:&jsonCurlCode];
+      NSString *jsonBody = [self runShellCapture:jsonCommand exitCode:&jsonCurlCode];
       if (jsonCurlCode == 0 && [jsonBody containsString:@"dev_build_failed"] &&
           [jsonBody containsString:@"stage"] &&
           [jsonBody containsString:@"timestamp_utc"] &&
           [jsonBody containsString:@"recovery_hint"] &&
           [jsonBody containsString:@"auto_retry_seconds"]) {
-        XCTAssertFalse([jsonBody containsString:escapeSequence]);
-        XCTAssertFalse([jsonBody containsString:@"\\u001b"]);
-        XCTAssertFalse([jsonBody containsString:@"\\u001B"]);
-        jsonErrorSeen = YES;
-        break;
+        jsonError = jsonBody;
+        return YES;
       }
-      usleep(250000);
+      return NO;
+    });
+    XCTAssertNotNil(jsonError);
+    if (jsonError != nil) {
+      XCTAssertFalse([jsonError containsString:escapeSequence]);
+      XCTAssertFalse([jsonError containsString:@"\\u001b"]);
+      XCTAssertFalse([jsonError containsString:@"\\u001B"]);
     }
-    XCTAssertTrue(jsonErrorSeen);
 
     XCTAssertTrue([self writeFile:appSourcePath content:fixedAppSource]);
     NSError *touchError = nil;
@@ -5391,18 +5372,11 @@
                                                           error:&touchError],
                   @"failed restoring app_lite.m mtime: %@", touchError.localizedDescription);
 
-    BOOL recovered = NO;
-    for (NSInteger attempt = 0; attempt < 120; attempt++) {
-      int curlCode = 0;
-      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
-                                    exitCode:&curlCode];
-      if (curlCode == 0 && [body containsString:@"hello from lite mode"]) {
-        recovered = YES;
-        break;
-      }
-      usleep(250000);
-    }
-    XCTAssertTrue(recovered);
+    NSString *recoveredPage =
+        [self waitForCurl:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+               containing:@"hello from lite mode"
+                  timeout:45.0];
+    XCTAssertNotNil(recoveredPage);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);
@@ -5529,33 +5503,19 @@
   [server launch];
 
   @try {
-    BOOL ready = NO;
-    for (NSInteger attempt = 0; attempt < 240; attempt++) {
-      int curlCode = 0;
-      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
-                                    exitCode:&curlCode];
-      if (curlCode == 0 && [body containsString:@"alpha"]) {
-        ready = YES;
-        break;
-      }
-      usleep(250000);
-    }
-    XCTAssertTrue(ready);
+    NSString *initialPage =
+        [self waitForCurl:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+               containing:@"alpha"
+                  timeout:90.0];
+    XCTAssertNotNil(initialPage);
 
     XCTAssertTrue([self writeFile:templatePath content:brokenTemplate]);
 
-    BOOL errorPageSeen = NO;
-    for (NSInteger attempt = 0; attempt < 240; attempt++) {
-      int curlCode = 0;
-      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
-                                    exitCode:&curlCode];
-      if (curlCode == 0 && [body containsString:@"Boomhauer Build Failed"]) {
-        errorPageSeen = YES;
-        break;
-      }
-      usleep(250000);
-    }
-    XCTAssertTrue(errorPageSeen);
+    NSString *templateErrorPage =
+        [self waitForCurl:[NSString stringWithFormat:@"curl -sS http://127.0.0.1:%d/", port]
+               containing:@"Boomhauer Build Failed"
+                  timeout:90.0];
+    XCTAssertNotNil(templateErrorPage);
 
     XCTAssertTrue([self writeFile:templatePath content:fixedTemplate]);
     NSError *touchError = nil;
@@ -5564,19 +5524,12 @@
                                                           error:&touchError],
                   @"failed restoring template mtime: %@", touchError.localizedDescription);
 
-    BOOL recovered = NO;
-    for (NSInteger attempt = 0; attempt < 160; attempt++) {
-      int curlCode = 0;
-      NSString *body = [self runShellCapture:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
-                                    exitCode:&curlCode];
-      if (curlCode == 0 && [body containsString:@"bravo"]) {
-        XCTAssertFalse([body containsString:@"alpha"]);
-        recovered = YES;
-        break;
-      }
-      usleep(250000);
-    }
-    XCTAssertTrue(recovered);
+    NSString *recovered =
+        [self waitForCurl:[NSString stringWithFormat:@"curl -fsS http://127.0.0.1:%d/", port]
+               containing:@"bravo"
+                  timeout:60.0];
+    XCTAssertNotNil(recovered);
+    XCTAssertFalse([recovered containsString:@"alpha"]);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);
