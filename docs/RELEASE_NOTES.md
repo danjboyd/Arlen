@@ -4,7 +4,7 @@
 
 - No changes yet.
 
-## 0.1.0 — 2026-10-06
+## 0.1.0 — 2026-10-07
 
 First tagged release. [Status](STATUS.md) describes everything this release
 ships; the entries below are the changes made since release candidates started
