@@ -108,7 +108,12 @@ Those lanes are intended to verify:
 - `propane` request serving and reload handling
 
 The preview lanes use `arlen-xctest-runner` so a Windows host can load and run
-the XCTest bundle without depending on the stock bundle discovery path.
+the XCTest bundle without depending on the stock bundle discovery path. They
+don't use the vendored `tools-xctest` fork that Linux and macOS lanes use yet,
+so Windows runs have no test filters, per-test time limits, JUnit reports or
+skips. GitHub issue #116 tracks the switch. The known blockers and the
+migration steps are listed in "Windows Test Runner" in
+[CI Alignment](CI_ALIGNMENT.md).
 
 ## 4. Packaged Release Contract
 

@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-10-05
+Last updated: 2026-10-07
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -17,6 +17,57 @@ Arlen also vendors `gnustep-cli-new` at `vendor/gnustep-cli-new`
 platform-runner standardization. This pin records the exact Windows
 MSYS2/GNUstep provisioning source that Arlen expects for `windows-preview`
 runners; it is not a new required merge-gate lane by itself.
+
+## Windows Test Runner
+
+The Windows preview lanes (`make phase24-windows-db-smoke` and
+`make phase24-windows-runtime-tests`) don't use the vendored fork. They build
+against the toolchain's XCTest and run bundles through
+`tools/arlen_xctest_runner.m`, so they get no filters, time limits, JUnit
+reports, skips or attachments. GitHub issue #116 tracks moving them to the fork.
+
+As of 2026-10-07 the move hasn't been verified on Windows: `windows-preview` is
+disabled and no Windows runner is registered. A source review of the fork at
+`v0.3.0` found:
+
+- The fork has no Windows CI lane, so it has never been built under MSYS2
+  `CLANG64`.
+- Blockers in the fork, all in the `-host` (run inside an application)
+  support, which Arlen doesn't use:
+  - `main.m` calls `kill(pid, SIGKILL)`, which mingw-w64 doesn't provide.
+  - `main.m` includes `<dlfcn.h>` for `dladdr`. That header comes only from
+    the optional `dlfcn-win32` package.
+  - `XCTest/GSXCTestHostLoader.m` calls `setenv`/`unsetenv`, which mingw-w64
+    doesn't declare. The `libXCTestHost` library works by `LD_PRELOAD`, which
+    has no Windows equivalent.
+  The fix is to compile `-host` out on Windows (`#ifdef _WIN32`) and skip
+  building `libXCTestHost` there.
+- The rest of `libXCTest` looks portable. It uses `pthread_once` and
+  `clock_gettime` (provided by winpthreads), `_exit` and `unistd.h` (provided
+  by mingw-w64), `objc_getClassList` for test discovery (the custom runner does
+  the same), and `NSBundle` to load bundles.
+- Arlen's make wiring assumes Linux:
+  - `VENDORED_XCTEST` names `obj/xctest`, but gnustep-make builds
+    `obj/xctest.exe` on Windows. The prerequisite never exists, so every run
+    would rebuild the runner from clean.
+  - `xctest_runtime_env` points `LD_LIBRARY_PATH` at the vendored
+    `libXCTest`. Windows finds DLLs through `PATH`.
+  - Windows builds compile with `-DGNUSTEP_WITHOUT_DLL=1`. Whether bundles
+    built that way link correctly against a DLL `libXCTest` is unknown until
+    a Windows build tries it.
+
+To finish the move once a Windows runner is back:
+
+1. Fix the `-host` blockers in `danjboyd/tools-xctest`, ideally with a Windows
+   lane in the fork's CI, then tag a release and bump `vendor/tools-xctest`.
+2. In `GNUmakefile`, use `$(EXEEXT)`/`.exe` for `VENDORED_XCTEST` on Windows,
+   prepend the vendored library directory to `PATH` in `xctest_runtime_env`,
+   and remove the `ARLEN_USE_VENDORED_XCTEST := 0` override.
+3. Point the phase24 targets at `$(call xctest_run,...)`, then delete
+   `tools/arlen_xctest_runner.m`, `XCTEST_BUNDLE_RUNNER_*` and its object from
+   `ALL_OBJECTS`.
+4. Run `make phase24-windows-confidence` on the runner, and update this
+   section, `docs/WINDOWS_CLANG64.md` and `docs/TESTING_WORKFLOW.md`.
 
 ## Goal
 

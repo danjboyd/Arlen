@@ -214,7 +214,8 @@ Windows-focused preview lanes:
 
 - `make phase24-windows-db-smoke`
  - focused PostgreSQL / ODBC loader smoke for MSYS2 `CLANG64`
- - uses `arlen-xctest-runner` to load the XCTest bundle directly
+ - uses `arlen-xctest-runner` to load the XCTest bundle directly, not the
+ vendored fork (GitHub issue #116; see [CI Alignment](CI_ALIGNMENT.md))
 - `make phase24-windows-runtime-tests`
  - Windows runtime/server parity coverage for `boomhauer`, `jobs-worker`, and
  `propane`
