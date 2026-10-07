@@ -1003,6 +1003,8 @@ Behavior:
  - `/openapi` (interactive explorer by default)
  - `/openapi/viewer` (lightweight fallback viewer)
  - `/openapi/swagger` (self-hosted swagger-style docs UI)
+ - `/openapi/assets/*` (CSS/JS for the docs UI pages; same-origin so the default CSP allows them)
+ - `/arlen/dev-error.css` (stylesheet for the development exception page)
 - built- sample realtime/composition routes:
  - `/ws/echo`
  - `/ws/channel/:channel`

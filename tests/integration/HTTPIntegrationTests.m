@@ -1898,7 +1898,16 @@
     XCTAssertTrue(docsOK);
     XCTAssertTrue([docsBody containsString:@"Arlen OpenAPI Explorer"]);
     XCTAssertTrue([docsBody containsString:@"Try It Out"]);
-    XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+    XCTAssertTrue([docsBody containsString:@"/openapi/assets/docs.js"]);
+    XCTAssertFalse([docsBody containsString:@"<script>"]);
+
+    BOOL scriptOK = NO;
+    NSString *scriptBody = [self requestPathWithRetries:@"/openapi/assets/docs.js"
+                                                   port:port
+                                               attempts:60
+                                                success:&scriptOK];
+    XCTAssertTrue(scriptOK);
+    XCTAssertTrue([scriptBody containsString:@"fetch('/openapi.json')"]);
 
     BOOL specOK = NO;
     NSString *specBody = [self requestPathWithRetries:@"/openapi.json"
@@ -1952,7 +1961,8 @@
     XCTAssertTrue(docsOK);
     XCTAssertTrue([docsBody containsString:@"Arlen Swagger UI"]);
     XCTAssertTrue([docsBody containsString:@"Try It Out"]);
-    XCTAssertTrue([docsBody containsString:@"fetch('/openapi.json')"]);
+    XCTAssertTrue([docsBody containsString:@"/openapi/assets/swagger.css"]);
+    XCTAssertTrue([docsBody containsString:@"/openapi/assets/docs.js"]);
 
     BOOL swaggerOK = NO;
     NSString *swaggerBody = [self requestPathWithRetries:@"/openapi/swagger"
@@ -4450,6 +4460,15 @@
   XCTAssertTrue([body containsString:@"\"framework\""]);
   XCTAssertTrue([body containsString:@"Arlen"]);
   XCTAssertTrue([body containsString:@"\"query\""]);
+}
+
+- (void)testTechDemoOpenAPIListsJSONEndpoints {
+  NSString *body = [self requestPath:@"/openapi.json"
+                        serverBinary:@"./build/tech-demo-server"
+                           envPrefix:@"ARLEN_APP_ROOT=examples/tech_demo"];
+  XCTAssertTrue([body containsString:@"\"/tech-demo/api/catalog\""]);
+  XCTAssertTrue([body containsString:@"\"/tech-demo/api/summary\""]);
+  XCTAssertTrue([body containsString:@"techDemoSummary"]);
 }
 
 - (void)testAPIReferenceAppStatusAndSwaggerDocs {
