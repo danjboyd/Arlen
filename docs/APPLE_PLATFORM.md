@@ -96,6 +96,12 @@ GNUstep bootstrap scripts.
 - Apple watch-mode support for `boomhauer` is not implemented yet; the runtime
   falls back to non-watch execution with an explicit warning.
 
+## Portability Rules
+
+- Detect NSNumber booleans with `ALNNumberIsBoolean()` (`ALNPlatform.h`), never
+  by comparing `objCType` with `@encode(BOOL)`. Apple arm64 encodes `BOOL` as
+  `"B"` while `@YES` reports `"c"`, and GNUstep encodes `BOOL` as `"C"`.
+
 ## Non-Goals
 
 - deprecating Linux/GNUstep support

@@ -1,4 +1,5 @@
 #import "ALNOAuthResourceServer.h"
+#import "ALNPlatform.h"
 #import "ALNAuth.h"
 #import "ALNOIDCClient.h"
 #import "ALNHTTPCompat.h"
@@ -48,7 +49,7 @@ static BOOL Path(NSString *path) {
     ([path isEqual:@"/"] || ![path hasSuffix:@"/"]);
 }
 static BOOL Number(id x) {
-  return [x isKindOfClass:[NSNumber class]] && strcmp([x objCType], @encode(BOOL)) != 0 && isfinite([x doubleValue]);
+  return [x isKindOfClass:[NSNumber class]] && !ALNNumberIsBoolean(x) && isfinite([x doubleValue]);
 }
 // Old-style plists deliver bare numbers and YES/NO as strings. Convert the forms
 // a plist can produce and leave anything else for validation to reject.
