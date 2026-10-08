@@ -91,6 +91,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Reference
 
 - [API Reference](API_REFERENCE.md): generated public API docs with per-method purpose and usage guidance.
+- [Markdown](MARKDOWN.md): CommonMark/GFM parsing to a node tree, safe HTML and plain-text rendering, custom inline spans.
 - [Password Hashing](PASSWORD_HASHING.md): Argon2id password hashing defaults and rehash workflow.
 - [Public Test Contract](PUBLIC_TEST_CONTRACT.md): public-surface release-confidence matrix and default evidence contract.
 - [Testing Workflow](TESTING_WORKFLOW.md): focused contributor lanes for turning bug reports into regressions.

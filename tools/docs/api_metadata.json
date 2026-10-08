@@ -193,6 +193,20 @@
     "ALNHTTPClient": {
       "summary": "Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).",
       "usage_example": "NSError *error = nil;\nALNHTTPClient *client = [[ALNHTTPClient alloc] initWithConfiguration:@{\n  @\"allowedHosts\" : @[ @\"api.vendor.example\" ],\n  @\"timeoutSeconds\" : @10,\n} error:&error];\nALNHTTPClientResult *result = [client POSTJSONObject:@{ @\"ticket\" : @42 }\n    toURL:[NSURL URLWithString:@\"https://api.vendor.example/v1/events\"]\n    headers:@{ @\"Authorization\" : @\"Bearer ...\" } error:&error];"
+    },
+    "ALNMarkdown": {
+      "summary": "CommonMark/GFM Markdown parsing (vendored cmark-gfm) with a safe HTML renderer and a plain-text renderer.",
+      "usage_example": "NSString *html = [ALNMarkdown HTMLFromString:message.body options:nil];\nNSString *text = [ALNMarkdown plainTextFromString:message.body options:nil];"
+    },
+    "ALNMarkdownNode": {
+      "summary": "Immutable node of a parsed Markdown document; walk `children` by `type` to write custom renderers."
+    },
+    "ALNMarkdownOptions": {
+      "summary": "Parsing and rendering settings for ALNMarkdown: GFM extensions, inline spans, nesting limit, URL scheme allowlists, HTML class map."
+    },
+    "ALNMarkdownInlineSpanSyntax": {
+      "summary": "Custom inline span syntax such as `⟦red⟧text⟦/red⟧`, delivered as ALNMarkdownNodeTypeInlineSpan nodes.",
+      "usage_example": "ALNMarkdownOptions *options = [ALNMarkdownOptions defaultOptions];\noptions.inlineSpans = @[ [ALNMarkdownInlineSpanSyntax syntaxWithIdentifier:@\"color\"\n                                                         openingDelimiter:@\"⟦\"\n                                                         closingDelimiter:@\"⟧\"\n                                                                    names:[NSSet setWithArray:@[ @\"red\" ]]] ];"
     }
   },
   "properties": {
@@ -367,6 +381,42 @@
     "ALNHTTPClientResult|init": {
       "purpose": "Unavailable. Results are constructed by the synchronous transport.",
       "usage": "Call `ALNSynchronousHTTPResult(request, maxRedirects, policy, &error)`."
+    },
+    "ALNMarkdown|parseString:options:": {
+      "purpose": "Parse Markdown into an ALNMarkdownNode document tree.",
+      "usage": "Never fails; nil input gives an empty document. Apply inline spans and the nesting limit through options."
+    },
+    "ALNMarkdown|HTMLFromString:options:": {
+      "purpose": "Render Markdown to HTML that is safe for untrusted input.",
+      "usage": "Raw HTML is escaped and link/image URLs are limited to the options' scheme allowlists, so the result can go through `<%== %>`."
+    },
+    "ALNMarkdown|HTMLFromNode:options:": {
+      "purpose": "Render an already parsed node (or subtree) to safe HTML.",
+      "usage": "Pass the same options used for parsing so rendering settings such as the class map apply."
+    },
+    "ALNMarkdown|plainTextFromString:options:": {
+      "purpose": "Render Markdown as readable plain text without markup.",
+      "usage": "Use for search indexing, classifiers and text-only channels; link URLs follow their text in parentheses."
+    },
+    "ALNMarkdown|plainTextFromNode:": {
+      "purpose": "Render an already parsed node as plain text.",
+      "usage": "Useful after inspecting or filtering the tree."
+    },
+    "ALNMarkdown|cmarkGFMVersion": {
+      "purpose": "Return the vendored cmark-gfm version string.",
+      "usage": "Diagnostics only."
+    },
+    "ALNMarkdownInlineSpanSyntax|syntaxWithIdentifier:openingDelimiter:closingDelimiter:names:": {
+      "purpose": "Define a custom inline span syntax.",
+      "usage": "Returns nil for an empty identifier or delimiter; pass names:nil to accept any ASCII name."
+    },
+    "ALNMarkdownOptions|defaultOptions": {
+      "purpose": "Return options with all GFM extensions on and safe URL allowlists.",
+      "usage": "Copy and adjust; options are copied when passed to ALNMarkdown."
+    },
+    "ALNMarkdownNode|textContent": {
+      "purpose": "Return the node's text with markup removed.",
+      "usage": "Breaks become spaces; code and raw HTML contribute their literal text."
     }
   }
 }

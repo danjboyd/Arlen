@@ -538,7 +538,9 @@
   XCTAssertTrue([makefile containsString:@"src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c"]);
   XCTAssertTrue([makefile containsString:@"THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1"]);
   XCTAssertTrue([makefile containsString:
-                              @"FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)"]);
+                              @"CMARK_GFM_C_SRCS := $(sort $(wildcard src/Arlen/Support/third_party/cmark-gfm/*.c))"]);
+  XCTAssertTrue([makefile containsString:
+                              @"FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS) $(CMARK_GFM_C_SRCS)"]);
   XCTAssertTrue([makefile containsString:@"FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)"]);
   XCTAssertTrue([makefile containsString:
                               @"JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)"]);

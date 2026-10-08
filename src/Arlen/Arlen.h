@@ -69,6 +69,7 @@
 #import "Support/ALNEventStream.h"
 #import "Support/ALNOIDCClient.h"
 #import "Support/ALNOAuthResourceServer.h"
+#import "Support/ALNMarkdown.h"
 #import "Support/ALNPasswordHash.h"
 #import "Support/ALNRecoveryCodes.h"
 #import "Support/ALNTOTP.h"

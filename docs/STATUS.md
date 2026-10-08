@@ -20,6 +20,7 @@ preview, and what is in flight. For engineering history, see
 |---|---|
 | HTTP | HTML and JSON routing, controllers, middleware, route metadata |
 | Templates | EOC (`.html.eoc`) transpiler, layouts, partials, forms, live fragments |
+| Markdown | CommonMark + GFM via vendored cmark-gfm: node tree, safe HTML and plain-text renderers, custom inline spans, `ALNEOCMarkdownHTML` |
 | Auth | Sessions, CSRF, rate limiting, password reset, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC/provider login, including configurable auth-module OIDC/Entra with app-owned identity resolution |
 | Auth UI | `headless`, `module-ui`, and `generated-app-ui` ownership modes |
 | Modules | `auth`, `admin-ui`, `jobs`, `notifications`, `storage`, `ops`, `search` |

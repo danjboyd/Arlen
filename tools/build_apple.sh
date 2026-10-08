@@ -159,6 +159,12 @@ while IFS= read -r src; do
   obj="$(obj_path_for "$src")"
   compile_c "$src" "$obj"
   framework_objs+=("$obj")
+done < <(find "$repo_root/src/Arlen/Support/third_party/cmark-gfm" -type f -name '*.c' | sort)
+
+while IFS= read -r src; do
+  obj="$(obj_path_for "$src")"
+  compile_c "$src" "$obj"
+  framework_objs+=("$obj")
 done < <(find "$repo_root/src/Arlen/Support/third_party/argon2/src" -type f -name '*.c' | sort)
 
 framework_lib="$lib_root/libArlenFramework.a"

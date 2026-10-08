@@ -141,7 +141,9 @@ else
 LLHTTP_C_SRCS :=
 endif
 ARGON2_C_SRCS := src/Arlen/Support/third_party/argon2/src/argon2.c src/Arlen/Support/third_party/argon2/src/core.c src/Arlen/Support/third_party/argon2/src/encoding.c src/Arlen/Support/third_party/argon2/src/ref.c src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c
-FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS)
+# Markdown (ALNMarkdown); see src/Arlen/Support/third_party/cmark-gfm/PROVENANCE.md.
+CMARK_GFM_C_SRCS := $(sort $(wildcard src/Arlen/Support/third_party/cmark-gfm/*.c))
+FRAMEWORK_C_SRCS := $(YYJSON_C_SRCS) $(LLHTTP_C_SRCS) $(ARGON2_C_SRCS) $(CMARK_GFM_C_SRCS)
 FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)

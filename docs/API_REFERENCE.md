@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `93`
-- Symbols: `162`
-- Public methods: `1101`
-- Public properties: `494`
+- Public headers: `94`
+- Symbols: `166`
+- Public methods: `1110`
+- Public properties: `517`
 
 ## API Surface Boundary
 
@@ -194,6 +194,10 @@ python3 tools/docs/generate_api_reference.py
 - [ALNLogger](api/ALNLogger.md): Structured logger with configurable output format and level-specific convenience methods.
 - [ALNMailAdapter](api/ALNMailAdapter.md): Mail adapter protocol for outbound delivery and delivery snapshot diagnostics.
 - [ALNMailMessage](api/ALNMailMessage.md): Mail payload model containing sender/recipients/content/headers/metadata fields.
+- [ALNMarkdown](api/ALNMarkdown.md): CommonMark/GFM Markdown parsing (vendored cmark-gfm) with a safe HTML renderer and a plain-text renderer.
+- [ALNMarkdownInlineSpanSyntax](api/ALNMarkdownInlineSpanSyntax.md): Custom inline span syntax such as `⟦red⟧text⟦/red⟧`, delivered as ALNMarkdownNodeTypeInlineSpan nodes.
+- [ALNMarkdownNode](api/ALNMarkdownNode.md): Immutable node of a parsed Markdown document; walk `children` by `type` to write custom renderers.
+- [ALNMarkdownOptions](api/ALNMarkdownOptions.md): Parsing and rendering settings for ALNMarkdown: GFM extensions, inline spans, nesting limit, URL scheme allowlists, HTML class map.
 - [ALNMetricsRegistry](api/ALNMetricsRegistry.md): In-memory metrics registry for counters, gauges, timings, snapshots, and Prometheus text output.
 - [ALNOAuthResourceServer](api/ALNOAuthResourceServer.md): Opt-in OAuth access-token verifier, verified principal, protected-resource discovery and shared REST/MCP authorization middleware.
 - [ALNOIDCClient](api/ALNOIDCClient.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
@@ -296,6 +300,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNHTTPCompat.h`
 - `src/Arlen/Support/ALNLive.h`
 - `src/Arlen/Support/ALNLogger.h`
+- `src/Arlen/Support/ALNMarkdown.h`
 - `src/Arlen/Support/ALNMetrics.h`
 - `src/Arlen/Support/ALNOAuthResourceServer.h`
 - `src/Arlen/Support/ALNOIDCClient.h`
