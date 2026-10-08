@@ -12,6 +12,13 @@
   arrive as typed nodes, and templates can use `<%== ALNEOCMarkdownHTML($body) %>`.
   See `docs/MARKDOWN.md` (GitHub issue 127).
 
+- PostgreSQL realtime fanout no longer crashes on macOS on its first publish.
+  Its publish queue was not retained under ARC on Apple, where dispatch queues
+  are Objective-C objects. Event-stream stores now serialize their
+  `CREATE TABLE`/`CREATE INDEX` with an advisory lock, so stores or processes
+  starting at the same time against a fresh database no longer fail with
+  `pg_type_typname_nsp_index` (GitHub issue 138).
+
 - The vendored test runner is now `danjboyd/tools-xctest` `v0.5.0` (was
   `v0.3.0`). A `TEST=` filter or `arlen test --only` selection that matches
   no test now fails the run with `No tests matched '<selection>'.` instead of
