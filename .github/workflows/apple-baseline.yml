@@ -34,16 +34,9 @@ jobs:
         run: |
           bash ./tools/ci/run_apple_baseline_confidence.sh
 
-      - name: Verify HTTP, retry, and PostgreSQL precision contracts
+      - name: Run the full Apple unit bundle against PostgreSQL and check the test inventory
         run: |
-          bash tools/ci/run_apple_client_data_regressions.sh 2>&1 | tee build/release_confidence/phase30/client_data_regressions.log
-
-      - name: Verify OIDC transport and concurrent security-header initialization
-        run: |
-          bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
-          for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests HTTPClientTests; do
-            xcrun xctest -XCTest "$filter" "$bundle_path"
-          done
+          bash tools/ci/run_apple_unit_suite.sh
 
       - name: Upload Apple confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
@@ -52,4 +45,5 @@ jobs:
           name: apple-baseline-confidence-${{ github.run_id }}
           path: |
             build/release_confidence/phase30/**
+            build/release_confidence/apple_unit/**
           if-no-files-found: warn
