@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -26,47 +26,36 @@ against the toolchain's XCTest and run bundles through
 `tools/arlen_xctest_runner.m`, so they get no filters, time limits, JUnit
 reports, skips or attachments. GitHub issue #116 tracks moving them to the fork.
 
-As of 2026-10-07 the move hasn't been verified on Windows: `windows-preview` is
-disabled and no Windows runner is registered. A source review of the fork at
-`v0.3.0` found:
+As of 2026-10-08 the move hasn't been verified on Windows: `windows-preview` is
+disabled and no Windows runner is registered.
 
-- The fork has no Windows CI lane, so it has never been built under MSYS2
-  `CLANG64`.
-- Blockers in the fork, all in the `-host` (run inside an application)
-  support, which Arlen doesn't use:
-  - `main.m` calls `kill(pid, SIGKILL)`, which mingw-w64 doesn't provide.
-  - `main.m` includes `<dlfcn.h>` for `dladdr`. That header comes only from
-    the optional `dlfcn-win32` package.
-  - `XCTest/GSXCTestHostLoader.m` calls `setenv`/`unsetenv`, which mingw-w64
-    doesn't declare. The `libXCTestHost` library works by `LD_PRELOAD`, which
-    has no Windows equivalent.
-  The fix is to compile `-host` out on Windows (`#ifdef _WIN32`) and skip
-  building `libXCTestHost` there.
-- The rest of `libXCTest` looks portable. It uses `pthread_once` and
-  `clock_gettime` (provided by winpthreads), `_exit` and `unistd.h` (provided
-  by mingw-w64), `objc_getClassList` for test discovery (the custom runner does
-  the same), and `NSBundle` to load bundles.
-- Arlen's make wiring assumes Linux:
-  - `VENDORED_XCTEST` names `obj/xctest`, but gnustep-make builds
-    `obj/xctest.exe` on Windows. The prerequisite never exists, so every run
-    would rebuild the runner from clean.
-  - `xctest_runtime_env` points `LD_LIBRARY_PATH` at the vendored
-    `libXCTest`. Windows finds DLLs through `PATH`.
-  - Windows builds compile with `-DGNUSTEP_WITHOUT_DLL=1`. Whether bundles
-    built that way link correctly against a DLL `libXCTest` is unknown until
-    a Windows build tries it.
+The fork itself is no longer a blocker. Since `v0.5.0` (pinned here) it builds
+and passes `make check` on MSYS2 `CLANG64` in its own CI
+(danjboyd/tools-xctest#28). On Windows it leaves out `-host` and
+`libXCTestHost`, which need `LD_PRELOAD` and which Arlen doesn't use; its
+metrics use the Windows process APIs, and parallel workers find `xctest`
+without `/proc`.
+
+What remains is Arlen's make wiring, which assumes Linux:
+
+- `VENDORED_XCTEST` names `obj/xctest`, but gnustep-make builds
+  `obj/xctest.exe` on Windows. The prerequisite never exists, so every run
+  would rebuild the runner from clean.
+- `xctest_runtime_env` points `LD_LIBRARY_PATH` at the vendored
+  `libXCTest`. Windows finds DLLs through `PATH`.
+- Windows builds compile with `-DGNUSTEP_WITHOUT_DLL=1`. Whether bundles
+  built that way link correctly against a DLL `libXCTest` is unknown until
+  a Windows build tries it.
 
 To finish the move once a Windows runner is back:
 
-1. Fix the `-host` blockers in `danjboyd/tools-xctest`, ideally with a Windows
-   lane in the fork's CI, then tag a release and bump `vendor/tools-xctest`.
-2. In `GNUmakefile`, use `$(EXEEXT)`/`.exe` for `VENDORED_XCTEST` on Windows,
+1. In `GNUmakefile`, use `$(EXEEXT)`/`.exe` for `VENDORED_XCTEST` on Windows,
    prepend the vendored library directory to `PATH` in `xctest_runtime_env`,
    and remove the `ARLEN_USE_VENDORED_XCTEST := 0` override.
-3. Point the phase24 targets at `$(call xctest_run,...)`, then delete
+2. Point the phase24 targets at `$(call xctest_run,...)`, then delete
    `tools/arlen_xctest_runner.m`, `XCTEST_BUNDLE_RUNNER_*` and its object from
    `ALL_OBJECTS`.
-4. Run `make phase24-windows-confidence` on the runner, and update this
+3. Run `make phase24-windows-confidence` on the runner, and update this
    section, `docs/WINDOWS_CLANG64.md` and `docs/TESTING_WORKFLOW.md`.
 
 ## Goal

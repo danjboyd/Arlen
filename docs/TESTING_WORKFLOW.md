@@ -152,6 +152,11 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
   and when a discovered test is missing from the baseline. After adding,
   removing, or renaming tests on purpose, run `make update-test-inventory` and
   commit the baseline changes with them. `linux-quality` runs the check.
+- **Selections must match.** A `TEST=` filter (`-only-testing`) that matches
+  no test fails the run with `XCTest: No tests matched '<selection>'.`, as
+  does a run in which no test executes, so a typo in a class or method name
+  can't pass by running nothing. `SKIP_TEST=` filters that match nothing are
+  harmless. The same applies to `arlen test --only`.
 - **Repetition for flake hunting, never retries.** `ITERATIONS=<n>` runs each
   selected test n times, and `UNTIL_FAILURE=1` repeats each test until its
   first failure (at most `ITERATIONS`, or 100). Both work with every XCTest make

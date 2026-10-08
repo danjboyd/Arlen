@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The vendored test runner is now `danjboyd/tools-xctest` `v0.5.0` (was
+  `v0.3.0`). A `TEST=` filter or `arlen test --only` selection that matches
+  no test now fails the run with `No tests matched '<selection>'.` instead of
+  passing with nothing run, and so does a run in which no test executes.
+  Class-level `+tearDown` now runs even when `+setUp` failed or skipped the
+  class. The fork also builds on Windows (MSYS2 `CLANG64`) now, which removes
+  its side of the blocker on moving the Windows lanes to it (GitHub issue 116).
+
 - Tests wait for real signals instead of sleeping for guessed intervals.
   `tests/shared/ALNTestWait.h` adds `ALNTestWaitUntil`,
   `ALNTestWaitForTaskExit`, and `ALNTestWaitForTCPPort`, built on
