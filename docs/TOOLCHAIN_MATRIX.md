@@ -35,9 +35,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 
 ## Apple Baseline (2026-04-08)
 
-This is the closed Apple-runtime baseline on the `mac` branch. It
-is a verified build/runtime contract, not a claim that every Linux/GNUstep
-test lane has already been migrated to Apple-native XCTest bundles.
+This is the closed Apple-runtime baseline. It is a verified build/runtime
+contract, not a claim that every Linux/GNUstep test lane runs on Apple; see
+`docs/APPLE_PLATFORM.md` for the Linux-only areas.
 
 | Component | Command | Observed baseline |
 | --- | --- | --- |
@@ -59,8 +59,10 @@ Apple path notes:
 - use `bash ./tools/ci/run_apple_baseline_confidence.sh` for the artifact-backed
   Apple baseline
 - do not source GNUstep bootstrap scripts on the Apple path
-- Apple XCTest availability is now verified with `tools/apple_xctest_smoke.sh`
-- full repo-native Objective-C Apple XCTest bundle migration remains future work
+- Apple XCTest availability is verified with `tools/apple_xctest_smoke.sh`
+- the repo-native Apple XCTest unit bundle is built by
+  `tools/build_apple_xctest.sh --suite unit` and run by `./tools/test_apple.sh`;
+  there is no Apple integration bundle yet
 
 ## Known libobjc2 Defect: Instance `@synchronized`
 
