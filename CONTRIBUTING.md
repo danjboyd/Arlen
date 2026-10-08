@@ -81,8 +81,9 @@ The make targets build and use the vendored `vendor/tools-xctest` runner, a
 tagged release of the maintained fork
 [`danjboyd/tools-xctest`](https://github.com/danjboyd/tools-xctest), and test
 bundles link against its `libXCTest`. That gives Apple-style `-only-testing`
-filters, `XCTSkip`, and per-test time limits (`ARLEN_TEST_TIMEOUT`, default 300
-seconds). Every run writes a JUnit report under `test-results/`.
+filters (a filter that matches no test fails the run), `XCTSkip`, and per-test
+time limits (`ARLEN_TEST_TIMEOUT`, default 300 seconds). Every run writes a
+JUnit report under `test-results/`.
 
 CI also checks that the unit and integration bundles discover exactly the tests
 listed in `tests/fixtures/test_inventory/`, so a test can't disappear

@@ -71,8 +71,8 @@ VENDORED_XCTEST_LIB_DIR := $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/obj
 ARLEN_USE_VENDORED_XCTEST ?= 1
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 # Windows lanes still build against the toolchain's XCTest and run through
-# tools/arlen_xctest_runner.m: the fork's -host code doesn't build on MSYS2
-# CLANG64, and the vendored runner rules below assume Linux (no .exe suffix,
+# tools/arlen_xctest_runner.m. The fork builds on MSYS2 CLANG64 since v0.5.0,
+# but the vendored runner rules below assume Linux (no .exe suffix,
 # LD_LIBRARY_PATH instead of PATH). See issue #116 and the "Windows Test
 # Runner" section of docs/CI_ALIGNMENT.md for the steps to switch.
 ARLEN_USE_VENDORED_XCTEST := 0

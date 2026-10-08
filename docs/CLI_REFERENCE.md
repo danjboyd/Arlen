@@ -804,7 +804,8 @@ through `tools/run_app_tests.sh`:
   can capture the app's route registration; app code needs no changes
 - runs the framework's vendored `xctest` (built on first use), else `xctest`
   from `PATH`, with an isolated GNUstep defaults home under `.boomhauer/test-home`
-- `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`
+- `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`;
+  an `--only` that matches no test fails the run (`No tests matched '...'`)
 - exit status is the runner's: non-zero when any test fails
 - GNUstep on Linux only for now
 
@@ -1180,6 +1181,7 @@ Lifecycle diagnostics:
  - pass these runner options only with the vendored runner, or when `ARLEN_XCTEST_CI_ARGS=1` says the selected runner supports them
 - `make test-unit-filter` / `make test-integration-filter`: focused XCTest reruns using `TEST=TestClass[/testMethod]` and optional `SKIP_TEST=TestClass[/testMethod]`
  - flake hunting, with these and every other XCTest target: `ITERATIONS=<n>` runs each selected test n times, and `UNTIL_FAILURE=1` repeats each test until it fails (at most `ITERATIONS`, or 100); both need the vendored runner (or `ARLEN_XCTEST_CI_ARGS=1`), and failing tests are never retried
+ - a `TEST` that matches no test fails the run (`No tests matched '...'`) rather than passing with nothing run; a `SKIP_TEST` that matches nothing is ignored
  - Arlen prepends the bundle target name automatically, so you do not include `ArlenUnitTests/` or `ArlenIntegrationTests/` in `TEST`
  - use the vendored runner by default so Apple-style `-only-testing`
  / `-skip-testing` arguments work regardless of the host's packaged `xctest`
