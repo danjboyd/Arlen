@@ -119,6 +119,11 @@ BOOL ALNEOCRenderCollection(NSMutableString *out,
                             NSUInteger column,
                             NSError **_Nullable error);
 
+// Markdown to safe HTML with the default ALNMarkdownOptions, for raw output:
+// <%== ALNEOCMarkdownHTML($body) %>. nil and NSNull render as "". Defined in
+// ALNMarkdown.m (framework library), not in the template runtime.
+NSString *ALNEOCMarkdownHTML(id _Nullable value);
+
 NS_ASSUME_NONNULL_END
 
 #endif

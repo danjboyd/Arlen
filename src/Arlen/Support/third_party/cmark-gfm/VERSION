@@ -1,0 +1,3 @@
+cmark-gfm upstream tag: 0.29.0.gfm.13
+cmark-gfm upstream commit: 587a12bb54d95ac37241377e6ddc93ea0e45439b
+build profile: flat source directory, generated headers hand-written for clang/GNUstep

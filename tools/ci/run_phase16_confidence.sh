@@ -48,6 +48,7 @@ third_party_c_srcs=(
   "$repo_root/src/Arlen/Support/third_party/argon2/src/ref.c"
   "$repo_root/src/Arlen/Support/third_party/argon2/src/blake2/blake2b.c"
 )
+mapfile -t -O "${#third_party_c_srcs[@]}" third_party_c_srcs < <(find "$repo_root/src/Arlen/Support/third_party/cmark-gfm" -type f -name '*.c' | sort)
 read -r -a objc_flags <<<"$(gnustep-config --objc-flags)"
 read -r -a base_libs <<<"$(gnustep-config --base-libs)"
 

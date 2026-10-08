@@ -287,6 +287,15 @@ Bad use case:
 <%== $userSuppliedComment %>
 ```
 
+User-written Markdown is the exception: `ALNEOCMarkdownHTML` escapes any raw
+HTML in its input and filters link URLs, so its output is safe for raw output.
+
+```html
+<%== ALNEOCMarkdownHTML($comment.body) %>
+```
+
+See [Markdown](MARKDOWN.md).
+
 ## 6. Control Flow and Objective-C in Templates
 
 EOC does not invent a separate control-flow language. Inside `<% ... %>` tags

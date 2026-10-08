@@ -112,7 +112,7 @@ The [Docs Index](docs/README.md) organizes everything by what you're trying to d
 | | |
 |---|---|
 | **HTTP and MVC** | Routing with path params, controllers, middleware, sessions, CSRF, rate limiting, security headers, static files with caching and ranges, multipart uploads |
-| **Templates** | EOC (`.html.eoc`) compiled to Objective-C: layouts, partials, collection rendering, forms, auto-escaping, file/line diagnostics |
+| **Templates** | EOC (`.html.eoc`) compiled to Objective-C: layouts, partials, collection rendering, forms, auto-escaping, file/line diagnostics; safe Markdown rendering (CommonMark + GFM) |
 | **JSON APIs** | Implicit JSON from controller return values, OpenAPI generation, interactive API explorer, JSON-first scaffolds, generated TypeScript clients and validators |
 | **Auth** | Passwords, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC login (including Microsoft Entra), OAuth resource server; headless, stock-UI, or ejected-UI modes |
 | **Data** | PostgreSQL-first migrations, schema codegen, typed SQL builder, optional ORM, MSSQL preview, Dataverse client and codegen |

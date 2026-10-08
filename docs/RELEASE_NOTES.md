@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Markdown support: `ALNMarkdown` parses CommonMark and GitHub Flavored
+  Markdown with a vendored cmark-gfm `0.29.0.gfm.13` into an Objective-C node
+  tree for custom renderers. It also has an HTML renderer that is safe for
+  untrusted input (raw HTML is escaped, link URLs are limited to `http`, `https`
+  and `mailto`, and a class map can style the output), and a plain-text
+  renderer. Tables, task lists, strikethrough and autolinks can be switched per
+  call, apps can register custom inline spans such as `⟦red⟧text⟦/red⟧` that
+  arrive as typed nodes, and templates can use `<%== ALNEOCMarkdownHTML($body) %>`.
+  See `docs/MARKDOWN.md` (GitHub issue 127).
+
 - The vendored test runner is now `danjboyd/tools-xctest` `v0.5.0` (was
   `v0.3.0`). A `TEST=` filter or `arlen test --only` selection that matches
   no test now fails the run with `No tests matched '<selection>'.` instead of
