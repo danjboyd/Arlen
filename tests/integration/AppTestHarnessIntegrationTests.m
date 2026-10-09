@@ -19,8 +19,9 @@
   }
   @try {
     int code = 0;
-    NSString *output = ALNTestRunShellCapture([NSString stringWithFormat:@"cd %@ && make arlen boomhauer",
-                                                                         ALNTestShellQuote(repoRoot)],
+    NSString *output = ALNTestRunShellCapture([NSString stringWithFormat:@"cd %@ && %@",
+                                                                         ALNTestShellQuote(repoRoot),
+                                                                         ALNTestFrameworkBuildCommand(@"arlen boomhauer")],
                                               &code);
     XCTAssertEqual(0, code, @"%@", output);
     NSString *arlen = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ %@",

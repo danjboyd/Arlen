@@ -89,9 +89,10 @@
 }
 
 - (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot {
-  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen eocc",
+  return [NSString stringWithFormat:@"%@ && cd %@ && %@",
                                     ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
-                                    ALNTestShellQuote(repoRoot)];
+                                    ALNTestShellQuote(repoRoot),
+                                    ALNTestFrameworkBuildCommand(@"arlen eocc")];
 }
 
 - (void)testModuleCLIAndBuildWorkflow {
@@ -567,10 +568,17 @@
     NSString *firstPrepareOutput = [self runShellCapture:prepareCommand exitCode:&code];
     XCTAssertEqual(0, code, @"%@", firstPrepareOutput);
 
+#if defined(__APPLE__)
+    NSString *currentGeneratedPath =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/apple/gen/modules/demo/modules/demo/dashboard/index.html.eoc.m"];
+    NSString *staleGeneratedPath =
+        [appRoot stringByAppendingPathComponent:@".boomhauer/apple/gen/modules/demo/dashboard/index.html.eoc.m"];
+#else
     NSString *currentGeneratedPath =
         [appRoot stringByAppendingPathComponent:@".boomhauer/build/gen/templates/modules/demo/dashboard/index.html.eoc.m"];
     NSString *staleGeneratedPath =
         [appRoot stringByAppendingPathComponent:@".boomhauer/build/gen/templates/modules/demo/modules/demo/dashboard/index.html.eoc.m"];
+#endif
     NSError *readError = nil;
     NSString *generatedSource = [NSString stringWithContentsOfFile:currentGeneratedPath
                                                           encoding:NSUTF8StringEncoding
@@ -582,9 +590,16 @@
     }
     XCTAssertTrue([self writeFile:staleGeneratedPath content:generatedSource ?: @""]);
 
+    // A compiled stale copy would define the template's symbol twice.
     NSString *secondPrepareOutput = [self runShellCapture:prepareCommand exitCode:&code];
     XCTAssertEqual(0, code, @"%@", secondPrepareOutput);
 
+#if defined(__APPLE__)
+    NSString *staleObjectPath = [[appRoot stringByAppendingPathComponent:@".boomhauer/apple/obj"]
+        stringByAppendingPathComponent:[[staleGeneratedPath substringFromIndex:[appRoot length] + 1]
+                                           stringByAppendingString:@".o"]];
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:staleObjectPath], @"%@", staleObjectPath);
+#else
     NSString *appMakefilePath = [appRoot stringByAppendingPathComponent:@".boomhauer/build/AppGNUmakefile"];
     readError = nil;
     NSString *appMakefile = [NSString stringWithContentsOfFile:appMakefilePath
@@ -594,6 +609,7 @@
     XCTAssertNil(readError);
     XCTAssertTrue([appMakefile containsString:currentGeneratedPath], @"%@", appMakefile ?: @"");
     XCTAssertFalse([appMakefile containsString:staleGeneratedPath], @"%@", appMakefile ?: @"");
+#endif
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }

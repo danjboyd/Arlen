@@ -27,6 +27,17 @@ FOUNDATION_EXPORT NSString *_Nullable ALNTestTemporaryDirectory(NSString *prefix
 FOUNDATION_EXPORT BOOL ALNTestWriteUTF8File(NSString *path,
                                             NSString *content,
                                             NSError *_Nullable *_Nullable error);
+// Shell command that builds the named framework tools (`arlen`, `eocc`,
+// `boomhauer`, `smoke-render`) from the current directory, which must be a
+// framework root. GNUstep runs `make <targets>`. Apple runs
+// `./bin/build-apple --with-boomhauer`, which builds the first three
+// incrementally; tools/build_apple_xctest.sh builds eoc-smoke-render and the
+// example servers with the integration bundle.
+FOUNDATION_EXPORT NSString *ALNTestFrameworkBuildCommand(NSString *targets);
+// Where `boomhauer --prepare-only` leaves an app's binary, relative to the app
+// root: .boomhauer/build/ (GNUstep) or .boomhauer/apple/ (Apple). Packaged
+// releases keep the .boomhauer/build/ layout on every platform.
+FOUNDATION_EXPORT NSString *ALNTestAppBinaryRelativePath(void);
 FOUNDATION_EXPORT NSString *ALNTestClientCompileCommand(NSArray<NSString *> *sources,
                                                         NSString *includeDirectory,
                                                         NSString *output);

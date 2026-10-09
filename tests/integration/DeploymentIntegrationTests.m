@@ -11,6 +11,37 @@
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
 
+#include <limits.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+// `readlink -f` reports physical paths, while temp directories can sit under a
+// symlink (macOS /var -> /private/var). Compare against the physical path.
+static NSString *ALNPhysicalPath(NSString *path) {
+  char resolved[PATH_MAX];
+  if (realpath([path fileSystemRepresentation], resolved) == NULL) {
+    return path;
+  }
+  return [[NSFileManager defaultManager] stringWithFileSystemRepresentation:resolved length:strlen(resolved)];
+}
+
+// This host's deploy profile, as tools/deploy/build_release.sh detects it, for
+// tests of same-profile deploys.
+static NSString *ALNHostDeployProfile(void) {
+  struct utsname host;
+  NSString *arch = (uname(&host) == 0) ? @(host.machine) : @"unknown";
+  if ([arch isEqualToString:@"aarch64"]) {
+    arch = @"arm64";
+  } else if ([arch isEqualToString:@"amd64"]) {
+    arch = @"x86_64";
+  }
+#if defined(__APPLE__)
+  return [NSString stringWithFormat:@"macos-%@-apple-foundation", arch];
+#else
+  return [NSString stringWithFormat:@"linux-%@-gnustep-clang", arch];
+#endif
+}
+
 @interface DeploymentIntegrationTests : XCTestCase
 @end
 
@@ -153,8 +184,9 @@
                          target:(NSString *)target
                        exitCode:(int *)exitCode {
   NSString *command = [NSString stringWithFormat:
-      @"%@ && cd %@ && make %@",
-      [self gnustepSourceCommandForRepoRoot:repoRoot], [self shellQuoted:repoRoot], target ?: @""];
+      @"%@ && cd %@ && %@",
+      [self gnustepSourceCommandForRepoRoot:repoRoot], [self shellQuoted:repoRoot],
+      ALNTestFrameworkBuildCommand(target ?: @"")];
   return [self runShellCapture:command exitCode:exitCode];
 }
 
@@ -173,6 +205,7 @@
 }
 
 - (void)testFrameworkSourceTouchRebuildsOneObjectArchiveAndDependentLinks {
+  ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *frameworkSource = [repoRoot stringByAppendingPathComponent:@"src/Arlen/MVC/View/ALNView.m"];
   int code = 0;
@@ -206,6 +239,7 @@
 }
 
 - (void)testTemplateTouchRetranspilesOneGeneratedObjectAndDependentLinks {
+  ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *templatePath = [repoRoot stringByAppendingPathComponent:@"templates/index.html.eoc"];
   int code = 0;
@@ -243,6 +277,7 @@
 }
 
 - (void)testUnitTestTouchDoesNotRebuildFrameworkOrIntegrationBundle {
+  ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *unitTestPath = [repoRoot stringByAppendingPathComponent:@"tests/unit/BuildPolicyTests.m"];
   int code = 0;
@@ -269,6 +304,7 @@
 }
 
 - (void)testCompileTimeFeatureFlagsCanDisableYYJSONAndLLHTTP {
+  ALNSkipOnApple(@"compiles the framework with gnustep-config flags; Apple builds always enable yyjson and llhttp");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-feature-toggle-smoke"];
   XCTAssertNotNil(workRoot);
@@ -470,7 +506,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -602,7 +638,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -688,7 +724,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -757,7 +793,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -871,7 +907,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -967,7 +1003,7 @@
 
   @try {
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1106,7 +1142,11 @@
     NSDictionary *buildPlan = [self parseJSONDictionaryFromOutput:buildPlanOutput context:@"arlen build --json"];
     XCTAssertEqualObjects(@"build", buildPlan[@"command"]);
     XCTAssertEqualObjects(@"planned", buildPlan[@"status"]);
+#if defined(__APPLE__)
+    XCTAssertEqualObjects(@"apple", buildPlan[@"toolchain"]);
+#else
     XCTAssertEqualObjects(@"all", buildPlan[@"make_target"]);
+#endif
 
     NSString *checkPlanOutput =
         [self runShellCapture:[NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
@@ -1117,7 +1157,11 @@
     NSDictionary *checkPlan = [self parseJSONDictionaryFromOutput:checkPlanOutput context:@"arlen check --json"];
     XCTAssertEqualObjects(@"check", checkPlan[@"command"]);
     XCTAssertEqualObjects(@"planned", checkPlan[@"status"]);
+#if defined(__APPLE__)
+    XCTAssertEqualObjects(@"apple", checkPlan[@"toolchain"]);
+#else
     XCTAssertEqualObjects(@"check", checkPlan[@"make_target"]);
+#endif
 
     NSString *deployPlanOutput =
         [self runShellCapture:[NSString stringWithFormat:
@@ -1181,7 +1225,7 @@
     NSString *frameworkSHA = [[self runShellCapture:[NSString stringWithFormat:@"git -C %@ rev-parse HEAD", repoRoot]
                                            exitCode:&code]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    output = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot] exitCode:&code];
+    output = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")] exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
     NSString *arlen = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen", appRoot, repoRoot, repoRoot];
@@ -1261,7 +1305,7 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1410,7 +1454,7 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1492,7 +1536,7 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1599,7 +1643,7 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1681,6 +1725,185 @@
   }
 }
 
+// GitHub issue 148: macOS targets run as launchd jobs. Generation does not
+// depend on the host, so this runs on every platform.
+- (void)testArlenDeployInitGeneratesLaunchdArtifactsForMacOSTargets {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-launchd-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-launchd-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"srv/myapp"];
+    NSString *envFile = [workRoot stringByAppendingPathComponent:@"etc/myapp.env"];
+    NSString *deployConfig = [NSString stringWithFormat:
+        @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = {\n"
+         "  mac = { host = \"localhost\"; releasePath = \"%@\"; profile = \"macos-arm64-apple-foundation\";\n"
+         "          runtimeStrategy = \"system\"; runtimeAction = \"restart\"; environment = \"production\";\n"
+         "          configuration = { envFile = \"%@\"; };\n"
+         "          init = { runtimeUser = \"_arlen\"; runtimeGroup = \"_arlen\"; }; };\n"
+         "}; }; }\n",
+        releasePath, envFile];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"] content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"int main(void) { return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy init mac --app-root %@ --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", initOutput);
+
+    NSString *generatedRoot = [appRoot stringByAppendingPathComponent:@"build/deploy/targets/mac"];
+    NSString *plistPath = [generatedRoot stringByAppendingPathComponent:@"launchd/arlen.mac.plist"];
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"systemd"]]);
+    NSData *plistData = [NSData dataWithContentsOfFile:plistPath];
+    XCTAssertNotNil(plistData, @"%@", plistPath);
+    NSDictionary *job = plistData != nil ? [NSPropertyListSerialization propertyListWithData:plistData
+                                                                                       options:0
+                                                                                        format:NULL
+                                                                                         error:NULL]
+                                         : nil;
+    XCTAssertTrue([job isKindOfClass:[NSDictionary class]], @"%@", plistPath);
+    NSString *propaneWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/propane-wrapper"];
+    XCTAssertEqualObjects(@"arlen.mac", job[@"Label"]);
+    XCTAssertEqualObjects(@[ propaneWrapper ], job[@"ProgramArguments"]);
+    XCTAssertEqualObjects(@"_arlen", job[@"UserName"]);
+    XCTAssertEqualObjects([releasePath stringByAppendingPathComponent:@"releases/current/app"],
+                          job[@"EnvironmentVariables"][@"ARLEN_APP_ROOT"]);
+    XCTAssertEqualObjects([releasePath stringByAppendingPathComponent:@"logs/arlen.mac.log"], job[@"StandardOutPath"]);
+    XCTAssertEqualObjects(@YES, job[@"KeepAlive"]);
+
+    NSString *wrapper = [NSString stringWithContentsOfFile:propaneWrapper encoding:NSUTF8StringEncoding error:NULL];
+    NSString *envFileLine = [NSString stringWithFormat:@"ENV_FILE='%@'", envFile];
+    XCTAssertTrue([wrapper containsString:envFileLine], @"%@", wrapper);
+    XCTAssertTrue([wrapper containsString:@"releases/current/framework/bin/propane' --env production"], @"%@", wrapper);
+    NSString *readme = [NSString stringWithContentsOfFile:[generatedRoot stringByAppendingPathComponent:@"README.txt"]
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+    XCTAssertTrue([readme containsString:@"sudo launchctl bootstrap system /Library/LaunchDaemons/arlen.mac.plist"], @"%@", readme);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor mac --app-root %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot]
+                                          exitCode:&code];
+    NSDictionary *doctor = [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor mac --json"];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in [doctor[@"checks"] isKindOfClass:[NSArray class]] ? doctor[@"checks"] : @[]) {
+      statuses[check[@"id"]] = check[@"status"];
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"target_launchd_plist"], @"%@", doctorOutput);
+    XCTAssertEqualObjects(@"pass", statuses[@"target_runtime_wrapper"], @"%@", doctorOutput);
+    XCTAssertNil(statuses[@"target_systemd_unit"], @"%@", doctorOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+// On macOS, deploy status/logs read a launchd job. The job runs in a per-user
+// domain (selected with ARLEN_LAUNCHD_DOMAIN), since the system domain needs
+// root.
+- (void)testArlenDeployStatusAndLogsReadLaunchdJobOnMacOS {
+#if !defined(__APPLE__)
+  XCTSkipUnless(NO, @"launchd is macOS-only");
+#else
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-launchd-status"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+  NSString *label = [NSString stringWithFormat:@"dev.arlen.test.%d", (int)getpid()];
+  NSString *domain = nil;
+  NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"srv/releases"];
+  NSString *logPath = [workRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"srv/logs/%@.log", label]];
+  NSString *plistPath = [workRoot stringByAppendingPathComponent:@"job.plist"];
+  @try {
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[releasesDir stringByAppendingPathComponent:@"r1"]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:[releasesDir stringByAppendingPathComponent:@"current"]
+                                                       withDestinationPath:[releasesDir stringByAppendingPathComponent:@"r1"]
+                                                                     error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[logPath stringByDeletingLastPathComponent]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    NSDictionary *job = @{
+      @"Label" : label,
+      @"ProgramArguments" : @[ @"/bin/sh", @"-c", @"echo launchd-job-started; exec sleep 300" ],
+      @"EnvironmentVariables" : @{ @"ARLEN_APP_ROOT" : @"/srv/app" },
+      @"StandardOutPath" : logPath,
+      @"StandardErrorPath" : logPath,
+      @"KeepAlive" : @YES,
+    };
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:job
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:NULL];
+    XCTAssertTrue([plistData writeToFile:plistPath atomically:YES]);
+    // A login session has gui/<uid>; a headless session may only accept user/<uid>.
+    int code = 1;
+    NSString *bootstrap = @"";
+    for (NSString *candidate in @[ @"gui", @"user" ]) {
+      domain = [NSString stringWithFormat:@"%@/%d", candidate, (int)getuid()];
+      bootstrap = [self runShellCapture:[NSString stringWithFormat:@"launchctl bootstrap %@ %@ 2>&1",
+                                                                  domain, [self shellQuoted:plistPath]]
+                               exitCode:&code];
+      if (code == 0) {
+        break;
+      }
+    }
+    XCTSkipUnless(code == 0, @"launchd refused a per-user job here: %@", bootstrap);
+
+    NSString *arlenEnv = [NSString stringWithFormat:@"ARLEN_LAUNCHD_DOMAIN=%@ ARLEN_FRAMEWORK_ROOT=%@", domain, repoRoot];
+    __block NSString *status = @"";
+    BOOL running = ALNTestWaitUntil(10.0, 0.2, ^BOOL {
+      int statusCode = 0;
+      status = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@ %@/build/arlen deploy status "
+                                                                 "--releases-dir %@ --service %@ --json",
+                                                                workRoot, arlenEnv, repoRoot, releasesDir, label]
+                            exitCode:&statusCode];
+      NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:[status dataUsingEncoding:NSUTF8StringEncoding]
+                                                              options:0
+                                                                error:NULL];
+      NSDictionary *service = [payload isKindOfClass:[NSDictionary class]] ? payload[@"service"] : nil;
+      return [service isKindOfClass:[NSDictionary class]] && [service[@"state"] isEqual:@"active"];
+    });
+    XCTAssertTrue(running, @"%@", status);
+
+    NSString *logs = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@ %@/build/arlen deploy logs "
+                                                                     "--releases-dir %@ --service %@ --lines 5 --json",
+                                                                    workRoot, arlenEnv, repoRoot, releasesDir, label]
+                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", logs);
+    NSDictionary *logsPayload = [self parseJSONDictionaryFromOutput:logs context:@"arlen deploy logs --service"];
+    XCTAssertEqualObjects(@"launchd", logsPayload[@"log_source"]);
+    XCTAssertEqualObjects(logPath, logsPayload[@"log_file"]);
+    XCTAssertTrue([logsPayload[@"captured_output"] containsString:@"launchd-job-started"], @"%@", logs);
+  } @finally {
+    if (domain != nil) {
+      (void)[self runShellCapture:[NSString stringWithFormat:@"launchctl bootout %@/%@ 2>/dev/null", domain, label]
+                         exitCode:NULL];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+#endif
+}
+
 - (void)testArlenDeployNamedTargetListDryrunAndInitUseCheckedInDeployConfig {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-target-app"];
@@ -1693,11 +1916,17 @@
 
   @try {
     NSString *releasePath = [workRoot stringByAppendingPathComponent:@"host/myapp"];
+#if defined(__APPLE__)
+    // The target is a Linux GNUstep host; a Mac deploying to it has no local
+    // GNUstep to resolve, so use the host's standard location.
+    NSString *gnustepScript = @"/usr/GNUstep/System/Library/Makefiles/GNUstep.sh";
+#else
     int resolverCode = 0;
     NSString *gnustepScript = [[self runShellCapture:[NSString stringWithFormat:@"bash %@", [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]]]
                                           exitCode:&resolverCode]
         stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     XCTAssertEqual(0, resolverCode);
+#endif
     XCTAssertTrue([gnustepScript length] > 0);
     NSString *deployConfig = [NSString stringWithFormat:
                                   @"{\n"
@@ -1814,6 +2043,9 @@
     XCTAssertTrue([[NSFileManager defaultManager]
                       fileExistsAtPath:[releasePath stringByAppendingPathComponent:@"releases"]]);
 
+#if !defined(__APPLE__)
+    // The doctor checks the target's GNUstep runtime on this host, which
+    // stands in for the Linux target; a Mac has none.
     NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
                                                         "deploy doctor production --app-root %@ --json",
@@ -1832,6 +2064,7 @@
     XCTAssertEqualObjects(@"pass", statuses[@"target_gnustep_script"]);
     XCTAssertEqualObjects(@"pass", statuses[@"target_gnustep_config"]);
     XCTAssertEqualObjects(@"pass", statuses[@"target_runtime_wrapper"]);
+#endif
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
@@ -1855,12 +2088,12 @@
     NSString *(^deployConfig)(NSString *, NSString *) = ^NSString *(NSString *sharedPaths, NSString *hook) {
       return [NSString stringWithFormat:
                            @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = { production = {\n"
-                            "  host = \"localhost\"; releasePath = \"%@\"; profile = \"linux-x86_64-gnustep-clang\";\n"
+                            "  host = \"localhost\"; releasePath = \"%@\"; profile = \"%@\";\n"
                             "  runtimeStrategy = \"system\"; runtimeAction = \"none\"; environment = \"production\";\n"
                             "  sharedPaths = (%@);\n"
                             "  prePackageCommands = (\"%@\");\n"
                             "}; }; }; }\n",
-                           releasePath, sharedPaths, hook];
+                           releasePath, ALNHostDeployProfile(), sharedPaths, hook];
     };
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"]
                           content:deployConfig(@"\"storage/media\", \"public/uploads\"",
@@ -2307,7 +2540,7 @@
                                    "      production = {\n"
                                    "        host = \"myapp.example.test\";\n"
                                    "        releasePath = \"%@\";\n"
-                                   "        profile = \"linux-x86_64-gnustep-clang\";\n"
+                                   "        profile = \"%@\";\n"
                                    "        runtimeStrategy = \"system\";\n"
                                    "        runtimeAction = \"none\";\n"
                                    "        environment = \"production\";\n"
@@ -2320,7 +2553,7 @@
                                    "    };\n"
                                    "  };\n"
                                    "}\n",
-                                  releasePath, mockSSH];
+                                  releasePath, ALNHostDeployProfile(), mockSSH];
     XCTAssertTrue([self writeFile:mockSSH
                           content:@"#!/usr/bin/env bash\n"
                                   "set -euo pipefail\n"
@@ -2500,7 +2733,7 @@
                                    "      production = {\n"
                                    "        host = \"myapp.example.test\";\n"
                                    "        releasePath = \"%@\";\n"
-                                   "        profile = \"linux-x86_64-gnustep-clang\";\n"
+                                   "        profile = \"%@\";\n"
                                    "        runtimeStrategy = \"system\";\n"
                                    "        runtimeAction = \"none\";\n"
                                    "        environment = \"production\";\n"
@@ -2513,7 +2746,7 @@
                                    "    };\n"
                                    "  };\n"
                                    "}\n",
-                                  releasePath, mockSSH];
+                                  releasePath, ALNHostDeployProfile(), mockSSH];
     XCTAssertTrue([self writeFile:mockSSH
                           content:@"#!/usr/bin/env bash\n"
                                   "echo 'mock ssh exits before reading upload stream' >&2\n"
@@ -2547,13 +2780,22 @@
                                         exitCode:&code];
     XCTAssertEqual(0, code, @"%@", initOutput);
 
+    // GNU timeout exits 124; macOS has no timeout(1), and perl's alarm kills
+    // with SIGALRM (128 + 14).
+#if defined(__APPLE__)
+    NSString *timeoutPrefix = @"perl -e 'alarm shift; exec @ARGV' 20";
+    int timedOutCode = 142;
+#else
+    NSString *timeoutPrefix = @"timeout 20s";
+    int timedOutCode = 124;
+#endif
     NSString *pushOutput = [self runShellCapture:[NSString stringWithFormat:
-                                                      @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen "
+                                                      @"cd %@ && %@ ARLEN_FRAMEWORK_ROOT=%@ %@ %@/build/arlen "
                                                        "deploy push production --app-root %@ --release-id ssh-early-exit-rel "
                                                        "--allow-missing-certification --json",
-                                                      appRoot, arlenEnv, repoRoot, repoRoot, appRoot]
+                                                      appRoot, arlenEnv, repoRoot, timeoutPrefix, repoRoot, appRoot]
                                         exitCode:&code];
-    XCTAssertNotEqual(124, code, @"deploy push timed out instead of reporting transport failure:\n%@", pushOutput);
+    XCTAssertNotEqual(timedOutCode, code, @"deploy push timed out instead of reporting transport failure:\n%@", pushOutput);
     XCTAssertNotEqual(0, code, @"%@", pushOutput);
     NSDictionary *pushPayload =
         [self parseJSONDictionaryFromOutput:pushOutput context:@"arlen deploy push early SSH exit --json"];
@@ -2634,7 +2876,7 @@
     XCTAssertEqual(0, code, @"%@", currentTarget);
     NSString *trimmed =
         [currentTarget stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    XCTAssertEqualObjects(releaseDir, trimmed);
+    XCTAssertEqualObjects(ALNPhysicalPath(releaseDir), trimmed);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
@@ -2670,7 +2912,7 @@
                           content:@"CREATE TABLE deploy_ops (id INTEGER);\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -3155,8 +3397,9 @@
       }
     }
     XCTAssertEqual((NSUInteger)2, [trimmed count], @"%@", runtimeLogText);
-    XCTAssertEqualObjects(runtimeBinary, trimmed[0]);
-    XCTAssertEqualObjects(runtimeBinary, trimmed[1]);
+    // The launchers resolve the release root physically (macOS /var is a symlink).
+    XCTAssertEqualObjects(ALNPhysicalPath(runtimeBinary), trimmed[0]);
+    XCTAssertEqualObjects(ALNPhysicalPath(runtimeBinary), trimmed[1]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
@@ -3185,7 +3428,7 @@
     XCTAssertTrue([self makeExecutableAtPath:sourceRuntime]);
 
     NSString *symlinkedRuntime =
-        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+        [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
     NSError *symlinkError = nil;
     XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[symlinkedRuntime stringByDeletingLastPathComponent]
                                             withIntermediateDirectories:YES
@@ -3222,7 +3465,7 @@
     XCTAssertEqual(0, code, @"%@", resolvedPackaged);
     NSString *trimmed =
         [resolvedPackaged stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    XCTAssertTrue([trimmed hasPrefix:[releasesDir stringByAppendingPathComponent:@"rel-symlink/app/.boomhauer/build"]],
+    XCTAssertTrue([trimmed hasPrefix:[ALNPhysicalPath(releasesDir) stringByAppendingPathComponent:@"rel-symlink/app/.boomhauer/build"]],
                   @"packaged runtime resolved outside release: %@", trimmed);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
@@ -3231,6 +3474,7 @@
 }
 
 - (void)testArlenDeployExperimentalRemoteRebuildRequiresAndUsesBuildCheckCommand {
+  ALNSkipOnApple(@"cross-profile remote rebuild; build_release.sh reports Apple cross-profile targets as unsupported");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-remote-rebuild-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-remote-rebuild-work"];
@@ -3253,7 +3497,7 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -3337,17 +3581,24 @@
                                   "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
     NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    // A target in the other runtime family from this host.
+#if defined(__APPLE__)
+    NSString *crossFamilyProfile = @"linux-x86_64-gnustep-clang";
+#else
+    NSString *crossFamilyProfile = @"macos-arm64-apple-foundation";
+#endif
     NSString *releaseOutput = [self runShellCapture:[NSString stringWithFormat:
                                                         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
                                                          "deploy release --app-root %@ --releases-dir %@ --release-id unsupported-rel-1 "
-                                                         "--target-profile macos-arm64-apple-foundation --allow-remote-rebuild "
+                                                         "--target-profile %@ --allow-remote-rebuild "
                                                          "--allow-missing-certification --skip-migrate --json",
-                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir]
+                                                        appRoot, repoRoot, repoRoot, appRoot, releasesDir,
+                                                        crossFamilyProfile]
                                           exitCode:&code];
     XCTAssertEqual(1, code, @"%@", releaseOutput);
     NSDictionary *releasePayload =
@@ -3543,9 +3794,10 @@
 
   int code = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"%@ && cd %@ && make smoke-render",
+      [self runShellCapture:[NSString stringWithFormat:@"%@ && cd %@ && %@",
                                                       [self gnustepSourceCommandForRepoRoot:repoRoot],
-                                                      repoRoot]
+                                                      repoRoot,
+                                                      ALNTestFrameworkBuildCommand(@"smoke-render")]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -3966,6 +4218,7 @@
 }
 
 - (void)testPhase9IFaultInjectionHarnessProducesExpectedPack {
+  ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9i-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4025,6 +4278,7 @@
 }
 
 - (void)testPhase9IFaultInjectionSeedReplayIsDeterministic {
+  ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputA = [self createTempDirectoryWithPrefix:@"arlen-phase9i-seed-a"];
   NSString *outputB = [self createTempDirectoryWithPrefix:@"arlen-phase9i-seed-b"];
@@ -4376,6 +4630,7 @@
 }
 
 - (void)testPhase10EJSONPerformanceGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4431,6 +4686,7 @@
 }
 
 - (void)testPhase10GDispatchPerformanceGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10g-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4482,6 +4738,7 @@
 }
 
 - (void)testPhase10HHTTPParsePerformanceGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10h-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4535,6 +4792,7 @@
 }
 
 - (void)testPhase10LRouteMatchInvestigationGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10l-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4617,6 +4875,7 @@
 }
 
 - (void)testPhase10MBackendParityMatrixGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux backend-parity lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-backend-parity"];
   XCTAssertNotNil(outputRoot);
@@ -4659,6 +4918,7 @@
 }
 
 - (void)testPhase10MProtocolAdversarialProbeProducesExpectedPack {
+  ALNSkipOnApple(@"Linux protocol-adversarial lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-protocol-adversarial"];
   XCTAssertNotNil(outputRoot);
@@ -4701,6 +4961,7 @@
 }
 
 - (void)testPhase11ProtocolAdversarialProbeProducesExpectedPack {
+  ALNSkipOnApple(@"Linux protocol-adversarial lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-adversarial"];
   XCTAssertNotNil(outputRoot);
@@ -4743,6 +5004,7 @@
 }
 
 - (void)testPhase11ProtocolFuzzAndLiveProbeProduceExpectedPacks {
+  ALNSkipOnApple(@"Linux fuzz lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fuzzOutputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-fuzz"];
   NSString *liveOutputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-live-adversarial"];
@@ -4819,6 +5081,7 @@
 }
 
 - (void)testPhase11SanitizerMatrixProducesExpectedPack {
+  ALNSkipOnApple(@"Linux sanitizer lane");
   // Runs the sanitizer matrix generator end to end.
   ALNTestSetExecutionTimeAllowance(self, 900);
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
@@ -4868,6 +5131,7 @@
 }
 
 - (void)testPhase10MSyscallFaultInjectionHarnessProducesExpectedPack {
+  ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-syscall-faults"];
   XCTAssertNotNil(outputRoot);
@@ -4913,6 +5177,7 @@
 }
 
 - (void)testPhase10MSyscallFaultInjectionConcurrentKeepAliveScenarioPasses {
+  ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-syscall-concurrent"];
   XCTAssertNotNil(outputRoot);
@@ -4963,6 +5228,7 @@
 }
 
 - (void)testPhase10MAllocationFaultInjectionHarnessProducesExpectedPack {
+  ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-allocation-faults"];
   XCTAssertNotNil(outputRoot);
@@ -5010,6 +5276,7 @@
 }
 
 - (void)testPhase10MLongRunSoakGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux soak lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-soak"];
   XCTAssertNotNil(outputRoot);
@@ -5067,6 +5334,7 @@
 }
 
 - (void)testPhase10MChaosRestartGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux chaos-restart lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-chaos-restart"];
   XCTAssertNotNil(outputRoot);
@@ -5138,6 +5406,7 @@
 }
 
 - (void)testPhase10MStaticAnalysisGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux static-analysis lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-static-analysis"];
   XCTAssertNotNil(outputRoot);
@@ -5180,6 +5449,7 @@
 }
 
 - (void)testPhase10MBlobThroughputGeneratorProducesExpectedPack {
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-blob-throughput"];
   XCTAssertNotNil(outputRoot);
@@ -5286,7 +5556,7 @@
                                   "}\n"]);
 
     int code = 0;
-    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
