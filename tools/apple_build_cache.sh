@@ -8,6 +8,18 @@
 #
 # Must stay compatible with macOS /bin/bash 3.2.
 
+# aln_apple_sdk_path
+# Physical path of the macOS SDK. xcrun reports MacOSX.sdk or a versioned
+# alias such as MacOSX26.4.sdk (a symlink to it), depending on the environment
+# (xctest sets SDKROOT to the alias). The SDK path is part of the build
+# fingerprint, so an unresolved path rebuilds everything when builds alternate
+# between a terminal and a test run.
+aln_apple_sdk_path() {
+  local sdk
+  sdk="$(xcrun --show-sdk-path)" || return 1
+  (cd "$sdk" && pwd -P)
+}
+
 # aln_apple_any_newer <ref> <path...>
 # True when any path is missing or has a later mtime than ref. Uses BSD find,
 # which compares full-resolution mtimes; bash 3.2's -nt only compares seconds.

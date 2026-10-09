@@ -41,7 +41,7 @@ if ! command -v xcrun >/dev/null 2>&1; then
   exit 1
 fi
 
-sdk_path="$(xcrun --show-sdk-path)"
+sdk_path="$(aln_apple_sdk_path)"
 clang_path="$(xcrun --find clang)"
 
 openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
