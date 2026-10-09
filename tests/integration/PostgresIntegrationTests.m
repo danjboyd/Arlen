@@ -182,7 +182,7 @@
 
   int buildCode = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&buildCode];
   XCTAssertEqual(0, buildCode, @"%@", buildOutput);
 
@@ -272,7 +272,7 @@
 
   int buildCode = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&buildCode];
   XCTAssertEqual(0, buildCode, @"%@", buildOutput);
 
@@ -439,7 +439,7 @@
 
   int buildCode = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&buildCode];
   XCTAssertEqual(0, buildCode, @"%@", buildOutput);
 
@@ -568,11 +568,9 @@
                                     error:&error]);
   XCTAssertNil(error);
 
-  NSString *brokenCompile = [NSString stringWithFormat:
-      @"%@ && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Arlen -I%@/src/Arlen/Data -I%@/src/Generated %@ %@ "
-       "-o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      [self gnustepSourceCommand], repoRoot, repoRoot, appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+  NSString *brokenCompile =
+      ALNTestClientCompileCommand(@[ brokenSourcePath, implPath ], [appRoot stringByAppendingPathComponent:@"src/Generated"],
+                                  [smokeBinaryPath stringByAppendingString:@".broken"]);
   NSString *brokenCompileOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenCompileOutput containsString:@"fieldDoesNotExist"], @"%@", brokenCompileOutput);
@@ -612,7 +610,7 @@
 
   int code = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -699,10 +697,9 @@
                                     error:&error]);
   XCTAssertNil(error);
 
-  NSString *brokenCompile = [NSString stringWithFormat:
-      @"%@ && clang $(gnustep-config --objc-flags) "
-       "-fobjc-arc -I%@/src/Generated %@ %@ -o %@.broken $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-      [self gnustepSourceCommand], appRoot, brokenSourcePath, implPath, smokeBinaryPath];
+  NSString *brokenCompile =
+      ALNTestClientCompileCommand(@[ brokenSourcePath, implPath ], [appRoot stringByAppendingPathComponent:@"src/Generated"],
+                                  [smokeBinaryPath stringByAppendingString:@".broken"]);
   NSString *brokenOutput = [self runShellCapture:brokenCompile exitCode:&code];
   XCTAssertNotEqual(0, code);
   XCTAssertTrue([brokenOutput containsString:@"fieldMissing"], @"%@", brokenOutput);
@@ -833,7 +830,7 @@
 
   int code = 0;
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
 
@@ -1006,7 +1003,7 @@
   XCTAssertEqual(0, code, @"%@", createAnalytics);
 
   NSString *buildOutput =
-      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && make arlen", repoRoot]
+      [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
                    exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
 

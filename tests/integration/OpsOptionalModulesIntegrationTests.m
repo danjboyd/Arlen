@@ -28,8 +28,8 @@
     // First prove ops alone, then the exact reported subset. No live database is needed.
     for (NSString *extraModules in @[ @"", @"auth jobs search" ]) {
       NSString *command = [prefix stringByAppendingFormat:
-        @"cd %@ && for module in %@; do %@ module add \"$module\" || exit; done && %@ boomhauer --prepare-only && .boomhauer/build/boomhauer-app",
-        ALNTestShellQuote(app), extraModules, cli, cli];
+        @"cd %@ && for module in %@; do %@ module add \"$module\" || exit; done && %@ boomhauer --prepare-only && %@",
+        ALNTestShellQuote(app), extraModules, cli, cli, ALNTestAppBinaryRelativePath()];
       output = ALNTestRunShellCapture(command, &code);
       XCTAssertEqual(0, code, @"%@", output);
       XCTAssertTrue([output containsString:@"ops optional modules: ok"], @"%@", output);

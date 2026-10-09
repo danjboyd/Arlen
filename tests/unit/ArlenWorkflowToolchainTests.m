@@ -5,7 +5,8 @@
 #import "../shared/ALNTestSupport.h"
 
 // `arlen build/check/test/perf/routes` use the Apple toolchain on macOS when
-// the framework root has bin/build-apple, and GNU make otherwise.
+// the framework root has bin/build-apple, and GNU make otherwise. `arlen perf`
+// is still GNUstep-only (GitHub issue 147).
 @interface ArlenWorkflowToolchainTests : XCTestCase
 @end
 
@@ -33,12 +34,18 @@
                   @"%@", error);
   }
   if (withAppleBuilder) {
-    NSString *builder = [root stringByAppendingPathComponent:@"bin/build-apple"];
-    XCTAssertTrue(ALNTestWriteUTF8File(builder, @"#!/usr/bin/env bash\necho apple-built\n", &error), @"%@", error);
-    XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
-                                                   ofItemAtPath:builder
-                                                          error:&error],
-                  @"%@", error);
+    NSDictionary<NSString *, NSString *> *scripts = @{
+      @"bin/build-apple" : @"#!/usr/bin/env bash\necho apple-built\n",
+      @"tools/test_apple_xctest.sh" : @"#!/usr/bin/env bash\necho \"apple-suite $*\"\n",
+    };
+    for (NSString *relativePath in scripts) {
+      NSString *script = [root stringByAppendingPathComponent:relativePath];
+      XCTAssertTrue(ALNTestWriteUTF8File(script, scripts[relativePath], &error), @"%@", error);
+      XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                                     ofItemAtPath:script
+                                                            error:&error],
+                    @"%@", error);
+    }
   }
   return root;
 }
@@ -98,9 +105,17 @@
   XCTAssertEqual(2, exitCode, @"%@", perf);
   XCTAssertTrue([perf containsString:@"runs only on GNUstep"], @"%@", perf);
 
-  NSString *integration = [self runArlen:@"test --integration" frameworkRoot:root exitCode:&exitCode];
-  XCTAssertEqual(2, exitCode, @"%@", integration);
-  XCTAssertTrue([integration containsString:@"arlen test --unit"], @"%@", integration);
+  // The unit and integration suites run as Apple XCTest bundles.
+  NSDictionary<NSString *, NSString *> *expectedSuites = @{
+    @"test --unit" : @"apple-suite --suite unit\n",
+    @"test --integration" : @"apple-suite --suite integration\n",
+    @"test --all" : @"apple-suite --suite unit\napple-suite --suite integration\n",
+  };
+  for (NSString *arguments in expectedSuites) {
+    NSString *output = [self runArlen:arguments frameworkRoot:root exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@: %@", arguments, output);
+    XCTAssertEqualObjects(expectedSuites[arguments], output, @"%@", arguments);
+  }
   [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
 #endif
 }

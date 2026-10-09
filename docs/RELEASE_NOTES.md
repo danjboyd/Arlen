@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The integration and durable-jobs suites run on macOS as Apple XCTest
+  bundles. `tools/build_apple_xctest.sh --suite integration|durable-jobs` builds
+  them and the binaries they launch (example servers, `eoc-smoke-render`,
+  `durable-job-probe`). `arlen test --integration` runs the integration bundle
+  and `arlen test`/`--all` runs unit then integration on macOS. `tools/ci/run_durable_jobs.sh`
+  works on macOS. All 206 integration tests are discovered on Apple, and tests
+  of GNUstep-only lanes skip there through the new `ALNSkipOnApple()`. Test
+  helpers are portable: `ALNTestFrameworkBuildCommand()`,
+  `ALNTestAppBinaryRelativePath()`, an Apple `ALNTestClientCompileCommand()`
+  (new `tools/apple_compile_program.sh`), and child-process lookup through
+  `ps -A` instead of GNU `ps --ppid`. Before, the lookup returned 0 on macOS
+  and the test's `kill(0, SIGKILL)` killed the test runner. On macOS
+  `arlen test --app` now prints the same per-class summary lines as the
+  GNUstep runner (GitHub issue 153).
+
 - `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
   without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
   runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit

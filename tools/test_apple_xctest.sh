@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<'USAGE'
-Usage: test_apple_xctest.sh [--suite unit] [--filter Class/testMethod]
+Usage: test_apple_xctest.sh [--suite unit|integration|durable-jobs] [--filter Class/testMethod]
 
 Builds and runs Apple XCTest bundles for the supported Arlen Objective-C suites.
 USAGE

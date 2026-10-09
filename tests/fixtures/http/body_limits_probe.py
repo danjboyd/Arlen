@@ -1,6 +1,7 @@
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 
@@ -30,11 +31,19 @@ def wait_until_empty(step, limit=15):
     raise AssertionError((step, round(time.time() - started, 2), spool_entries()))
 
 def rss_anon_kib():
-    with open('/proc/%d/status' % SERVER_PID) as status:
-        for line in status:
-            if line.startswith('RssAnon:'):
-                return int(line.split()[1])
-    return 0
+    # Linux reports anonymous memory directly. Without /proc (macOS), use the
+    # resident set size: spool files are written, not mapped, so heap
+    # buffering of the bodies would still show up as growth.
+    status_path = '/proc/%d/status' % SERVER_PID
+    if os.path.exists(status_path):
+        with open(status_path) as status:
+            for line in status:
+                if line.startswith('RssAnon:'):
+                    return int(line.split()[1])
+        return 0
+    output = subprocess.run(['ps', '-o', 'rss=', '-p', str(SERVER_PID)],
+                            capture_output=True, text=True).stdout.strip()
+    return int(output) if output else 0
 
 def head(path, length, content_type=b'multipart/form-data; boundary=Aa'):
     return (b'POST ' + path + b' HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n'

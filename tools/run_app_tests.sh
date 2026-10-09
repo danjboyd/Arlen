@@ -51,10 +51,34 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   export ARLEN_APP_ROOT="$app_root"
   export ARLEN_FRAMEWORK_ROOT="$framework_root"
   cd "$app_root"
+  apple_args=()
   if [[ -n "$apple_selectors" ]]; then
-    exec xcrun xctest -XCTest "$apple_selectors" "$bundle"
+    apple_args=(-XCTest "$apple_selectors")
   fi
-  exec xcrun xctest "$bundle"
+  # Add the GNUstep runner's per-class summary lines ("HomeTests: 1 tests
+  # PASSED", "MissingTests: 1/1 tests FAILED") after each class suite.
+  set +e
+  xcrun xctest ${apple_args[@]+"${apple_args[@]}"} "$bundle" 2>&1 | awk '
+    { print }
+    /^Test Suite .* (passed|failed) at / {
+      suite = $0
+      sub(/^Test Suite \047/, "", suite)
+      sub(/\047 (passed|failed) at .*/, "", suite)
+      next
+    }
+    /^[ \t]*Executed [0-9]+ tests?, with [0-9]+ failures?/ {
+      if (suite != "" && suite !~ /\.xctest$/ && suite != "All tests" && suite != "Selected tests") {
+        total = $2
+        failed = $5
+        if (failed == 0) {
+          printf "%s: %d tests PASSED\n", suite, total
+        } else {
+          printf "%s: %d/%d tests FAILED\n", suite, failed, total
+        }
+      }
+      suite = ""
+    }'
+  exit "${PIPESTATUS[0]}"
 fi
 
 (cd "$app_root" && ARLEN_FRAMEWORK_ROOT="$framework_root" "$framework_root/bin/boomhauer" --build-tests)

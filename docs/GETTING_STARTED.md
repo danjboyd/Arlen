@@ -155,7 +155,8 @@ See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
 
 These commands also work on macOS, where they build with the Apple toolchain
 instead of `make`. `arlen check` runs the Apple verification lane there, and
-`arlen perf` and `arlen test --integration` are GNUstep-only for now.
+`arlen test` runs the Apple unit and integration bundles. `arlen perf` is
+GNUstep-only for now.
 
 ## 7. Choose the Next Guide
 

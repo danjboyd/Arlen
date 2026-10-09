@@ -159,9 +159,10 @@
 }
 
 - (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot quotedRepoRoot:(NSString *)quotedRepoRoot {
-  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen eocc",
+  return [NSString stringWithFormat:@"%@ && cd %@ && %@",
                                     ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
-                                    quotedRepoRoot ?: [self shellQuoted:repoRoot]];
+                                    quotedRepoRoot ?: [self shellQuoted:repoRoot],
+                                    ALNTestFrameworkBuildCommand(@"arlen eocc")];
 }
 
 - (NSDictionary *)curlJSONAtPort:(int)port

@@ -5458,20 +5458,16 @@ static int CommandTest(NSArray *args) {
     return RunShellCommand([parts componentsJoinedByString:@" "]);
   }
   if (UsesAppleToolchain(frameworkRoot)) {
-    // The Apple XCTest bundle covers the unit suite; the integration suite is
-    // still built only by the GNUstep makefile.
-    if ([args containsObject:@"--integration"]) {
-      fprintf(stderr, "arlen test --integration: the integration suite runs only on GNUstep for now; "
-                      "on macOS use `arlen test --unit`\n");
-      return 2;
+    NSString *runSuite = [NSString stringWithFormat:@"cd %@ && ./tools/test_apple_xctest.sh --suite",
+                                                    ShellQuote(frameworkRoot)];
+    if ([args count] == 0 || [args containsObject:@"--all"]) {
+      return RunShellCommand([NSString stringWithFormat:@"%@ unit && %@ integration", runSuite, runSuite]);
     }
-    if ([args count] == 0 || [args containsObject:@"--all"] || [args containsObject:@"--unit"]) {
-      if (![args containsObject:@"--unit"]) {
-        fprintf(stderr, "arlen test: on macOS this runs the unit suite only; the integration suite runs only "
-                        "on GNUstep for now\n");
-      }
-      return RunShellCommand([NSString stringWithFormat:@"cd %@ && ./tools/test_apple_xctest.sh",
-                                                        ShellQuote(frameworkRoot)]);
+    if ([args containsObject:@"--unit"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" unit"]);
+    }
+    if ([args containsObject:@"--integration"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" integration"]);
     }
     fprintf(stderr, "arlen test: unsupported options\n");
     return 2;
