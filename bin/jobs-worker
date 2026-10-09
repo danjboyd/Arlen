@@ -153,15 +153,27 @@ if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
   exit 1
 fi
 
+# macOS builds with the Apple toolchain and writes the app to .boomhauer/apple/.
+# A checkout there can carry a build/arlen wrapper (tools/build_apple_xctest.sh),
+# so only a non-checkout root counts as a packaged release.
+app_build_binary="$app_root/.boomhauer/build/boomhauer-app"
+prefer_packaged_binary="$is_release_framework_root"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  app_build_binary="$app_root/.boomhauer/apple/boomhauer-app"
+  if (( is_checkout_framework_root == 1 )); then
+    prefer_packaged_binary=0
+  fi
+fi
+
 if [[ ! -f "$app_root/config/app.plist" ]] || ! app_root_has_sources "$app_root"; then
   packaged_app_binary=""
-  if (( is_release_framework_root == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+  if (( prefer_packaged_binary == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_build_binary")"; then
     app_binary="$packaged_app_binary"
   else
     echo "jobs-worker: invalid app root: $app_root" >&2
     exit 1
   fi
-elif (( is_release_framework_root == 1 )) && app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+elif (( prefer_packaged_binary == 1 )) && app_binary="$(resolve_compiled_binary "$app_build_binary")"; then
   # ARLEN-BUG-018: packaged release workers should execute the shipped binary
   # instead of forcing a mutable source-style rebuild.
   :
@@ -174,8 +186,8 @@ else
     echo "jobs-worker: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
     exit "$status"
   fi
-  if ! app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
-    echo "jobs-worker: expected compiled app binary at $app_root/.boomhauer/build/boomhauer-app" >&2
+  if ! app_binary="$(resolve_compiled_binary "$app_build_binary")"; then
+    echo "jobs-worker: expected compiled app binary at $app_build_binary" >&2
     exit 1
   fi
 fi
@@ -188,4 +200,4 @@ fi
 export ARLEN_APP_ROOT="$app_root"
 export ARLEN_FRAMEWORK_ROOT="$framework_root"
 
-exec "$app_binary" --env "$environment" "${worker_args[@]}"
+exec "$app_binary" --env "$environment" ${worker_args[@]+"${worker_args[@]}"}

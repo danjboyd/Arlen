@@ -115,6 +115,13 @@ app_root_has_sources() {
   [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
 }
 
+# macOS builds with the Apple toolchain (bin/build-apple) instead of GNU make,
+# and writes its binaries to build/apple/ and .boomhauer/apple/.
+is_apple_host=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  is_apple_host=1
+fi
+
 framework_root="${ARLEN_FRAMEWORK_ROOT:-$default_framework_root}"
 app_root="${ARLEN_APP_ROOT:-$PWD}"
 environment="production"
@@ -329,7 +336,13 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-if (( is_checkout_framework_root == 1 )); then
+if (( is_checkout_framework_root == 1 && is_apple_host == 1 )); then
+  "$framework_root/bin/build-apple" >/dev/null
+  if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/apple/arlen")"; then
+    echo "propane: expected compiled arlen binary under $framework_root/build/apple" >&2
+    exit 1
+  fi
+elif (( is_checkout_framework_root == 1 )); then
   if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
     make -C "$framework_root" arlen >/dev/null
     if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
@@ -350,31 +363,9 @@ if [[ -z "$config_json" ]]; then
   exit 1
 fi
 
-while IFS='=' read -r key value; do
-  case "$key" in
-    config_host) config_host="$value" ;;
-    config_port) config_port="$value" ;;
-    config_workers) config_workers="$value" ;;
-    config_graceful_shutdown_seconds) config_graceful_shutdown_seconds="$value" ;;
-    config_respawn_delay_ms) config_respawn_delay_ms="$value" ;;
-    config_reload_overlap_seconds) config_reload_overlap_seconds="$value" ;;
-    config_listen_backlog) config_listen_backlog="$value" ;;
-    config_connection_timeout_seconds) config_connection_timeout_seconds="$value" ;;
-    config_enable_reuse_port) config_enable_reuse_port="$value" ;;
-    config_job_worker_count) config_job_worker_count="$value" ;;
-    config_job_worker_command) config_job_worker_command="$value" ;;
-    config_job_worker_respawn_delay_ms) config_job_worker_respawn_delay_ms="$value" ;;
-    config_cluster_enabled) config_cluster_enabled="$value" ;;
-    config_cluster_name) config_cluster_name="$value" ;;
-    config_cluster_node_id) config_cluster_node_id="$value" ;;
-    config_cluster_expected_nodes) config_cluster_expected_nodes="$value" ;;
-    config_worker_fd_warn_percent) config_worker_fd_warn_percent="$value" ;;
-    config_worker_fd_critical_percent) config_worker_fd_critical_percent="$value" ;;
-    config_worker_fd_retire_percent) config_worker_fd_retire_percent="$value" ;;
-    config_worker_fd_retire_count) config_worker_fd_retire_count="$value" ;;
-    config_worker_fd_check_seconds) config_worker_fd_check_seconds="$value" ;;
-  esac
-done < <(python3 - "$config_json" <<'PY'
+# The heredoc lives in a function: bash 3.2 misparses one nested in < <(...).
+emit_config_values() {
+  python3 - "$1" <<'PY'
 import json
 import sys
 
@@ -429,7 +420,33 @@ print(f"config_worker_fd_retire_percent={as_int(accessories.get('workerFDRetireP
 print(f"config_worker_fd_retire_count={as_int(accessories.get('workerFDRetireCount', 0), 0, 0)}")
 print(f"config_worker_fd_check_seconds={as_int(accessories.get('workerFDCheckSeconds', 15), 15, 1)}")
 PY
-)
+}
+
+while IFS='=' read -r key value; do
+  case "$key" in
+    config_host) config_host="$value" ;;
+    config_port) config_port="$value" ;;
+    config_workers) config_workers="$value" ;;
+    config_graceful_shutdown_seconds) config_graceful_shutdown_seconds="$value" ;;
+    config_respawn_delay_ms) config_respawn_delay_ms="$value" ;;
+    config_reload_overlap_seconds) config_reload_overlap_seconds="$value" ;;
+    config_listen_backlog) config_listen_backlog="$value" ;;
+    config_connection_timeout_seconds) config_connection_timeout_seconds="$value" ;;
+    config_enable_reuse_port) config_enable_reuse_port="$value" ;;
+    config_job_worker_count) config_job_worker_count="$value" ;;
+    config_job_worker_command) config_job_worker_command="$value" ;;
+    config_job_worker_respawn_delay_ms) config_job_worker_respawn_delay_ms="$value" ;;
+    config_cluster_enabled) config_cluster_enabled="$value" ;;
+    config_cluster_name) config_cluster_name="$value" ;;
+    config_cluster_node_id) config_cluster_node_id="$value" ;;
+    config_cluster_expected_nodes) config_cluster_expected_nodes="$value" ;;
+    config_worker_fd_warn_percent) config_worker_fd_warn_percent="$value" ;;
+    config_worker_fd_critical_percent) config_worker_fd_critical_percent="$value" ;;
+    config_worker_fd_retire_percent) config_worker_fd_retire_percent="$value" ;;
+    config_worker_fd_retire_count) config_worker_fd_retire_count="$value" ;;
+    config_worker_fd_check_seconds) config_worker_fd_check_seconds="$value" ;;
+  esac
+done < <(emit_config_values "$config_json")
 
 worker_count="${workers_override:-${config_workers:-4}}"
 host="${host_override:-${config_host:-127.0.0.1}}"
@@ -455,7 +472,8 @@ is_uint() {
 
 parse_bool_int() {
   local raw="${1:-}"
-  local normalized="${raw,,}"
+  local normalized
+  normalized="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
   case "$normalized" in
     1|true|yes|on)
       echo "1"
@@ -566,8 +584,22 @@ if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; th
   is_app_root=1
 fi
 
+app_build_binary="$app_root/.boomhauer/build/boomhauer-app"
+framework_server_binary="$framework_root/build/boomhauer"
+if (( is_apple_host == 1 )); then
+  app_build_binary="$app_root/.boomhauer/apple/boomhauer-app"
+  framework_server_binary="$framework_root/build/apple/boomhauer"
+fi
+
+# On macOS a checkout can carry a build/arlen wrapper (tools/build_apple_xctest.sh),
+# so only a non-checkout root counts as a packaged release there.
+prefer_packaged_binary="$is_release_framework_root"
+if (( is_apple_host == 1 && is_checkout_framework_root == 1 )); then
+  prefer_packaged_binary=0
+fi
+
 packaged_app_binary=""
-if (( is_release_framework_root == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
+if (( prefer_packaged_binary == 1 )) && packaged_app_binary="$(resolve_compiled_binary "$app_build_binary")"; then
   :
 else
   packaged_app_binary=""
@@ -586,16 +618,18 @@ elif (( is_app_root == 1 )); then
     echo "propane: app prepare step failed; see $app_root/.boomhauer/last_build_error.log" >&2
     exit "$status"
   fi
-  if ! app_binary="$(resolve_compiled_binary "$app_root/.boomhauer/build/boomhauer-app")"; then
-    echo "propane: expected compiled server binary at $app_root/.boomhauer/build/boomhauer-app" >&2
+  if ! app_binary="$(resolve_compiled_binary "$app_build_binary")"; then
+    echo "propane: expected compiled server binary at $app_build_binary" >&2
     exit 1
   fi
 else
-  if (( is_checkout_framework_root == 1 )); then
+  if (( is_checkout_framework_root == 1 && is_apple_host == 1 )); then
+    "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
+  elif (( is_checkout_framework_root == 1 )); then
     make -C "$framework_root" boomhauer >/dev/null
   fi
-  if ! app_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
-    echo "propane: expected compiled server binary at $framework_root/build/boomhauer" >&2
+  if ! app_binary="$(resolve_compiled_binary "$framework_server_binary")"; then
+    echo "propane: expected compiled server binary at $framework_server_binary" >&2
     exit 1
   fi
 fi
@@ -606,7 +640,7 @@ if [[ ! -x "$app_binary" ]]; then
 fi
 
 worker_args=(--env "$environment" --host "$host" --port "$port")
-worker_args+=("${worker_passthrough[@]}")
+worker_args+=(${worker_passthrough[@]+"${worker_passthrough[@]}"})
 
 export ARLEN_APP_ROOT="$app_root"
 export ARLEN_FRAMEWORK_ROOT="$framework_root"
@@ -683,17 +717,47 @@ sleep_ms() {
   sleep "$duration"
 }
 
+# FD pressure: Linux reads /proc. Elsewhere (macOS) lsof lists the worker's
+# numeric descriptors, and the soft limit is propane's own, which workers
+# inherit and do not change.
+fd_probe="none"
+if [[ -d /proc/self/fd ]]; then
+  fd_probe="proc"
+elif command -v lsof >/dev/null 2>&1; then
+  fd_probe="lsof"
+fi
+
 worker_fd_count() {
   local pid="$1"
-  if [[ ! -d "/proc/$pid/fd" ]]; then
-    echo "-1"
-    return
-  fi
-  find "/proc/$pid/fd" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '
+  case "$fd_probe" in
+    proc)
+      if [[ ! -d "/proc/$pid/fd" ]]; then
+        echo "-1"
+        return
+      fi
+      find "/proc/$pid/fd" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '
+      ;;
+    lsof)
+      lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null | awk '/^f/ {n++} END {print n + 0}'
+      ;;
+    *)
+      echo "-1"
+      ;;
+  esac
 }
 
 worker_fd_soft_limit() {
   local pid="$1"
+  if [[ "$fd_probe" == "lsof" ]]; then
+    local limit
+    limit="$(ulimit -n)"
+    if is_uint "$limit"; then
+      echo "$limit"
+    else
+      echo "0"
+    fi
+    return
+  fi
   if [[ ! -r "/proc/$pid/limits" ]]; then
     echo "0"
     return
@@ -701,9 +765,24 @@ worker_fd_soft_limit() {
   awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null
 }
 
+worker_fd_targets() {
+  local pid="$1"
+  case "$fd_probe" in
+    proc)
+      local fd
+      for fd in "/proc/$pid/fd"/*; do
+        readlink "$fd" 2>/dev/null || true
+      done
+      ;;
+    lsof)
+      lsof -nP -a -p "$pid" -d 0-999999 -F n 2>/dev/null | sed -n 's/^n//p'
+      ;;
+  esac
+}
+
 worker_fd_top_targets() {
   local pid="$1"
-  if [[ ! -d "/proc/$pid/fd" ]]; then
+  if [[ "$fd_probe" == "proc" && ! -d "/proc/$pid/fd" ]]; then
     echo ""
     return
   fi
@@ -719,7 +798,7 @@ worker_fd_top_targets() {
         out="$line"
       fi
     fi
-  done < <(for fd in "/proc/$pid/fd"/*; do readlink "$fd" 2>/dev/null || true; done | sort | uniq -c | sort -nr | head -5)
+  done < <(worker_fd_targets "$pid" | sort | uniq -c | sort -nr | head -5)
   echo "$out"
 }
 
@@ -727,22 +806,22 @@ remove_worker_pid() {
   local retired_pid="$1"
   local survivors=()
   local pid
-  for pid in "${workers[@]}"; do
+  for pid in ${workers[@]+"${workers[@]}"}; do
     if [[ "$pid" != "$retired_pid" ]]; then
       survivors+=("$pid")
     fi
   done
-  workers=("${survivors[@]}")
+  workers=(${survivors[@]+"${survivors[@]}"})
 }
 
 check_worker_fd_pressure() {
-  if [[ ! -d /proc ]]; then
+  if [[ "$fd_probe" == "none" ]]; then
     return
   fi
 
   local retire_pids=()
   local pid
-  for pid in "${workers[@]}"; do
+  for pid in ${workers[@]+"${workers[@]}"}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       continue
     fi
@@ -800,7 +879,7 @@ check_worker_fd_pressure() {
     fi
   done
 
-  for pid in "${retire_pids[@]}"; do
+  for pid in ${retire_pids[@]+"${retire_pids[@]}"}; do
     remove_worker_pid "$pid"
     terminate_pid_list "http_worker" "fd_pressure_retire" "$pid"
     if (( no_respawn == 0 && once_mode == 0 && shutting_down == 0 )); then
@@ -812,7 +891,7 @@ check_worker_fd_pressure() {
 
 spawn_worker() {
   local start_reason="${1:-boot}"
-  "$app_binary" "${worker_args[@]}" &
+  "$app_binary" ${worker_args[@]+"${worker_args[@]}"} &
   local pid=$!
   workers+=("$pid")
   echo "propane: worker started pid=$pid"
@@ -842,7 +921,7 @@ terminate_pid_list() {
 
   local alive=()
   local pid
-  for pid in "${candidates[@]}"; do
+  for pid in ${candidates[@]+"${candidates[@]}"}; do
     if kill -0 "$pid" 2>/dev/null; then
       emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=TERM" "reason=$stop_reason"
       kill -TERM "$pid" 2>/dev/null || true
@@ -858,7 +937,7 @@ terminate_pid_list() {
   local tick
   for ((tick = 0; tick < max_ticks && ${#alive[@]} > 0; tick++)); do
     local remaining=()
-    for pid in "${alive[@]}"; do
+    for pid in ${alive[@]+"${alive[@]}"}; do
       if kill -0 "$pid" 2>/dev/null; then
         remaining+=("$pid")
       else
@@ -871,17 +950,17 @@ terminate_pid_list() {
         emit_lifecycle_event "${role}_stopped" "role=$role" "pid=$pid" "status=$status" "exit_reason=$exit_reason" "reason=$stop_reason"
       fi
     done
-    alive=("${remaining[@]}")
+    alive=(${remaining[@]+"${remaining[@]}"})
     if (( ${#alive[@]} > 0 )); then
       sleep 0.1
     fi
   done
 
-  for pid in "${alive[@]}"; do
+  for pid in ${alive[@]+"${alive[@]}"}; do
     emit_lifecycle_event "${role}_stop_requested" "role=$role" "pid=$pid" "signal=KILL" "reason=${stop_reason}_grace_timeout"
     kill -KILL "$pid" 2>/dev/null || true
   done
-  for pid in "${alive[@]}"; do
+  for pid in ${alive[@]+"${alive[@]}"}; do
     set +e
     wait "$pid" 2>/dev/null
     local status=$?
@@ -903,7 +982,8 @@ last_fd_pressure_check=0
 
 on_term() {
   local signal_name="${1:-TERM}"
-  local normalized="${signal_name,,}"
+  local normalized
+  normalized="$(printf '%s' "$signal_name" | tr '[:upper:]' '[:lower:]')"
   if (( shutting_down == 1 )); then
     return
   fi
@@ -923,8 +1003,8 @@ on_hup() {
 cleanup_and_exit() {
   local code="$1"
   emit_lifecycle_event "manager_stopping" "reason=$shutdown_reason" "exit_code=$code"
-  terminate_pid_list "http_worker" "$shutdown_reason" "${workers[@]}"
-  terminate_pid_list "async_worker" "$shutdown_reason" "${job_workers[@]}"
+  terminate_pid_list "http_worker" "$shutdown_reason" ${workers[@]+"${workers[@]}"}
+  terminate_pid_list "async_worker" "$shutdown_reason" ${job_workers[@]+"${job_workers[@]}"}
   rm -f "$pid_file"
   emit_lifecycle_event "manager_stopped" "reason=$shutdown_reason" "exit_code=$code"
   exit "$code"
@@ -937,7 +1017,7 @@ trap on_hup HUP
 if (( print_routes == 1 )); then
   workers=()
   rm -f "$pid_file"
-  exec "$app_binary" "${worker_args[@]}"
+  exec "$app_binary" ${worker_args[@]+"${worker_args[@]}"}
 fi
 
 for ((idx = 0; idx < worker_count; idx++)); do
@@ -956,8 +1036,8 @@ while (( shutting_down == 0 )); do
 
   if (( reload_requested == 1 )); then
     reload_generation=$((reload_generation + 1))
-    old_workers=("${workers[@]}")
-    old_job_workers=("${job_workers[@]}")
+    old_workers=(${workers[@]+"${workers[@]}"})
+    old_job_workers=(${job_workers[@]+"${job_workers[@]}"})
     workers=()
     job_workers=()
     echo "propane: reload requested; starting replacement workers"
@@ -971,14 +1051,14 @@ while (( shutting_down == 0 )); do
     if (( reload_overlap_seconds > 0 )); then
       sleep "$reload_overlap_seconds"
     fi
-    terminate_pid_list "http_worker" "reload_retire_generation_${reload_generation}" "${old_workers[@]}"
-    terminate_pid_list "async_worker" "reload_retire_generation_${reload_generation}" "${old_job_workers[@]}"
+    terminate_pid_list "http_worker" "reload_retire_generation_${reload_generation}" ${old_workers[@]+"${old_workers[@]}"}
+    terminate_pid_list "async_worker" "reload_retire_generation_${reload_generation}" ${old_job_workers[@]+"${old_job_workers[@]}"}
     emit_lifecycle_event "manager_reload_completed" "generation=$reload_generation" "active_workers=${#workers[@]}" "active_async_workers=${#job_workers[@]}"
     reload_requested=0
   fi
 
   dead=()
-  for pid in "${workers[@]}"; do
+  for pid in ${workers[@]+"${workers[@]}"}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       set +e
       wait "$pid"
@@ -990,9 +1070,9 @@ while (( shutting_down == 0 )); do
 
   if (( ${#dead[@]} > 0 )); then
     survivors=()
-    for pid in "${workers[@]}"; do
+    for pid in ${workers[@]+"${workers[@]}"}; do
       is_dead=0
-      for pair in "${dead[@]}"; do
+      for pair in ${dead[@]+"${dead[@]}"}; do
         dead_pid="${pair%%:*}"
         if [[ "$pid" == "$dead_pid" ]]; then
           is_dead=1
@@ -1003,9 +1083,9 @@ while (( shutting_down == 0 )); do
         survivors+=("$pid")
       fi
     done
-    workers=("${survivors[@]}")
+    workers=(${survivors[@]+"${survivors[@]}"})
 
-    for pair in "${dead[@]}"; do
+    for pair in ${dead[@]+"${dead[@]}"}; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: worker exited pid=$dead_pid status=$dead_status"
@@ -1026,7 +1106,7 @@ while (( shutting_down == 0 )); do
     fi
 
     if (( no_respawn == 0 )); then
-      for _ in "${dead[@]}"; do
+      for _ in ${dead[@]+"${dead[@]}"}; do
         sleep_ms "$respawn_delay_ms"
         spawn_worker "respawn_after_exit"
       done
@@ -1040,7 +1120,7 @@ while (( shutting_down == 0 )); do
   fi
 
   job_dead=()
-  for pid in "${job_workers[@]}"; do
+  for pid in ${job_workers[@]+"${job_workers[@]}"}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       set +e
       wait "$pid"
@@ -1052,9 +1132,9 @@ while (( shutting_down == 0 )); do
 
   if (( ${#job_dead[@]} > 0 )); then
     job_survivors=()
-    for pid in "${job_workers[@]}"; do
+    for pid in ${job_workers[@]+"${job_workers[@]}"}; do
       is_dead=0
-      for pair in "${job_dead[@]}"; do
+      for pair in ${job_dead[@]+"${job_dead[@]}"}; do
         dead_pid="${pair%%:*}"
         if [[ "$pid" == "$dead_pid" ]]; then
           is_dead=1
@@ -1065,9 +1145,9 @@ while (( shutting_down == 0 )); do
         job_survivors+=("$pid")
       fi
     done
-    job_workers=("${job_survivors[@]}")
+    job_workers=(${job_survivors[@]+"${job_survivors[@]}"})
 
-    for pair in "${job_dead[@]}"; do
+    for pair in ${job_dead[@]+"${job_dead[@]}"}; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: async worker exited pid=$dead_pid status=$dead_status"
@@ -1080,7 +1160,7 @@ while (( shutting_down == 0 )); do
     done
 
     if (( no_respawn == 0 )); then
-      for _ in "${job_dead[@]}"; do
+      for _ in ${job_dead[@]+"${job_dead[@]}"}; do
         sleep_ms "$job_worker_respawn_delay_ms"
         spawn_job_worker "respawn_after_exit"
       done
