@@ -71,12 +71,10 @@ resolve_directory_path() {
   return 1
 }
 
-resolve_operability_helper() {
-  local release_dir="$1"
-  local manifest_path="$release_dir/metadata/manifest.json"
-  local helper_path=""
-  if [[ -f "$manifest_path" ]] && command -v python3 >/dev/null 2>&1; then
-    helper_path="$(python3 - "$manifest_path" <<'PY'
+# manifest_operability_helper <manifest>: prints paths.operability_probe_helper.
+# A function, not a heredoc inside $(...), which macOS bash 3.2 misparses.
+manifest_operability_helper() {
+  python3 - "$1" <<'PY'
 import json
 import sys
 
@@ -92,7 +90,14 @@ if isinstance(payload, dict):
             helper = value
 print(helper)
 PY
-)"
+}
+
+resolve_operability_helper() {
+  local release_dir="$1"
+  local manifest_path="$release_dir/metadata/manifest.json"
+  local helper_path=""
+  if [[ -f "$manifest_path" ]] && command -v python3 >/dev/null 2>&1; then
+    helper_path="$(manifest_operability_helper "$manifest_path")"
     if [[ -n "$helper_path" ]]; then
       if [[ "$helper_path" = /* ]] || [[ "$helper_path" =~ ^[A-Za-z]:[\\/] ]] || [[ "$helper_path" =~ ^\\\\ ]]; then
         printf '%s\n' "$helper_path"
