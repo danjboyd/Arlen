@@ -250,4 +250,42 @@
   XCTAssertEqualObjects(@"head_wildcard", [router matchMethod:@"HEAD" path:@"/static"].route.name);
 }
 
+// GitHub issue 154: clients such as the generated TypeScript client send
+// parameters through encodeURIComponent.
+- (void)testParameterValuesArePercentDecodedOnce {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"POST"
+                    path:@"/users/:identifier/files/:name"
+                    name:@"user_file"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  NSDictionary<NSString *, NSArray<NSString *> *> *cases = @{
+    @"/users/user%3Aabc/files/a%20b.txt" : @[ @"user:abc", @"a b.txt" ],
+    @"/users/user:abc/files/plain" : @[ @"user:abc", @"plain" ],
+    @"/users/caf%C3%A9/files/a+b" : @[ @"caf\u00e9", @"a+b" ],
+    @"/users/a%2Fb/files/x" : @[ @"a/b", @"x" ],
+    @"/users/double%2541/files/x" : @[ @"double%41", @"x" ],
+    @"/users/bad%zz/files/half%4" : @[ @"bad%zz", @"half%4" ],
+  };
+  for (NSString *path in cases) {
+    ALNRouteMatch *match = [router matchMethod:@"POST" path:path];
+    XCTAssertNotNil(match, @"%@", path);
+    XCTAssertEqualObjects(match.params[@"identifier"], cases[path][0], @"%@", path);
+    XCTAssertEqualObjects(match.params[@"name"], cases[path][1], @"%@", path);
+  }
+}
+
+- (void)testEncodedSlashDoesNotSplitSegments {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/docs/:slug"
+                    name:@"doc"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  XCTAssertEqualObjects([router matchMethod:@"GET" path:@"/docs/a%2Fb"].params[@"slug"], @"a/b");
+  XCTAssertNil([router matchMethod:@"GET" path:@"/docs/a/b"]);
+}
+
 @end
