@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Named route parameters (`:id`) are percent-decoded. Arlen's generated
+  TypeScript client and the OpenAPI explorer send parameters through
+  `encodeURIComponent`, so an identifier such as `user:abc` arrived as
+  `user%3Aabc` and its lookup failed with a 404. Values are decoded once after
+  the path is split, so `%2F` stays inside the value, and a segment with an
+  invalid escape is kept as sent. Wildcard (`*name`) values are unchanged.
+  **Upgrade note:** apps that decoded route parameters themselves should stop,
+  or values containing `%25` decode twice (GitHub issue 154).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple

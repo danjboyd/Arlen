@@ -18,6 +18,17 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
   return [normalized componentsSeparatedByString:@"/"];
 }
 
+// A named parameter's value is its path segment percent-decoded. The path is
+// split on "/" first, so an encoded slash (%2F) stays inside one value, and
+// the value is decoded once ("%2541" yields "%41"). A segment with an invalid
+// escape is kept as sent; "+" is literal in a path.
+static NSString *ALNDecodedRouteParameter(NSString *segment) {
+  if (segment == nil || [segment rangeOfString:@"%"].location == NSNotFound) {
+    return segment ?: @"";
+  }
+  return [segment stringByRemovingPercentEncoding] ?: segment;
+}
+
 static NSString *ALNNormalizeRouteFormat(NSString *value) {
   if (![value isKindOfClass:[NSString class]]) {
     return nil;
@@ -283,7 +294,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
       return nil;
     }
     return @{
-      self.parameterizedFastPathParamName : tail
+      self.parameterizedFastPathParamName : ALNDecodedRouteParameter(tail)
     };
   }
 
@@ -330,7 +341,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
       if (params == nil) {
         params = [NSMutableDictionary dictionaryWithCapacity:2];
       }
-      params[name] = incomingSegment ?: @"";
+      params[name] = ALNDecodedRouteParameter(incomingSegment);
       continue;
     }
 
