@@ -1,4 +1,5 @@
 #import "ALNDataverseQuery.h"
+#import "ALNPlatform.h"
 
 #import <ctype.h>
 #import <string.h>
@@ -48,22 +49,6 @@ static BOOL ALNDataverseQueryLooksLikeGUID(NSString *value) {
   return YES;
 }
 
-static BOOL ALNDataverseQueryNumberLooksBoolean(NSNumber *number) {
-  if (number == nil) {
-    return NO;
-  }
-#if defined(__APPLE__)
-  if (CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID()) {
-    return YES;
-  }
-#endif
-  const char *type = [number objCType];
-  if (type == NULL) {
-    return NO;
-  }
-  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
-}
-
 static NSString *ALNDataverseQueryEscapeStringLiteral(NSString *value) {
   return [ALNDataverseQueryTrimmedString(value) stringByReplacingOccurrencesOfString:@"'"
                                                                            withString:@"''"];
@@ -92,7 +77,7 @@ static NSString *ALNDataverseQueryLiteral(id value, NSError **error) {
     return [NSString stringWithFormat:@"'%@'", ALNDataverseQueryEscapeStringLiteral(text)];
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNDataverseQueryNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       return [(NSNumber *)value boolValue] ? @"true" : @"false";
     }
     return [(NSNumber *)value stringValue];

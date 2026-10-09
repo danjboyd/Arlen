@@ -1,4 +1,5 @@
 #import "ALNMCPModule.h"
+#import "ALNPlatform.h"
 #import "ALNMCPSchema.h"
 #import "ALNAuth.h"
 #import "ALNOAuthResourceServer.h"
@@ -16,7 +17,7 @@ static NSString *const Version = @"2025-11-25";
 static NSString *const ModuleKey = @"Arlen.MCP.module";
 static BOOL Dict(id v) { return [v isKindOfClass:[NSDictionary class]]; }
 static BOOL String(id v) { return [v isKindOfClass:[NSString class]]; }
-static BOOL Bool(id v) { return [v isKindOfClass:[NSNumber class]] && (strcmp([v objCType], @encode(BOOL)) == 0); }
+static BOOL Bool(id v) { return ALNNumberIsBoolean(v); }
 // Old-style plists deliver bare numbers as strings; accept either, reject anything else.
 static BOOL ConfigInteger(id value, NSUInteger fallback, NSUInteger *out) {
   if (!value) { *out = fallback; return YES; }
