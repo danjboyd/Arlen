@@ -186,9 +186,12 @@ compile_objc() {
 
 # eocc --manifest reuses unchanged outputs, so generated sources keep their
 # mtimes and their objects stay current. Each module gets its own output
-# directory so a removed module's sources can be dropped.
+# directory so a removed module's sources can be dropped. Sets
+# generated_sources to the outputs of the current templates only, so a stale
+# file left in the gen tree is never compiled.
 transpile_app_templates() {
   mkdir -p "$app_template_root" "$module_template_root"
+  generated_sources=()
 
   template_files=()
   if [[ -d "$app_root/templates" ]]; then
@@ -205,6 +208,9 @@ transpile_app_templates() {
         --output-dir "$app_template_root" \
         --manifest "$app_template_root/manifest.json" \
       "${template_files[@]}" 1>&2
+    for template_path in "${template_files[@]}"; do
+      generated_sources+=("$app_template_root/${template_path#"$app_root/templates"/}.m")
+    done
   fi
 
   local active_modules=" "
@@ -215,8 +221,13 @@ transpile_app_templates() {
       if [[ ! -d "$template_root" ]]; then
         continue
       fi
+      # An app template at templates/modules/<id>/<path> overrides the
+      # module's own; it is transpiled with the app templates instead.
       module_templates=()
       while IFS= read -r template_path; do
+        if [[ -f "$app_root/templates/modules/$module_id/${template_path#"$template_root"/}" ]]; then
+          continue
+        fi
         module_templates+=("$template_path")
       done < <(find "$template_root" -type f -name '*.html.eoc' | sort)
       if [[ ${#module_templates[@]} -eq 0 ]]; then
@@ -231,6 +242,9 @@ transpile_app_templates() {
         --manifest "$module_out/manifest.json" \
         --logical-prefix "modules/$module_id" \
         "${module_templates[@]}" 1>&2
+      for template_path in "${module_templates[@]}"; do
+        generated_sources+=("$module_out/modules/$module_id/${template_path#"$template_root"/}.m")
+      done
     done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
   fi
 
@@ -255,10 +269,6 @@ while IFS= read -r src; do
   app_sources+=("$src")
 done < <(find "$app_root/modules" -type f -path '*/Sources/*.m' 2>/dev/null | sort)
 
-generated_sources=()
-while IFS= read -r src; do
-  generated_sources+=("$src")
-done < <(find "$app_template_root" "$module_template_root" -type f -name '*.m' 2>/dev/null | sort)
 
 if [[ ${#app_sources[@]} -eq 0 ]]; then
   echo "build-apple-app: no app Objective-C sources found" >&2
