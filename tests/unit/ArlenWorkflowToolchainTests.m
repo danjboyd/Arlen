@@ -5,8 +5,7 @@
 #import "../shared/ALNTestSupport.h"
 
 // `arlen build/check/test/perf/routes` use the Apple toolchain on macOS when
-// the framework root has bin/build-apple, and GNU make otherwise. `arlen perf`
-// is still GNUstep-only (GitHub issue 147).
+// the framework root has bin/build-apple, and GNU make otherwise.
 @interface ArlenWorkflowToolchainTests : XCTestCase
 @end
 
@@ -37,6 +36,7 @@
     NSDictionary<NSString *, NSString *> *scripts = @{
       @"bin/build-apple" : @"#!/usr/bin/env bash\necho apple-built\n",
       @"tools/test_apple_xctest.sh" : @"#!/usr/bin/env bash\necho \"apple-suite $*\"\n",
+      @"tests/performance/run_perf.sh" : @"#!/usr/bin/env bash\necho apple-perf\n",
     };
     for (NSString *relativePath in scripts) {
       NSString *script = [root stringByAppendingPathComponent:relativePath];
@@ -97,13 +97,13 @@
   [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
 }
 
-- (void)testAppleReportsGNUstepOnlySuitesInsteadOfCallingMake {
+- (void)testAppleRunsTestSuitesAndPerfWithoutMake {
 #if defined(__APPLE__)
   NSString *root = [self createFrameworkFixtureWithAppleBuilder:YES];
   int exitCode = -1;
   NSString *perf = [self runArlen:@"perf" frameworkRoot:root exitCode:&exitCode];
-  XCTAssertEqual(2, exitCode, @"%@", perf);
-  XCTAssertTrue([perf containsString:@"runs only on GNUstep"], @"%@", perf);
+  XCTAssertEqual(0, exitCode, @"%@", perf);
+  XCTAssertEqualObjects(@"apple-perf\n", perf);
 
   // The unit and integration suites run as Apple XCTest bundles.
   NSDictionary<NSString *, NSString *> *expectedSuites = @{

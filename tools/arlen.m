@@ -5491,8 +5491,9 @@ static int CommandPerf(void) {
     return 1;
   }
   if (UsesAppleToolchain(frameworkRoot)) {
-    fprintf(stderr, "arlen perf: the performance suite runs only on GNUstep for now\n");
-    return 2;
+    // run_perf.sh builds with the Apple toolchain itself on macOS.
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && bash ./tests/performance/run_perf.sh",
+                                                      ShellQuote(frameworkRoot)]);
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
