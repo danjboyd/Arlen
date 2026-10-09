@@ -90,6 +90,34 @@ resolve_compiled_binary() {
   return 1
 }
 
+# read_manifest_status <manifest> <version>
+# Prints the manifest's status; fails unless it is a JSON object of <version>
+# with a string status. A function, not a heredoc inside $(...), which macOS
+# bash 3.2 misparses.
+read_manifest_status() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+path, expected_version = sys.argv[1], sys.argv[2]
+with open(path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+if not isinstance(payload, dict):
+    raise SystemExit("manifest JSON must be an object")
+
+version = payload.get("version")
+if not isinstance(version, str) or version != expected_version:
+    raise SystemExit("manifest version must be " + expected_version)
+
+status = payload.get("status")
+if not isinstance(status, str) or not status:
+    raise SystemExit("manifest missing string field 'status'")
+
+print(status)
+PY
+}
+
 copy_path_if_exists() {
   local src="$1"
   local dest="$2"
@@ -579,28 +607,7 @@ if [[ "$allow_missing_certification" != "1" ]]; then
   fi
 
   set +e
-  certification_check_output="$(python3 - "$certification_manifest" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-if not isinstance(payload, dict):
-    raise SystemExit("manifest JSON must be an object")
-
-version = payload.get("version")
-if not isinstance(version, str) or version != "phase9j-release-certification-v1":
-    raise SystemExit("manifest version must be phase9j-release-certification-v1")
-
-status = payload.get("status")
-if not isinstance(status, str) or not status:
-    raise SystemExit("manifest missing string field 'status'")
-
-print(status)
-PY
-)"
+  certification_check_output="$(read_manifest_status "$certification_manifest" phase9j-release-certification-v1)"
   certification_check_rc=$?
   set -e
   if [[ "$certification_check_rc" -ne 0 ]]; then
@@ -632,28 +639,7 @@ PY
   fi
 
   set +e
-  json_perf_check_output="$(python3 - "$json_performance_manifest" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-if not isinstance(payload, dict):
-    raise SystemExit("manifest JSON must be an object")
-
-version = payload.get("version")
-if not isinstance(version, str) or version != "phase10e-json-performance-v1":
-    raise SystemExit("manifest version must be phase10e-json-performance-v1")
-
-status = payload.get("status")
-if not isinstance(status, str) or not status:
-    raise SystemExit("manifest missing string field 'status'")
-
-print(status)
-PY
-)"
+  json_perf_check_output="$(read_manifest_status "$json_performance_manifest" phase10e-json-performance-v1)"
   json_perf_check_rc=$?
   set -e
   if [[ "$json_perf_check_rc" -ne 0 ]]; then
