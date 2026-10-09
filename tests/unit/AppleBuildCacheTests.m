@@ -80,6 +80,15 @@
 #endif
 }
 
+- (void)testSDKPathIsTheSameForEverySDKAlias {
+#if defined(__APPLE__)
+  NSString *output = [self runCacheScript:
+      @"sdk_dir=\"$(dirname \"$(aln_apple_sdk_path)\")\"\n"
+      @"for sdk in \"$sdk_dir\"/MacOSX*.sdk; do SDKROOT=\"$sdk\" aln_apple_sdk_path; done | sort -u | wc -l | tr -d ' '\n"];
+  XCTAssertEqualObjects(@"1\n", output);
+#endif
+}
+
 - (void)testFingerprintChangeClearsObjectRoot {
 #if defined(__APPLE__)
   NSString *output = [self runCacheScript:
