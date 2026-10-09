@@ -584,17 +584,17 @@ if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; th
   is_app_root=1
 fi
 
+# A macOS source checkout builds with the Apple toolchain into .boomhauer/apple/
+# and build/apple/. Packaged releases keep the build/ layout on every platform.
+# On macOS a checkout can also carry a build/arlen wrapper
+# (tools/build_apple_xctest.sh), so only a non-checkout root counts as a
+# packaged release there.
 app_build_binary="$app_root/.boomhauer/build/boomhauer-app"
 framework_server_binary="$framework_root/build/boomhauer"
-if (( is_apple_host == 1 )); then
-  app_build_binary="$app_root/.boomhauer/apple/boomhauer-app"
-  framework_server_binary="$framework_root/build/apple/boomhauer"
-fi
-
-# On macOS a checkout can carry a build/arlen wrapper (tools/build_apple_xctest.sh),
-# so only a non-checkout root counts as a packaged release there.
 prefer_packaged_binary="$is_release_framework_root"
 if (( is_apple_host == 1 && is_checkout_framework_root == 1 )); then
+  app_build_binary="$app_root/.boomhauer/apple/boomhauer-app"
+  framework_server_binary="$framework_root/build/apple/boomhauer"
   prefer_packaged_binary=0
 fi
 

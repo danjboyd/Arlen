@@ -743,7 +743,7 @@ Build and run the first-party jobs worker loop for the current app root.
 
 - delegates to framework `bin/jobs-worker` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
-- on macOS the app is built with the Apple toolchain and runs from `.boomhauer/apple/boomhauer-app`; packaged release reuse applies only to non-checkout framework roots there
+- on macOS a source checkout builds the app with the Apple toolchain and runs `.boomhauer/apple/boomhauer-app`; a packaged release (non-checkout framework root) runs its shipped `.boomhauer/build/boomhauer-app` as on Linux
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload and `app/.boomhauer/build/boomhauer-app` is already present, reuses that packaged binary instead of recompiling from source
 - packaged release reuse now wins even when the release app root no longer
  carries source files; `boomhauer` is not required for immutable runtime
@@ -767,7 +767,7 @@ Run production manager (`propane`) for the current app root.
 
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
-- on macOS, `propane` builds with `bin/build-apple` instead of `make` and runs `.boomhauer/apple/boomhauer-app`; FD-pressure checks use `lsof` instead of `/proc`
+- on macOS, `propane` builds with `bin/build-apple` instead of `make` and runs `.boomhauer/apple/boomhauer-app` from a source checkout (a packaged release runs its shipped `.boomhauer/build/boomhauer-app`); FD-pressure checks use `lsof` instead of `/proc`
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload, `propane` runs directly from that payload and reuses `app/.boomhauer/build/boomhauer-app` without requiring a full Arlen checkout
 - when a packaged release app root already carries `.boomhauer/build/boomhauer-app`,
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
