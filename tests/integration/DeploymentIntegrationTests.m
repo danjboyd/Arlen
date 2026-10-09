@@ -4630,7 +4630,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10EJSONPerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4686,7 +4686,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10GDispatchPerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10g-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4738,7 +4738,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10HHTTPParsePerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10h-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4792,7 +4792,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10LRouteMatchInvestigationGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10l-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -5449,7 +5449,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MBlobThroughputGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-blob-throughput"];
   XCTAssertNotNil(outputRoot);

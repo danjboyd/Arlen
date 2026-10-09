@@ -829,7 +829,14 @@ See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 Run performance suite and regression gate (`make perf`).
 
-GNUstep only for now. On macOS it exits `2` without running anything.
+On macOS it runs `tests/performance/run_perf.sh` directly, which builds the
+profile servers with the Apple toolchain (`bin/build-apple`, and
+`tools/build_apple_xctest.sh --suite integration --tools-only` for the example
+servers) and runs them from `build/apple/`. The committed baselines are
+recorded on Linux hosts, so on macOS the baseline root defaults to
+`build/perf/baselines/macos-<arch>`: the first run records this Mac's baseline
+and later runs are gated against it. Set `ARLEN_PERF_BASELINE_ROOT` to use
+another root.
 
 Profile selection is environment-driven:
 
