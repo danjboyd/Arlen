@@ -1,5 +1,6 @@
 #include <math.h>
 #import "ALNDataverseClient.h"
+#import "ALNPlatform.h"
 
 #import <ctype.h>
 #import <string.h>
@@ -80,17 +81,6 @@ static BOOL ALNDataverseLooksLikeGUID(NSString *value) {
     }
   }
   return YES;
-}
-
-static BOOL ALNDataverseNumberLooksBoolean(NSNumber *number) {
-  if (number == nil) {
-    return NO;
-  }
-  const char *type = [number objCType];
-  if (type == NULL) {
-    return NO;
-  }
-  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
 }
 
 static NSString *ALNDataverseEscapeODataStringLiteral(NSString *value) {
@@ -528,7 +518,7 @@ static NSString *ALNDataverseODataLiteral(id value, NSError **error) {
     return [NSString stringWithFormat:@"'%@'", ALNDataverseEscapeODataStringLiteral(text)];
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNDataverseNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       return [(NSNumber *)value boolValue] ? @"true" : @"false";
     }
     return [(NSNumber *)value stringValue];

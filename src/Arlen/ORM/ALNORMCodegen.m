@@ -1,4 +1,5 @@
 #import "ALNORMCodegen.h"
+#import "ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
 
@@ -444,7 +445,7 @@ static void ALNORMCodegenAppendJSONValue(NSMutableString *output, id value) {
     return;
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (strcmp([(NSNumber *)value objCType], @encode(BOOL)) == 0) {
+    if (ALNNumberIsBoolean(value)) {
       [output appendString:[value boolValue] ? @"true" : @"false"];
     } else {
       [output appendString:[value stringValue]];
