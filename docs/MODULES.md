@@ -225,6 +225,8 @@ send step-up there.
 (GitHub issue 98).
 `mcp` moved to `1.0.2` so a disabled module stays inert at startup (GitHub issue
 105).
+`auth` moved to `1.5.1` and `mcp` to `1.0.3` so booleans are detected correctly
+on Apple arm64 (GitHub issue 132).
 
 ## MCP tools
 
