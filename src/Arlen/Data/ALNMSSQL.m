@@ -643,17 +643,6 @@ static NSError *ALNMSSQLErrorForHandle(ALNMSSQLErrorCode code,
   return ALNMSSQLMakeError(code, message, detail, diagnostics);
 }
 
-static BOOL ALNMSSQLNSNumberLooksBoolean(NSNumber *value) {
-  if (value == nil) {
-    return NO;
-  }
-  const char *type = [value objCType];
-  if (type == NULL) {
-    return NO;
-  }
-  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
-}
-
 static BOOL ALNMSSQLNSNumberLooksFloatingPoint(NSNumber *value) {
   if (value == nil) {
     return NO;
@@ -823,7 +812,7 @@ static NSString *ALNMSSQLTextParameterForValue(id value,
     text = [(NSUUID *)value UUIDString];
     sqlType = SQL_GUID;
   } else if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNMSSQLNSNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       text = [((NSNumber *)value) boolValue] ? @"1" : @"0";
       sqlType = SQL_BIT;
     } else if (ALNMSSQLNSNumberLooksFloatingPoint((NSNumber *)value)) {
@@ -919,7 +908,7 @@ static BOOL ALNMSSQLBindSpecificationForValue(id value,
   }
 
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNMSSQLNSNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       NSMutableData *buffer = [NSMutableData dataWithLength:sizeof(unsigned char)];
       unsigned char raw = [((NSNumber *)value) boolValue] ? 1 : 0;
       memcpy([buffer mutableBytes], &raw, sizeof(unsigned char));

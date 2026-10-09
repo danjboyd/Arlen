@@ -1,4 +1,5 @@
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
 
@@ -48,22 +49,6 @@ static void ALNSetError(NSError **error, NSInteger code, NSString *message) {
   *error = [NSError errorWithDomain:ALNJSONSerializationErrorDomain
                                code:code
                            userInfo:userInfo];
-}
-
-static BOOL ALNNSNumberLooksBoolean(NSNumber *number) {
-  if (number == nil) {
-    return NO;
-  }
-#if defined(__APPLE__)
-  if (CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID()) {
-    return YES;
-  }
-#endif
-  const char *type = [number objCType];
-  if (type == NULL) {
-    return NO;
-  }
-  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
 }
 
 static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth);
@@ -232,7 +217,7 @@ static yyjson_mut_val *ALNYYValueFromFoundation(yyjson_mut_doc *doc,
   if ([obj isKindOfClass:[NSNumber class]]) {
     NSNumber *number = (NSNumber *)obj;
     const char *type = [number objCType];
-    if (ALNNSNumberLooksBoolean(number)) {
+    if (ALNNumberIsBoolean(number)) {
       return yyjson_mut_bool(doc, [number boolValue]);
     }
 
@@ -373,7 +358,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
   }
   if ([obj isKindOfClass:[NSNumber class]]) {
     NSNumber *number = (NSNumber *)obj;
-    if (ALNNSNumberLooksBoolean(number)) {
+    if (ALNNumberIsBoolean(number)) {
       return YES;
     }
     return isfinite([number doubleValue]) != 0;

@@ -99,8 +99,18 @@ static NSError *ALNPgEventStreamStreamRequired(void) {
         @"CREATE UNIQUE INDEX IF NOT EXISTS %@_idempotency ON %@ (stream_id, idempotency_key) "
          "WHERE idempotency_key IS NOT NULL",
         self.tableName, self.tableName];
-    if ([self.database executeCommand:create parameters:@[] error:error] < 0 ||
-        [self.database executeCommand:index parameters:@[] error:error] < 0) {
+    // CREATE ... IF NOT EXISTS is not safe under concurrency: two stores creating
+    // the table at once can fail on pg_type_typname_nsp_index. Serialize the DDL
+    // across every process sharing the database.
+    NSString *lockKey = [NSString stringWithFormat:@"arlen_event_stream_schema:%@", self.tableName];
+    BOOL created = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **innerError) {
+      return [connection executeQuery:@"SELECT pg_advisory_xact_lock(hashtextextended($1, 0))"
+                           parameters:@[ lockKey ]
+                                error:innerError] != nil &&
+             [connection executeCommand:create parameters:@[] error:innerError] >= 0 &&
+             [connection executeCommand:index parameters:@[] error:innerError] >= 0;
+    } error:error];
+    if (!created) {
       return NO;
     }
     self.schemaReady = YES;
