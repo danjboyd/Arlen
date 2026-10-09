@@ -73,7 +73,7 @@ fi
 
 "$framework_root/bin/build-apple" >/dev/null
 
-sdk_path="$(xcrun --show-sdk-path)"
+sdk_path="$(aln_apple_sdk_path)"
 clang_path="$(xcrun --find clang)"
 
 openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"

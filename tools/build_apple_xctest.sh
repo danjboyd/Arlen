@@ -52,8 +52,8 @@ if ! command -v xcrun >/dev/null 2>&1; then
   exit 1
 fi
 
-sdk_path="$(xcrun --show-sdk-path)"
-platform_path="$(xcrun --show-sdk-platform-path)"
+sdk_path="$(aln_apple_sdk_path)"
+platform_path="$(cd "$(xcrun --show-sdk-platform-path)" && pwd -P)"
 clang_path="$(xcrun --find clang)"
 framework_dir="$platform_path/Developer/Library/Frameworks"
 
