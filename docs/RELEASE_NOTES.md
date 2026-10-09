@@ -17,6 +17,14 @@
   `arlen test --app` now prints the same per-class summary lines as the
   GNUstep runner (GitHub issue 153).
 
+- Apple app builds (`tools/build_apple_app.sh`, used by `boomhauer` and
+  `propane` on macOS) handle module templates like the GNUstep build. A module
+  template overridden by the app (`templates/modules/<id>/...`) is no longer
+  compiled twice, which failed the link with a duplicate
+  `ALNEOCRender_modules_...` symbol. Only the outputs of the current templates
+  are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
+  ignored (GitHub issue 152).
+
 - `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
   without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
   runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit
