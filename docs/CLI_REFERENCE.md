@@ -331,7 +331,7 @@ Named targets:
 
 `arlen deploy logs`
 
-- streams `journalctl -u <unit>` when `--service <unit>` is supplied
+- streams `journalctl -u <unit>` when `--service <unit>` is supplied; on macOS it tails the launchd job's log, `<releasePath>/logs/<label>.log`
 - can tail an explicit file with `--file <path>`
 - otherwise reports active release metadata pointers (`manifest.json`, `README.txt`, `release.env`, optional lifecycle log path)
 - when `[target]` has SSH transport metadata, delegates logs to the remote host
@@ -366,7 +366,7 @@ Release-only options:
 - `--env <name>`: migration environment (default: `production`)
 - `--base-url <url>`: verify `GET /healthz` after activation
 - `--skip-migrate`: skip the migration step during activation
-- `--service <name>`: systemd unit for status/rollback/log operations
+- `--service <name>`: systemd unit for status/rollback/log operations; on macOS the launchd job label (`system/<label>`, or the domain in `ARLEN_LAUNCHD_DOMAIN`), restarted with `launchctl kickstart -k` and reloaded with `launchctl kill HUP`. See DEPLOYMENT.md, "macOS launchd Runbook".
 - `--runtime-action <reload|restart|none>`: runtime action used by `deploy release` and `deploy rollback` when `--service` is set
 - `--runtime-restart-command <shell>`: non-interactive restart command override, for example `sudo -n systemctl restart arlen@myapp`
 - `--runtime-reload-command <shell>`: non-interactive reload command override

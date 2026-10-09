@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- macOS deploy targets run under launchd. For `macos-*-apple-foundation`
+  targets `arlen deploy init` generates `launchd/<label>.plist` (from the new
+  `tools/deploy/launchd/arlen.plist`) and propane/jobs-worker wrappers that
+  export the target's env file, since launchd has no `EnvironmentFile`. The
+  doctor checks the plist and `launchctl`. On macOS, `arlen deploy`
+  `status`/`doctor` read the job with `launchctl print`, `restart`/`reload`
+  default to `launchctl kickstart -k`/`kill HUP`, and `logs --service` tails
+  `<releasePath>/logs/<label>.log`. `ARLEN_LAUNCHD_DOMAIN` selects a domain
+  other than `system`. The default service name for macOS targets is
+  `arlen.<target>` (GitHub issue 148).
+
 - The integration and durable-jobs suites run on macOS as Apple XCTest
   bundles. `tools/build_apple_xctest.sh --suite integration|durable-jobs` builds
   them and the binaries they launch (example servers, `eoc-smoke-render`,
