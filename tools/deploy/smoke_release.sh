@@ -161,7 +161,8 @@ else
   mkdir -p "$work_dir"
   own_work_dir=0
 fi
-work_dir="$(cd "$work_dir" && pwd)"
+# Physical path, to match the readlink -f results compared below.
+work_dir="$(cd "$work_dir" && pwd -P)"
 releases_dir="$work_dir/releases"
 
 cleanup() {

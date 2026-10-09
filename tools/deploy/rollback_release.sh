@@ -42,7 +42,8 @@ if [[ ! -d "$releases_dir" ]]; then
   echo "rollback_release.sh: releases directory not found: $releases_dir" >&2
   exit 1
 fi
-releases_dir="$(cd "$releases_dir" && pwd)"
+# Physical path: readlink -f below resolves symlinks such as macOS /var.
+releases_dir="$(cd "$releases_dir" && pwd -P)"
 
 current_target=""
 if [[ -L "$releases_dir/current" ]]; then
@@ -50,8 +51,11 @@ if [[ -L "$releases_dir/current" ]]; then
 fi
 
 if [[ -z "$target_release_id" ]]; then
-  mapfile -t candidates < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -r)
-  for candidate in "${candidates[@]}"; do
+  candidates=()
+  while IFS= read -r candidate_path; do
+    candidates+=("$(basename "$candidate_path")")
+  done < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d | sort -r)
+  for candidate in ${candidates[@]+"${candidates[@]}"}; do
     candidate_path="$releases_dir/$candidate"
     if [[ "$candidate_path" == "$current_target" ]]; then
       continue
