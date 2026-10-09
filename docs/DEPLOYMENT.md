@@ -128,6 +128,14 @@ Current intended v1 policy:
 - GNUstep-to-GNUstep remote rebuild across profile differences: experimental
 - Apple Foundation to GNUstep deployment: unsupported
 
+Packaging on macOS: `tools/deploy/build_release.sh` (used by `arlen deploy push`
+and `release`) builds with `bin/build-apple` and copies the Apple binaries into
+the same release layout as GNUstep (`app/.boomhauer/build/boomhauer-app`,
+`framework/build/{arlen,boomhauer}`), so `propane` and the deploy helpers run a
+Mac release the same way. That makes Mac-to-Mac (`macos-arm64-apple-foundation`)
+a same-profile deployment. The service-manager runbook and `--service` actions
+are still systemd-only; a launchd path is tracked in GitHub issue 148.
+
 ### 4.3 Project Deployment Configuration
 
 App-owned deployment config now lives in `config/deploy.plist`. New

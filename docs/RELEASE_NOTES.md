@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `arlen deploy push`/`release` can package a release on macOS.
+  `tools/deploy/build_release.sh` builds with `bin/build-apple` there and
+  copies `.boomhauer/apple/boomhauer-app` and `build/apple/{arlen,boomhauer}`
+  into the usual release layout, instead of failing in GNU `make`. The release
+  scripts also run under macOS `/bin/bash` 3.2 and BSD tools:
+  `build_release.sh` no longer aborts on empty `sharedPaths` or
+  `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
+  or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
+  physical paths, so a release under a symlinked directory such as macOS
+  `/var` is recognized as current. launchd service management is still open
+  (GitHub issue 148).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple
