@@ -60,9 +60,10 @@ Apple path notes:
   Apple baseline
 - do not source GNUstep bootstrap scripts on the Apple path
 - Apple XCTest availability is verified with `tools/apple_xctest_smoke.sh`
-- the repo-native Apple XCTest unit bundle is built by
-  `tools/build_apple_xctest.sh --suite unit` and run by `./tools/test_apple.sh`;
-  there is no Apple integration bundle yet
+- the repo-native Apple XCTest bundles are built by
+  `tools/build_apple_xctest.sh --suite unit|integration|durable-jobs` and run
+  by `./tools/test_apple_xctest.sh` (`arlen test`); `./tools/test_apple.sh`
+  runs the unit bundle plus the runtime checks
 
 ## Known libobjc2 Defect: Instance `@synchronized`
 

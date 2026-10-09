@@ -165,7 +165,7 @@ and docs lanes.
 | Platform | Status |
 |---|---|
 | Linux, clang-built GNUstep | **Production baseline.** This is the authoritative target. |
-| macOS, Apple runtime | Verified. Recommended for development on a Mac. |
+| macOS, Apple runtime | Verified for development and production (propane, launchd deploys). See [Apple Platform](docs/APPLE_PLATFORM.md) for the Linux-only test lanes. |
 | Windows, CLANG64 | Preview. |
 
 The current release is **v0.1.0**. Arlen follows semantic versioning; while it
