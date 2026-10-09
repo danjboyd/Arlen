@@ -2917,6 +2917,18 @@ static NSString *FrameworkRootFromExecutablePath(void) {
   return nil;
 }
 
+// macOS builds with the Apple toolchain (bin/build-apple) instead of GNU make.
+// Framework roots without that builder, such as test fixtures, keep the make
+// workflow.
+static BOOL UsesAppleToolchain(NSString *frameworkRoot) {
+#if defined(__APPLE__)
+  return PathExists([frameworkRoot stringByAppendingPathComponent:@"bin/build-apple"], NULL);
+#else
+  (void)frameworkRoot;
+  return NO;
+#endif
+}
+
 static NSString *BoomhauerBuildCommand(NSString *frameworkRoot) {
   return [NSString stringWithFormat:@"cd %@ && make boomhauer", ShellQuote(frameworkRoot)];
 }
@@ -5402,6 +5414,13 @@ static int CommandRoutes(void) {
   if ([frameworkRoot length] == 0) {
     return 1;
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    // bin/boomhauer builds the app (or the framework server outside an app root)
+    // with the Apple toolchain and runs it with --print-routes.
+    return RunShellCommand([NSString
+        stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer --print-routes",
+                         ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot)]);
+  }
   NSString *command = [NSString stringWithFormat:@"%@ && %@",
                                                  BoomhauerBuildCommand(frameworkRoot),
                                                  BoomhauerLaunchCommand(@[ @"--print-routes" ],
@@ -5438,6 +5457,21 @@ static int CommandTest(NSArray *args) {
     [parts insertObject:ShellQuote(appRoot) atIndex:1];
     return RunShellCommand([parts componentsJoinedByString:@" "]);
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    NSString *runSuite = [NSString stringWithFormat:@"cd %@ && ./tools/test_apple_xctest.sh --suite",
+                                                    ShellQuote(frameworkRoot)];
+    if ([args count] == 0 || [args containsObject:@"--all"]) {
+      return RunShellCommand([NSString stringWithFormat:@"%@ unit && %@ integration", runSuite, runSuite]);
+    }
+    if ([args containsObject:@"--unit"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" unit"]);
+    }
+    if ([args containsObject:@"--integration"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" integration"]);
+    }
+    fprintf(stderr, "arlen test: unsupported options\n");
+    return 2;
+  }
   if ([args count] == 0 || [args containsObject:@"--all"]) {
     return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
   }
@@ -5455,6 +5489,11 @@ static int CommandPerf(void) {
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"perf");
   if ([frameworkRoot length] == 0) {
     return 1;
+  }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    // run_perf.sh builds with the Apple toolchain itself on macOS.
+    return RunShellCommand([NSString stringWithFormat:@"cd %@ && bash ./tests/performance/run_perf.sh",
+                                                      ShellQuote(frameworkRoot)]);
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
@@ -7722,8 +7761,18 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
     return 1;
   }
 
+  // On macOS, build maps to the Apple builder and check to the Apple
+  // verification lane (unit bundle plus app scaffold smoke).
+  BOOL appleToolchain = UsesAppleToolchain(frameworkRoot);
+  NSString *workflowCommand = [NSString stringWithFormat:@"make %@", makeTarget ?: @""];
+  if (appleToolchain) {
+    workflowCommand = [commandName isEqualToString:@"build"] ? @"./bin/build-apple --with-boomhauer"
+                                                             : @"./tools/test_apple.sh";
+  }
+  NSString *payloadMakeTarget = appleToolchain ? @"" : (makeTarget ?: @"");
+  NSString *toolchain = appleToolchain ? @"apple" : @"make";
   NSString *shellCommand =
-      [NSString stringWithFormat:@"cd %@ && make %@", ShellQuote(frameworkRoot), makeTarget ?: @""];
+      [NSString stringWithFormat:@"cd %@ && %@", ShellQuote(frameworkRoot), workflowCommand];
 
   if (dryRun) {
     if (asJSON) {
@@ -7733,7 +7782,8 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
         @"workflow" : commandName ?: @"",
         @"status" : @"planned",
         @"framework_root" : frameworkRoot ?: @"",
-        @"make_target" : makeTarget ?: @"",
+        @"make_target" : payloadMakeTarget,
+        @"toolchain" : toolchain,
         @"shell_command" : shellCommand ?: @"",
       };
       PrintJSONPayload(stdout, payload);
@@ -7755,14 +7805,15 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
   payload[@"workflow"] = commandName ?: @"";
   payload[@"status"] = (exitCode == 0) ? @"ok" : @"error";
   payload[@"framework_root"] = frameworkRoot ?: @"";
-  payload[@"make_target"] = makeTarget ?: @"";
+  payload[@"make_target"] = payloadMakeTarget;
+  payload[@"toolchain"] = toolchain;
   payload[@"shell_command"] = shellCommand ?: @"";
   payload[@"exit_code"] = @(exitCode);
   payload[@"captured_output"] = capturedOutput ?: @"";
   if (exitCode != 0) {
     payload[@"error"] = @{
-      @"code" : @"make_failed",
-      @"message" : [NSString stringWithFormat:@"`make %@` failed", makeTarget ?: @""],
+      @"code" : appleToolchain ? @"build_failed" : @"make_failed",
+      @"message" : [NSString stringWithFormat:@"`%@` failed", workflowCommand],
       @"fixit" : @{
         @"action" : @"Inspect captured_output and repair the first failing target before rerunning.",
         @"example" : [NSString stringWithFormat:@"arlen %@ --json", commandName ?: @""],

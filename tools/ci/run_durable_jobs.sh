@@ -3,7 +3,10 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
-source tools/source_gnustep_env.sh
+source tools/platform.sh
+if ! aln_platform_is_macos; then
+  source tools/source_gnustep_env.sh
+fi
 
 # An isolated cluster makes live persistence mandatory without application credentials.
 pg_bin="$(bash "$repo_root/tools/ci/resolve_postgres_test_bin.sh")"
@@ -22,7 +25,12 @@ export ARLEN_PG_TEST_DSN="host=$jobs_pg_tmp/socket dbname=postgres user=arlen_jo
 export ARLEN_JOBS_TEST_PG_DATA="$jobs_pg_tmp/data"
 export ARLEN_JOBS_TEST_PG_BIN="$pg_bin"
 mkdir -p build/release_confidence
-if ! make durable-jobs-tests 2>&1 | tee build/release_confidence/durable_jobs.log; then
+if aln_platform_is_macos; then
+  run_suite=(./tools/test_apple_xctest.sh --suite durable-jobs)
+else
+  run_suite=(make durable-jobs-tests)
+fi
+if ! "${run_suite[@]}" 2>&1 | tee build/release_confidence/durable_jobs.log; then
   cat "$jobs_pg_tmp/server.log" >&2
   exit 1
 fi

@@ -297,26 +297,9 @@
 }
 
 - (NSArray *)childPIDsForParent:(pid_t)parentPID {
-  int exitCode = 0;
-  NSString *command =
-      [NSString stringWithFormat:@"ps -o pid= --ppid %d 2>/dev/null", (int)parentPID];
-  NSString *output = [self runShellCapture:command exitCode:&exitCode];
-  if (exitCode != 0 || [output length] == 0) {
-    return @[];
-  }
-
   NSMutableArray *pids = [NSMutableArray array];
-  NSArray *lines = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
-  for (NSString *line in lines) {
-    NSString *trimmed =
-        [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if ([trimmed length] == 0) {
-      continue;
-    }
-    NSInteger value = [trimmed integerValue];
-    if (value > 0) {
-      [pids addObject:@(value)];
-    }
+  for (NSDictionary *entry in [self childProcessInfoForParent:parentPID]) {
+    [pids addObject:entry[@"pid"]];
   }
   return pids;
 }
@@ -332,11 +315,10 @@
   return last;
 }
 
+// Lists every process and filters by parent, because `ps --ppid` is GNU-only.
 - (NSArray *)childProcessInfoForParent:(pid_t)parentPID {
   int exitCode = 0;
-  NSString *command =
-      [NSString stringWithFormat:@"ps -o pid= -o args= --ppid %d 2>/dev/null", (int)parentPID];
-  NSString *output = [self runShellCapture:command exitCode:&exitCode];
+  NSString *output = [self runShellCapture:@"ps -A -o pid= -o ppid= -o args= 2>/dev/null" exitCode:&exitCode];
   if (exitCode != 0 || [output length] == 0) {
     return @[];
   }
@@ -352,7 +334,8 @@
 
     NSScanner *scanner = [NSScanner scannerWithString:trimmed];
     NSInteger pid = 0;
-    if (![scanner scanInteger:&pid] || pid <= 0) {
+    NSInteger ppid = 0;
+    if (![scanner scanInteger:&pid] || pid <= 0 || ![scanner scanInteger:&ppid] || ppid != parentPID) {
       continue;
     }
     NSString *args = @"";
@@ -616,7 +599,7 @@
     XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
 
     NSString *preparedBinary =
-        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+        [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);
 
     int port = [self randomPort];
@@ -2901,7 +2884,7 @@
   NSString *output =
       [self requestWithServerEnv:nil
                      serverBinary:@"./build/boomhauer"
-                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=validated-file) && bytes=$(wc -c < \"$tmp\") && prefix=$(dd if=\"$tmp\" bs=1 count=8 2>/dev/null | tr -d '\\n') && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nprefix=%%s\\n' \"$code\" \"$bytes\" \"$prefix\""
+                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=validated-file) && bytes=$(wc -c < \"$tmp\" | tr -d ' ') && prefix=$(dd if=\"$tmp\" bs=1 count=8 2>/dev/null | tr -d '\\n') && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nprefix=%%s\\n' \"$code\" \"$bytes\" \"$prefix\""
                         curlCode:&curlCode
                        serverCode:&serverCode];
   XCTAssertEqual(0, curlCode);
@@ -2932,7 +2915,7 @@
   NSString *output =
       [self requestWithServerEnv:nil
                      serverBinary:@"./build/boomhauer"
-                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=bad-file-metadata) && bytes=$(wc -c < \"$tmp\") && body=$(cat \"$tmp\") && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nbody=%%s' \"$code\" \"$bytes\" \"$body\""
+                        curlBody:@"tmp=$(mktemp) && code=$(curl -sS -w '%%{http_code}' -o \"$tmp\" http://127.0.0.1:%d/api/blob?size=8192\\&mode=bad-file-metadata) && bytes=$(wc -c < \"$tmp\" | tr -d ' ') && body=$(cat \"$tmp\") && rm -f \"$tmp\" && printf 'code=%%s\\nbytes=%%s\\nbody=%%s' \"$code\" \"$bytes\" \"$body\""
                         curlCode:&curlCode
                        serverCode:&serverCode];
   XCTAssertEqual(0, curlCode);
@@ -3307,7 +3290,7 @@
     NSString *statusBlocked = [self requestWithServerEnv:nil
                                              serverBinary:@"./build/boomhauer"
                                                 curlBody:[NSString stringWithFormat:
-                                                                    @"curl -sS -o /dev/null -w '%%{http_code}' "
+                                                                    @"curl -sS -o /dev/null -w '%%%%{http_code}' "
                                                                      "http://127.0.0.1:%%d/static/%@/blocked.exe",
                                                                      relativeRoot]
                                                 curlCode:&curlCode
@@ -3321,7 +3304,7 @@
     NSString *statusAllowed = [self requestWithServerEnv:@"ARLEN_STATIC_ALLOW_EXTENSIONS=txt,exe"
                                              serverBinary:@"./build/boomhauer"
                                                 curlBody:[NSString stringWithFormat:
-                                                                    @"curl -sS -o /dev/null -w '%%{http_code}' "
+                                                                    @"curl -sS -o /dev/null -w '%%%%{http_code}' "
                                                                      "http://127.0.0.1:%%d/static/%@/blocked.exe",
                                                                      relativeRoot]
                                                 curlCode:&curlCode
@@ -3393,7 +3376,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
-        [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+        [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
     server.standardOutput = [NSPipe pipe];
     server.standardError = [NSPipe pipe];
     [server launch];
@@ -3458,7 +3441,7 @@
       server = [[NSTask alloc] init];
       server.launchPath = @"/bin/bash";
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
-          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSPipe pipe];
       server.standardError = [NSPipe pipe];
       [server launch];
@@ -3511,7 +3494,7 @@
     server = [[NSTask alloc] init];
     server.launchPath = @"/bin/bash";
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
-        [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+        [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
     server.standardOutput = [NSPipe pipe];
     server.standardError = [NSPipe pipe];
     [server launch];
@@ -3592,7 +3575,7 @@
       server.launchPath = @"/bin/bash";
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
           envPrefix, backend,
-          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
       server.standardError = server.standardOutput;
       [server launch];
@@ -3652,7 +3635,7 @@
       // exec: the task's pid is the server's, so the probe can read its memory.
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ exec %@ --port %d",
           envPrefix, backend,
-          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
       server.standardError = server.standardOutput;
       [server launch];
@@ -3686,9 +3669,6 @@
 // range, 304 and HEAD, plus a static mount) leave the worker's descriptor count
 // and its /dev/null descriptors where they started, in both dispatch modes.
 - (void)testFileResponsesKeepWorkerDescriptorsStable_Issue67 {
-  if (![[NSFileManager defaultManager] fileExistsAtPath:@"/proc/self/fd"]) {
-    return;  // Linux /proc required.
-  }
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-fd-stability"];
   XCTAssertNotNil(appRoot);
@@ -3723,7 +3703,7 @@
       NSTask *server = [[NSTask alloc] init];
       server.launchPath = @"/bin/bash";
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
-          [self shellQuoted:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]], port]];
+          [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
       server.standardError = server.standardOutput;
       [server launch];
@@ -4081,14 +4061,17 @@
     XCTAssertTrue([prepareOutput containsString:
                                   @"boomhauer: prepare-only mode; building app artifacts without starting the server"],
                   @"%@", prepareOutput);
+#if !defined(__APPLE__)
+    // Progress steps of the GNUstep app build.
     XCTAssertTrue([prepareOutput containsString:@"boomhauer: [1/4]"], @"%@", prepareOutput);
     XCTAssertTrue([prepareOutput containsString:@"boomhauer: [2/4] transpiling templates"], @"%@",
                   prepareOutput);
     XCTAssertTrue([prepareOutput containsString:@"boomhauer: [3/4]"], @"%@", prepareOutput);
     XCTAssertTrue([prepareOutput containsString:@"boomhauer: [4/4]"], @"%@", prepareOutput);
+#endif
     XCTAssertFalse([prepareOutput containsString:@"boomhauer: watching"], @"%@", prepareOutput);
     NSString *preparedBinary =
-        [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+        [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:preparedBinary]);
 
     int curlCode = 0;
@@ -4106,7 +4089,7 @@
     NSString *escapeBody =
         [self requestWithServerEnv:envPrefix
                        serverBinary:preparedBinary
-                          curlBody:@"curl -sS -o - -w '\\n%{http_code}' http://127.0.0.1:%d/assets/escape.txt"
+                          curlBody:@"curl -sS -o - -w '\\n%%{http_code}' http://127.0.0.1:%d/assets/escape.txt"
                           curlCode:&curlCode
                          serverCode:&serverCode];
     XCTAssertEqual(0, curlCode);
@@ -4137,14 +4120,23 @@
                                   "}\n"]);
     XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
 
-    NSString *fakeMakePath = [fakeBin stringByAppendingPathComponent:@"make"];
-    XCTAssertTrue([self writeFile:fakeMakePath
-                          content:@"#!/usr/bin/env bash\n"
-                                  "echo \"fake make failing: $*\" >&2\n"
-                                  "exit 42\n"]);
+    // The framework-tools build fails through a fake toolchain command: GNU
+    // make on GNUstep, xcrun (used by bin/build-apple) on Apple.
+#if defined(__APPLE__)
+    NSString *fakeTool = @"xcrun";
+#else
+    NSString *fakeTool = @"make";
+#endif
+    NSString *fakeToolFailure = [NSString stringWithFormat:@"fake %@ failing:", fakeTool];
+    NSString *fakeToolPath = [fakeBin stringByAppendingPathComponent:fakeTool];
+    NSString *fakeToolScript = [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
+                                                           "echo \"%@ $*\" >&2\n"
+                                                           "exit 42\n",
+                                                           fakeToolFailure];
+    XCTAssertTrue([self writeFile:fakeToolPath content:fakeToolScript]);
     NSError *chmodError = nil;
     XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
-                                                   ofItemAtPath:fakeMakePath
+                                                   ofItemAtPath:fakeToolPath
                                                           error:&chmodError]);
     XCTAssertNil(chmodError);
 
@@ -4161,9 +4153,11 @@
     XCTAssertTrue([output containsString:
                               @"boomhauer: prepare-only mode; building app artifacts without starting the server"],
                   @"%@", output);
+#if !defined(__APPLE__)
     XCTAssertTrue([output containsString:@"boomhauer: [1/4] checking tool freshness and building framework artifacts"],
                   @"%@", output);
-    XCTAssertTrue([output containsString:@"fake make failing:"], @"%@", output);
+#endif
+    XCTAssertTrue([output containsString:fakeToolFailure], @"%@", output);
 
     NSString *metaPath = [appRoot stringByAppendingPathComponent:@".boomhauer/last_build_error.meta"];
     NSString *logPath = [appRoot stringByAppendingPathComponent:@".boomhauer/last_build_error.log"];
@@ -4182,7 +4176,7 @@
                                                        error:&readError];
     XCTAssertNotNil(logOutput);
     XCTAssertNil(readError);
-    XCTAssertTrue([logOutput containsString:@"fake make failing:"], @"%@", logOutput);
+    XCTAssertTrue([logOutput containsString:fakeToolFailure], @"%@", logOutput);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
@@ -4190,6 +4184,7 @@
 }
 
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
+  ALNSkipOnApple(@"GNU make sanitizer build of an external framework root");
   // Rebuilds framework artifacts; well past the lane default per-test limit.
   ALNTestSetExecutionTimeAllowance(self, 900);
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
@@ -4254,7 +4249,7 @@
     XCTAssertFalse([output containsString:@"undefined reference to `__asan_"], @"%@", output);
     XCTAssertFalse([output containsString:@"undefined reference to `__ubsan_"], @"%@", output);
     XCTAssertTrue([[NSFileManager defaultManager]
-        isExecutableFileAtPath:[appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"]]);
+        isExecutableFileAtPath:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     if ([[NSFileManager defaultManager] fileExistsAtPath:frameworkRoot]) {
@@ -4642,7 +4637,14 @@
     NSArray *initialWorkers =
         [self waitForChildPIDsForParent:server.processIdentifier minimumCount:2 attempts:60];
     XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
+    if ([initialWorkers count] < 2) {
+      return;
+    }
     pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
+    XCTAssertTrue(killedPID > 0);
+    if (killedPID <= 0) {
+      return;  // kill(0) would signal this test process's own group.
+    }
     XCTAssertEqual(0, kill(killedPID, SIGKILL));
 
     BOOL respawned = [self waitForFile:lifecycleLog
@@ -4822,6 +4824,9 @@
                                                 excluding:0
                                                  attempts:80];
     XCTAssertTrue(firstAsyncPID > 0);
+    if (firstAsyncPID <= 0) {
+      return;  // kill(0) would signal this test process's own group.
+    }
 
     XCTAssertEqual(0, kill(firstAsyncPID, SIGKILL));
 
@@ -5143,7 +5148,14 @@
                                                   minimumCount:2
                                                       attempts:80];
     XCTAssertGreaterThanOrEqual([initialWorkers count], 2u);
+    if ([initialWorkers count] < 2) {
+      return;
+    }
     pid_t killedPID = (pid_t)[initialWorkers[0] intValue];
+    XCTAssertTrue(killedPID > 0);
+    if (killedPID <= 0) {
+      return;  // kill(0) would signal this test process's own group.
+    }
     XCTAssertEqual(0, kill(killedPID, SIGKILL));
 
     BOOL respawned = ALNTestWaitUntil(40.0, 0.2, ^BOOL {

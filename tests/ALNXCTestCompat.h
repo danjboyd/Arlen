@@ -25,6 +25,18 @@
   } while (0)
 #endif
 
+// Skips, on Apple, a test of a GNUstep-only tool or lane: GNU make's build
+// graph, `gnustep-config` compiles, or the Linux perf, fault-injection, fuzz
+// and sanitizer lanes. The test is still discovered, so test inventories match
+// on every platform. `reason` says what is GNUstep-only.
+#if defined(__APPLE__)
+#define ALNSkipOnApple(reason) XCTSkipIf(YES, @"GNUstep-only: %@", (reason))
+#else
+#define ALNSkipOnApple(reason) \
+  do {                         \
+  } while (0)
+#endif
+
 // Raises this test's per-test time limit (enforced by `xctest
 // -test-timeouts-enabled YES` / `-default-test-execution-time-allowance`) for a
 // test that legitimately runs longer than the lane default.

@@ -65,9 +65,10 @@
 }
 
 - (NSString *)buildToolsCommandForRepoRoot:(NSString *)repoRoot {
-  return [NSString stringWithFormat:@"%@ && cd %@ && make arlen",
+  return [NSString stringWithFormat:@"%@ && cd %@ && %@",
                                     ALNTestGNUstepSourceCommandForRepoRoot(repoRoot),
-                                    ALNTestShellQuote(repoRoot)];
+                                    ALNTestShellQuote(repoRoot),
+                                    ALNTestFrameworkBuildCommand(@"arlen")];
 }
 
 - (void)testModuleMigrateAppliesAndUpgradesNamespacedMigrations {
