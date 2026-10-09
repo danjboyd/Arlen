@@ -1,5 +1,6 @@
 #import "ALNTestSupport.h"
 #import "ALNTestWait.h"
+#import <dispatch/dispatch.h>
 #import <signal.h>
 
 #import <ctype.h>
@@ -238,6 +239,36 @@ BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {
     return NO;
   }
   return YES;
+}
+
+static BOOL ALNTestShellHasGNUTimeout(void) {
+  static BOOL available = NO;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    NSString *path = [[[NSProcessInfo processInfo] environment] objectForKey:@"PATH"] ?: @"/usr/bin:/bin";
+    for (NSString *directory in [path componentsSeparatedByString:@":"]) {
+      if ([directory length] > 0 &&
+          [[NSFileManager defaultManager]
+              isExecutableFileAtPath:[directory stringByAppendingPathComponent:@"timeout"]]) {
+        available = YES;
+        break;
+      }
+    }
+  });
+  return available;
+}
+
+NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds) {
+  if (ALNTestShellHasGNUTimeout()) {
+    return [NSString stringWithFormat:@"timeout %lus", (unsigned long)seconds];
+  }
+  return [NSString stringWithFormat:@"perl -e 'alarm shift; exec @ARGV or die \"exec: $!\\n\"' %lu",
+                                    (unsigned long)seconds];
+}
+
+BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode) {
+  // GNU timeout exits 124; a process killed by SIGALRM reports 128 + 14.
+  return ALNTestShellHasGNUTimeout() ? (exitCode == 124) : (exitCode == 128 + SIGALRM);
 }
 
 NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
