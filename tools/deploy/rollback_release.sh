@@ -42,8 +42,7 @@ if [[ ! -d "$releases_dir" ]]; then
   echo "rollback_release.sh: releases directory not found: $releases_dir" >&2
   exit 1
 fi
-# Physical path: readlink -f below resolves symlinks such as macOS /var.
-releases_dir="$(cd "$releases_dir" && pwd -P)"
+releases_dir="$(cd "$releases_dir" && pwd)"
 
 current_target=""
 if [[ -L "$releases_dir/current" ]]; then
@@ -57,7 +56,9 @@ if [[ -z "$target_release_id" ]]; then
   done < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d | sort -r)
   for candidate in ${candidates[@]+"${candidates[@]}"}; do
     candidate_path="$releases_dir/$candidate"
-    if [[ "$candidate_path" == "$current_target" ]]; then
+    # readlink -f resolves symlinks such as macOS /var, so compare resolved
+    # paths; the current link itself keeps the logical path, as activation does.
+    if [[ "$(readlink -f "$candidate_path")" == "$current_target" ]]; then
       continue
     fi
     target_release_id="$candidate"
