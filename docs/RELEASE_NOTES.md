@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
+  and `build_apple_xctest.sh` record clang depfiles and skip objects whose
+  source and headers are unchanged, and skip archiving or linking when no input
+  changed. Changing the compiler or flags clears the object cache. Generated
+  templates are reused through the `eocc` manifest instead of being deleted on
+  every run. A no-op `bin/build-apple` now takes under a second instead of
+  ~20s, so each `arlen` command on macOS no longer pays for a full rebuild
+  (GitHub issue 142).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple

@@ -6,6 +6,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 # shellcheck source=tools/platform.sh
 source "$script_dir/platform.sh"
+# shellcheck source=tools/apple_build_cache.sh
+source "$script_dir/apple_build_cache.sh"
 
 if ! aln_platform_is_macos; then
   echo "build-apple: this builder only supports macOS" >&2
@@ -110,18 +112,45 @@ link_flags=(
   -lcrypto
 )
 
+aln_apple_reset_on_flag_change "$obj_root" "$("$clang_path" --version)" \
+  "${objc_flags[@]}" -- "${c_flags[@]}" -- "${link_flags[@]}"
+
 compile_objc() {
   local src="$1"
   local obj="$2"
+  if aln_apple_object_is_current "$src" "$obj"; then
+    return 0
+  fi
   mkdir -p "$(dirname "$obj")"
-  "$clang_path" "${objc_flags[@]}" -c "$src" -o "$obj"
+  "$clang_path" "${objc_flags[@]}" -MMD -MF "${obj%.o}.d" -c "$src" -o "$obj"
 }
 
 compile_c() {
   local src="$1"
   local obj="$2"
+  if aln_apple_object_is_current "$src" "$obj"; then
+    return 0
+  fi
   mkdir -p "$(dirname "$obj")"
-  "$clang_path" "${c_flags[@]}" -c "$src" -o "$obj"
+  "$clang_path" "${c_flags[@]}" -MMD -MF "${obj%.o}.d" -c "$src" -o "$obj"
+}
+
+# link_if_stale <output> <input...> -- <extra link args...>
+link_if_stale() {
+  local output="$1"
+  shift
+  local inputs=()
+  while [[ $# -gt 0 && "$1" != "--" ]]; do
+    inputs+=("$1")
+    shift
+  done
+  shift
+  local manifest="$obj_root/.link/${output#$build_root/}.inputs"
+  if aln_apple_link_is_current "$manifest" "$output" "${inputs[@]}"; then
+    return 0
+  fi
+  "$clang_path" "${objc_flags[@]}" "${inputs[@]}" -o "$output" "$@"
+  aln_apple_record_link_inputs "$manifest" "${inputs[@]}"
 }
 
 obj_path_for() {
@@ -168,8 +197,12 @@ while IFS= read -r src; do
 done < <(find "$repo_root/src/Arlen/Support/third_party/argon2/src" -type f -name '*.c' | sort)
 
 framework_lib="$lib_root/libArlenFramework.a"
-rm -f "$framework_lib"
-libtool -static -o "$framework_lib" "${framework_objs[@]}"
+framework_lib_manifest="$obj_root/.link/lib/libArlenFramework.a.inputs"
+if ! aln_apple_link_is_current "$framework_lib_manifest" "$framework_lib" "${framework_objs[@]}"; then
+  rm -f "$framework_lib"
+  libtool -static -o "$framework_lib" "${framework_objs[@]}"
+  aln_apple_record_link_inputs "$framework_lib_manifest" "${framework_objs[@]}"
+fi
 
 eocc_objs=()
 for src in \
@@ -183,17 +216,17 @@ do
 done
 
 eocc_bin="$build_root/eocc"
-"$clang_path" "${objc_flags[@]}" "${eocc_objs[@]}" -o "$eocc_bin" "${link_flags[@]}"
+link_if_stale "$eocc_bin" "${eocc_objs[@]}" -- "${link_flags[@]}"
 
 arlen_entry_obj="$(obj_path_for "$repo_root/tools/arlen.m")"
 compile_objc "$repo_root/tools/arlen.m" "$arlen_entry_obj"
 arlen_bin="$build_root/arlen"
-"$clang_path" "${objc_flags[@]}" "$arlen_entry_obj" "$framework_lib" -o "$arlen_bin" "${link_flags[@]}"
+link_if_stale "$arlen_bin" "$arlen_entry_obj" "$framework_lib" -- "${link_flags[@]}"
 
 apple_auth_audit_obj="$(obj_path_for "$repo_root/tools/apple_auth_audit.m")"
 compile_objc "$repo_root/tools/apple_auth_audit.m" "$apple_auth_audit_obj"
 apple_auth_audit_bin="$build_root/apple-auth-audit"
-"$clang_path" "${objc_flags[@]}" "$apple_auth_audit_obj" "$framework_lib" -o "$apple_auth_audit_bin" "${link_flags[@]}"
+link_if_stale "$apple_auth_audit_bin" "$apple_auth_audit_obj" "$framework_lib" -- "${link_flags[@]}"
 
 if [[ $with_boomhauer -eq 1 ]]; then
   template_files=()
@@ -202,6 +235,7 @@ if [[ $with_boomhauer -eq 1 ]]; then
   done < <(find "$repo_root/templates" -type f -name '*.html.eoc' | sort)
 
   if [[ ${#template_files[@]} -gt 0 ]]; then
+    aln_apple_reset_generated_if_stale "$gen_root" "$eocc_bin" "$gen_root/manifest.json"
     "$eocc_bin" \
       --template-root "$repo_root/templates" \
       --output-dir "$gen_root" \
@@ -217,8 +251,8 @@ if [[ $with_boomhauer -eq 1 ]]; then
 
     boomhauer_obj="$(obj_path_for "$repo_root/tools/boomhauer.m")"
     compile_objc "$repo_root/tools/boomhauer.m" "$boomhauer_obj"
-    "$clang_path" "${objc_flags[@]}" "$boomhauer_obj" "${generated_objs[@]}" "$framework_lib" \
-      -o "$build_root/boomhauer" "${link_flags[@]}"
+    link_if_stale "$build_root/boomhauer" "$boomhauer_obj" ${generated_objs[@]+"${generated_objs[@]}"} \
+      "$framework_lib" -- "${link_flags[@]}"
   fi
 fi
 
