@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `boomhauer --watch` on macOS now handles build failures the way the
+  GNUstep path does. A failed build serves the diagnostic error page through
+  the framework `boomhauer`, writes `.boomhauer/last_build_error.{log,meta}`,
+  retries every `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, and switches back
+  to the app once a rebuild succeeds. Before, a broken first build exited watch
+  mode, and a broken rebuild kept serving the old binary. `--prepare-only`
+  failures also record `last_build_error.*` and print the log. The watcher now
+  execs the server in its background job, so stopping `boomhauer` no longer
+  leaves the app server running, and file changes are detected by fractional
+  mtime and ctime (GitHub issue 151).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple
