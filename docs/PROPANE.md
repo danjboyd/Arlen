@@ -53,9 +53,10 @@ Run from an app root, or set:
 
 On macOS, `propane` builds with the Apple toolchain (`bin/build-apple`) instead
 of GNU `make`, and runs `.boomhauer/apple/boomhauer-app` (or
-`build/apple/boomhauer` outside an app root). It runs under the system
-`/bin/bash` 3.2. Packaged release payloads are still Linux-only, so on macOS
-`propane` always rebuilds from a framework checkout.
+`build/apple/boomhauer` outside an app root) from a source checkout. It runs
+under the system `/bin/bash` 3.2. A packaged release keeps the
+`.boomhauer/build/` layout on every platform, and `propane` runs its shipped
+binary; packaging a release on macOS is tracked in GitHub issue 148.
 
 ## Propane Accessories
 
