@@ -438,8 +438,10 @@ private cluster; a missing server fails provisioning. Existing unit discovery
 runs `HTTPCompatTests` and `DataverseRegressionTests`, which use loopback peers
 and captured transports/injected sleepers rather than public providers.
 
-`apple-baseline` additionally runs `tools/ci/run_apple_client_data_regressions.sh`
-with the same HTTP/retry tests and live timestamp regression using Apple XCTest.
+`apple-baseline` additionally runs `tools/ci/run_apple_unit_suite.sh`: the full
+Apple XCTest unit bundle against a private PostgreSQL, which includes the same
+HTTP/retry tests and live timestamp regression, followed by a check of
+discovered tests against the shared unit inventory.
 Its bootstrap installs Homebrew `postgresql@17` and `libpq` in addition to
 `openssl@3`; the script selects their paths explicitly and uses a private Unix
 socket PostgreSQL cluster. Apple builds link system libcurl for the new HTTP

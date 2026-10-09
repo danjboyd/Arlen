@@ -620,6 +620,29 @@ live timestamp regressions. `ARLEN_TEST_PG_BIN` and `ARLEN_LIBPQ_PREFIX` can sel
 an existing PostgreSQL installation. Linux CI's clang `/usr/GNUstep` bootstrap
 and repo-local tools-xctest runner remain unchanged.
 
+## Apple unit suite
+
+On macOS with full Xcode:
+
+```bash
+brew install openssl@3 postgresql@17 libpq
+bash tools/ci/run_apple_unit_suite.sh
+```
+
+This builds the Apple XCTest unit bundle and starts a private PostgreSQL on a
+Unix socket. It runs every unit test with `ARLEN_PG_TEST_DSN` set, so the
+PostgreSQL-backed tests run instead of skipping. It then checks that Apple
+discovered exactly the tests in
+`tests/fixtures/test_inventory/ArlenUnitTests.tests.txt`. Apple's `xctest` has
+no `-list-tests`, so the listing comes from the run's `Test Case ... started`
+lines and is checked with `tools/ci/check_test_inventory.py`.
+
+Both platforms share the inventory. Don't compile a test out on one platform
+with `#if`; skip it with `XCTSkip` so discovery stays the same everywhere.
+
+Logs go to `build/release_confidence/apple_unit/`. The `apple-baseline` job
+runs this script and uploads that directory on failure.
+
 ## Live PostgreSQL regression gate
 
 Run `bash tools/ci/run_postgres_regressions.sh` with the supported clang GNUstep
@@ -655,16 +678,8 @@ test bundle, while excluding preload libraries from compiler utilities.
 The test is included in the full unit suite, the Linux quality gate, and the
 ASan/UBSan unit lane. Required checks remain unchanged.
 
-On macOS, the Apple baseline job selects the OIDC, metadata transport,
-security-header cold-start and outbound HTTP client tests with native XCTest.
-To reproduce:
-
-```bash
-bundle_path="$(tools/build_apple_xctest.sh --suite unit --print-bundle-path)"
-for filter in AuthModuleOIDCTests MetadataTransportTests SecurityHeadersColdStartTests HTTPClientTests; do
-  xcrun xctest -XCTest "$filter" "$bundle_path"
-done
-```
+On macOS, the Apple baseline job runs it as part of the full Apple unit bundle
+(see [Apple unit suite](#apple-unit-suite)).
 
 ## Instance Lock Cold-Start Regression
 
