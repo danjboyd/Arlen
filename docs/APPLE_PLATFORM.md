@@ -82,19 +82,38 @@ GNUstep bootstrap scripts.
   - builds and runs `examples/auth_primitives`
   - verifies local login + TOTP MFA elevation and stub OIDC provider login
 - `./bin/boomhauer` now has an Apple app-root path as well as a repo-root
-  runtime path.
+  runtime path, including watch-mode rebuild/restart.
+- `./tools/test_apple.sh` builds and runs the repo-native Apple XCTest unit
+  bundle (`tools/build_apple_xctest.sh --suite unit`) before the runtime
+  checks above.
 
 ## Known Characterized Gaps
 
-- Full repo-native Objective-C Apple XCTest bundle migration is still future
-  work; the current closed baseline verifies Apple XCTest availability through
-  the dedicated `tools/apple_xctest_smoke.sh` helper and the Apple-runtime
-  confidence lane.
-- Some shell tooling and CI helpers outside the core build/test/run loop still
-  remain GNUstep/Linux-specific because the Linux path is still supported.
-- PostgreSQL and ODBC discovery still need broader macOS normalization.
-- Apple watch-mode support for `boomhauer` is not implemented yet; the runtime
-  falls back to non-watch execution with an explicit warning.
+The Apple path covers the core build/test/run loop. These areas are still
+Linux-only or narrower on macOS:
+
+- Test coverage:
+  - `tools/build_apple_xctest.sh` builds only the `unit` suite. The
+    integration suite, durable jobs, `tests/phase20`, and the browser error
+    audit run only on GNUstep.
+  - The `apple-baseline` CI lane is non-required. It runs the smoke lane and
+    selected XCTest filters, not the full unit bundle. Run
+    `./tools/test_apple.sh` locally for the full bundle.
+  - PostgreSQL- and MSSQL-backed tests skip unless `ARLEN_PG_TEST_DSN` or the
+    MSSQL test DSN is set.
+- Tooling:
+  - `propane` and `jobs-worker` expect GNUstep build output
+    (`.boomhauer/build/`) and read `/proc`.
+  - `arlen build`, `arlen check`, `arlen test`, and `arlen perf` call GNU
+    `make`.
+  - Deploy packaging and the systemd runbook target Linux.
+  - Sanitizer, fault-injection, fuzz, soak, and perf lanes are Linux-only.
+- Runtime:
+  - File-descriptor pressure diagnostics read `/proc` and do nothing on macOS.
+  - File responses use read/write instead of `sendfile`.
+  - Apple builds target `arm64` only.
+- Shell scripts that run on macOS must work with `/bin/bash` 3.2. In particular,
+  expand arrays that may be empty as `${a[@]+"${a[@]}"}` under `set -u`.
 
 ## Portability Rules
 
