@@ -16,7 +16,7 @@
 # between a terminal and a test run.
 aln_apple_sdk_path() {
   local sdk
-  sdk="$(xcrun --show-sdk-path)" || return 1
+  sdk="$(xcrun --show-sdk-path)" || return
   (cd "$sdk" && pwd -P)
 }
 
