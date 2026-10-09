@@ -787,11 +787,17 @@ GET /health [code] -> HealthController#show (health.show)
 `[code]` means the route was registered by Objective-C app/module code. Both
 forms are inspected from the same effective route table.
 
+On macOS this runs `bin/boomhauer --print-routes`, which builds the app with the
+Apple toolchain.
+
 ### `arlen test [--unit|--integration|--all]`
 
 Run framework tests.
 
 - default: equivalent to `--all`
+- macOS: `--unit`, `--all` and the default run the Apple XCTest unit bundle
+  (`tools/test_apple_xctest.sh`). The integration suite is GNUstep-only for
+  now, so `--all` notes that on stderr and `--integration` exits `2`.
 
 ### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
 
@@ -807,13 +813,19 @@ through `tools/run_app_tests.sh`:
 - `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`;
   an `--only` that matches no test fails the run (`No tests matched '...'`)
 - exit status is the runner's: non-zero when any test fails
-- GNUstep on Linux only for now
+- macOS: `tools/build_apple_app.sh --build-tests` builds
+  `.boomhauer/apple/tests/AppTests.xctest` the same way, and Xcode's
+  `xcrun xctest` runs it. `--only` becomes `-XCTest Class[/method]` (several
+  are comma-joined). `--skip` exits `2`, because Xcode's `xctest` has no skip
+  filter.
 
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 ### `arlen perf`
 
 Run performance suite and regression gate (`make perf`).
+
+GNUstep only for now. On macOS it exits `2` without running anything.
 
 Profile selection is environment-driven:
 
@@ -832,6 +844,9 @@ Run full quality gate (`make check`):
 - perf gate
 - `--dry-run`: emit planned `make check` workflow without executing it
 - `--json`: emit machine-readable workflow payloads/failure diagnostics (`phase7g-agent-dx-contracts-v1`)
+- macOS: runs the Apple verification lane, `tools/test_apple.sh` (the Apple
+  unit bundle plus an app scaffold, build and request smoke) instead of
+  `make check`
 
 ### `arlen build [--dry-run] [--json]`
 
@@ -839,6 +854,13 @@ Build framework targets (`make all`).
 
 - `--dry-run`: emit planned `make all` workflow without executing it
 - `--json`: emit machine-readable workflow payloads/failure diagnostics (`phase7g-agent-dx-contracts-v1`)
+- macOS: runs `bin/build-apple --with-boomhauer` instead of `make all`
+
+`build` and `check` JSON payloads include `toolchain` (`make` or `apple`). With
+`apple`, `make_target` is empty, `shell_command` names the Apple script, and a
+failure reports error code `build_failed` instead of `make_failed`. The Apple
+toolchain is used on macOS whenever the framework root has `bin/build-apple`;
+other framework roots keep `make`.
 
 ## `build/eocc`
 

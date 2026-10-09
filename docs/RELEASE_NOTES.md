@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- Apple app builds (`tools/build_apple_app.sh`, used by `boomhauer` and
+  `propane` on macOS) handle module templates like the GNUstep build. A module
+  template overridden by the app (`templates/modules/<id>/...`) is no longer
+  compiled twice, which failed the link with a duplicate
+  `ALNEOCRender_modules_...` symbol. Only the outputs of the current templates
+  are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
+  ignored (GitHub issue 152).
+
+- `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
+  without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
+  runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit
+  bundle, and `routes` runs `bin/boomhauer --print-routes`. `arlen test --app`
+  builds the app's tests into `.boomhauer/apple/tests/AppTests.xctest` with the
+  new `tools/build_apple_app.sh --build-tests` and runs them with
+  `xcrun xctest`. `build`/`check` JSON payloads add `toolchain`. `arlen perf`
+  and `arlen test --integration` exit `2` on macOS with a GNUstep-only message
+  instead of failing inside `make` (GitHub issue 146).
+
+- Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
+  and `build_apple_xctest.sh` record clang depfiles and skip objects whose
+  source and headers are unchanged, and skip archiving or linking when no input
+  changed. Changing the compiler or flags clears the object cache. Generated
+  templates are reused through the `eocc` manifest instead of being deleted on
+  every run. A no-op `bin/build-apple` now takes under a second instead of
+  ~20s, so each `arlen` command on macOS no longer pays for a full rebuild
+  (GitHub issue 142).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple
