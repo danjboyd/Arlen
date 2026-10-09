@@ -107,7 +107,7 @@ static void PrintDeployUsage(void) {
           "  --framework-root <path>\n"
           "  --releases-dir <path>\n"
           "  --release-id <id>\n"
-          "  --service <name>      systemd unit for runtime state/log actions\n"
+          "  --service <name>      systemd unit or launchd label (macOS) for runtime state/log actions\n"
           "  --base-url <url>      Base URL for probe validation\n"
           "  --target-profile <profile>\n"
           "  --runtime-strategy <system|managed|bundled>\n"
@@ -716,6 +716,42 @@ static NSString *PreviousReleaseIDAtReleasesDir(NSString *releasesDir, NSString 
   return nil;
 }
 
+#if defined(__APPLE__)
+// On macOS a service is a launchd job: the service name is its label, in the
+// system domain by default (a daemon installed from the plist that `arlen
+// deploy init` generates). ARLEN_LAUNCHD_DOMAIN selects another domain, such
+// as gui/<uid> for a per-user agent.
+static NSString *LaunchdServiceTarget(NSString *label) {
+  NSString *domain = Trimmed([[NSProcessInfo processInfo] environment][@"ARLEN_LAUNCHD_DOMAIN"]);
+  return [NSString stringWithFormat:@"%@/%@", [domain length] > 0 ? domain : @"system", label ?: @""];
+}
+
+// Output of `launchctl print system/<label>`, or nil when launchd does not
+// know the label.
+static NSString *LaunchdPrintOutput(NSString *label, int *exitCode) {
+  int code = 0;
+  NSString *output = RunShellCaptureCommand([NSString stringWithFormat:@"launchctl print %@ 2>&1",
+                                                                      ShellQuote(LaunchdServiceTarget(label))],
+                                            &code);
+  if (exitCode != NULL) {
+    *exitCode = code;
+  }
+  return (code == 0) ? (output ?: @"") : nil;
+}
+
+// A top-level `<key> = <value>` property of `launchctl print` output (one tab
+// of indentation; nested blocks use two).
+static NSString *LaunchdPrintProperty(NSString *printOutput, NSString *key) {
+  NSString *prefix = [NSString stringWithFormat:@"\t%@ = ", key];
+  for (NSString *line in [printOutput componentsSeparatedByString:@"\n"]) {
+    if ([line hasPrefix:prefix]) {
+      return Trimmed([line substringFromIndex:[prefix length]]);
+    }
+  }
+  return nil;
+}
+#endif
+
 static NSString *ServiceRuntimeState(NSString *serviceName, NSString **capturedOutput) {
   if ([serviceName length] == 0) {
     if (capturedOutput != NULL) {
@@ -723,6 +759,23 @@ static NSString *ServiceRuntimeState(NSString *serviceName, NSString **capturedO
     }
     return @"not_requested";
   }
+#if defined(__APPLE__)
+  int printCode = 0;
+  NSString *printOutput = LaunchdPrintOutput(serviceName, &printCode);
+  if (printOutput == nil) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = [NSString stringWithFormat:@"launchd has no job %@ (launchctl exit %d)",
+                                                   LaunchdServiceTarget(serviceName), printCode];
+    }
+    return @"inactive";
+  }
+  NSString *launchdState = LaunchdPrintProperty(printOutput, @"state") ?: @"unknown";
+  if (capturedOutput != NULL) {
+    *capturedOutput = [NSString stringWithFormat:@"launchd state: %@", launchdState];
+  }
+  // Match systemd's vocabulary for the callers.
+  return [launchdState isEqualToString:@"running"] ? @"active" : launchdState;
+#endif
   int commandCode = 0;
   NSString *systemctlPath =
       Trimmed(RunShellCaptureCommand(@"command -v systemctl 2>/dev/null", &commandCode));
@@ -753,6 +806,14 @@ static NSString *ServiceMainPID(NSString *serviceName, NSString **capturedOutput
     }
     return nil;
   }
+#if defined(__APPLE__)
+  NSString *printOutput = LaunchdPrintOutput(serviceName, NULL);
+  NSString *pid = (printOutput != nil) ? LaunchdPrintProperty(printOutput, @"pid") : nil;
+  if (capturedOutput != NULL) {
+    *capturedOutput = pid ?: @"";
+  }
+  return ([pid length] > 0 && ![pid isEqualToString:@"0"]) ? pid : nil;
+#endif
   int exitCode = 0;
   NSString *output = Trimmed(RunShellCaptureCommand([NSString stringWithFormat:@"systemctl show %@ -p MainPID --value 2>&1",
                                                                               ShellQuote(serviceName)],
@@ -819,6 +880,40 @@ static NSDictionary *EnvironmentDictionaryForPID(NSString *pid, NSString **captu
 }
 
 static NSDictionary *ServiceEnvironmentForService(NSString *serviceName, NSString **capturedOutput) {
+#if defined(__APPLE__)
+  // macOS does not expose another process's environment like /proc does; use
+  // the job's environment as launchd reports it (the plist's
+  // EnvironmentVariables, which carry the runtime roots).
+  NSString *printOutput = LaunchdPrintOutput(serviceName, NULL);
+  if (printOutput == nil) {
+    if (capturedOutput != NULL) {
+      *capturedOutput = [NSString stringWithFormat:@"launchd has no job %@", LaunchdServiceTarget(serviceName)];
+    }
+    return @{};
+  }
+  NSMutableDictionary *environment = [NSMutableDictionary dictionary];
+  BOOL inEnvironment = NO;
+  for (NSString *line in [printOutput componentsSeparatedByString:@"\n"]) {
+    if ([line isEqualToString:@"\tenvironment = {"]) {
+      inEnvironment = YES;
+      continue;
+    }
+    if (!inEnvironment) {
+      continue;
+    }
+    if ([line isEqualToString:@"\t}"]) {
+      break;
+    }
+    NSRange arrow = [line rangeOfString:@" => "];
+    if (arrow.location != NSNotFound) {
+      environment[Trimmed([line substringToIndex:arrow.location])] = [line substringFromIndex:NSMaxRange(arrow)];
+    }
+  }
+  if (capturedOutput != NULL) {
+    *capturedOutput = [NSString stringWithFormat:@"loaded environment from launchd job %@", LaunchdServiceTarget(serviceName)];
+  }
+  return environment;
+#endif
   NSString *mainPIDOutput = nil;
   NSString *mainPID = ServiceMainPID(serviceName, &mainPIDOutput);
   if ([mainPID length] == 0) {
@@ -847,12 +942,22 @@ static NSString *RuntimeCommandForAction(NSString *action,
                                          NSString *restartCommand,
                                          NSString *reloadCommand) {
   NSString *normalizedAction = [Trimmed(action) lowercaseString];
+#if defined(__APPLE__)
+  // launchd: kickstart -k restarts the job; propane reloads workers on HUP.
+  NSString *restartDefault =
+      [NSString stringWithFormat:@"launchctl kickstart -k %@", ShellQuote(LaunchdServiceTarget(serviceName))];
+  NSString *reloadDefault =
+      [NSString stringWithFormat:@"launchctl kill HUP %@", ShellQuote(LaunchdServiceTarget(serviceName))];
+#else
+  NSString *restartDefault = [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+  NSString *reloadDefault = [NSString stringWithFormat:@"systemctl reload %@", ShellQuote(serviceName)];
+#endif
   if ([normalizedAction isEqualToString:@"restart"]) {
     NSString *custom = ExpandedRuntimeCommandTemplate(restartCommand, @"restart", serviceName);
-    return [custom length] > 0 ? custom : [NSString stringWithFormat:@"systemctl restart %@", ShellQuote(serviceName)];
+    return [custom length] > 0 ? custom : restartDefault;
   }
   NSString *custom = ExpandedRuntimeCommandTemplate(reloadCommand, @"reload", serviceName);
-  return [custom length] > 0 ? custom : [NSString stringWithFormat:@"systemctl reload %@", ShellQuote(serviceName)];
+  return [custom length] > 0 ? custom : reloadDefault;
 }
 
 static NSArray<NSString *> *NormalizedRequiredEnvironmentKeys(NSArray *keys) {
@@ -1723,9 +1828,6 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
   }
 
   NSString *serviceName = StringValueForDeployKey(rawTarget, @"service");
-  if ([serviceName length] == 0) {
-    serviceName = [NSString stringWithFormat:@"arlen@%@", targetName ?: @"app"];
-  }
 
   NSString *envFile = StringValueForDeployKey(configuration, @"envFile");
   if ([envFile length] == 0) {
@@ -1741,6 +1843,14 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
   NSString *profile = StringValueForDeployKey(rawTarget, @"profile");
   NSString *runtimeFamily = RuntimeFamilyForDeployProfile(profile);
   BOOL targetUsesGNUstep = [runtimeFamily isEqualToString:@"gnustep"];
+  // macOS targets run under launchd, everything else under systemd. A launchd
+  // service name is the job label.
+  NSString *serviceManager = [runtimeFamily isEqualToString:@"apple-foundation"] ? @"launchd" : @"systemd";
+  if ([serviceName length] == 0) {
+    serviceName = [serviceManager isEqualToString:@"launchd"]
+                      ? [NSString stringWithFormat:@"arlen.%@", targetName ?: @"app"]
+                      : [NSString stringWithFormat:@"arlen@%@", targetName ?: @"app"];
+  }
   NSString *gnustepScript = StringValueForDeployKey(runtime, @"gnustepScript");
   if ([gnustepScript length] == 0 && targetUsesGNUstep) {
     gnustepScript = DefaultGNUstepScriptPath();
@@ -1792,6 +1902,8 @@ static NSDictionary *LoadDeployTargetNamed(NSString *appRoot, NSString *targetNa
     @"remote_tmp_dir" : [StringValueForDeployKey(transport, @"remoteTmpDir") length] > 0 ? StringValueForDeployKey(transport, @"remoteTmpDir") : @"/tmp",
     @"remote_enabled" : @([StringValueForDeployKey(transport, @"sshHost") length] > 0),
     @"systemd_unit_filename" : SystemdUnitFilenameForServiceName(serviceName),
+    @"service_manager" : serviceManager,
+    @"launchd_plist_filename" : [serviceName stringByAppendingString:@".plist"],
   };
 }
 
@@ -1878,13 +1990,28 @@ static NSArray<NSString *> *DeployTargetSharedPathDirectories(NSDictionary *targ
 
 // Deterministic generated artifacts under build/deploy/targets/<target>/ on the
 // machine running arlen.
+static BOOL DeployTargetUsesLaunchd(NSDictionary *target) {
+  return [StringValueForDeployKey(target, @"service_manager") isEqualToString:@"launchd"];
+}
+
+// The generated service definition: a systemd unit, or a launchd plist for
+// macOS targets.
+static NSString *DeployTargetServiceArtifactPath(NSDictionary *target) {
+  NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
+  if (DeployTargetUsesLaunchd(target)) {
+    return [[generatedDir stringByAppendingPathComponent:@"launchd"]
+        stringByAppendingPathComponent:StringValueForDeployKey(target, @"launchd_plist_filename")];
+  }
+  return [[generatedDir stringByAppendingPathComponent:@"systemd"]
+      stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")];
+}
+
 static NSArray<NSString *> *DeployTargetGeneratedArtifactPaths(NSDictionary *target) {
   return @[
     StringValueForDeployKey(target, @"generated_dir"),
     StringValueForDeployKey(target, @"propane_wrapper"),
     StringValueForDeployKey(target, @"jobs_worker_wrapper"),
-    [[StringValueForDeployKey(target, @"generated_dir") stringByAppendingPathComponent:@"systemd"]
-        stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")],
+    DeployTargetServiceArtifactPath(target),
   ];
 }
 
@@ -1931,6 +2058,70 @@ static NSString *RenderedSystemdUnitForTarget(NSDictionary *target, NSString *fr
                                                withString:[NSString stringWithFormat:@"SyslogIdentifier=%@",
                                                                              [serviceName stringByReplacingOccurrencesOfString:@".service" withString:@""]]];
   return content;
+}
+
+static NSString *XMLEscapedString(NSString *value) {
+  NSString *escaped = value ?: @"";
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"&" withString:@"&amp;"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"<" withString:@"&lt;"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@">" withString:@"&gt;"];
+  return escaped;
+}
+
+static NSString *RenderedLaunchdPlistForTarget(NSDictionary *target, NSString *frameworkRoot) {
+  NSString *templatePath = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy/launchd/arlen.plist"];
+  NSString *template = [NSString stringWithContentsOfFile:templatePath encoding:NSUTF8StringEncoding error:NULL];
+  if ([template length] == 0) {
+    template = @"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                "<plist version=\"1.0\">\n<dict>\n"
+                "  <key>Label</key>\n  <string>{{LABEL}}</string>\n"
+                "  <key>ProgramArguments</key>\n  <array>\n    <string>{{PROGRAM}}</string>\n  </array>\n"
+                "  <key>WorkingDirectory</key>\n  <string>{{RELEASE_PATH}}/releases/current/app</string>\n"
+                "  <key>UserName</key>\n  <string>{{USER}}</string>\n"
+                "  <key>GroupName</key>\n  <string>{{GROUP}}</string>\n"
+                "  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n"
+                "  <key>StandardOutPath</key>\n  <string>{{LOG_PATH}}</string>\n"
+                "  <key>StandardErrorPath</key>\n  <string>{{LOG_PATH}}</string>\n"
+                "</dict>\n</plist>\n";
+  }
+  NSString *label = StringValueForDeployKey(target, @"service");
+  NSDictionary<NSString *, NSString *> *values = @{
+    @"{{LABEL}}" : label ?: @"",
+    @"{{PROGRAM}}" : StringValueForDeployKey(target, @"propane_wrapper") ?: @"",
+    @"{{RELEASE_PATH}}" : StringValueForDeployKey(target, @"release_path") ?: @"",
+    @"{{USER}}" : StringValueForDeployKey(target, @"runtime_user") ?: @"arlen",
+    @"{{GROUP}}" : StringValueForDeployKey(target, @"runtime_group") ?: @"arlen",
+    @"{{LOG_PATH}}" : [StringValueForDeployKey(target, @"logs_dir")
+                         stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.log", label ?: @"arlen"]],
+  };
+  NSString *content = template;
+  for (NSString *token in [[values allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    content = [content stringByReplacingOccurrencesOfString:token withString:XMLEscapedString(values[token])];
+  }
+  return content;
+}
+
+// launchd has no EnvironmentFile, so launchd targets always start through a
+// wrapper that exports the site env file.
+static NSString *RenderedLaunchdWrapperForTarget(NSDictionary *target, NSString *toolName) {
+  NSString *releasePath = StringValueForDeployKey(target, @"release_path");
+  NSString *environment = [StringValueForDeployKey(target, @"environment") length] > 0 ? StringValueForDeployKey(target, @"environment") : @"production";
+  NSString *binaryPath = [[releasePath stringByAppendingPathComponent:
+                                           [NSString stringWithFormat:@"releases/current/framework/bin/%@", toolName]]
+      stringByStandardizingPath];
+  NSString *argumentSuffix = [toolName isEqualToString:@"propane"] ? [NSString stringWithFormat:@" --env %@", environment] : @"";
+  return [NSString stringWithFormat:
+      @"#!/usr/bin/env bash\n"
+       "set -euo pipefail\n"
+       "ENV_FILE=%@\n"
+       "if [ -f \"$ENV_FILE\" ]; then\n"
+       "  set -a\n"
+       "  . \"$ENV_FILE\"\n"
+       "  set +a\n"
+       "fi\n"
+       "exec %@%@ \"$@\"\n",
+      ShellQuote(StringValueForDeployKey(target, @"env_file") ?: @""), ShellQuote(binaryPath ?: @""), argumentSuffix];
 }
 
 static NSString *RenderedGNUstepWrapperForTarget(NSDictionary *target, NSString *toolName) {
@@ -1991,7 +2182,49 @@ static NSString *RenderedEnvExampleForTarget(NSDictionary *target, NSString *fra
   return content;
 }
 
+static NSString *RenderedLaunchdInitReadmeForTarget(NSDictionary *target) {
+  NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
+  NSString *plistFile = StringValueForDeployKey(target, @"launchd_plist_filename");
+  NSString *label = StringValueForDeployKey(target, @"service");
+  return [NSString stringWithFormat:
+      @"Arlen deploy init generated deterministic host artifacts for target %@.\n\n"
+       "Created host layout:\n"
+       "- %@\n"
+       "- %@\n"
+       "- %@\n"
+       "- %@\n\n"
+       "Generated artifacts:\n"
+       "- %@/launchd/%@\n"
+       "- %@/env/%@.env.example\n"
+       "- %@/bin/propane-wrapper\n"
+       "- %@/bin/jobs-worker-wrapper\n\n"
+       "Runtime contract:\n"
+       "- runtime family: apple-foundation\n"
+       "- service manager: launchd (label %@)\n"
+       "- the wrappers export %@ before starting propane or jobs-worker\n\n"
+       "Operator follow-up still required:\n"
+       "- create the runtime user/group if your host does not already provide them\n"
+       "- copy the env example to %@ and populate secret values\n"
+       "- install the wrappers at the paths the plist names\n"
+       "- sudo install -o root -g wheel -m 644 %@/launchd/%@ /Library/LaunchDaemons/%@\n"
+       "- sudo launchctl bootstrap system /Library/LaunchDaemons/%@\n"
+       "- service output goes to %@/%@.log (arlen deploy logs --service %@)\n",
+      StringValueForDeployKey(target, @"name"),
+      StringValueForDeployKey(target, @"release_path"),
+      StringValueForDeployKey(target, @"releases_dir"),
+      StringValueForDeployKey(target, @"shared_dir"),
+      StringValueForDeployKey(target, @"logs_dir"),
+      generatedDir, plistFile, generatedDir, StringValueForDeployKey(target, @"name"),
+      generatedDir, generatedDir, label, StringValueForDeployKey(target, @"env_file"),
+      StringValueForDeployKey(target, @"env_file"),
+      generatedDir, plistFile, plistFile, plistFile,
+      StringValueForDeployKey(target, @"logs_dir"), label, label];
+}
+
 static NSString *RenderedInitReadmeForTarget(NSDictionary *target) {
+  if (DeployTargetUsesLaunchd(target)) {
+    return RenderedLaunchdInitReadmeForTarget(target);
+  }
   NSString *serviceFile = StringValueForDeployKey(target, @"systemd_unit_filename");
   NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
   NSString *envFile = StringValueForDeployKey(target, @"env_file");
@@ -2086,24 +2319,30 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
                                                 NSString **failureMessage) {
   NSFileManager *fm = [NSFileManager defaultManager];
   NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
-  for (NSString *subdirectory in @[ @"bin", @"systemd", @"env" ]) {
+  BOOL usesLaunchd = DeployTargetUsesLaunchd(target);
+  for (NSString *subdirectory in @[ @"bin", usesLaunchd ? @"launchd" : @"systemd", @"env" ]) {
     NSString *directory = [generatedDir stringByAppendingPathComponent:subdirectory];
     if ([generatedDir length] > 0 &&
         [fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
       [createdDirectories addObject:directory];
     }
   }
-  NSString *systemdPath =
-      [[generatedDir stringByAppendingPathComponent:@"systemd"] stringByAppendingPathComponent:StringValueForDeployKey(target, @"systemd_unit_filename")];
+  NSString *servicePath = DeployTargetServiceArtifactPath(target);
   NSString *envExamplePath =
       [[[generatedDir stringByAppendingPathComponent:@"env"] stringByAppendingPathComponent:StringValueForDeployKey(target, @"name")] stringByAppendingString:@".env.example"];
   NSString *propaneWrapperPath = StringValueForDeployKey(target, @"propane_wrapper");
   NSString *jobsWorkerWrapperPath = StringValueForDeployKey(target, @"jobs_worker_wrapper");
   NSArray *files = @[
-    @[ systemdPath, RenderedSystemdUnitForTarget(target, frameworkRoot), @NO, @"failed writing generated systemd unit" ],
+    usesLaunchd ? @[ servicePath, RenderedLaunchdPlistForTarget(target, frameworkRoot), @NO, @"failed writing generated launchd plist" ]
+                : @[ servicePath, RenderedSystemdUnitForTarget(target, frameworkRoot), @NO, @"failed writing generated systemd unit" ],
     @[ envExamplePath, RenderedEnvExampleForTarget(target, frameworkRoot), @NO, @"failed writing generated env example" ],
-    @[ propaneWrapperPath, RenderedGNUstepWrapperForTarget(target, @"propane"), @YES, @"failed writing propane wrapper" ],
-    @[ jobsWorkerWrapperPath, RenderedGNUstepWrapperForTarget(target, @"jobs-worker"), @YES, @"failed writing jobs-worker wrapper" ],
+    @[ propaneWrapperPath,
+       usesLaunchd ? RenderedLaunchdWrapperForTarget(target, @"propane") : RenderedGNUstepWrapperForTarget(target, @"propane"),
+       @YES, @"failed writing propane wrapper" ],
+    @[ jobsWorkerWrapperPath,
+       usesLaunchd ? RenderedLaunchdWrapperForTarget(target, @"jobs-worker")
+                   : RenderedGNUstepWrapperForTarget(target, @"jobs-worker"),
+       @YES, @"failed writing jobs-worker wrapper" ],
     @[ [generatedDir stringByAppendingPathComponent:@"README.txt"], RenderedInitReadmeForTarget(target), @NO,
        @"failed writing deploy init README" ],
   ];
@@ -2416,15 +2655,16 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForTargetHost(NSDictionary *ta
   }
 
   NSString *generatedDir = StringValueForDeployKey(target, @"generated_dir");
-  NSString *systemdUnit = [generatedDir stringByAppendingPathComponent:[NSString stringWithFormat:@"systemd/%@",
-                                                                 StringValueForDeployKey(target, @"systemd_unit_filename")]];
+  BOOL usesLaunchd = DeployTargetUsesLaunchd(target);
+  NSString *serviceArtifact = DeployTargetServiceArtifactPath(target);
+  NSString *serviceArtifactKind = usesLaunchd ? @"launchd plist" : @"systemd unit";
   NSString *envExample =
       [generatedDir stringByAppendingPathComponent:[NSString stringWithFormat:@"env/%@.env.example",
                                                                  StringValueForDeployKey(target, @"name")]];
-  addCheck(@"target_systemd_unit",
-           [fm fileExistsAtPath:systemdUnit] ? @"pass" : @"fail",
-           [NSString stringWithFormat:@"%@ %@", [fm fileExistsAtPath:systemdUnit] ? @"generated systemd unit:" : @"generated systemd unit missing:",
-                                      systemdUnit],
+  addCheck(usesLaunchd ? @"target_launchd_plist" : @"target_systemd_unit",
+           [fm fileExistsAtPath:serviceArtifact] ? @"pass" : @"fail",
+           [NSString stringWithFormat:@"generated %@%@ %@", serviceArtifactKind,
+                                      [fm fileExistsAtPath:serviceArtifact] ? @":" : @" missing:", serviceArtifact],
            @"Run `arlen deploy init <target>` to generate the host artifacts.");
   addCheck(@"target_env_example",
            [fm fileExistsAtPath:envExample] ? @"pass" : @"fail",
@@ -2475,13 +2715,28 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForTargetHost(NSDictionary *ta
              @"`arlen deploy` validates the host/runtime contract but does not install the GNUstep runtime yet.");
   }
 
-  int systemctlCode = 0;
-  NSString *systemctlPath = Trimmed(RunShellCaptureCommand(@"command -v systemctl 2>/dev/null", &systemctlCode));
-  addCheck(@"target_systemd",
-           (systemctlCode == 0 && [systemctlPath length] > 0) ? @"pass" : @"warn",
-           (systemctlCode == 0 && [systemctlPath length] > 0) ? [NSString stringWithFormat:@"systemd available: %@", systemctlPath]
-                                                               : @"systemd not detected on this host",
-           @"The Debian-first host contract assumes systemd for production service management.");
+  if (usesLaunchd) {
+    BOOL wrappersPresent = [fm isExecutableFileAtPath:StringValueForDeployKey(target, @"propane_wrapper")] &&
+                           [fm isExecutableFileAtPath:StringValueForDeployKey(target, @"jobs_worker_wrapper")];
+    addCheck(@"target_runtime_wrapper", wrappersPresent ? @"pass" : @"fail",
+             wrappersPresent ? @"launchd env wrappers generated" : @"launchd env wrappers missing",
+             @"Run `arlen deploy init <target>`; launchd starts propane through the wrapper that exports the env file.");
+    int launchctlCode = 0;
+    NSString *launchctlPath = Trimmed(RunShellCaptureCommand(@"command -v launchctl 2>/dev/null", &launchctlCode));
+    addCheck(@"target_launchd",
+             (launchctlCode == 0 && [launchctlPath length] > 0) ? @"pass" : @"warn",
+             (launchctlCode == 0 && [launchctlPath length] > 0) ? [NSString stringWithFormat:@"launchd available: %@", launchctlPath]
+                                                                 : @"launchd not detected on this host",
+             @"macOS targets run as launchd daemons.");
+  } else {
+    int systemctlCode = 0;
+    NSString *systemctlPath = Trimmed(RunShellCaptureCommand(@"command -v systemctl 2>/dev/null", &systemctlCode));
+    addCheck(@"target_systemd",
+             (systemctlCode == 0 && [systemctlPath length] > 0) ? @"pass" : @"warn",
+             (systemctlCode == 0 && [systemctlPath length] > 0) ? [NSString stringWithFormat:@"systemd available: %@", systemctlPath]
+                                                                 : @"systemd not detected on this host",
+             @"The Debian-first host contract assumes systemd for production service management.");
+  }
 
   if (passCount != NULL) {
     *passCount = localPass;
@@ -2915,6 +3170,18 @@ static NSString *FrameworkRootFromExecutablePath(void) {
     return candidate;
   }
   return nil;
+}
+
+// macOS builds with the Apple toolchain (bin/build-apple) instead of GNU make.
+// Framework roots without that builder, such as test fixtures, keep the make
+// workflow.
+static BOOL UsesAppleToolchain(NSString *frameworkRoot) {
+#if defined(__APPLE__)
+  return PathExists([frameworkRoot stringByAppendingPathComponent:@"bin/build-apple"], NULL);
+#else
+  (void)frameworkRoot;
+  return NO;
+#endif
 }
 
 static NSString *BoomhauerBuildCommand(NSString *frameworkRoot) {
@@ -5402,6 +5669,13 @@ static int CommandRoutes(void) {
   if ([frameworkRoot length] == 0) {
     return 1;
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    // bin/boomhauer builds the app (or the framework server outside an app root)
+    // with the Apple toolchain and runs it with --print-routes.
+    return RunShellCommand([NSString
+        stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer --print-routes",
+                         ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot)]);
+  }
   NSString *command = [NSString stringWithFormat:@"%@ && %@",
                                                  BoomhauerBuildCommand(frameworkRoot),
                                                  BoomhauerLaunchCommand(@[ @"--print-routes" ],
@@ -5438,6 +5712,21 @@ static int CommandTest(NSArray *args) {
     [parts insertObject:ShellQuote(appRoot) atIndex:1];
     return RunShellCommand([parts componentsJoinedByString:@" "]);
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    NSString *runSuite = [NSString stringWithFormat:@"cd %@ && ./tools/test_apple_xctest.sh --suite",
+                                                    ShellQuote(frameworkRoot)];
+    if ([args count] == 0 || [args containsObject:@"--all"]) {
+      return RunShellCommand([NSString stringWithFormat:@"%@ unit && %@ integration", runSuite, runSuite]);
+    }
+    if ([args containsObject:@"--unit"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" unit"]);
+    }
+    if ([args containsObject:@"--integration"]) {
+      return RunShellCommand([runSuite stringByAppendingString:@" integration"]);
+    }
+    fprintf(stderr, "arlen test: unsupported options\n");
+    return 2;
+  }
   if ([args count] == 0 || [args containsObject:@"--all"]) {
     return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
   }
@@ -5455,6 +5744,10 @@ static int CommandPerf(void) {
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"perf");
   if ([frameworkRoot length] == 0) {
     return 1;
+  }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    fprintf(stderr, "arlen perf: the performance suite runs only on GNUstep for now\n");
+    return 2;
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
@@ -7166,6 +7459,16 @@ static int CommandDeploy(NSArray *args) {
     NSString *lifecycleLog = [releaseEnv[@"ARLEN_PROPANE_LIFECYCLE_LOG"] isKindOfClass:[NSString class]]
                                  ? releaseEnv[@"ARLEN_PROPANE_LIFECYCLE_LOG"]
                                  : @"";
+    NSString *fileLogSource = @"file";
+#if defined(__APPLE__)
+    // launchd has no journal. The generated plist sends the service's output
+    // to <release path>/logs/<label>.log.
+    if ([serviceName length] > 0 && [logFilePath length] == 0) {
+      logFilePath = [[[releasesDir stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"logs"]
+          stringByAppendingPathComponent:[serviceName stringByAppendingString:@".log"]];
+      fileLogSource = @"launchd";
+    }
+#else
     if ([serviceName length] > 0) {
       NSString *journalCommand = [NSString stringWithFormat:@"journalctl -u %@ -n %ld --no-pager%@",
                                                           ShellQuote(serviceName), (long)logLines,
@@ -7194,6 +7497,8 @@ static int CommandDeploy(NSArray *args) {
       return RunShellCommand(journalCommand);
     }
 
+#endif
+
     if ([logFilePath length] > 0) {
       NSString *tailCommand = [NSString stringWithFormat:@"tail -n %ld %@%@",
                                                        (long)logLines, followLogs ? @"-f " : @"",
@@ -7209,7 +7514,8 @@ static int CommandDeploy(NSArray *args) {
           @"status" : (exitCode == 0) ? @"ok" : @"error",
           @"active_release_id" : currentReleaseID ?: @"",
           @"active_release_dir" : currentReleaseDir ?: @"",
-          @"log_source" : @"file",
+          @"log_source" : fileLogSource,
+          @"service" : serviceName ?: @"",
           @"log_file" : logFilePath ?: @"",
           @"manifest_path" : currentManifestPath ?: @"",
           @"lifecycle_log_path" : lifecycleLog ?: @"",
@@ -7722,8 +8028,18 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
     return 1;
   }
 
+  // On macOS, build maps to the Apple builder and check to the Apple
+  // verification lane (unit bundle plus app scaffold smoke).
+  BOOL appleToolchain = UsesAppleToolchain(frameworkRoot);
+  NSString *workflowCommand = [NSString stringWithFormat:@"make %@", makeTarget ?: @""];
+  if (appleToolchain) {
+    workflowCommand = [commandName isEqualToString:@"build"] ? @"./bin/build-apple --with-boomhauer"
+                                                             : @"./tools/test_apple.sh";
+  }
+  NSString *payloadMakeTarget = appleToolchain ? @"" : (makeTarget ?: @"");
+  NSString *toolchain = appleToolchain ? @"apple" : @"make";
   NSString *shellCommand =
-      [NSString stringWithFormat:@"cd %@ && make %@", ShellQuote(frameworkRoot), makeTarget ?: @""];
+      [NSString stringWithFormat:@"cd %@ && %@", ShellQuote(frameworkRoot), workflowCommand];
 
   if (dryRun) {
     if (asJSON) {
@@ -7733,7 +8049,8 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
         @"workflow" : commandName ?: @"",
         @"status" : @"planned",
         @"framework_root" : frameworkRoot ?: @"",
-        @"make_target" : makeTarget ?: @"",
+        @"make_target" : payloadMakeTarget,
+        @"toolchain" : toolchain,
         @"shell_command" : shellCommand ?: @"",
       };
       PrintJSONPayload(stdout, payload);
@@ -7755,14 +8072,15 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
   payload[@"workflow"] = commandName ?: @"";
   payload[@"status"] = (exitCode == 0) ? @"ok" : @"error";
   payload[@"framework_root"] = frameworkRoot ?: @"";
-  payload[@"make_target"] = makeTarget ?: @"";
+  payload[@"make_target"] = payloadMakeTarget;
+  payload[@"toolchain"] = toolchain;
   payload[@"shell_command"] = shellCommand ?: @"";
   payload[@"exit_code"] = @(exitCode);
   payload[@"captured_output"] = capturedOutput ?: @"";
   if (exitCode != 0) {
     payload[@"error"] = @{
-      @"code" : @"make_failed",
-      @"message" : [NSString stringWithFormat:@"`make %@` failed", makeTarget ?: @""],
+      @"code" : appleToolchain ? @"build_failed" : @"make_failed",
+      @"message" : [NSString stringWithFormat:@"`%@` failed", workflowCommand],
       @"fixit" : @{
         @"action" : @"Inspect captured_output and repair the first failing target before rerunning.",
         @"example" : [NSString stringWithFormat:@"arlen %@ --json", commandName ?: @""],

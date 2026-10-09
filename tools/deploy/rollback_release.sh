@@ -50,10 +50,15 @@ if [[ -L "$releases_dir/current" ]]; then
 fi
 
 if [[ -z "$target_release_id" ]]; then
-  mapfile -t candidates < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort -r)
-  for candidate in "${candidates[@]}"; do
+  candidates=()
+  while IFS= read -r candidate_path; do
+    candidates+=("$(basename "$candidate_path")")
+  done < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d | sort -r)
+  for candidate in ${candidates[@]+"${candidates[@]}"}; do
     candidate_path="$releases_dir/$candidate"
-    if [[ "$candidate_path" == "$current_target" ]]; then
+    # readlink -f resolves symlinks such as macOS /var, so compare resolved
+    # paths; the current link itself keeps the logical path, as activation does.
+    if [[ "$(readlink -f "$candidate_path")" == "$current_target" ]]; then
       continue
     fi
     target_release_id="$candidate"
