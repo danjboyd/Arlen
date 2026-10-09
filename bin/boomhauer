@@ -197,15 +197,14 @@ if [[ $build_tests_requested -eq 1 ]]; then
 fi
 
 if aln_platform_is_macos; then
-  apple_compiled_binary=""
+  apple_built_binary=""
   apple_child_pid=""
 
   apple_fingerprint_fields() {
     local path="$1"
-    local size mtime
-    size="$(stat -f %z "$path" 2>/dev/null || echo 0)"
-    mtime="$(stat -f %m "$path" 2>/dev/null || echo 0)"
-    printf '%s|%s\n' "$size" "$mtime"
+    # Fractional mtime and ctime, so a same-size edit that restores the old
+    # mtime is still seen as a change.
+    stat -f '%z|%Fm|%Fc' "$path" 2>/dev/null || echo '0|0|0'
   }
 
   apple_append_entries() {
@@ -260,23 +259,142 @@ if aln_platform_is_macos; then
     apple_stop_child
   }
 
-  apple_prepare_binary() {
-    if [[ $is_app_root -eq 0 ]]; then
-      bash "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
-      printf '%s\n' "$framework_root/build/apple/boomhauer"
-      return 0
-    fi
+  # Build failures are recorded like the GNUstep path does, in
+  # .boomhauer/last_build_error.{log,meta}. Watch mode serves them through the
+  # framework boomhauer's diagnostic page until a rebuild succeeds.
+  apple_state_root="$app_root/.boomhauer"
+  apple_error_output_file="$apple_state_root/last_build_error.log"
+  apple_error_meta_file="$apple_state_root/last_build_error.meta"
+  apple_error_server_binary="$framework_root/build/apple/boomhauer"
+  apple_build_error_retry_seconds="${ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS:-2}"
+  if [[ ! "$apple_build_error_retry_seconds" =~ ^[0-9]+$ ]]; then
+    apple_build_error_retry_seconds=2
+  fi
+  apple_build_error_auto_refresh_seconds="${ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS:-3}"
+  if [[ ! "$apple_build_error_auto_refresh_seconds" =~ ^[0-9]+$ ]]; then
+    apple_build_error_auto_refresh_seconds=3
+  fi
+  apple_build_error_recovery_hint="${ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT:-Fix the compile error and save a watched file. Boomhauer retries automatically every ${apple_build_error_retry_seconds} seconds while the diagnostic server is active.}"
+  apple_child_mode=""
+  apple_next_build_retry_at=0
 
-    bash "$framework_root/tools/build_apple_app.sh" \
-      --app-root "$app_root" \
-      --framework-root "$framework_root" \
-      --print-path
+  apple_record_build_failure() {
+    local stage="$1"
+    local command="$2"
+    local exit_code="$3"
+    local output_file="$4"
+    mkdir -p "$apple_state_root"
+    cp "$output_file" "$apple_error_output_file"
+    {
+      printf 'stage=%s\n' "$stage"
+      printf 'command=%s\n' "$command"
+      printf 'exit_code=%s\n' "$exit_code"
+      printf 'timestamp_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >"$apple_error_meta_file"
   }
 
-  apple_start_child() {
+  # apple_run_build_stage <stage> <output-file> <command...>
+  # Runs one build stage with stdout in <output-file> and stderr in
+  # <output-file>.log. On failure records the stage and returns its status.
+  apple_run_build_stage() {
+    local stage="$1"
+    local output_file="$2"
+    shift 2
+    local status=0
+    "$@" >"$output_file" 2>"$output_file.log" || status=$?
+    if [[ $status -ne 0 ]]; then
+      cat "$output_file" >>"$output_file.log"
+      apple_record_build_failure "$stage" "$*" "$status" "$output_file.log"
+    fi
+    return "$status"
+  }
+
+  # apple_build: builds the framework tools (which include the diagnostic
+  # server), then the app, and sets apple_built_binary.
+  apple_build() {
+    local work_dir
+    local status=0
+    work_dir="$(mktemp -d "${TMPDIR:-/tmp}/boomhauer-apple-build.XXXXXX")"
+    apple_built_binary=""
+    if apple_run_build_stage "tooling" "$work_dir/tooling" \
+        bash "$framework_root/bin/build-apple" --with-boomhauer; then
+      if [[ $is_app_root -eq 0 ]]; then
+        apple_built_binary="$apple_error_server_binary"
+      elif apple_run_build_stage "app_build" "$work_dir/app" \
+          bash "$framework_root/tools/build_apple_app.sh" \
+            --app-root "$app_root" \
+            --framework-root "$framework_root" \
+            --print-path; then
+        apple_built_binary="$(tail -n 1 "$work_dir/app")"
+      else
+        status=$?
+      fi
+    else
+      status=$?
+    fi
+    rm -rf "$work_dir"
+    if [[ $status -eq 0 ]]; then
+      rm -f "$apple_error_output_file" "$apple_error_meta_file"
+    fi
+    return "$status"
+  }
+
+  apple_start_app_child() {
     export ARLEN_APP_ROOT="$app_root"
-    run_with_server_args "$apple_compiled_binary" &
+    # exec in the background job so $! is the server itself and stopping it
+    # does not orphan a grandchild.
+    exec_with_server_args "$apple_built_binary" &
     apple_child_pid="$!"
+    apple_child_mode="app"
+    apple_next_build_retry_at=0
+  }
+
+  apple_start_error_child() {
+    if [[ ! -x "$apple_error_server_binary" ]]; then
+      echo "boomhauer: diagnostic server $apple_error_server_binary is unavailable" >&2
+      cat "$apple_error_output_file" >&2 || true
+      return 1
+    fi
+    export ARLEN_APP_ROOT="$app_root"
+    export ARLEN_BOOMHAUER_BUILD_ERROR_FILE="$apple_error_output_file"
+    export ARLEN_BOOMHAUER_BUILD_ERROR_META_FILE="$apple_error_meta_file"
+    export ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS="$apple_build_error_retry_seconds"
+    export ARLEN_BOOMHAUER_BUILD_ERROR_AUTO_REFRESH_SECONDS="$apple_build_error_auto_refresh_seconds"
+    export ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT="$apple_build_error_recovery_hint"
+    exec_with_server_args "$apple_error_server_binary" &
+    apple_child_pid="$!"
+    apple_child_mode="build_error"
+  }
+
+  apple_schedule_build_retry() {
+    if [[ "$apple_build_error_retry_seconds" -gt 0 ]]; then
+      apple_next_build_retry_at=$(( $(date +%s) + apple_build_error_retry_seconds ))
+    else
+      apple_next_build_retry_at=0
+    fi
+  }
+
+  # Rebuilds, then serves the app, or the diagnostic page when the build fails.
+  # A running diagnostic server is kept; it rereads the error files.
+  apple_build_and_serve() {
+    if apple_build; then
+      if [[ $apple_stop_requested -eq 1 ]]; then
+        return 0
+      fi
+      apple_stop_child
+      apple_start_app_child
+      return 0
+    fi
+    apple_schedule_build_retry
+    if [[ "$apple_child_mode" == "build_error" && -n "$apple_child_pid" ]] &&
+        kill -0 "$apple_child_pid" >/dev/null 2>&1; then
+      return 0
+    fi
+    apple_stop_child
+    echo "boomhauer: build failed, serving diagnostic error page" >&2
+    if ! apple_start_error_child; then
+      exit 1
+    fi
   }
 
   apple_run_once() {
@@ -284,16 +402,21 @@ if aln_platform_is_macos; then
       if [[ $is_app_root -eq 0 ]]; then
         echo "boomhauer: prepare-only mode; building Apple boomhauer artifacts"
       else
-        echo "boomhauer: prepare-only mode; building Apple app artifacts"
+        echo "boomhauer: prepare-only mode; building app artifacts without starting the server"
       fi
     fi
 
-    apple_compiled_binary="$(apple_prepare_binary)"
+    local status=0
+    apple_build || status=$?
+    if [[ $status -ne 0 ]]; then
+      cat "$apple_error_output_file" >&2 || true
+      exit "$status"
+    fi
     if [[ $prepare_only -eq 1 ]]; then
       exit 0
     fi
     export ARLEN_APP_ROOT="$app_root"
-    exec_with_server_args "$apple_compiled_binary"
+    exec_with_server_args "$apple_built_binary"
   }
 
   if [[ $watch_mode -eq 0 ]]; then
@@ -303,10 +426,9 @@ if aln_platform_is_macos; then
   trap apple_on_signal INT TERM
   trap apple_stop_child EXIT
 
-  apple_compiled_binary="$(apple_prepare_binary)"
   echo "boomhauer: watching $app_root"
   apple_last_fingerprint="$(apple_runtime_fingerprint)"
-  apple_start_child
+  apple_build_and_serve
 
   while [[ $apple_stop_requested -eq 0 ]]; do
     sleep 1
@@ -321,30 +443,27 @@ if aln_platform_is_macos; then
       child_status=$?
       set -e
       apple_child_pid=""
+      if [[ $child_status -ne 0 ]]; then
+        echo "boomhauer: server exited with status $child_status" >&2
+        if [[ "$apple_child_mode" == "build_error" && -f "$apple_error_output_file" ]]; then
+          cat "$apple_error_output_file" >&2 || true
+        fi
+      fi
       exit "$child_status"
     fi
 
     apple_current_fingerprint="$(apple_runtime_fingerprint)"
-    if [[ "$apple_current_fingerprint" == "$apple_last_fingerprint" ]]; then
+    if [[ "$apple_current_fingerprint" != "$apple_last_fingerprint" ]]; then
+      apple_last_fingerprint="$apple_current_fingerprint"
+      echo "boomhauer: change detected, rebuilding..."
+      apple_build_and_serve
       continue
     fi
-    apple_last_fingerprint="$apple_current_fingerprint"
-    echo "boomhauer: change detected, rebuilding..."
 
-    if [[ $apple_stop_requested -eq 1 ]]; then
-      break
-    fi
-    if next_binary="$(apple_prepare_binary)"; then
-      if [[ $apple_stop_requested -eq 1 ]]; then
-        break
-      fi
-      apple_compiled_binary="$next_binary"
-      apple_stop_child
-      apple_start_child
-    else
-      if [[ $apple_stop_requested -eq 0 ]]; then
-        echo "boomhauer: Apple rebuild failed; keeping the previous server process running if available" >&2
-      fi
+    if [[ "$apple_child_mode" == "build_error" && "$apple_next_build_retry_at" -gt 0 &&
+          "$(date +%s)" -ge "$apple_next_build_retry_at" ]]; then
+      echo "boomhauer: retrying failed build..."
+      apple_build_and_serve
     fi
   done
   exit 0
