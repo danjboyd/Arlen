@@ -775,8 +775,12 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual((NSInteger)200, [adminHTML[@"status"] integerValue]);
     XCTAssertTrue([adminHTML[@"body"] containsString:@"Arlen Admin"]);
 
-    NSString *encodedSubject =
-        [registerPayload[@"subject"] stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLPathAllowedCharacterSet]];
+    // Subjects look like "user:<uuid>". Apple's URLPathAllowedCharacterSet
+    // escapes ':' and GNUstep's does not, and route parameters are matched
+    // undecoded (GitHub issue 154), so keep ':' literal on both.
+    NSMutableCharacterSet *subjectAllowed = [[NSCharacterSet URLPathAllowedCharacterSet] mutableCopy];
+    [subjectAllowed addCharactersInString:@":"];
+    NSString *encodedSubject = [registerPayload[@"subject"] stringByAddingPercentEncodingWithAllowedCharacters:subjectAllowed];
     sessionResponse = [self curlJSONAtPort:port
                                       path:@"/auth/api/session"
                                     method:@"GET"

@@ -1,7 +1,8 @@
+import ctypes
 import json
 import os
 import socket
-import subprocess
+import struct
 import threading
 import time
 
@@ -31,9 +32,10 @@ def wait_until_empty(step, limit=15):
     raise AssertionError((step, round(time.time() - started, 2), spool_entries()))
 
 def rss_anon_kib():
-    # Linux reports anonymous memory directly. Without /proc (macOS), use the
-    # resident set size: spool files are written, not mapped, so heap
-    # buffering of the bodies would still show up as growth.
+    # Linux: anonymous resident memory. Without /proc (macOS), the physical
+    # footprint, which likewise leaves out clean file-backed pages. Bodies and
+    # uploads are memory-mapped from their spool files, so total RSS would
+    # count them even though nothing is buffered on the heap.
     status_path = '/proc/%d/status' % SERVER_PID
     if os.path.exists(status_path):
         with open(status_path) as status:
@@ -41,9 +43,16 @@ def rss_anon_kib():
                 if line.startswith('RssAnon:'):
                     return int(line.split()[1])
         return 0
-    output = subprocess.run(['ps', '-o', 'rss=', '-p', str(SERVER_PID)],
-                            capture_output=True, text=True).stdout.strip()
-    return int(output) if output else 0
+    return phys_footprint_kib()
+
+def phys_footprint_kib():
+    # proc_pid_rusage(RUSAGE_INFO_V2): a 16-byte UUID, then uint64 fields;
+    # ri_phys_footprint is the eighth.
+    libsystem = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    info = ctypes.create_string_buffer(512)
+    if libsystem.proc_pid_rusage(SERVER_PID, 2, info) != 0:
+        raise OSError('proc_pid_rusage failed for %d' % SERVER_PID)
+    return struct.unpack_from('=Q', info.raw, 16 + 7 * 8)[0] // 1024
 
 def head(path, length, content_type=b'multipart/form-data; boundary=Aa'):
     return (b'POST ' + path + b' HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n'

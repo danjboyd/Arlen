@@ -3217,8 +3217,9 @@ static NSString *ALNHostDeployProfile(void) {
       }
     }
     XCTAssertEqual((NSUInteger)2, [trimmed count], @"%@", runtimeLogText);
-    XCTAssertEqualObjects(runtimeBinary, trimmed[0]);
-    XCTAssertEqualObjects(runtimeBinary, trimmed[1]);
+    // The launchers resolve the release root physically (macOS /var is a symlink).
+    XCTAssertEqualObjects(ALNPhysicalPath(runtimeBinary), trimmed[0]);
+    XCTAssertEqualObjects(ALNPhysicalPath(runtimeBinary), trimmed[1]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
