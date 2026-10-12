@@ -35,6 +35,11 @@ FOUNDATION_EXPORT NSDictionary *ALNTestRunShellCaptureStreams(NSString *command)
 // The task must own the server PID (launch with exec, without a shell wrapper).
 FOUNDATION_EXPORT BOOL ALNTestStopServerTask(NSTask *_Nullable task);
 FOUNDATION_EXPORT NSString *ALNTestRunShellCapture(NSString *command, int *_Nullable exitCode);
+// Shell prefix that kills the following command after `seconds`: GNU timeout
+// when on PATH, else a perl alarm (macOS ships no timeout). See
+// ALNTestShellTimeoutExitedByTimeout for the exit status each one reports.
+FOUNDATION_EXPORT NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds);
+FOUNDATION_EXPORT BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode);
 FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     NSDictionary<NSString *, NSString *> *environment);
 
