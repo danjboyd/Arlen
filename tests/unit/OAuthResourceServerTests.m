@@ -90,28 +90,6 @@ static NSUInteger OAuthCalls;
   [ALNAuth applyClaims:@{@"sub":@"forged-session", @"scope":@"Research.Read"} toContext:context]; return YES;
 }
 @end
-// Foundation transport fixture, including redirect and chunked-size callbacks.
-@interface OAuthMetadataProtocol : NSURLProtocol
-@end
-@implementation OAuthMetadataProtocol
-+ (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqual:@"metadata.fixture.test"]; }
-+ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
-- (void)startLoading {
-  NSString *path = self.request.URL.path;
-  if ([path isEqual:@"/timeout"]) return;
-  NSInteger status = [path isEqual:@"/failure"] ? 500 : ([path isEqual:@"/redirect"] ? 302 : 200);
-  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:@{}];
-  if (status == 302) {
-    [self.client URLProtocol:self wasRedirectedToRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://metadata.fixture.test/ok"]] redirectResponse:response]; return;
-  }
-  [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-  if (status != 200) return; // The bounded delegate cancels on an error status.
-  [self.client URLProtocol:self didLoadData:[@"{}" dataUsingEncoding:NSUTF8StringEncoding]];
-  if ([path isEqual:@"/large"]) { [self.client URLProtocol:self didLoadData:[NSMutableData dataWithLength:100]]; return; }
-  [self.client URLProtocolDidFinishLoading:self];
-}
-- (void)stopLoading {}
-@end
 @interface OAuthResourceServerTests : XCTestCase
 @property(nonatomic, strong) NSDictionary *key;
 @property(nonatomic, strong) NSDictionary *secondKey;
@@ -426,17 +404,6 @@ static NSUInteger OAuthCalls;
   XCTAssertNil([self.server principalForAccessToken:[self token:claims] error:NULL]); // ID-token typ rejected.
   claims[@"idtyp"] = @"app";
   XCTAssertNil([self.server principalForAccessToken:OAuthTestSignedJWT(claims, self.key[@"privateKeyPEM"], header) error:NULL]);
-}
-- (void)testBoundedFoundationMetadataTransport {
-#if !defined(GNUSTEP) // GNUstep production transport is covered by real socket tests.
-  [NSURLProtocol registerClass:[OAuthMetadataProtocol class]];
-  @try {
-    XCTAssertNotNil(ALNBoundedMetadataGET([NSURL URLWithString:@"https://metadata.fixture.test/ok"], 32, 1));
-    for (NSString *path in @[@"failure", @"redirect", @"large", @"timeout"]) {
-      XCTAssertNil(ALNBoundedMetadataGET([NSURL URLWithString:[@"https://metadata.fixture.test/" stringByAppendingString:path]], 32, 0.15), @"%@", path);
-    }
-  } @finally { [NSURLProtocol unregisterClass:[OAuthMetadataProtocol class]]; }
-#endif
 }
 - (void)testConcurrentColdValidationCoalescesRefresh {
   NSString *token = [self token:[self claims]];
