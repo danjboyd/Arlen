@@ -11,6 +11,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 # shellcheck source=tools/platform.sh
 source "$script_dir/platform.sh"
+# shellcheck source=tools/apple_build_cache.sh
+source "$script_dir/apple_build_cache.sh"
 
 if ! aln_platform_is_macos; then
   echo "apple-compile-program: this helper only supports macOS" >&2
@@ -72,7 +74,7 @@ while IFS= read -r dir; do
 done < <(find "$repo_root/modules" -mindepth 2 -maxdepth 2 -type d -name Sources 2>/dev/null | sort)
 
 "$(xcrun --find clang)" \
-  -isysroot "$(xcrun --show-sdk-path)" \
+  -isysroot "$(aln_apple_sdk_path)" \
   -arch arm64 \
   -fobjc-arc \
   -fblocks \
