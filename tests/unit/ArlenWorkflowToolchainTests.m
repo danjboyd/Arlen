@@ -51,7 +51,10 @@
 }
 
 - (NSString *)runArlen:(NSString *)arguments frameworkRoot:(NSString *)frameworkRoot exitCode:(int *)exitCode {
-  NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ %@ 2>&1",
+  // The Linux ASan lane preloads a sanitizer runtime that conflicts with the
+  // one linked into build/arlen, so clear it as BuildPolicyTests does.
+  NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+                                                  "ARLEN_FRAMEWORK_ROOT=%@ %@ %@ 2>&1",
                                                  ALNTestShellQuote(frameworkRoot), ALNTestShellQuote(frameworkRoot),
                                                  ALNTestShellQuote([self arlenPath]), arguments];
   return ALNTestRunShellCapture(command, exitCode);
