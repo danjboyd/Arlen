@@ -137,9 +137,10 @@
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:arlenPath],
                   @"expected test-unit prerequisite to build executable %@", arlenPath);
     NSString *command = [NSString stringWithFormat:
-        @"cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ timeout 20s %@/build/arlen build --json > %@",
+        @"cd %@ && LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ %@ %@/build/arlen build --json > %@",
         [self shellQuoted:repoRoot],
         [self shellQuoted:fixtureRoot],
+        ALNTestShellTimeoutPrefix(20),
         [self shellQuoted:repoRoot],
         [self shellQuoted:outputPath]];
     int exitCode = 0;
@@ -149,7 +150,7 @@
                                                                                 error:nil];
     NSNumber *outputSize = attributes[NSFileSize] ?: @0;
 
-    XCTAssertNotEqual(124, exitCode, @"arlen build --json timed out, likely blocked on captured child output:\ncommand: %@\nshell output:\n%@\njson output bytes: %@\njson output:\n%@",
+    XCTAssertFalse(ALNTestShellTimeoutExitedByTimeout(exitCode), @"arlen build --json timed out, likely blocked on captured child output:\ncommand: %@\nshell output:\n%@\njson output bytes: %@\njson output:\n%@",
                       command, commandOutput, outputSize, output);
     XCTAssertEqual(0, exitCode, @"command: %@\nshell output:\n%@\njson output bytes: %@\njson output:\n%@",
                    command, commandOutput, outputSize, output);

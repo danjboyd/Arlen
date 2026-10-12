@@ -28,8 +28,14 @@ static BOOL ALNPgRealtimeChannelIsSafe(NSString *channel) {
 @property(nonatomic, copy) NSString *connectionString;
 @property(nonatomic, copy) NSString *notifyChannel;
 @property(nonatomic, weak) ALNRealtimeHub *hub;
-// Not an Objective-C object on GNUstep (no OS_OBJECT_USE_OBJC); released in dealloc.
+#if OS_OBJECT_USE_OBJC
+// An Objective-C object on Apple: ARC must retain it, or the queue is freed as
+// soon as init stores it and the first publish crashes.
+@property(nonatomic, strong) dispatch_queue_t publishQueue;
+#else
+// Not an Objective-C object on GNUstep; released in dealloc.
 @property(nonatomic, assign) dispatch_queue_t publishQueue;
+#endif
 @property(nonatomic, strong) ALNPg *publisher;
 @property(nonatomic, strong) NSCondition *state;
 @property(nonatomic, assign) BOOL stopped;
