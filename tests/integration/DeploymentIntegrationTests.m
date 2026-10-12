@@ -481,7 +481,8 @@
     XCTAssertEqual(0, code, @"%@", newOutput);
 
     NSString *appRoot = [appParent stringByAppendingPathComponent:@"SmokeApp"];
-    int port = [self randomPort];
+    // --port 0 lets smoke_release.sh pick each probe port just before starting
+    // propane. A port picked here could be taken while the releases build.
     // ARLEN-BUG-019: packaged smoke validation must resolve the manifest's
     // release-relative operability helper against the selected release root,
     // not against the caller's current working directory.
@@ -490,11 +491,11 @@
                                                         "--app-root %s "
                                                         "--framework-root %s "
                                                         "--work-dir %s "
-                                                        "--port %d "
+                                                        "--port 0 "
                                                         "--release-a smoke-1 "
                                                         "--release-b smoke-2",
                                                        [appParent UTF8String], [repoRoot UTF8String], [appRoot UTF8String],
-                                                       [repoRoot UTF8String], [workRoot UTF8String], port]
+                                                       [repoRoot UTF8String], [workRoot UTF8String]]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", smokeOutput);
     XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
