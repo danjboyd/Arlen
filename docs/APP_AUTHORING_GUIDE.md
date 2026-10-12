@@ -38,8 +38,9 @@ Common patterns:
 - `method`: usually `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`
 - `path`: static paths and placeholder segments such as `:id`. A placeholder's
   value is its segment percent-decoded once (`/users/user%3Aabc` gives
-  `user:abc`; `%2F` stays inside the value). Wildcard (`*name`) values are not
-  decoded.
+  `user:abc`; `%2F` stays inside the value). A segment with a malformed
+  escape, `%00`, or invalid UTF-8 is kept as sent. Wildcard (`*name`) values are
+  not decoded.
 - `name`: stable route name used later for route metadata
 - `controllerClass`: Objective-C controller class
 - `action`: selector name without the `:` suffix

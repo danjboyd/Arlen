@@ -267,12 +267,46 @@
     @"/users/a%2Fb/files/x" : @[ @"a/b", @"x" ],
     @"/users/double%2541/files/x" : @[ @"double%41", @"x" ],
     @"/users/bad%zz/files/half%4" : @[ @"bad%zz", @"half%4" ],
+    @"/users/%e2%82%ac/files/%F0%9F%98%80" : @[ @"\u20ac", @"\U0001F600" ],
   };
   for (NSString *path in cases) {
     ALNRouteMatch *match = [router matchMethod:@"POST" path:path];
     XCTAssertNotNil(match, @"%@", path);
     XCTAssertEqualObjects(match.params[@"identifier"], cases[path][0], @"%@", path);
     XCTAssertEqualObjects(match.params[@"name"], cases[path][1], @"%@", path);
+  }
+}
+
+// Decoding is all-or-nothing and identical on Apple and GNUstep: one bad
+// escape, an encoded NUL, or bytes that are not strict UTF-8 keep the whole
+// segment exactly as sent.
+- (void)testInvalidParameterEncodingsAreKeptAsSent {
+  ALNRouter *router = [[ALNRouter alloc] init];
+  [router addRouteMethod:@"GET"
+                    path:@"/items/:id"
+                    name:@"item"
+         controllerClass:[RouterDummyController class]
+                  action:@"index"];
+
+  NSArray<NSString *> *segments = @[
+    @"bad%zz%41",      // a valid escape after an invalid one is not decoded
+    @"a%00b",          // NUL
+    @"%00",
+    @"trail%",
+    @"%C3",            // truncated two-byte sequence
+    @"%C3%28",         // bad continuation byte
+    @"%FF",            // never valid in UTF-8
+    @"%C0%AF",         // overlong "/"
+    @"%E0%80%AF",      // overlong "/"
+    @"%ED%A0%80",      // UTF-16 surrogate
+    @"%F4%90%80%80",   // above U+10FFFF
+    @"%80",            // lone continuation byte
+  ];
+  for (NSString *segment in segments) {
+    NSString *path = [@"/items/" stringByAppendingString:segment];
+    ALNRouteMatch *match = [router matchMethod:@"GET" path:path];
+    XCTAssertNotNil(match, @"%@", path);
+    XCTAssertEqualObjects(match.params[@"id"], segment, @"%@", path);
   }
 }
 

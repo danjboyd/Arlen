@@ -6,8 +6,10 @@
   TypeScript client and the OpenAPI explorer send parameters through
   `encodeURIComponent`, so an identifier such as `user:abc` arrived as
   `user%3Aabc` and its lookup failed with a 404. Values are decoded once after
-  the path is split, so `%2F` stays inside the value, and a segment with an
-  invalid escape is kept as sent. Wildcard (`*name`) values are unchanged.
+  the path is split, so `%2F` stays inside the value. Decoding is
+  all-or-nothing and the same on Apple and GNUstep: a segment with a malformed
+  escape, an encoded NUL (`%00`), or bytes that are not strict UTF-8 is kept
+  exactly as sent. Wildcard (`*name`) values are unchanged.
   **Upgrade note:** apps that decoded route parameters themselves should stop,
   or values containing `%25` decode twice (GitHub issue 154).
 
