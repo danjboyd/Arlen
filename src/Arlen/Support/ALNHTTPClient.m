@@ -1,4 +1,5 @@
 #import "ALNHTTPClient.h"
+#import "ALNPlatform.h"
 
 #import "ALNJSONSerialization.h"
 #import "ALNLogger.h"
@@ -35,12 +36,7 @@ static long long HCInteger(id value) {
     long long parsed = 0;
     return ([scanner scanLongLong:&parsed] && scanner.isAtEnd && parsed >= 0) ? parsed : -2;
   }
-  if (![value isKindOfClass:[NSNumber class]]) return -2;
-#if defined(__APPLE__)
-  if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) return -2;
-#endif
-  const char *type = [value objCType];
-  if (type == NULL || strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0) return -2;
+  if (![value isKindOfClass:[NSNumber class]] || ALNNumberIsBoolean(value)) return -2;
   double number = [value doubleValue];
   return (isfinite(number) && number >= 0 && number == floor(number) && number < 9.0e15) ? (long long)number : -2;
 }

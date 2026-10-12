@@ -803,17 +803,6 @@ enum {
   ALNPGOIDOID_JSONB_ARRAY = 3807,
 };
 
-static BOOL ALNPgNSNumberLooksBoolean(NSNumber *value) {
-  if (value == nil) {
-    return NO;
-  }
-  const char *type = [value objCType];
-  if (type == NULL) {
-    return NO;
-  }
-  return (strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0);
-}
-
 static NSString *ALNPgHexStringFromData(NSData *data) {
   if (![data isKindOfClass:[NSData class]]) {
     return @"";
@@ -892,7 +881,7 @@ static NSString *ALNPgArrayElementString(id value, NSError **error) {
     return ALNPgEscapedArrayStringLiteral([(NSUUID *)value UUIDString] ?: @"");
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNPgNSNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       return [((NSNumber *)value) boolValue] ? @"true" : @"false";
     }
     return [value stringValue];
@@ -971,7 +960,7 @@ static NSString *ALNPgStringFromParam(id value, NSError **error) {
     return [(NSUUID *)value UUIDString];
   }
   if ([value isKindOfClass:[NSNumber class]]) {
-    if (ALNPgNSNumberLooksBoolean((NSNumber *)value)) {
+    if (ALNNumberIsBoolean(value)) {
       return [((NSNumber *)value) boolValue] ? @"true" : @"false";
     }
     return [value stringValue];

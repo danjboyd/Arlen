@@ -5,6 +5,7 @@
 #import "../shared/ALNTestSupport.h"
 
 @interface Phase13ModuleIntegrationTests : XCTestCase
+@property(nonatomic, copy) NSString *warningGNUstepConfigPath;
 @end
 
 @implementation Phase13ModuleIntegrationTests
@@ -35,6 +36,48 @@
 
 - (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   return ALNTestRunShellCapture(command, exitCode);
+}
+
+// Runs a `--json` command and returns its stdout, the JSON payload. stderr is
+// kept out of it: gnustep-base writes warnings there, such as unknown
+// GNUstep.conf keys (issue #130). The attachment records both streams.
+- (NSString *)runJSONCommand:(NSString *)command exitCode:(int *)exitCode {
+  NSDictionary *result = ALNTestRunShellCaptureStreams(command);
+  int status = [result[@"status"] intValue];
+  if (exitCode != NULL) {
+    *exitCode = status;
+  }
+  NSString *standardOutput = result[@"stdout"] ?: @"";
+  NSString *standardError = result[@"stderr"] ?: @"";
+  ALNTestAttachCommandOutput(self, command,
+                             [NSString stringWithFormat:@"%@\n[stderr]\n%@", standardOutput, standardError], status);
+  return standardOutput;
+}
+
+// A copy of the host's GNUstep.conf plus a key gnustep-base does not know, so
+// every `arlen module` run here writes gnustep-base's "Configuration contains
+// unknown keys" warning to stderr, as hosts with a newer gnustep-make than
+// gnustep-base do (issue #130). nil if the host has no GNUstep.conf to copy.
+- (NSString *)warningGNUstepConfig {
+  if (self.warningGNUstepConfigPath != nil) {
+    return self.warningGNUstepConfigPath;
+  }
+  NSString *hostConfig = ALNTestEnvironmentString(@"GNUSTEP_CONFIG_FILE") ?: @"/etc/GNUstep/GNUstep.conf";
+  NSString *contents = [NSString stringWithContentsOfFile:hostConfig encoding:NSUTF8StringEncoding error:NULL];
+  NSString *directory = contents != nil ? [self createTempDirectoryWithPrefix:@"phase13-gnustep-conf"] : nil;
+  if (directory == nil) {
+    return nil;
+  }
+  NSString *path = [directory stringByAppendingPathComponent:@"GNUstep.conf"];
+  if (![self writeFile:path content:[contents stringByAppendingString:@"\nARLEN_TEST_UNKNOWN_CONFIG_KEY=1\n"]]) {
+    return nil;
+  }
+  // gnustep-base ignores a config file that anyone but its owner can write.
+  if (![[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0644 } ofItemAtPath:path error:NULL]) {
+    return nil;
+  }
+  self.warningGNUstepConfigPath = path;
+  return path;
 }
 
 - (NSDictionary *)parseJSONDictionary:(NSString *)output {
@@ -160,7 +203,7 @@
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
 
-    NSString *addAlpha = [self runShellCapture:[NSString stringWithFormat:
+    NSString *addAlpha = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add alpha --source %@ --json",
         appRoot, repoRoot, repoRoot, alphaSource]
                                       exitCode:&code];
@@ -168,13 +211,13 @@
     NSDictionary *addAlphaPayload = [self parseJSONDictionary:addAlpha];
     XCTAssertEqualObjects(@"ok", addAlphaPayload[@"status"]);
 
-    NSString *addBeta = [self runShellCapture:[NSString stringWithFormat:
+    NSString *addBeta = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add beta --source %@ --json",
         appRoot, repoRoot, repoRoot, betaSource]
                                      exitCode:&code];
     XCTAssertEqual(0, code, @"%@", addBeta);
 
-    NSString *listOutput = [self runShellCapture:[NSString stringWithFormat:
+    NSString *listOutput = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && %@/build/arlen module list --json",
         appRoot, repoRoot]
                                         exitCode:&code];
@@ -184,7 +227,7 @@
     XCTAssertEqualObjects(@"alpha", modules[0][@"identifier"]);
     XCTAssertEqualObjects(@"beta", modules[1][@"identifier"]);
 
-    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+    NSString *doctorOutput = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && %@/build/arlen module doctor --env development --json",
         appRoot, repoRoot]
                                           exitCode:&code];
@@ -192,7 +235,7 @@
     NSDictionary *doctorPayload = [self parseJSONDictionary:doctorOutput];
     XCTAssertEqualObjects(@"ok", doctorPayload[@"status"]);
 
-    NSString *assetsOutput = [self runShellCapture:[NSString stringWithFormat:
+    NSString *assetsOutput = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && %@/build/arlen module assets --output-dir build/module_assets --json",
         appRoot, repoRoot]
                                           exitCode:&code];
@@ -209,7 +252,7 @@
                                            exitCode:&code];
     XCTAssertEqual(0, code, @"%@", prepareOutput);
 
-    NSString *upgradeOutput = [self runShellCapture:[NSString stringWithFormat:
+    NSString *upgradeOutput = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && %@/build/arlen module upgrade alpha --source %@ --json",
         appRoot, repoRoot, alphaV2Source]
                                            exitCode:&code];
@@ -217,7 +260,7 @@
     NSDictionary *upgradePayload = [self parseJSONDictionary:upgradeOutput];
     XCTAssertEqualObjects(@"updated", upgradePayload[@"status"]);
 
-    NSString *listOutput2 = [self runShellCapture:[NSString stringWithFormat:
+    NSString *listOutput2 = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && %@/build/arlen module list --json",
         appRoot, repoRoot]
                                          exitCode:&code];
@@ -243,8 +286,12 @@
                         appRoot:(NSString *)appRoot
                        repoRoot:(NSString *)repoRoot
                   frameworkRoot:(NSString *)frameworkRoot {
-  return [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module %@",
+  NSString *config = [self warningGNUstepConfig];
+  NSString *configAssignment =
+      config != nil ? [NSString stringWithFormat:@"GNUSTEP_CONFIG_FILE=%@ ", ALNTestShellQuote(config)] : @"";
+  return [NSString stringWithFormat:@"cd %@ && %@ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module %@",
                                     ALNTestShellQuote(appRoot),
+                                    configAssignment,
                                     ALNTestShellQuote(frameworkRoot),
                                     ALNTestShellQuote(repoRoot),
                                     arguments];
@@ -288,7 +335,7 @@
     int code = 0;
     NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot] exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
-    NSString *output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+    NSString *output = [self runJSONCommand:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
                                                                                                 ALNTestShellQuote(source)]
                                                               appRoot:appRoot
                                                              repoRoot:repoRoot
@@ -315,7 +362,7 @@
     }
 
     NSDate *beforeUpgrade = [NSDate dateWithTimeIntervalSinceNow:-2];
-    output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"upgrade alpha --source %@ --json",
+    output = [self runJSONCommand:[self arlenModuleCommand:[NSString stringWithFormat:@"upgrade alpha --source %@ --json",
                                                                                       ALNTestShellQuote(source)]
                                                     appRoot:appRoot
                                                    repoRoot:repoRoot
@@ -369,7 +416,7 @@
     NSString *forcedUpgrade =
         [NSString stringWithFormat:@"upgrade alpha --source %@ --force --json", ALNTestShellQuote(source)];
 
-    NSString *output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+    NSString *output = [self runJSONCommand:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
                                                                                                 ALNTestShellQuote(source)]
                                                               appRoot:appRoot
                                                              repoRoot:repoRoot
@@ -384,20 +431,20 @@
     XCTAssertEqualObjects(digestV1, lock[@"modules"][0][@"contentDigest"]);
 
     // Unchanged source: a genuine no-op.
-    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertEqualObjects(@"noop", [self parseJSONDictionary:output][@"status"]);
 
     // Issue 54: upstream sources change but version stays 1.0.0.
     XCTAssertTrue([self writeFile:sourceFile content:@"// release 2 security fix\n"]);
-    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
                       containsObject:@"module_framework_copy_differs"], @"%@", output);
 
-    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     payload = [self parseJSONDictionary:output];
@@ -409,12 +456,12 @@
     // A locally edited vendored copy is never overwritten without --force.
     XCTAssertTrue([self writeFile:installedFile content:@"// local patch\n"]);
     XCTAssertTrue([self writeFile:sourceFile content:@"// release 3\n"]);
-    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
                       containsObject:@"module_locally_modified"], @"%@", output);
 
-    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(1, code, @"%@", output);
     payload = [self parseJSONDictionary:output];
@@ -426,7 +473,7 @@
                           [NSString stringWithContentsOfFile:installedFile encoding:NSUTF8StringEncoding error:NULL]);
 
     // `module add` at the same version also refuses to silently keep stale files.
-    output = [self runShellCapture:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
+    output = [self runJSONCommand:[self arlenModuleCommand:[NSString stringWithFormat:@"add alpha --source %@ --json",
                                                                                       ALNTestShellQuote(source)]
                                                     appRoot:appRoot
                                                    repoRoot:repoRoot
@@ -435,7 +482,7 @@
     XCTAssertEqual(1, code, @"%@", output);
     XCTAssertEqualObjects(@"module_already_installed", [self parseJSONDictionary:output][@"error"][@"code"]);
 
-    output = [self runShellCapture:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     payload = [self parseJSONDictionary:output];
@@ -447,23 +494,23 @@
     // Locks written before contentDigest existed cannot prove the copy is unedited.
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
                           content:@"{\n  modules = (\n    { identifier = \"alpha\"; path = \"modules/alpha\"; version = \"1.0.0\"; enabled = YES; }\n  );\n}\n"]);
-    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertTrue([[self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"]
                       containsObject:@"module_content_untracked"], @"%@", output);
 
     XCTAssertTrue([self writeFile:sourceFile content:@"// release 4\n"]);
-    output = [self runShellCapture:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:upgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(1, code, @"%@", output);
     payload = [self parseJSONDictionary:output];
     XCTAssertEqualObjects(@"content_differs", payload[@"error"][@"code"]);
     XCTAssertEqualObjects(@NO, payload[@"locally_modified"]);
 
-    output = [self runShellCapture:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:forcedUpgrade appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
-    output = [self runShellCapture:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json" appRoot:appRoot repoRoot:repoRoot frameworkRoot:frameworkRoot]
                           exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertEqualObjects(@[], [self diagnosticCodesInDoctorPayload:[self parseJSONDictionary:output] module:@"alpha"],
@@ -618,7 +665,7 @@
                                   "}\n"]);
 
     int code = 0;
-    NSString *addJobsOutput = [self runShellCapture:[NSString stringWithFormat:
+    NSString *addJobsOutput = [self runJSONCommand:[NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add jobs --json",
         appRoot, repoRoot, repoRoot]
                                            exitCode:&code];

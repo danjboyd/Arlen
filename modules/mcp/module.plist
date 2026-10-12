@@ -1,6 +1,6 @@
 {
   identifier = "mcp";
-  version = "1.0.2";
+  version = "1.0.3";
   principalClass = "ALNMCPModule";
   dependencies = ();
   compatibility = { arlenVersion = ">= 0.1.0"; };

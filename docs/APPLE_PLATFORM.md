@@ -115,6 +115,12 @@ Linux-only or narrower on macOS:
 - Shell scripts that run on macOS must work with `/bin/bash` 3.2. In particular,
   expand arrays that may be empty as `${a[@]+"${a[@]}"}` under `set -u`.
 
+## Portability Rules
+
+- Detect NSNumber booleans with `ALNNumberIsBoolean()` (`ALNPlatform.h`), never
+  by comparing `objCType` with `@encode(BOOL)`. Apple arm64 encodes `BOOL` as
+  `"B"` while `@YES` reports `"c"`, and GNUstep encodes `BOOL` as `"C"`.
+
 ## Non-Goals
 
 - deprecating Linux/GNUstep support

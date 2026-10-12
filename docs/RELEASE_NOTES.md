@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Boolean `NSNumber`s are now detected the same way everywhere, using the new
+  `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
+  old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple
+  arm64 while `@YES` reports `"c"`. On macOS the MCP module therefore rejected
+  its tools' boolean annotations and boolean schema values, and the OAuth
+  resource server accepted JSON `true` as a numeric claim. PostgreSQL, MSSQL and
+  Dataverse also bound `@YES` as `1`, and ORM codegen emitted booleans as
+  numbers. On GNUstep, `numberWithChar:` values are no longer treated as
+  booleans. `auth` moves to `1.5.1` and `mcp` to `1.0.3` (GitHub issue 132).
+
 - Markdown support: `ALNMarkdown` parses CommonMark and GitHub Flavored
   Markdown with a vendored cmark-gfm `0.29.0.gfm.13` into an Objective-C node
   tree for custom renderers. It also has an HTML renderer that is safe for
@@ -11,6 +21,13 @@
   call, apps can register custom inline spans such as `⟦red⟧text⟦/red⟧` that
   arrive as typed nodes, and templates can use `<%== ALNEOCMarkdownHTML($body) %>`.
   See `docs/MARKDOWN.md` (GitHub issue 127).
+
+- PostgreSQL realtime fanout no longer crashes on macOS on its first publish.
+  Its publish queue was not retained under ARC on Apple, where dispatch queues
+  are Objective-C objects. Event-stream stores now serialize their
+  `CREATE TABLE`/`CREATE INDEX` with an advisory lock, so stores or processes
+  starting at the same time against a fresh database no longer fail with
+  `pg_type_typname_nsp_index` (GitHub issue 138).
 
 - The vendored test runner is now `danjboyd/tools-xctest` `v0.5.0` (was
   `v0.3.0`). A `TEST=` filter or `arlen test --only` selection that matches

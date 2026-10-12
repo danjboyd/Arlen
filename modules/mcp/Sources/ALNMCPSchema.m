@@ -1,14 +1,11 @@
 #import "ALNMCPSchema.h"
+#import "ALNPlatform.h"
 #import <math.h>
 
 BOOL ALNMCPFail(NSError **error, NSString *message) {
   if (error) *error = [NSError errorWithDomain:@"Arlen.MCP" code:1
                                     userInfo:@{NSLocalizedDescriptionKey: message}];
   return NO;
-}
-static BOOL MCPIsBoolean(id value) {
-  return [value isKindOfClass:[NSNumber class]] &&
-      (strcmp([value objCType], @encode(BOOL)) == 0);
 }
 static NSDictionary *Normalize(id raw, BOOL route, NSUInteger depth, NSError **error) {
   if (depth > 32) { ALNMCPFail(error, @"MCP schema exceeds depth 32"); return nil; }
@@ -19,7 +16,7 @@ static NSDictionary *Normalize(id raw, BOOL route, NSUInteger depth, NSError **e
   NSMutableDictionary *schema = [raw mutableCopy];
   if (route) {
     [schema removeObjectForKey:@"source"];
-    if (depth > 0 && MCPIsBoolean(schema[@"required"])) [schema removeObjectForKey:@"required"];
+    if (depth > 0 && ALNNumberIsBoolean(schema[@"required"])) [schema removeObjectForKey:@"required"];
   }
   NSSet *allowed = [NSSet setWithArray:@[@"type", @"properties", @"required", @"additionalProperties",
       @"items", @"enum", @"description", @"title", @"minimum", @"maximum", @"minLength", @"maxLength",
@@ -45,7 +42,7 @@ static NSDictionary *Normalize(id raw, BOOL route, NSUInteger depth, NSError **e
     BOOL count = ![@[@"minimum", @"maximum"] containsObject:key];
     BOOL applicable = count ? ([key hasSuffix:@"Length"] ? [type isEqual:@"string"] : [type isEqual:@"array"])
                             : [@[@"integer", @"number"] containsObject:type];
-    if (!applicable || ![bound isKindOfClass:[NSNumber class]] || MCPIsBoolean(bound) ||
+    if (!applicable || ![bound isKindOfClass:[NSNumber class]] || ALNNumberIsBoolean(bound) ||
         !isfinite([bound doubleValue]) || (count && ([bound doubleValue] < 0 || floor([bound doubleValue]) != [bound doubleValue]))) {
       ALNMCPFail(error, @"Invalid or inapplicable schema bound"); return nil;
     }
@@ -57,7 +54,7 @@ static NSDictionary *Normalize(id raw, BOOL route, NSUInteger depth, NSError **e
   }
   if ([type isEqual:@"object"]) {
     id props = schema[@"properties"] ?: @{};
-    if (![props isKindOfClass:[NSDictionary class]] || (schema[@"additionalProperties"] && !MCPIsBoolean(schema[@"additionalProperties"]))) {
+    if (![props isKindOfClass:[NSDictionary class]] || (schema[@"additionalProperties"] && !ALNNumberIsBoolean(schema[@"additionalProperties"]))) {
       ALNMCPFail(error, @"properties must be an object; additionalProperties must be boolean"); return nil;
     }
     id req = schema[@"required"] ?: @[];
@@ -67,7 +64,7 @@ static NSDictionary *Normalize(id raw, BOOL route, NSUInteger depth, NSError **e
     for (id key in props) {
       if (![key isKindOfClass:[NSString class]]) { ALNMCPFail(error, @"Invalid property name"); return nil; }
       id descriptor = props[key];
-      if (route && [descriptor isKindOfClass:[NSDictionary class]] && MCPIsBoolean(descriptor[@"required"]) && [descriptor[@"required"] boolValue] && ![required containsObject:key]) [required addObject:key];
+      if (route && [descriptor isKindOfClass:[NSDictionary class]] && ALNNumberIsBoolean(descriptor[@"required"]) && [descriptor[@"required"] boolValue] && ![required containsObject:key]) [required addObject:key];
       NSDictionary *child = Normalize(descriptor, route, depth + 1, error);
       if (!child) return nil;
       properties[key] = child;
@@ -123,11 +120,11 @@ BOOL ALNMCPValidate(id value, NSDictionary *schema) {
     if (schema[@"minLength"] && length < [schema[@"minLength"] unsignedIntegerValue]) return NO;
     if (schema[@"maxLength"] && length > [schema[@"maxLength"] unsignedIntegerValue]) return NO;
   } else if ([type isEqual:@"boolean"]) {
-    if (!MCPIsBoolean(value)) return NO;
+    if (!ALNNumberIsBoolean(value)) return NO;
   } else if ([type isEqual:@"null"]) {
     if (value != [NSNull null]) return NO;
   } else {
-    if (![value isKindOfClass:[NSNumber class]] || MCPIsBoolean(value)) return NO;
+    if (![value isKindOfClass:[NSNumber class]] || ALNNumberIsBoolean(value)) return NO;
     double number = [value doubleValue];
     if (!isfinite(number) || ([type isEqual:@"integer"] && floor(number) != number)) return NO;
     if (schema[@"minimum"] && number < [schema[@"minimum"] doubleValue]) return NO;

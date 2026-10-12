@@ -1,7 +1,10 @@
 #import "ALNPlatform.h"
 
+#import <dispatch/dispatch.h>
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -38,6 +41,29 @@ BOOL ALNPlatformUsesGNUstepFoundation(void) {
   return YES;
 #else
   return NO;
+#endif
+}
+
+BOOL ALNNumberIsBoolean(id value) {
+  if (![value isKindOfClass:[NSNumber class]]) {
+    return NO;
+  }
+#if defined(__APPLE__)
+  return (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID());
+#else
+  static Class boolNumberClass = Nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    boolNumberClass = [[NSNumber numberWithBool:YES] class];
+    if (boolNumberClass == [[NSNumber numberWithInt:1] class]) {
+      boolNumberClass = Nil;
+    }
+  });
+  if (boolNumberClass != Nil) {
+    return [value isKindOfClass:boolNumberClass];
+  }
+  const char *type = [value objCType];
+  return (type != NULL && strcmp(type, @encode(BOOL)) == 0);
 #endif
 }
 

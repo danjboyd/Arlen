@@ -1,4 +1,5 @@
 #import "ALNAuthModuleOIDC.h"
+#import "ALNPlatform.h"
 #import "ALNOIDCClient.h"
 #import "ALNHTTPCompat.h"
 #import "ALNSecurityPrimitives.h"
@@ -128,15 +129,7 @@ static NSUInteger OAssuranceLevelValue(id value) {
   if (![value isKindOfClass:[NSNumber class]] || [value doubleValue] != (double)[value integerValue]) {
     return 0;
   }
-  // Same boolean test as ALNJSONSerialization: on Apple arm64 BOOL encodes as
-  // "B" while @YES reports "c", so ask CoreFoundation there.
-#if defined(__APPLE__)
-  if (CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
-    return 0;
-  }
-#endif
-  const char *type = [value objCType];
-  if (type == NULL || strcmp(type, @encode(BOOL)) == 0 || strcmp(type, "B") == 0) {
+  if (ALNNumberIsBoolean(value)) {
     return 0;
   }
   return ([value integerValue] >= 1 && [value integerValue] <= 3) ? (NSUInteger)[value integerValue] : 0;
