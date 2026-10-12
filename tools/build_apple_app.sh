@@ -6,6 +6,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 # shellcheck source=tools/platform.sh
 source "$script_dir/platform.sh"
+# shellcheck source=tools/apple_build_cache.sh
+source "$script_dir/apple_build_cache.sh"
 
 if ! aln_platform_is_macos; then
   echo "build-apple-app: this builder only supports macOS" >&2
@@ -71,7 +73,7 @@ fi
 
 "$framework_root/bin/build-apple" >/dev/null
 
-sdk_path="$(xcrun --show-sdk-path)"
+sdk_path="$(aln_apple_sdk_path)"
 clang_path="$(xcrun --find clang)"
 
 openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
@@ -89,7 +91,7 @@ obj_root="$app_build_root/obj"
 gen_root="$app_build_root/gen"
 app_template_root="$gen_root/templates"
 module_template_root="$gen_root/modules"
-mkdir -p "$obj_root" "$app_template_root" "$module_template_root"
+mkdir -p "$obj_root"
 
 eocc_bin="$framework_root/build/apple/eocc"
 framework_lib="$framework_root/build/apple/lib/libArlenFramework.a"
@@ -151,6 +153,9 @@ link_flags=(
   -lcrypto
 )
 
+aln_apple_reset_on_flag_change "$obj_root" "$("$clang_path" --version)" \
+  "${objc_flags[@]}" -- "${link_flags[@]}"
+
 obj_path_for() {
   local src="$1"
   local rel
@@ -165,28 +170,37 @@ obj_path_for() {
 compile_objc() {
   local src="$1"
   local obj="$2"
+  if aln_apple_object_is_current "$src" "$obj"; then
+    return 0
+  fi
   mkdir -p "$(dirname "$obj")"
-  "$clang_path" "${objc_flags[@]}" -c "$src" -o "$obj"
+  "$clang_path" "${objc_flags[@]}" -MMD -MF "${obj%.o}.d" -c "$src" -o "$obj"
 }
 
+# eocc --manifest reuses unchanged outputs, so generated sources keep their
+# mtimes and their objects stay current. Each module gets its own output
+# directory so a removed module's sources can be dropped.
 transpile_app_templates() {
-  rm -rf "$app_template_root" "$module_template_root"
   mkdir -p "$app_template_root" "$module_template_root"
 
+  template_files=()
   if [[ -d "$app_root/templates" ]]; then
-    template_files=()
     while IFS= read -r template_path; do
       template_files+=("$template_path")
     done < <(find "$app_root/templates" -type f -name '*.html.eoc' | sort)
-    if [[ ${#template_files[@]} -gt 0 ]]; then
-      "$eocc_bin" \
+  fi
+  if [[ ${#template_files[@]} -eq 0 ]]; then
+    rm -rf "$app_template_root"
+  else
+    aln_apple_reset_generated_if_stale "$app_template_root" "$eocc_bin" "$app_template_root/manifest.json"
+    "$eocc_bin" \
         --template-root "$app_root/templates" \
         --output-dir "$app_template_root" \
         --manifest "$app_template_root/manifest.json" \
-        "${template_files[@]}" 1>&2
-    fi
+      "${template_files[@]}" 1>&2
   fi
 
+  local active_modules=" "
   if [[ -d "$app_root/modules" ]]; then
     while IFS= read -r module_root; do
       module_id="$(basename "$module_root")"
@@ -201,14 +215,24 @@ transpile_app_templates() {
       if [[ ${#module_templates[@]} -eq 0 ]]; then
         continue
       fi
+      active_modules+="$module_id "
+      module_out="$module_template_root/$module_id"
+      aln_apple_reset_generated_if_stale "$module_out" "$eocc_bin" "$module_out/manifest.json"
       "$eocc_bin" \
         --template-root "$template_root" \
-        --output-dir "$module_template_root" \
-        --manifest "$module_template_root/$module_id.manifest.json" \
+        --output-dir "$module_out" \
+        --manifest "$module_out/manifest.json" \
         --logical-prefix "modules/$module_id" \
         "${module_templates[@]}" 1>&2
     done < <(find "$app_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
   fi
+
+  local module_out
+  while IFS= read -r module_out; do
+    if [[ "$active_modules" != *" $(basename "$module_out") "* ]]; then
+      rm -rf "$module_out"
+    fi
+  done < <(find "$module_template_root" -mindepth 1 -maxdepth 1 2>/dev/null | sort)
 }
 
 transpile_app_templates
@@ -249,7 +273,11 @@ if (( ${#generated_sources[@]} > 0 )); then
   done
 fi
 
-"$clang_path" "${objc_flags[@]}" "${app_objects[@]}" "$framework_lib" -o "$app_binary" "${link_flags[@]}"
+link_manifest="$obj_root/.link/boomhauer-app.inputs"
+if ! aln_apple_link_is_current "$link_manifest" "$app_binary" "${app_objects[@]}" "$framework_lib"; then
+  "$clang_path" "${objc_flags[@]}" "${app_objects[@]}" "$framework_lib" -o "$app_binary" "${link_flags[@]}"
+  aln_apple_record_link_inputs "$link_manifest" "${app_objects[@]}" "$framework_lib"
+fi
 
 if [[ $print_path -eq 1 ]]; then
   printf '%s\n' "$app_binary"
