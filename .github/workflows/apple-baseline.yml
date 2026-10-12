@@ -38,6 +38,16 @@ jobs:
         run: |
           bash tools/ci/run_apple_unit_suite.sh
 
+      - name: Run the Apple integration bundle against PostgreSQL and check the test inventory
+        run: |
+          bash tools/ci/run_apple_integration_suite.sh
+
+      - name: Run the Apple durable-jobs bundle against PostgreSQL
+        run: |
+          export ARLEN_TEST_PG_BIN="$(brew --prefix postgresql@17)/bin"
+          export ARLEN_LIBPQ_PREFIX="$(brew --prefix libpq)"
+          bash tools/ci/run_durable_jobs.sh
+
       - name: Upload Apple confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
@@ -46,4 +56,6 @@ jobs:
           path: |
             build/release_confidence/phase30/**
             build/release_confidence/apple_unit/**
+            build/release_confidence/apple_integration/**
+            build/release_confidence/durable_jobs.log
           if-no-files-found: warn

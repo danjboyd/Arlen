@@ -120,5 +120,7 @@ The build links macOS system libcurl for `ALNSynchronousHTTPResult`; custom link
 commands also need `-lcurl`. For live database and client contract regressions,
 install `postgresql@17` and `libpq`, then run
 `bash tools/ci/run_apple_unit_suite.sh` (the full unit bundle against a private
-PostgreSQL, as Apple CI runs it). See
+PostgreSQL, as Apple CI runs it). Apple CI also runs
+`bash tools/ci/run_apple_integration_suite.sh` and
+`bash tools/ci/run_durable_jobs.sh`. See
 [HTTP client](HTTP_CLIENT.md) and [Testing workflow](TESTING_WORKFLOW.md).
