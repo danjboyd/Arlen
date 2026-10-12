@@ -21,7 +21,8 @@
   `propane` on macOS) handle module templates like the GNUstep build. A module
   template overridden by the app (`templates/modules/<id>/...`) is no longer
   compiled twice, which failed the link with a duplicate
-  `ALNEOCRender_modules_...` symbol. Only the outputs of the current templates
+  `ALNEOCRender_modules_...` symbol. Override paths match exactly, including
+  case, as on GNUstep, even on case-insensitive APFS. Only the outputs of the current templates
   are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
   ignored (GitHub issue 152).
 

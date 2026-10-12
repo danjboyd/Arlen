@@ -98,7 +98,9 @@
 }
 
 - (void)testAppleReportsGNUstepOnlySuitesInsteadOfCallingMake {
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+  XCTSkip(@"Apple toolchain dispatch runs only on macOS");
+#endif
   NSString *root = [self createFrameworkFixtureWithAppleBuilder:YES];
   int exitCode = -1;
   NSString *perf = [self runArlen:@"perf" frameworkRoot:root exitCode:&exitCode];
@@ -117,7 +119,6 @@
     XCTAssertEqualObjects(expectedSuites[arguments], output, @"%@", arguments);
   }
   [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
-#endif
 }
 
 @end
