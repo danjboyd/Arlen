@@ -127,6 +127,16 @@ copy_compiled_binary_if_exists() {
   return 0
 }
 
+# Matches bin/propane's app_root_has_sources: an app is compiled when it has
+# app_lite.m or any src/**/*.m, not only src/main.m.
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 detect_local_platform_profile() {
   local os_name
   local arch_name
@@ -788,7 +798,9 @@ done
 
 make -C "$framework_root" arlen boomhauer >/dev/null
 
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+app_is_compiled=0
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
+  app_is_compiled=1
   ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
     "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
 fi
@@ -813,6 +825,16 @@ if packaged_runtime_binary="$(copy_compiled_binary_if_exists "$app_root/.boomhau
   :
 else
   packaged_runtime_binary="$release_dir/app/.boomhauer/build/boomhauer-app"
+  # Without a packaged binary propane would rebuild inside the release, which
+  # has no framework sources, so fail here instead of at activation.
+  if [[ "$app_is_compiled" == "1" ]]; then
+    emit_error \
+      "app_binary_missing" \
+      "app has sources but no compiled binary was produced at $app_root/.boomhauer/build/boomhauer-app" \
+      "Check that the app builds with boomhauer --no-watch --prepare-only from the app root." \
+      "ARLEN_APP_ROOT=$app_root $framework_root/bin/boomhauer --no-watch --prepare-only" \
+      1
+  fi
 fi
 
 # Package runtime/tooling payload used by deploy scripts.

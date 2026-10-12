@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `build_release.sh` (used by `arlen deploy push` and `make deploy-smoke`) now
+  packages a compiled binary for any app with `app_lite.m` or Objective-C
+  sources under `src/`, the same check propane uses. Before, it built the app
+  only when `src/main.m` existed, so apps like `examples/tech_demo`
+  (`src/tech_demo_server.m`) were released without a binary, and propane then
+  failed trying to rebuild inside the release. A release build now fails
+  immediately, with error code `app_binary_missing`, when an app has sources but
+  no binary is produced.
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple

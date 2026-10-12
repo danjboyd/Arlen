@@ -504,6 +504,44 @@
   }
 }
 
+- (void)testReleasePackagesBinaryForAppWithoutMainSource {
+  // examples/tech_demo keeps its entry point in src/tech_demo_server.m, not
+  // src/main.m. build_release.sh used to skip preparing such apps, packaging no
+  // binary, so propane failed rebuilding inside the release.
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-nomain-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-nomain-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"src/demo_server.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    int code = 0;
+    NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"%s/tools/deploy/build_release.sh --app-root %s "
+                                                   "--framework-root %s --releases-dir %s --release-id nomain "
+                                                   "--allow-missing-certification 2>&1",
+                                                  [repoRoot UTF8String], [appRoot UTF8String],
+                                                  [repoRoot UTF8String], [releasesDir UTF8String]]
+                                    exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    NSString *binary = [releasesDir stringByAppendingPathComponent:@"nomain/app/.boomhauer/build/boomhauer-app"];
+    XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:binary], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:NULL];
+  }
+}
+
 - (void)testWriteReleaseEnvPreservesPhase32DatabaseContractThroughActivateAndRollback_ARLEN_BUG_020 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-020-app"];
