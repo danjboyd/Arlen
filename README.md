@@ -74,8 +74,8 @@ First install your platform's toolchain:
 
 | Platform | Prerequisites | What the installer does |
 |---|---|---|
-| **macOS, Apple Silicon** | Xcode Command Line Tools (`xcode-select --install`) and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
-| **macOS, Intel** | Same as Apple Silicon | Builds the framework once with Apple clang |
+| **macOS, Apple Silicon** | macOS 14 or later, the Xcode Command Line Tools (`xcode-select --install`), and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
+| **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
 The managed GNUstep toolchain for Linux (Debian, amd64/arm64):

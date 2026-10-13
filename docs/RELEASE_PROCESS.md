@@ -112,7 +112,7 @@ does not match `ALNModuleSystemFrameworkVersion`:
 - `release-assets` builds the downloadable archives, smoke-tests an install
   from each one, and attaches them to the release:
   - `arlen-X.Y.Z.tar.gz`: the source tree plus vendored `tools-xctest`. It is
-    used on Linux and Intel Macs, and `install.sh` builds it once.
+    used on Linux, where `install.sh` builds it once.
   - `arlen-X.Y.Z-macos-arm64.tar.gz`: prebuilt Apple framework tools.
   - `install.sh` and `SHA256SUMS`.
 

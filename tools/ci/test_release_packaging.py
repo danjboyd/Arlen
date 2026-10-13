@@ -68,7 +68,9 @@ class ManagedToolchainEnvTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as base:
             root = self._fake_root(base, managed=True)
             ld = self._ld_path_after_source(root / "System/Library/Makefiles/GNUstep.sh")
-            self.assertEqual(ld, f"{root.resolve()}/lib:/existing")
+            first, rest = ld.split(":", 1)
+            self.assertEqual(Path(first).resolve(), (root / "lib").resolve())
+            self.assertEqual(rest, "/existing")
 
     def test_unmanaged_root_is_left_alone(self):
         with tempfile.TemporaryDirectory() as base:

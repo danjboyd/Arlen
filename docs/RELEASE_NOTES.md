@@ -6,8 +6,9 @@
   and `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`
   installs Arlen to `~/.local/share/arlen/<version>` with an `arlen` launcher
   in `~/.local/bin`. Downloads are checked against `SHA256SUMS`.
-  - Apple Silicon Macs get prebuilt framework tools.
-  - Linux and Intel Macs get a source archive that the installer builds once.
+  - Apple Silicon Macs (macOS 14 or later) get prebuilt framework tools, so
+    nothing is compiled at install time. Intel Macs are not supported yet.
+  - Linux gets a source archive that the installer builds once.
   - On Linux the launcher sets up the GNUstep environment, so there is no
     `source` step.
 
