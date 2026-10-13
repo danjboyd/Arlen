@@ -27,8 +27,9 @@ packages built with GCC will not work.
 If you don't already have one, install the managed toolchain from
 [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
 `~/.local/share/gnustep-cli` and needs no root except for host packages. Its
-toolchains are built for Debian (amd64 and arm64), and Arlen is verified with
-the amd64 one on Debian 13:
+toolchains (gnustep-cli `v0.1.0`) target Debian 13 "trixie" on amd64 and
+arm64. They need ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are not
+covered yet. Arlen is verified with the amd64 toolchain on Debian 13:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh \

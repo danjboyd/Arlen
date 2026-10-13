@@ -18,7 +18,8 @@
 
 - Linux has a public toolchain path. Arlen now works with the
   [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed
-  clang/libobjc2 toolchain, which installs without root. When `/usr/GNUstep`
+  clang/libobjc2 toolchain for Debian 13 (trixie), which installs without
+  root. When `/usr/GNUstep`
   is absent, `tools/source_gnustep_env.sh` finds it under
   `~/.local/share/gnustep-cli` or `/opt/gnustep-cli`, and puts its
   `libdispatch` directory on `LD_LIBRARY_PATH`.

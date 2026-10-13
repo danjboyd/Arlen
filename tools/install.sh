@@ -146,7 +146,7 @@ if [[ $do_build -eq 1 ]]; then
 arlen-install: error: no clang-built GNUstep toolchain was found.
 
 Arlen needs clang + libobjc2 + gnustep-base. The quickest way to get them on
-Debian is the managed toolchain from gnustep-cli (no root needed):
+Debian 13 (trixie) is the managed toolchain from gnustep-cli (no root needed):
 
   curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh | sh -s -- --yes setup --user
 

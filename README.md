@@ -78,7 +78,7 @@ First install your platform's toolchain:
 | **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
-The managed GNUstep toolchain for Linux (Debian, amd64/arm64):
+The managed GNUstep toolchain for Linux (Debian 13 "trixie", amd64/arm64; not Debian 12 or Ubuntu yet):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh \

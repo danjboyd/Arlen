@@ -103,7 +103,9 @@ That helper resolves the active GNUstep shell init path in this order:
    `libdispatch` and GNUstep.sh does not add it.
 
 The gnustep-cli `v0.1.0` managed toolchain (`linux-amd64-clang`, libobjc2 2.3,
-gnustep-base 1.31.1) was verified with Arlen on Debian 13 on 2026-10-13. The
+gnustep-base 1.31.1) was verified with Arlen on Debian 13 on 2026-10-13.
+gnustep-cli scopes its v0.1.0 Linux toolchains to Debian 13 (ICU 76, glibc
+2.41 or newer). Debian 12 and Ubuntu need other toolchain artifacts. The
 check covered bootstrap `setup --user`, `make all`, `arlen new`, and
 `boomhauer` serving `/healthz`. It is the documented public Linux toolchain
 path; see `docs/GETTING_STARTED.md`.
