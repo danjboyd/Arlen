@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-15
+Last updated: 2026-10-13
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -96,6 +96,17 @@ That helper resolves the active GNUstep shell init path in this order:
 3. `gnustep-config --variable=GNUSTEP_MAKEFILES`
 4. `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
 5. `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh`
+6. a gnustep-cli managed toolchain at `~/.local/share/gnustep-cli` or
+   `/opt/gnustep-cli`. When the resolved toolchain is a gnustep-cli root
+   (it has `toolchain-manifest.json`), the helper also prepends `<root>/lib`
+   to `LD_LIBRARY_PATH`, because that is where those toolchains keep
+   `libdispatch` and GNUstep.sh does not add it.
+
+The gnustep-cli `v0.1.0` managed toolchain (`linux-amd64-clang`, libobjc2 2.3,
+gnustep-base 1.31.1) was verified with Arlen on Debian 13 on 2026-10-13. The
+check covered bootstrap `setup --user`, `make all`, `arlen new`, and
+`boomhauer` serving `/healthz`. It is the documented public Linux toolchain
+path; see `docs/GETTING_STARTED.md`.
 
 Contributors who already source a managed toolchain env script can keep doing
 that, as long as it exposes a valid `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
@@ -220,7 +231,9 @@ Linux/GNUstep deploy confidence now validates three layers:
 - app config presence (`config/app.plist`)
 - GNUstep script availability
 - required tool commands (`clang`, `make`, `bash`)
-- recommended tool commands (`xctest`, `python3`, `curl`)
+- test runner: the vendored `tools-xctest` when `vendor/tools-xctest` is
+  present, otherwise `xctest` on `PATH`
+- recommended tool commands (`python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
 - `dispatch/dispatch.h` availability after GNUstep init
 - `libpq` presence check (when `ldconfig` is available)

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Install with one command. Each release now ships downloadable archives,
+  and `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`
+  installs Arlen to `~/.local/share/arlen/<version>` with an `arlen` launcher
+  in `~/.local/bin`. Downloads are checked against `SHA256SUMS`.
+  - Apple Silicon Macs get prebuilt framework tools.
+  - Linux and Intel Macs get a source archive that the installer builds once.
+  - On Linux the launcher sets up the GNUstep environment, so there is no
+    `source` step.
+
+  The new `release-assets` workflow builds the archives and smoke-tests an
+  install from each one. See `docs/GETTING_STARTED.md` and
+  `docs/CLI_REFERENCE.md`.
+
+- Linux has a public toolchain path. Arlen now works with the
+  [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed
+  clang/libobjc2 toolchain, which installs without root. When `/usr/GNUstep`
+  is absent, `tools/source_gnustep_env.sh` finds it under
+  `~/.local/share/gnustep-cli` or `/opt/gnustep-cli`, and puts its
+  `libdispatch` directory on `LD_LIBRARY_PATH`.
+
+- `arlen doctor` no longer warns that `xctest` is missing when the vendored
+  `tools-xctest` runner is present. That runner is what `arlen test` uses.
+
 - Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
   and `build_apple_xctest.sh` record clang depfiles and skip objects whose
   source and headers are unchanged, and skip archiving or linking when no input

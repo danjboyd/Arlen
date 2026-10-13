@@ -2,6 +2,41 @@
 
 This document describes currently implemented command-line interfaces.
 
+## Installer (`tools/install.sh`)
+
+```bash
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+```
+
+The installer downloads a release archive, checks it against the release's
+`SHA256SUMS`, and unpacks it to `<prefix>/<version>`. It then points
+`<prefix>/current` at that version and writes an `arlen` launcher to the bin
+dir.
+
+How it gets the framework tools depends on the platform:
+
+- Apple Silicon: uses the prebuilt `arlen-X.Y.Z-macos-arm64.tar.gz`.
+- Linux: builds `arlen-X.Y.Z.tar.gz` once with `make all`, against the
+  GNUstep that `tools/source_gnustep_env.sh` resolves.
+- Intel Macs: builds the same source archive once with `bin/build-apple`.
+
+On Linux the launcher sources `tools/source_gnustep_env.sh` before running
+`bin/arlen`. Set `ARLEN_HOME` to run a different installed version.
+
+Options:
+
+- `--version X.Y.Z`: release to install (default: latest)
+- `--prefix DIR`: install root (default `~/.local/share/arlen`)
+- `--bin-dir DIR`: launcher directory (default `~/.local/bin`)
+- `--archive FILE`: install a local release archive instead of downloading
+- `--no-build`: unpack only
+
+If no clang-built GNUstep is found on Linux, the installer exits non-zero and
+prints the gnustep-cli managed-toolchain command.
+
+Release archives are produced by `tools/release/package_framework.sh` (see
+`docs/RELEASE_PROCESS.md`).
+
 ## `arlen`
 
 Usage:
@@ -36,7 +71,10 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
 - intended for first-run toolchain validation (GNUstep/tooling presence)
 - resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
- `gnustep-config --variable=GNUSTEP_MAKEFILES`, then `/usr/GNUstep`
+ `gnustep-config --variable=GNUSTEP_MAKEFILES`, `/usr/GNUstep`, then a
+ gnustep-cli managed toolchain (`~/.local/share/gnustep-cli`, `/opt/gnustep-cli`)
+- reports the vendored `tools-xctest` runner as the test runner when
+ `vendor/tools-xctest` is present; otherwise it looks for `xctest` on `PATH`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
  managed toolchains without libdispatch headers fail early
 - `--env <name>`: include the target environment name in output (default `development`)

@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-10-08
+Last updated: 2026-10-13
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -187,6 +187,33 @@ the confidence lane to a required workflow only after it is deliberately added t
 `.github/workflows/`, branch-protection guidance, and the public support
 contract in the same change.
 
+## Release Assets
+
+`release-assets` runs when a release is published, and on demand with
+`workflow_dispatch` (input `tag`, plus `upload` to attach the results). It
+never runs on pull requests, so it is not a merge-gate lane.
+
+- `release-assets / source-archive` (self-hosted `iep-apt` runner) checks the
+  tag against `ALNModuleSystemFrameworkVersion`, builds `arlen-X.Y.Z.tar.gz`
+  with `tools/release/package_framework.sh --kind source`, and installs it
+  with `tools/release/smoke_install.sh`. That script runs `tools/install.sh`,
+  creates an app, and checks that `boomhauer` serves `/healthz` and `/`.
+- `release-assets / macos-arm64-archive` (`macos-15`) builds the prebuilt
+  `arlen-X.Y.Z-macos-arm64.tar.gz` and runs the same install smoke.
+- `release-assets / publish` attaches both archives, `install.sh`, and
+  `SHA256SUMS` to the release. It runs only if both smokes pass.
+
+`linux-quality` runs `tools/ci/test_release_packaging.py`. It checks the
+source archive's layout (one top directory, `.arlen-dist`, vendored
+`tools-xctest`, no `.git` and no `gnustep-cli-new`) and the managed-toolchain
+`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. This is a step
+inside the existing job, so no required check names change.
+
+Linux has no prebuilt archive. The framework's build-flags sentinel hashes
+absolute toolchain paths, and gnustep-cli managed toolchains live under each
+user's home, so `tools/install.sh` builds the source archive once on the
+user's machine instead.
+
 ## Failure Triage And Fast Feedback
 
 The current workflow policy is:
@@ -229,6 +256,7 @@ Use clear workflow filenames that match their actual role:
 - `.github/workflows/apple-baseline.yml`
 - `.github/workflows/windows-preview.yml`
 - `.github/workflows/release-certification.yml`
+- `.github/workflows/release-assets.yml`
 
 The workflow `name:` field should match the filename-level intent. Avoid
 historical phase-number filenames that now launch newer lanes.
@@ -248,6 +276,7 @@ Do not require by default:
 - Windows preview
 - nightly thread-race / experimental lanes
 - release certification
+- release assets
 
 Verified repo state on 2026-04-16:
 

@@ -19,37 +19,77 @@ manifest property names or `objectForColumnName:` with the original SQL name.
 Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
 schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
 
-## 1. Prerequisites
+## 1. Install a clang-built GNUstep Toolchain
 
-- a clang-built GNUstep toolchain
-- `tools-xctest` (`xctest` command)
+Arlen needs clang, the `libobjc2` runtime, and `gnustep-base`. Distro GNUstep
+packages built with GCC will not work.
 
-Initialize GNUstep in your shell. The repo helper also works with managed
-toolchains that expose `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`:
+If you don't already have one, install the managed toolchain from
+[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
+`~/.local/share/gnustep-cli` and needs no root except for host packages. Its
+toolchains are built for Debian (amd64 and arm64), and Arlen is verified with
+the amd64 one on Debian 13:
 
 ```bash
-source /path/to/Arlen/tools/source_gnustep_env.sh
+curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh \
+  | sh -s -- --yes setup --user
 ```
 
-Run the bootstrap diagnostic first:
+`--yes` lets setup install host prerequisites (clang, libcurl, libffi, ICU,
+and so on) with `sudo apt-get`. Leave it off to print the command and run it
+yourself. Arlen's env helper finds this toolchain on its own when
+`/usr/GNUstep` is absent.
+
+If you already have a clang-built GNUstep, for example under `/usr/GNUstep`,
+use it as is. On other distributions, build clang + libobjc2 + GNUstep from
+source with [gnustep/tools-scripts](https://github.com/gnustep/tools-scripts). For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+
+## 2. Install Arlen
+
+### From a release (recommended)
 
 ```bash
-/path/to/Arlen/bin/arlen doctor
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
 ```
 
-If you want structured output for automation:
+The installer:
+
+1. downloads the latest release archive and checks it against `SHA256SUMS`;
+2. unpacks it to `~/.local/share/arlen/<version>`;
+3. builds the framework once against your toolchain, which takes about a
+   minute;
+4. writes an `arlen` launcher to `~/.local/bin`.
+
+The launcher sets up the GNUstep environment by itself, so you don't need to
+source anything. Make sure `~/.local/bin` is on your `PATH`, then check your
+setup:
 
 ```bash
-/path/to/Arlen/bin/arlen doctor --json
+arlen doctor
 ```
 
-For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+Useful installer options:
 
-## 2. Build Arlen
+- `--version X.Y.Z` pins a release.
+- `--prefix DIR` and `--bin-dir DIR` move the install.
+- `--archive FILE` installs an archive you already downloaded.
 
-From repository root:
+To upgrade, rerun the installer. Earlier versions stay under
+`~/.local/share/arlen/`. The launcher follows `current`, so set
+`ARLEN_HOME=~/.local/share/arlen/<version>` to run an older one.
+
+With the installer, every `/path/to/Arlen/bin/arlen` in the rest of this
+guide is just `arlen`.
+
+### From a git checkout
+
+Use a checkout to work on Arlen itself or to track `main`:
 
 ```bash
+git clone --recursive https://github.com/danjboyd/Arlen.git
+cd Arlen
+source tools/source_gnustep_env.sh
+./bin/arlen doctor
 make all
 ```
 
@@ -58,6 +98,12 @@ This builds the main tools you will use first:
 - `build/arlen`
 - `build/boomhauer`
 - `build/eocc`
+
+If you want structured doctor output for automation:
+
+```bash
+/path/to/Arlen/bin/arlen doctor --json
+```
 
 ## 3. Create Your First App
 
