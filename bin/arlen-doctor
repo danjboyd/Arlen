@@ -169,7 +169,8 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
   if phase39_config_blob | grep -Eq 'durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
     phase39_has_durable_state=1
   fi
-  if [[ -n "${ARLEN_STATE_DURABLE:-}" && "${ARLEN_STATE_DURABLE,,}" =~ ^(1|yes|true)$ ]]; then
+  phase39_state_durable="$(printf '%s' "${ARLEN_STATE_DURABLE:-}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$phase39_state_durable" =~ ^(1|yes|true)$ ]]; then
     phase39_has_durable_state=1
   fi
 
