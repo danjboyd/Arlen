@@ -68,7 +68,17 @@ curl -fsS --max-time 5 "http://127.0.0.1:$port/" | grep -q "Welcome to Arlen" ||
   exit 1
 }
 
-if grep -q "building framework artifacts" "$work/boomhauer.log"; then
+install_root="$work/arlen/current"
+kind="$(awk -F= '$1 == "kind" {print $2}' "$install_root/.arlen-dist")"
+if [[ "$kind" == "macos-arm64" ]]; then
+  # build-apple removes the manifest and creates build/apple/obj when it
+  # stops trusting the prebuilt tools and rebuilds them.
+  if [[ ! -f "$install_root/build/apple/.release-prebuilt" || -d "$install_root/build/apple/obj" ]]; then
+    echo "smoke_install: the prebuilt Apple framework tools were rebuilt after install" >&2
+    cat "$work/boomhauer.log" >&2
+    exit 1
+  fi
+elif grep -q "building framework artifacts" "$work/boomhauer.log"; then
   echo "smoke_install: note: boomhauer rebuilt framework artifacts after install"
 fi
 

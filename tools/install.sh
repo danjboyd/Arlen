@@ -14,9 +14,9 @@
 # Linux:  the archive is built once against your clang-built GNUstep
 #         toolchain (about a minute). See docs/GETTING_STARTED.md for getting
 #         that toolchain.
-# macOS:  Apple Silicon gets prebuilt framework tools. Intel Macs build from
-#         source. Both need the Xcode Command Line Tools and Homebrew
-#         openssl@3; see docs/GETTING_STARTED_MACOS.md.
+# macOS:  Apple Silicon only; gets prebuilt framework tools. Needs the Xcode
+#         Command Line Tools and Homebrew openssl@3 and libpq; see
+#         docs/GETTING_STARTED_MACOS.md. Intel Macs are not supported yet.
 #
 # Must stay bash 3.2 compatible (macOS /bin/bash).
 set -euo pipefail
@@ -60,7 +60,13 @@ case "$os" in
   *) die "unsupported OS '$os'. Windows uses the CLANG64 preview path: docs/WINDOWS_CLANG64.md" ;;
 esac
 
-# Apple Silicon gets the prebuilt archive; everything else builds the source one.
+# The Apple build scripts target arm64 only (-arch arm64), so Intel Macs are
+# not supported yet.
+if [[ "$platform" == "macos" && "$arch" != "arm64" ]]; then
+  die "macOS on $arch is not supported; Arlen's Apple build targets Apple Silicon (arm64) only"
+fi
+
+# Apple Silicon gets the prebuilt archive; Linux builds the source one.
 if [[ "$platform" == "macos" && "$arch" == "arm64" ]]; then
   asset_suffix="-macos-arm64"
   prebuilt=1

@@ -2,6 +2,44 @@
 
 This guide is the closed Apple-runtime baseline for Arlen on macOS.
 
+## Install a Release
+
+On Apple Silicon, the release installer unpacks prebuilt framework tools
+(`arlen`, `boomhauer`, `eocc`, and `libArlenFramework.a`), so nothing in the
+framework is compiled at install time. Your apps are still compiled on your
+Mac, so you need:
+
+- Xcode Command Line Tools (`xcode-select --install`). Full Xcode is needed
+  only for `arlen test`, which runs Apple XCTest.
+- Homebrew `openssl@3` and `libpq` (`brew install openssl@3 libpq`), at the
+  default `/opt/homebrew` prefix. The prebuilt tools link against that
+  OpenSSL.
+- macOS 14 or later.
+
+```bash
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+arlen doctor
+arlen new MyApp && cd MyApp && arlen boomhauer --port 3000
+```
+
+The installer verifies the download against the release's `SHA256SUMS`,
+unpacks it to `~/.local/share/arlen/<version>`, points
+`~/.local/share/arlen/current` at it, and writes an `arlen` launcher to
+`~/.local/bin`. The launcher sets `ARLEN_FRAMEWORK_ROOT` to the install, so
+apps can live anywhere. Run `install.sh --help` for the prefix and version
+options. If you downloaded the archive with a browser, pass it with
+`--archive`; the installer clears the quarantine flag.
+
+The prebuilt tools stay in use while the installed framework sources and the
+OpenSSL location match the release. If you edit the installed sources, or
+OpenSSL moves, `build-apple` rebuilds the framework once with your toolchain
+(about 20 seconds) and builds incrementally from then on.
+
+Intel Macs are not supported yet: the Apple build scripts target arm64 only.
+
+To work from a source checkout instead, which you need in order to change the
+framework or run its test suites, follow the sections below.
+
 ## 1. Prerequisites
 
 - macOS with full Xcode installed and selected as the active developer
