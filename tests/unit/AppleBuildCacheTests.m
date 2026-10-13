@@ -102,4 +102,32 @@
 #endif
 }
 
+- (void)testReleasePrebuiltManifestTrustsMatchingSources {
+#if defined(__APPLE__)
+  NSString *output = [self runCacheScript:
+      @"mkdir -p src build/apple; echo one > src/a.m; touch build/apple/arlen\n"
+      @"check() { if aln_apple_release_prebuilt_is_current . \"$2\" build/apple/arlen; then echo \"$1=trusted\"; else echo \"$1=rebuild\"; fi; }\n"
+      @"check no-manifest /opt/ssl\n"
+      @"aln_apple_release_write_manifest . /opt/ssl\n"
+      @"check matching /opt/ssl\n"
+      @"check openssl-moved /opt/other\n"
+      @"[[ -f build/apple/.release-prebuilt ]] || echo stale-manifest=removed\n"
+      @"aln_apple_release_write_manifest . /opt/ssl\n"
+      @"echo two > src/a.m\n"
+      @"check source-edited /opt/ssl\n"
+      @"echo one > src/a.m\n"
+      @"check source-restored /opt/ssl\n"
+      @"aln_apple_release_write_manifest . /opt/ssl; rm build/apple/arlen\n"
+      @"check output-missing /opt/ssl\n"];
+  XCTAssertEqualObjects(@"no-manifest=rebuild\n"
+                        @"matching=trusted\n"
+                        @"openssl-moved=rebuild\n"
+                        @"stale-manifest=removed\n"
+                        @"source-edited=rebuild\n"
+                        @"source-restored=rebuild\n"
+                        @"output-missing=rebuild\n",
+                        output);
+#endif
+}
+
 @end

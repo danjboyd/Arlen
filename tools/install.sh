@@ -169,6 +169,9 @@ cat >"$launcher" <<EOF
 #!/usr/bin/env bash
 # Installed by Arlen's tools/install.sh. Set ARLEN_HOME to use another install.
 arlen_home="\${ARLEN_HOME:-$prefix/current}"
+# Apps live outside the install, so arlen cannot find the framework by walking
+# up from the app directory.
+export ARLEN_FRAMEWORK_ROOT="\${ARLEN_FRAMEWORK_ROOT:-\$arlen_home}"
 if [[ "\$(uname -s)" != "Darwin" ]]; then
   # shellcheck disable=SC1091
   source "\$arlen_home/tools/source_gnustep_env.sh" >/dev/null || exit 1
