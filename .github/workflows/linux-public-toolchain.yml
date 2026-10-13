@@ -30,14 +30,17 @@ env:
 
 jobs:
   public-toolchain:
-    name: linux-public-toolchain / ${{ matrix.image }}
-    runs-on: ubuntu-latest
+    name: linux-public-toolchain / ${{ matrix.image }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        image: ["debian:13", "ubuntu:26.04"]
+        include:
+          - { image: "debian:13", arch: amd64, runner: ubuntu-latest }
+          - { image: "debian:13", arch: arm64, runner: ubuntu-24.04-arm }
+          - { image: "ubuntu:26.04", arch: amd64, runner: ubuntu-latest }
     steps:
       - name: Install base packages
         run: |

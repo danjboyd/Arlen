@@ -114,15 +114,15 @@ gnustep-cli builds a toolchain per distribution:
 
 | Distribution | Toolchain target | ICU | glibc | clang |
 |---|---|---|---|---|
-| Debian 13 | `linux-amd64-clang` | 76 | 2.41 | 19 |
+| Debian 13 (amd64) | `linux-amd64-clang` | 76 | 2.41 | 19 |
+| Debian 13 (arm64) | `linux-arm64-clang` | 76 | 2.41 | 19 |
 | Ubuntu 26.04 LTS | `linux-ubuntu2604-amd64-clang` | 78 | 2.43 | 21 |
 
 Both are verified with Arlen by the `linux-public-toolchain` CI lane, which
-runs in clean containers. Debian 12, Ubuntu 24.04, and arm64 have not been
-verified with Arlen. Besides the toolchain's own host prerequisites, Arlen
+runs in clean containers (arm64 on a GitHub arm runner). Debian 12,
+Ubuntu 24.04, and Ubuntu arm64 have not been verified with Arlen. Besides the toolchain's own host prerequisites, Arlen
 needs `libssl-dev`. The GnuTLS libcurl that the toolchain installs
-(`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. `gnustep --version` still prints `0.1.0-dev` on the stable install,
-which is a known gnustep-cli labeling issue. The
+(`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. The
 check covered bootstrap `setup --user`, `make all`, `arlen new`, and
 `boomhauer` serving `/healthz`. It is the documented public Linux toolchain
 path; see `docs/GETTING_STARTED.md`.
