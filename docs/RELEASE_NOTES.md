@@ -90,6 +90,15 @@
   retried; a new `linux-quality` check keeps `-retry-tests-on-failure` out of
   the build and CI wiring.
 
+- `propane` and `jobs-worker` no longer run a stale app binary from a
+  built source checkout. A built checkout also has `build/arlen`, so the
+  launchers treated it as a packaged release and ran whatever
+  `.boomhauer/build/boomhauer-app` an earlier build had left. That meant code
+  changes did not take effect until boomhauer was rerun. Only a framework root
+  without `GNUmakefile` and `src/Arlen` counts as a packaged release now;
+  packaged releases from `arlen deploy push` still run their shipped binary
+  (GitHub issue 150).
+
 ## 0.1.0 — 2026-10-07
 
 First tagged release. [Status](STATUS.md) describes everything this release
