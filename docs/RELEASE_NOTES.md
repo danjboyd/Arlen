@@ -19,13 +19,22 @@
 - Linux has a public toolchain path. Arlen now works with the
   [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed
   clang/libobjc2 toolchain for Debian 13 (trixie), which installs without
-  root. When `/usr/GNUstep`
-  is absent, `tools/source_gnustep_env.sh` finds it under
+  root. When `/usr/GNUstep` is absent, `tools/source_gnustep_env.sh` finds it
+  under
   `~/.local/share/gnustep-cli` or `/opt/gnustep-cli`, and puts its
   `libdispatch` directory on `LD_LIBRARY_PATH`.
 
 - `arlen doctor` no longer warns that `xctest` is missing when the vendored
   `tools-xctest` runner is present. That runner is what `arlen test` uses.
+
+- `propane` and `jobs-worker` run on macOS. They build with the Apple
+  toolchain instead of `make` and run the app from
+  `.boomhauer/apple/boomhauer-app`, and `propane`'s FD-pressure checks use
+  `lsof` where `/proc` is missing. `propane`, `jobs-worker` and `arlen doctor`
+  no longer use bash 4 syntax that macOS `/bin/bash` 3.2 rejects: `${var,,}`,
+  a heredoc inside `< <(...)`, and expanding empty arrays under `set -u`.
+  Before, `propane` aborted at startup on macOS. `ShellPortabilityTests` guards the scripts that run on
+  macOS against those constructs (GitHub issue 144).
 
 - Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
   and `build_apple_xctest.sh` record clang depfiles and skip objects whose
