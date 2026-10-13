@@ -95,12 +95,36 @@ package_macos_arm64() {
     echo "package_framework: macos-arm64 archives must be built on an arm64 Mac" >&2
     return 1
   fi
-  stage_source_tree "$stage_root/arlen-$version"
-  # Apple prebuilt staging is owned by the macOS release work: build
-  # build/apple inside the staged tree and record the prebuilt manifest that
-  # bin/build-apple trusts.
-  echo "package_framework: macos-arm64 packaging is not implemented yet" >&2
-  return 1
+  local dest="$stage_root/arlen-$version"
+  stage_source_tree "$dest"
+
+  # Build inside the staged tree so the archive matches its own sources.
+  # Target macOS 14 so archives built on newer runners still run on Sonoma.
+  echo "package_framework: building build/apple (bin/build-apple --with-boomhauer)"
+  MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}" \
+    "$dest/bin/build-apple" --with-boomhauer >"$stage_root/build-apple.log" 2>&1 || {
+    tail -50 "$stage_root/build-apple.log" >&2
+    echo "package_framework: bin/build-apple failed" >&2
+    return 1
+  }
+  if [[ ! -x "$dest/build/apple/boomhauer" ]]; then
+    echo "package_framework: bin/build-apple did not produce build/apple/boomhauer" >&2
+    return 1
+  fi
+
+  # Objects, depfiles, and generated template sources only serve incremental
+  # rebuilds, and their recorded paths point into this staging directory.
+  rm -rf "$dest/build/apple/obj" "$dest/build/apple/gen"
+
+  # shellcheck source=tools/platform.sh
+  source "$dest/tools/platform.sh"
+  # shellcheck source=tools/apple_build_cache.sh
+  source "$dest/tools/apple_build_cache.sh"
+  local openssl_prefix="${ARLEN_OPENSSL_PREFIX:-}"
+  if [[ -z "$openssl_prefix" ]]; then
+    openssl_prefix="$(aln_platform_first_brew_prefix openssl@3)"
+  fi
+  aln_apple_release_write_manifest "$dest" "$openssl_prefix"
 }
 
 case "$kind" in

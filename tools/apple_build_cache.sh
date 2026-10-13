@@ -109,3 +109,57 @@ aln_apple_reset_generated_if_stale() {
   rm -rf "$gen_dir"
   mkdir -p "$gen_dir"
 }
+
+# Release archives (tools/release/package_framework.sh --kind macos-arm64)
+# ship build/apple prebuilt plus build/apple/.release-prebuilt. The recorded
+# depfiles, link manifests, and flag fingerprint carry the packaging machine's
+# absolute paths and SDK, so the checks above would rebuild everything after
+# the archive is unpacked elsewhere. Instead the prebuilt outputs are trusted
+# while the framework sources and the OpenSSL location still match.
+
+# aln_apple_release_source_digest <repo_root>
+# SHA-256 over the contents of every input to build-apple.
+aln_apple_release_source_digest() {
+  (
+    cd "$1" &&
+      find src modules templates \
+        tools/eocc.m tools/arlen.m tools/boomhauer.m tools/apple_auth_audit.m \
+        tools/build_apple.sh tools/apple_build_cache.sh \
+        -type f 2>/dev/null |
+      LC_ALL=C sort | tr '\n' '\0' | xargs -0 shasum -a 256 | shasum -a 256 | awk '{print $1}'
+  )
+}
+
+# aln_apple_release_manifest_value <manifest> <key>
+aln_apple_release_manifest_value() {
+  awk -F= -v key="$2" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$1"
+}
+
+# aln_apple_release_write_manifest <repo_root> <openssl_prefix>
+aln_apple_release_write_manifest() {
+  local root="$1"
+  {
+    printf 'source_digest=%s\n' "$(aln_apple_release_source_digest "$root")"
+    printf 'openssl_prefix=%s\n' "$2"
+  } >"$root/build/apple/.release-prebuilt"
+}
+
+# aln_apple_release_prebuilt_is_current <repo_root> <openssl_prefix> <output...>
+# True when the release manifest matches and every output exists. A stale
+# manifest is removed, so later builds use the normal incremental checks.
+aln_apple_release_prebuilt_is_current() {
+  local root="$1"
+  local openssl_prefix="$2"
+  shift 2
+  local manifest="$root/build/apple/.release-prebuilt"
+  [[ -f "$manifest" ]] || return 1
+  local output
+  for output in "$@"; do
+    [[ -x "$output" || -f "$output" ]] || { rm -f "$manifest"; return 1; }
+  done
+  if [[ "$(aln_apple_release_manifest_value "$manifest" openssl_prefix)" != "$openssl_prefix" ||
+        "$(aln_apple_release_manifest_value "$manifest" source_digest)" != "$(aln_apple_release_source_digest "$root")" ]]; then
+    rm -f "$manifest"
+    return 1
+  fi
+}

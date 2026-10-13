@@ -58,6 +58,20 @@ build_root="$repo_root/build/apple"
 obj_root="$build_root/obj"
 lib_root="$build_root/lib"
 gen_root="$build_root/gen/templates"
+
+release_outputs=(
+  "$build_root/eocc"
+  "$build_root/lib/libArlenFramework.a"
+  "$build_root/arlen"
+  "$build_root/apple-auth-audit"
+)
+if [[ $with_boomhauer -eq 1 ]]; then
+  release_outputs+=("$build_root/boomhauer")
+fi
+if aln_apple_release_prebuilt_is_current "$repo_root" "$openssl_prefix" "${release_outputs[@]}"; then
+  echo "build-apple: using prebuilt release artifacts in $build_root"
+  exit 0
+fi
 mkdir -p "$build_root" "$obj_root" "$lib_root" "$gen_root"
 
 common_flags=(
