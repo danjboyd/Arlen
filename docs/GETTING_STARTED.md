@@ -29,18 +29,25 @@ If you don't already have one, install the managed toolchain from
 `~/.local/share/gnustep-cli` and needs no root except for host packages.
 
 The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
-the release's signature. Arlen is verified with it on Debian 13 "trixie"
-amd64. The toolchain needs ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are
-not covered yet, and arm64 is untested with Arlen.
+the release's signature. Arlen is verified with it on amd64 for:
+
+- Debian 13 "trixie"
+- Ubuntu 26.04 LTS "resolute"
+
+Each distribution gets its own toolchain build. Debian 12, Ubuntu 24.04, and
+arm64 are not covered yet.
 
 ```bash
 curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
   | sh -s -- --yes setup --user
+sudo apt-get install -y libssl-dev
 ```
 
 `--yes` lets setup install host prerequisites (clang, libcurl, libffi, ICU,
 and so on) with `sudo apt-get`. Leave it off to print the command and run it
-yourself. Arlen's env helper finds this toolchain on its own when
+yourself. Arlen also needs the OpenSSL development package (`libssl-dev`),
+which the toolchain does not install. To use PostgreSQL, install the client
+library too (`libpq5`, or `libpq-dev` for the headers). Arlen's env helper finds this toolchain on its own when
 `/usr/GNUstep` is absent.
 
 If you already have a clang-built GNUstep, for example under `/usr/GNUstep`,
@@ -270,7 +277,7 @@ framework tests require no tenant or public deployment.
 OAuth metadata requests use certificate-chain and hostname verification with a 256 KiB response
 limit, a five-second total deadline per document, and redirect/non-200 rejection.
 GNUstep uses a bounded libcurl transport (development headers/library with TLS
-and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
+and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev` or `libcurl4-gnutls-dev`). This works
 on startup and maintenance threads without pumping application run-loop callbacks.
 Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
 not GNUstep TLS user defaults. The general-purpose `ALNSynchronousURLRequest` helper

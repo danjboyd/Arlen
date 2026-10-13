@@ -79,12 +79,14 @@ First install your platform's toolchain:
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
 The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
-verified with it on Debian 13 "trixie" amd64; Debian 12, Ubuntu, and arm64 are
-not covered yet:
+verified with it on **Debian 13** and **Ubuntu 26.04 LTS** (amd64). Debian 12,
+Ubuntu 24.04, and arm64 are not covered yet. Install it, plus the OpenSSL
+headers Arlen links against:
 
 ```bash
 curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
   | sh -s -- --yes setup --user
+sudo apt-get install -y libssl-dev
 ```
 
 Releases unpack to `~/.local/share/arlen/<version>`. Every download is checked

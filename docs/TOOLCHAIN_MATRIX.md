@@ -108,10 +108,20 @@ build) was verified with Arlen on Debian 13 amd64 on 2026-10-13. Install it
 with the release-asset bootstrap,
 `https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh`.
 That script verifies the production-signed manifest. The raw script at the
-repo's `v0.1.0` tag installs the `0.1.0-dev` prerelease instead. The toolchain
-needs ICU 76 and glibc 2.41 or newer, which means Debian 13; Debian 12 and
-Ubuntu need other toolchain artifacts, and arm64 has not been verified with
-Arlen. `gnustep --version` still prints `0.1.0-dev` on the stable install,
+repo's `v0.1.0` tag installs the `0.1.0-dev` prerelease instead.
+
+gnustep-cli builds a toolchain per distribution:
+
+| Distribution | Toolchain target | ICU | glibc | clang |
+|---|---|---|---|---|
+| Debian 13 | `linux-amd64-clang` | 76 | 2.41 | 19 |
+| Ubuntu 26.04 LTS | `linux-ubuntu2604-amd64-clang` | 78 | 2.43 | 21 |
+
+Both are verified with Arlen by the `linux-public-toolchain` CI lane, which
+runs in clean containers. Debian 12, Ubuntu 24.04, and arm64 have not been
+verified with Arlen. Besides the toolchain's own host prerequisites, Arlen
+needs `libssl-dev`. The GnuTLS libcurl that the toolchain installs
+(`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. `gnustep --version` still prints `0.1.0-dev` on the stable install,
 which is a known gnustep-cli labeling issue. The
 check covered bootstrap `setup --user`, `make all`, `arlen new`, and
 `boomhauer` serving `/healthz`. It is the documented public Linux toolchain
