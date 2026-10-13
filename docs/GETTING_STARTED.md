@@ -29,13 +29,13 @@ If you don't already have one, install the managed toolchain from
 `~/.local/share/gnustep-cli` and needs no root except for host packages.
 
 The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
-the release's signature. Arlen is verified with it on amd64 for:
+the release's signature. Arlen is verified with it on:
 
-- Debian 13 "trixie"
-- Ubuntu 26.04 LTS "resolute"
+- Debian 13 "trixie", amd64 and arm64
+- Ubuntu 26.04 LTS "resolute", amd64
 
 Each distribution gets its own toolchain build. Debian 12, Ubuntu 24.04, and
-arm64 are not covered yet.
+Ubuntu on arm64 are not covered yet.
 
 ```bash
 curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \

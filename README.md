@@ -79,8 +79,8 @@ First install your platform's toolchain:
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
 The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
-verified with it on **Debian 13** and **Ubuntu 26.04 LTS** (amd64). Debian 12,
-Ubuntu 24.04, and arm64 are not covered yet. Install it, plus the OpenSSL
+verified with it on **Debian 13** (amd64 and arm64) and **Ubuntu 26.04 LTS**
+(amd64). Debian 12, Ubuntu 24.04, and Ubuntu on arm64 are not covered yet. Install it, plus the OpenSSL
 headers Arlen links against:
 
 ```bash

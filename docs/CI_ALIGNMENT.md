@@ -217,7 +217,8 @@ user's machine instead.
 ## Public Linux Toolchain
 
 `linux-public-toolchain` runs the README's Linux install path in clean
-`debian:13` and `ubuntu:26.04` containers on GitHub-hosted runners. Each job
+containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
+(`ubuntu-24.04-arm`), and `ubuntu:26.04` on amd64. Each job
 creates an unprivileged user and installs the gnustep-cli managed toolchain
 with its `v0.1.0` release bootstrap. It then packages a source archive and runs
 `tools/release/smoke_install.sh`. The container has no `/usr/GNUstep`, so the

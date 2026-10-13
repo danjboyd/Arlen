@@ -19,8 +19,9 @@
 - Linux has a public toolchain path. Arlen now works with the
   [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed
   clang/libobjc2 toolchain (stable `v0.1.0`), which installs without root.
-  Arlen is verified with it on Debian 13 and Ubuntu 26.04 LTS (amd64); the
-  new `linux-public-toolchain` CI lane checks both in clean containers. When
+  Arlen is verified with it on Debian 13 (amd64 and arm64) and Ubuntu 26.04
+  LTS (amd64). The new `linux-public-toolchain` CI lane checks all three in
+  clean containers. When
   `/usr/GNUstep` is absent, `tools/source_gnustep_env.sh` finds the toolchain
   under `~/.local/share/gnustep-cli` or `/opt/gnustep-cli`, and puts its
   `libdispatch` directory on `LD_LIBRARY_PATH`.
