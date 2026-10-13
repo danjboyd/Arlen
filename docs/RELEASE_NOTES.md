@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `propane` and `jobs-worker` run on macOS. They build with the Apple
+  toolchain instead of `make` and run the app from
+  `.boomhauer/apple/boomhauer-app`, and `propane`'s FD-pressure checks use
+  `lsof` where `/proc` is missing. `propane`, `jobs-worker` and `arlen doctor`
+  no longer use bash 4 syntax that macOS `/bin/bash` 3.2 rejects: `${var,,}`,
+  a heredoc inside `< <(...)`, and expanding empty arrays under `set -u`.
+  Before, `propane` aborted at startup on macOS. `ShellPortabilityTests` guards the scripts that run on
+  macOS against those constructs (GitHub issue 144).
+
 - Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
   and `build_apple_xctest.sh` record clang depfiles and skip objects whose
   source and headers are unchanged, and skip archiving or linking when no input
