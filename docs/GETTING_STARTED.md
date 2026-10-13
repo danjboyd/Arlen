@@ -26,10 +26,13 @@ packages built with GCC will not work.
 
 If you don't already have one, install the managed toolchain from
 [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
-`~/.local/share/gnustep-cli` and needs no root except for host packages. Its
-toolchains (gnustep-cli `v0.1.0`) target Debian 13 "trixie" on amd64 and
-arm64. They need ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are not
-covered yet. Arlen is verified with the amd64 toolchain on Debian 13:
+`~/.local/share/gnustep-cli` and needs no root except for host packages.
+
+This path is **early**. The bootstrap command below installs gnustep-cli's
+`0.1.0-dev` prerelease toolchain. Arlen is verified with it on Debian 13
+"trixie" amd64. It needs ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are
+not covered, and arm64 is untested with Arlen. Use the command exactly as
+shown; don't add a `--manifest` option.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh \
