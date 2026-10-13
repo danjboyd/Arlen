@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
+  without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
+  runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit
+  bundle, and `routes` runs `bin/boomhauer --print-routes`. `arlen test --app`
+  builds the app's tests into `.boomhauer/apple/tests/AppTests.xctest` with the
+  new `tools/build_apple_app.sh --build-tests` and runs them with
+  `xcrun xctest`. `build`/`check` JSON payloads add `toolchain`. `arlen perf`
+  and `arlen test --integration` exit `2` on macOS with a GNUstep-only message
+  instead of failing inside `make` (GitHub issue 146).
 - `propane` and `jobs-worker` run on macOS. They build with the Apple
   toolchain instead of `make` and run the app from
   `.boomhauer/apple/boomhauer-app`, and `propane`'s FD-pressure checks use
