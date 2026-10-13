@@ -1,0 +1,72 @@
+name: linux-public-toolchain
+
+# Runs the README's public Linux install path in clean containers: install the
+# gnustep-cli managed toolchain with its release bootstrap, then install Arlen
+# from a source archive with tools/install.sh and serve a new app. It runs as
+# an ordinary user with no /usr/GNUstep, so Arlen must find the managed
+# toolchain on its own. It is not a merge-gate lane; see docs/CI_ALIGNMENT.md.
+
+on:
+  pull_request:
+    paths:
+      - "tools/install.sh"
+      - "tools/release/**"
+      - "tools/source_gnustep_env.sh"
+      - "tools/resolve_gnustep.sh"
+      - "GNUmakefile"
+      - ".github/workflows/linux-public-toolchain.yml"
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GNUSTEP_CLI_BOOTSTRAP_URL: https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh
+
+jobs:
+  public-toolchain:
+    name: linux-public-toolchain / ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:13", "ubuntu:26.04"]
+    steps:
+      - name: Install base packages
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git make python3 sudo libssl-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create an unprivileged user
+        run: |
+          useradd --create-home --shell /bin/bash arlen
+          echo 'arlen ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/arlen
+          git config --system --add safe.directory '*'
+          chown -R arlen:arlen "$GITHUB_WORKSPACE"
+
+      - name: Install the gnustep-cli managed toolchain
+        run: |
+          sudo -u arlen -H bash -c 'set -euo pipefail; cd ~; curl -fsSL "$0" -o gnustep-bootstrap.sh; sh gnustep-bootstrap.sh --yes setup --user' \
+            "$GNUSTEP_CLI_BOOTSTRAP_URL"
+
+      - name: Package Arlen and smoke-test the install
+        run: |
+          sudo -u arlen -H bash -c 'set -euo pipefail
+            cd "$0"
+            test ! -e /usr/GNUstep
+            bash tools/release/package_framework.sh --version 0.0.0 --kind source --out "$HOME/dist"
+            bash tools/release/smoke_install.sh "$HOME/dist/arlen-0.0.0.tar.gz"' \
+            "$GITHUB_WORKSPACE"

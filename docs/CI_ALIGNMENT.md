@@ -214,6 +214,20 @@ absolute toolchain paths, and gnustep-cli managed toolchains live under each
 user's home, so `tools/install.sh` builds the source archive once on the
 user's machine instead.
 
+## Public Linux Toolchain
+
+`linux-public-toolchain` runs the README's Linux install path in clean
+`debian:13` and `ubuntu:26.04` containers on GitHub-hosted runners. Each job
+creates an unprivileged user and installs the gnustep-cli managed toolchain
+with its `v0.1.0` release bootstrap. It then packages a source archive and runs
+`tools/release/smoke_install.sh`. The container has no `/usr/GNUstep`, so the
+job also checks that Arlen finds the managed toolchain on its own.
+
+It runs on pull requests that touch the installer, packaging, GNUstep env
+helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
+a merge-gate lane; the self-hosted lanes stay the authoritative Linux
+baseline.
+
 ## Failure Triage And Fast Feedback
 
 The current workflow policy is:
@@ -257,6 +271,7 @@ Use clear workflow filenames that match their actual role:
 - `.github/workflows/windows-preview.yml`
 - `.github/workflows/release-certification.yml`
 - `.github/workflows/release-assets.yml`
+- `.github/workflows/linux-public-toolchain.yml`
 
 The workflow `name:` field should match the filename-level intent. Avoid
 historical phase-number filenames that now launch newer lanes.
@@ -277,6 +292,7 @@ Do not require by default:
 - nightly thread-race / experimental lanes
 - release certification
 - release assets
+- linux public toolchain
 
 Verified repo state on 2026-04-16:
 
