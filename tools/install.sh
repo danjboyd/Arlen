@@ -148,7 +148,7 @@ arlen-install: error: no clang-built GNUstep toolchain was found.
 Arlen needs clang + libobjc2 + gnustep-base. The quickest way to get them on
 Debian 13 (trixie) is the managed toolchain from gnustep-cli (no root needed):
 
-  curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh | sh -s -- --yes setup --user
+  curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh | sh -s -- --yes setup --user
 
 Then rerun this installer. Arlen $version is unpacked at $dest; to finish by
 hand, run: $dest/bin/arlen doctor

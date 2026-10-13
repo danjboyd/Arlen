@@ -102,15 +102,17 @@ That helper resolves the active GNUstep shell init path in this order:
    to `LD_LIBRARY_PATH`, because that is where those toolchains keep
    `libdispatch` and GNUstep.sh does not add it.
 
-A gnustep-cli managed toolchain (`linux-amd64-clang`, libobjc2 2.3,
-gnustep-base 1.31.1) was verified with Arlen on Debian 13 amd64 on 2026-10-13.
-The bootstrap script at gnustep-cli's `v0.1.0` tag sets
-`CLI_VERSION="0.1.0-dev"`, so it installs the `0.1.0-dev` prerelease
-artifacts. On amd64, the stable `v0.1.0` manifest still points at an older
-Debian 12 toolchain build that does not run on Debian 13. Do not document
-`--manifest .../v0.1.0/...` until gnustep-cli republishes it. These toolchains
-need ICU 76 and glibc 2.41 or newer, which means Debian 13; Debian 12 and
-Ubuntu need other toolchain artifacts. The
+The gnustep-cli stable `v0.1.0` managed toolchain (`linux-amd64-clang`,
+libobjc2 2.3, gnustep-base 1.31.1, republished 2026-10-13 as a Debian 13
+build) was verified with Arlen on Debian 13 amd64 on 2026-10-13. Install it
+with the release-asset bootstrap,
+`https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh`.
+That script verifies the production-signed manifest. The raw script at the
+repo's `v0.1.0` tag installs the `0.1.0-dev` prerelease instead. The toolchain
+needs ICU 76 and glibc 2.41 or newer, which means Debian 13; Debian 12 and
+Ubuntu need other toolchain artifacts, and arm64 has not been verified with
+Arlen. `gnustep --version` still prints `0.1.0-dev` on the stable install,
+which is a known gnustep-cli labeling issue. The
 check covered bootstrap `setup --user`, `make all`, `arlen new`, and
 `boomhauer` serving `/healthz`. It is the documented public Linux toolchain
 path; see `docs/GETTING_STARTED.md`.

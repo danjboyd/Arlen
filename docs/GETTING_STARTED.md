@@ -28,14 +28,13 @@ If you don't already have one, install the managed toolchain from
 [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
 `~/.local/share/gnustep-cli` and needs no root except for host packages.
 
-This path is **early**. The bootstrap command below installs gnustep-cli's
-`0.1.0-dev` prerelease toolchain. Arlen is verified with it on Debian 13
-"trixie" amd64. It needs ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are
-not covered, and arm64 is untested with Arlen. Use the command exactly as
-shown; don't add a `--manifest` option.
+The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
+the release's signature. Arlen is verified with it on Debian 13 "trixie"
+amd64. The toolchain needs ICU 76 and glibc 2.41, so Debian 12 and Ubuntu are
+not covered yet, and arm64 is untested with Arlen.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.sh \
+curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
   | sh -s -- --yes setup --user
 ```
 
