@@ -51,9 +51,21 @@ if [[ -f "$clang64_gnustep_sh" ]]; then
   exit 0
 fi
 
-print_path "$default_gnustep_sh"
 if [[ -f "$default_gnustep_sh" ]]; then
+  print_path "$default_gnustep_sh"
   exit 0
 fi
+
+# Managed toolchains installed by gnustep-cli (`gnustep setup --user` or
+# `--system`), used when there is no /usr/GNUstep toolchain.
+for managed_root in "${HOME:-}/.local/share/gnustep-cli" /opt/gnustep-cli; do
+  candidate="$managed_root/System/Library/Makefiles/GNUstep.sh"
+  if [[ -n "$managed_root" && -f "$candidate" ]]; then
+    print_path "$candidate"
+    exit 0
+  fi
+done
+
+print_path "$default_gnustep_sh"
 
 exit 1
