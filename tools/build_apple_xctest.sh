@@ -6,6 +6,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 
 # shellcheck source=tools/platform.sh
 source "$script_dir/platform.sh"
+# shellcheck source=tools/apple_build_cache.sh
+source "$script_dir/apple_build_cache.sh"
 
 if ! aln_platform_is_macos; then
   echo "build-apple-xctest: this helper only supports macOS" >&2
@@ -50,8 +52,8 @@ if ! command -v xcrun >/dev/null 2>&1; then
   exit 1
 fi
 
-sdk_path="$(xcrun --show-sdk-path)"
-platform_path="$(xcrun --show-sdk-platform-path)"
+sdk_path="$(aln_apple_sdk_path)"
+platform_path="$(cd "$(xcrun --show-sdk-platform-path)" && pwd -P)"
 clang_path="$(xcrun --find clang)"
 framework_dir="$platform_path/Developer/Library/Frameworks"
 
@@ -76,7 +78,7 @@ framework_lib="$build_root/lib/libArlenFramework.a"
 eocc_bin="$build_root/eocc"
 generated_root="$build_root/gen/templates"
 module_generated_root="$build_root/gen/apple-test-modules"
-mkdir -p "$tests_root" "$obj_root" "$bundle_root/Contents/MacOS"
+mkdir -p "$tests_root" "$obj_root"
 
 ensure_wrapper() {
   local target="$1"
@@ -155,6 +157,9 @@ link_flags=(
   -lcrypto
 )
 
+aln_apple_reset_on_flag_change "$obj_root" "$("$clang_path" --version)" \
+  "${objc_flags[@]}" -- "${link_flags[@]}"
+
 obj_path_for() {
   local src="$1"
   local rel="${src#$repo_root/}"
@@ -165,8 +170,11 @@ obj_path_for() {
 compile_objc() {
   local src="$1"
   local obj="$2"
+  if aln_apple_object_is_current "$src" "$obj"; then
+    return 0
+  fi
   mkdir -p "$(dirname "$obj")"
-  "$clang_path" "${objc_flags[@]}" -c "$src" -o "$obj"
+  "$clang_path" "${objc_flags[@]}" -MMD -MF "${obj%.o}.d" -c "$src" -o "$obj"
 }
 
 sources=()
@@ -180,8 +188,10 @@ while IFS= read -r src; do
   sources+=("$src")
 done < <(find "$generated_root" -type f -name '*.m' 2>/dev/null | sort)
 
-rm -rf "$module_generated_root"
+# Each module gets its own eocc output directory and manifest so unchanged
+# outputs are reused and a removed module's sources can be dropped.
 mkdir -p "$module_generated_root"
+active_modules=" "
 while IFS= read -r module_root; do
   module_id="$(basename "$module_root")"
   template_root="$module_root/Resources/Templates"
@@ -197,13 +207,22 @@ while IFS= read -r module_root; do
     continue
   fi
 
+  active_modules+="$module_id "
+  module_out="$module_generated_root/$module_id"
+  aln_apple_reset_generated_if_stale "$module_out" "$eocc_bin" "$module_out/manifest.json"
   "$eocc_bin" \
     --template-root "$template_root" \
-    --output-dir "$module_generated_root" \
-    --manifest "$module_generated_root/$module_id.manifest.json" \
+    --output-dir "$module_out" \
+    --manifest "$module_out/manifest.json" \
     --logical-prefix "modules/$module_id" \
     "${module_templates[@]}" >/dev/null
 done < <(find "$repo_root/modules" -mindepth 1 -maxdepth 1 -type d | sort)
+
+while IFS= read -r module_out; do
+  if [[ "$active_modules" != *" $(basename "$module_out") "* ]]; then
+    rm -rf "$module_out"
+  fi
+done < <(find "$module_generated_root" -mindepth 1 -maxdepth 1 | sort)
 
 while IFS= read -r src; do
   sources+=("$src")
@@ -221,9 +240,13 @@ for src in "${sources[@]}"; do
   objects+=("$obj")
 done
 
-rm -rf "$bundle_root"
-mkdir -p "$bundle_root/Contents/MacOS"
-"$clang_path" "${objc_flags[@]}" "${objects[@]}" "$framework_lib" -o "$bundle_bin" "${link_flags[@]}"
+link_manifest="$obj_root/.link/ArlenUnitTests.inputs"
+if ! aln_apple_link_is_current "$link_manifest" "$bundle_bin" "${objects[@]}" "$framework_lib"; then
+  rm -rf "$bundle_root"
+  mkdir -p "$bundle_root/Contents/MacOS"
+  "$clang_path" "${objc_flags[@]}" "${objects[@]}" "$framework_lib" -o "$bundle_bin" "${link_flags[@]}"
+  aln_apple_record_link_inputs "$link_manifest" "${objects[@]}" "$framework_lib"
+fi
 cp "$repo_root/tests/Info-apple-unit.plist" "$bundle_root/Contents/Info.plist"
 
 if [[ $print_bundle_path -eq 1 ]]; then

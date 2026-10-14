@@ -13,6 +13,42 @@
   physical paths, so a release under a symlinked directory such as macOS
   `/var` is recognized as current. launchd service management is still open
   (GitHub issue 148).
+- `boomhauer --watch` on macOS now handles build failures the way the
+  GNUstep path does. A failed build serves the diagnostic error page through
+  the framework `boomhauer`, writes `.boomhauer/last_build_error.{log,meta}`,
+  retries every `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, and switches back
+  to the app once a rebuild succeeds. Before, a broken first build exited watch
+  mode, and a broken rebuild kept serving the old binary. `--prepare-only`
+  failures also record `last_build_error.*` and print the log. The watcher now
+  execs the server in its background job, so stopping `boomhauer` no longer
+  leaves the app server running, and file changes are detected by fractional
+  mtime and ctime (GitHub issue 151).
+- `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
+  without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
+  runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit
+  bundle, and `routes` runs `bin/boomhauer --print-routes`. `arlen test --app`
+  builds the app's tests into `.boomhauer/apple/tests/AppTests.xctest` with the
+  new `tools/build_apple_app.sh --build-tests` and runs them with
+  `xcrun xctest`. `build`/`check` JSON payloads add `toolchain`. `arlen perf`
+  and `arlen test --integration` exit `2` on macOS with a GNUstep-only message
+  instead of failing inside `make` (GitHub issue 146).
+- `propane` and `jobs-worker` run on macOS. They build with the Apple
+  toolchain instead of `make` and run the app from
+  `.boomhauer/apple/boomhauer-app`, and `propane`'s FD-pressure checks use
+  `lsof` where `/proc` is missing. `propane`, `jobs-worker` and `arlen doctor`
+  no longer use bash 4 syntax that macOS `/bin/bash` 3.2 rejects: `${var,,}`,
+  a heredoc inside `< <(...)`, and expanding empty arrays under `set -u`.
+  Before, `propane` aborted at startup on macOS. `ShellPortabilityTests` guards the scripts that run on
+  macOS against those constructs (GitHub issue 144).
+
+- Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
+  and `build_apple_xctest.sh` record clang depfiles and skip objects whose
+  source and headers are unchanged, and skip archiving or linking when no input
+  changed. Changing the compiler or flags clears the object cache. Generated
+  templates are reused through the `eocc` manifest instead of being deleted on
+  every run. A no-op `bin/build-apple` now takes under a second instead of
+  ~20s, so each `arlen` command on macOS no longer pays for a full rebuild
+  (GitHub issue 142).
 
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
@@ -74,6 +110,15 @@
   `ARLEN_TSAN_UNIT_ITERATIONS` (GitHub issue 113). Failed tests are never
   retried; a new `linux-quality` check keeps `-retry-tests-on-failure` out of
   the build and CI wiring.
+
+- `propane` and `jobs-worker` no longer run a stale app binary from a
+  built source checkout. A built checkout also has `build/arlen`, so the
+  launchers treated it as a packaged release and ran whatever
+  `.boomhauer/build/boomhauer-app` an earlier build had left. That meant code
+  changes did not take effect until boomhauer was rerun. Only a framework root
+  without `GNUmakefile` and `src/Arlen` counts as a packaged release now;
+  packaged releases from `arlen deploy push` still run their shipped binary
+  (GitHub issue 150).
 
 ## 0.1.0 — 2026-10-07
 
