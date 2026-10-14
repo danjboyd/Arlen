@@ -13,6 +13,7 @@
 #endif
 
 #import "ALNCryptoCompat.h"
+#import "ALNJSONSerialization.h"
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNWebPushErrorDomain = @"Arlen.WebPush.Error";
@@ -354,9 +355,9 @@ BOOL ALNWebPushTopicIsValid(NSString *topic) {
   return [[topic stringByTrimmingCharactersInSet:allowed] length] == 0;
 }
 
-// JSON string literal for a claim value; NSJSONSerialization escapes the content.
+// JSON string literal for a claim value; the JSON serializer escapes the content.
 static NSString *ALNWebPushJSONString(NSString *value) {
-  NSData *data = [NSJSONSerialization dataWithJSONObject:@[ value ?: @"" ] options:0 error:NULL];
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:@[ value ?: @"" ] options:0 error:NULL];
   NSString *array = (data != nil) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
   if ([array length] < 2) {
     return @"\"\"";
