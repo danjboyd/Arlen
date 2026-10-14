@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Apple app builds (`tools/build_apple_app.sh`, used by `boomhauer` and
+  `propane` on macOS) handle module templates like the GNUstep build. A module
+  template overridden by the app (`templates/modules/<id>/...`) is no longer
+  compiled twice, which failed the link with a duplicate
+  `ALNEOCRender_modules_...` symbol. Only the outputs of the current templates
+  are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
+  ignored (GitHub issue 152).
+
 - `arlen deploy push`/`release` can package a release on macOS.
   `tools/deploy/build_release.sh` builds with `bin/build-apple` there and
   copies `.boomhauer/apple/boomhauer-app` and `build/apple/{arlen,boomhauer}`
