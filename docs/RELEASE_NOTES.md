@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- The notifications module has a `webpush` channel for browsers and installed
+  web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
+  RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and
+  RFC 8292 VAPID with 12-hour tokens reused per push service; requests carry
+  `TTL`, `Urgency` and `Topic`. Definitions implement
+  `notificationsModuleWebPushMessageForPayload:runtime:error:`; a `nudge`
+  message sends no content. Messages over 3993 bytes, bad topics and unknown
+  urgencies are rejected when queued. New user routes under
+  `/notifications/api/push/` manage the signed-in user's subscriptions, and the
+  module serves a service worker (with `Service-Worker-Allowed: /`) and a
+  `window.ArlenWebPush` helper that asks for permission from a user gesture.
+  Subscription endpoints must be on a known push-service host unless
+  `webPush.allowedEndpointHosts` widens the list. `404`/`410` marks a
+  subscription inactive; `429`, `5xx` and timeouts retry only the failed devices
+  after `Retry-After`. The channel is off by default
+  (`notificationsModule.webPush.enabled`, `ARLEN_WEBPUSH_*` environment
+  variables), and `POST /notifications/api/push/test` is registered only with
+  `webPush.testRoute.enabled`. `arlen webpush generate-keys` and
+  `arlen webpush public-key` create and inspect VAPID keys.
+- A jobs-module job can set `ALNJobsModuleRetryAfterSecondsErrorKey` in its
+  failure's `userInfo` to delay its next attempt by at least that many seconds,
+  past the `retryBackoff` cap, up to one day.
+
 - `boomhauer --watch` on macOS now handles build failures the way the
   GNUstep path does. A failed build serves the diagnostic error page through
   the framework `boomhauer`, writes `.boomhauer/last_build_error.{log,meta}`,
