@@ -16,6 +16,7 @@
 #import "ALNPg.h"
 #import "Arlen/ORM/ALNORMTypeScriptCodegen.h"
 #import "ALNSchemaCodegen.h"
+#import "ALNWebPush.h"
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -41,7 +42,18 @@ static void PrintUsage(void) {
           "  check [--dry-run] [--json]\n"
           "  build [--dry-run] [--json]\n"
           "  config [--env <name>] [--json]\n"
-          "  doctor [--env <name>] [--json]\n");
+          "  doctor [--env <name>] [--json]\n"
+          "  webpush <generate-keys|public-key> [--json]\n");
+}
+
+static void PrintWebPushUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen webpush <generate-keys|public-key> [--json]\n"
+          "\n"
+          "  generate-keys         Create a VAPID key pair for notificationsModule.webPush.\n"
+          "  public-key [--stdin]  Print the public key (the browser applicationServerKey) for\n"
+          "                        ARLEN_WEBPUSH_VAPID_PRIVATE_KEY, or for a private key read\n"
+          "                        from stdin. Private keys are never taken as arguments.\n");
 }
 
 static void PrintNewUsage(void) {
@@ -2917,6 +2929,18 @@ static NSString *FrameworkRootFromExecutablePath(void) {
   return nil;
 }
 
+// macOS builds with the Apple toolchain (bin/build-apple) instead of GNU make.
+// Framework roots without that builder, such as test fixtures, keep the make
+// workflow.
+static BOOL UsesAppleToolchain(NSString *frameworkRoot) {
+#if defined(__APPLE__)
+  return PathExists([frameworkRoot stringByAppendingPathComponent:@"bin/build-apple"], NULL);
+#else
+  (void)frameworkRoot;
+  return NO;
+#endif
+}
+
 static NSString *BoomhauerBuildCommand(NSString *frameworkRoot) {
   return [NSString stringWithFormat:@"cd %@ && make boomhauer", ShellQuote(frameworkRoot)];
 }
@@ -5402,6 +5426,13 @@ static int CommandRoutes(void) {
   if ([frameworkRoot length] == 0) {
     return 1;
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    // bin/boomhauer builds the app (or the framework server outside an app root)
+    // with the Apple toolchain and runs it with --print-routes.
+    return RunShellCommand([NSString
+        stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer --print-routes",
+                         ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot)]);
+  }
   NSString *command = [NSString stringWithFormat:@"%@ && %@",
                                                  BoomhauerBuildCommand(frameworkRoot),
                                                  BoomhauerLaunchCommand(@[ @"--print-routes" ],
@@ -5438,6 +5469,25 @@ static int CommandTest(NSArray *args) {
     [parts insertObject:ShellQuote(appRoot) atIndex:1];
     return RunShellCommand([parts componentsJoinedByString:@" "]);
   }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    // The Apple XCTest bundle covers the unit suite; the integration suite is
+    // still built only by the GNUstep makefile.
+    if ([args containsObject:@"--integration"]) {
+      fprintf(stderr, "arlen test --integration: the integration suite runs only on GNUstep for now; "
+                      "on macOS use `arlen test --unit`\n");
+      return 2;
+    }
+    if ([args count] == 0 || [args containsObject:@"--all"] || [args containsObject:@"--unit"]) {
+      if (![args containsObject:@"--unit"]) {
+        fprintf(stderr, "arlen test: on macOS this runs the unit suite only; the integration suite runs only "
+                        "on GNUstep for now\n");
+      }
+      return RunShellCommand([NSString stringWithFormat:@"cd %@ && ./tools/test_apple_xctest.sh",
+                                                        ShellQuote(frameworkRoot)]);
+    }
+    fprintf(stderr, "arlen test: unsupported options\n");
+    return 2;
+  }
   if ([args count] == 0 || [args containsObject:@"--all"]) {
     return RunShellCommand([NSString stringWithFormat:@"cd %@ && make test", ShellQuote(frameworkRoot)]);
   }
@@ -5455,6 +5505,10 @@ static int CommandPerf(void) {
   NSString *frameworkRoot = ResolveFrameworkRootForCommand(@"perf");
   if ([frameworkRoot length] == 0) {
     return 1;
+  }
+  if (UsesAppleToolchain(frameworkRoot)) {
+    fprintf(stderr, "arlen perf: the performance suite runs only on GNUstep for now\n");
+    return 2;
   }
   return RunShellCommand([NSString stringWithFormat:@"cd %@ && make perf", ShellQuote(frameworkRoot)]);
 }
@@ -7722,8 +7776,18 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
     return 1;
   }
 
+  // On macOS, build maps to the Apple builder and check to the Apple
+  // verification lane (unit bundle plus app scaffold smoke).
+  BOOL appleToolchain = UsesAppleToolchain(frameworkRoot);
+  NSString *workflowCommand = [NSString stringWithFormat:@"make %@", makeTarget ?: @""];
+  if (appleToolchain) {
+    workflowCommand = [commandName isEqualToString:@"build"] ? @"./bin/build-apple --with-boomhauer"
+                                                             : @"./tools/test_apple.sh";
+  }
+  NSString *payloadMakeTarget = appleToolchain ? @"" : (makeTarget ?: @"");
+  NSString *toolchain = appleToolchain ? @"apple" : @"make";
   NSString *shellCommand =
-      [NSString stringWithFormat:@"cd %@ && make %@", ShellQuote(frameworkRoot), makeTarget ?: @""];
+      [NSString stringWithFormat:@"cd %@ && %@", ShellQuote(frameworkRoot), workflowCommand];
 
   if (dryRun) {
     if (asJSON) {
@@ -7733,7 +7797,8 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
         @"workflow" : commandName ?: @"",
         @"status" : @"planned",
         @"framework_root" : frameworkRoot ?: @"",
-        @"make_target" : makeTarget ?: @"",
+        @"make_target" : payloadMakeTarget,
+        @"toolchain" : toolchain,
         @"shell_command" : shellCommand ?: @"",
       };
       PrintJSONPayload(stdout, payload);
@@ -7755,14 +7820,15 @@ static int RunMakeWorkflowCommand(NSString *commandName, NSString *makeTarget, N
   payload[@"workflow"] = commandName ?: @"";
   payload[@"status"] = (exitCode == 0) ? @"ok" : @"error";
   payload[@"framework_root"] = frameworkRoot ?: @"";
-  payload[@"make_target"] = makeTarget ?: @"";
+  payload[@"make_target"] = payloadMakeTarget;
+  payload[@"toolchain"] = toolchain;
   payload[@"shell_command"] = shellCommand ?: @"";
   payload[@"exit_code"] = @(exitCode);
   payload[@"captured_output"] = capturedOutput ?: @"";
   if (exitCode != 0) {
     payload[@"error"] = @{
-      @"code" : @"make_failed",
-      @"message" : [NSString stringWithFormat:@"`make %@` failed", makeTarget ?: @""],
+      @"code" : appleToolchain ? @"build_failed" : @"make_failed",
+      @"message" : [NSString stringWithFormat:@"`%@` failed", workflowCommand],
       @"fixit" : @{
         @"action" : @"Inspect captured_output and repair the first failing target before rerunning.",
         @"example" : [NSString stringWithFormat:@"arlen %@ --json", commandName ?: @""],
@@ -8075,6 +8141,77 @@ static int CommandDoctor(NSArray *args) {
   }
 
   return (failCount == 0) ? 0 : 1;
+}
+
+static int CommandWebPush(NSArray *args) {
+  NSString *subcommand = ([args count] > 0) ? args[0] : @"";
+  if ([subcommand length] == 0 || [subcommand isEqualToString:@"--help"] || [subcommand isEqualToString:@"-h"]) {
+    PrintWebPushUsage();
+    return [subcommand length] == 0 ? 2 : 0;
+  }
+  BOOL asJSON = NO;
+  BOOL fromStdin = NO;
+  for (NSUInteger idx = 1; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--stdin"] && [subcommand isEqualToString:@"public-key"]) {
+      fromStdin = YES;
+    } else {
+      fprintf(stderr, "arlen webpush: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSError *error = nil;
+  NSDictionary *keys = nil;
+  if ([subcommand isEqualToString:@"generate-keys"]) {
+    keys = ALNWebPushGenerateVAPIDKeyPair(&error);
+  } else if ([subcommand isEqualToString:@"public-key"]) {
+    NSString *privateKey = nil;
+    if (fromStdin) {
+      NSData *input = [[NSFileHandle fileHandleWithStandardInput] readDataToEndOfFile];
+      privateKey = [[NSString alloc] initWithData:input ?: [NSData data] encoding:NSUTF8StringEncoding];
+    } else {
+      privateKey = [[NSProcessInfo processInfo] environment][@"ARLEN_WEBPUSH_VAPID_PRIVATE_KEY"];
+    }
+    if ([Trimmed(privateKey) length] == 0) {
+      fprintf(stderr, "arlen webpush: set ARLEN_WEBPUSH_VAPID_PRIVATE_KEY or pass the key on stdin with --stdin\n");
+      return 2;
+    }
+    NSString *publicKey = ALNWebPushVAPIDPublicKeyForPrivateKey(privateKey, &error);
+    keys = (publicKey != nil) ? @{ @"publicKey" : publicKey } : nil;
+  } else {
+    fprintf(stderr, "arlen webpush: unknown subcommand %s\n", [subcommand UTF8String]);
+    PrintWebPushUsage();
+    return 2;
+  }
+  if (keys == nil) {
+    fprintf(stderr, "arlen webpush: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  if (asJSON) {
+    NSData *json = [ALNJSONSerialization dataWithJSONObject:keys options:StableJSONWritingOptions() error:&error];
+    if (json == nil) {
+      fprintf(stderr, "arlen webpush: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    fprintf(stdout, "%s\n", [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] UTF8String]);
+    return 0;
+  }
+  if (keys[@"privateKey"] == nil) {
+    fprintf(stdout, "%s\n", [keys[@"publicKey"] UTF8String]);
+    return 0;
+  }
+  fprintf(stdout,
+          "# VAPID keys for notificationsModule.webPush. Keep the private key out of the\n"
+          "# repository; set these in the server environment.\n"
+          "ARLEN_WEBPUSH_VAPID_PUBLIC_KEY=%s\n"
+          "ARLEN_WEBPUSH_VAPID_PRIVATE_KEY=%s\n",
+          [keys[@"publicKey"] UTF8String],
+          [keys[@"privateKey"] UTF8String]);
+  return 0;
 }
 
 static int CommandConfig(NSArray *args) {
@@ -10931,7 +11068,8 @@ static int CommandModule(NSArray *args) {
 static NSArray<NSString *> *TopLevelCompletionCandidates(void) {
   return @[ @"new", @"generate", @"boomhauer", @"jobs", @"propane", @"deploy", @"completion",
             @"migrate", @"module", @"schema-codegen", @"dataverse-codegen", @"typed-sql-codegen",
-            @"typescript-codegen", @"routes", @"test", @"perf", @"check", @"build", @"config", @"doctor" ];
+            @"typescript-codegen", @"routes", @"test", @"perf", @"check", @"build", @"config", @"doctor",
+            @"webpush" ];
 }
 
 static NSArray<NSString *> *DeploySubcommandCompletionCandidates(void) {
@@ -11170,6 +11308,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"module"]) {
       return CommandModule(args);
+    }
+    if ([command isEqualToString:@"webpush"]) {
+      return CommandWebPush(args);
     }
     if ([command isEqualToString:@"schema-codegen"]) {
       return CommandSchemaCodegen(args);
