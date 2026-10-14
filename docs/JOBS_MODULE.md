@@ -87,6 +87,13 @@ Job definitions may publish operator-facing metadata such as:
 
 The runtime surfaces this metadata through the definitions JSON payloads, pending/leased/dead-letter job snapshots, and the module-owned dashboard summary.
 
+A job that fails can ask for a minimum delay before its next attempt by putting
+seconds (an `NSNumber`) under `ALNJobsModuleRetryAfterSecondsErrorKey` in its
+error's `userInfo`. The retry waits for the longer of that delay and the
+`retryBackoff` delay, even past `retryBackoff.maxSeconds`, up to one day. Use it to
+honour an upstream service's HTTP `Retry-After`; the notifications module's Web
+Push channel does.
+
 ## Surfaces
 
 HTML:
