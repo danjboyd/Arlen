@@ -743,6 +743,7 @@ Build and run the first-party jobs worker loop for the current app root.
 
 - delegates to framework `bin/jobs-worker` with `ARLEN_APP_ROOT` + `ARLEN_FRAMEWORK_ROOT`
 - compiles the app through `bin/boomhauer --no-watch --prepare-only` and then runs `.boomhauer/build/boomhauer-app` in jobs-worker mode
+- on macOS a source checkout builds the app with the Apple toolchain and runs `.boomhauer/apple/boomhauer-app`; a packaged release (non-checkout framework root) runs its shipped `.boomhauer/build/boomhauer-app` as on Linux
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload and `app/.boomhauer/build/boomhauer-app` is already present, reuses that packaged binary instead of recompiling from source
 - packaged release reuse now wins even when the release app root no longer
  carries source files; `boomhauer` is not required for immutable runtime
@@ -766,6 +767,7 @@ Run production manager (`propane`) for the current app root.
 
 - manager args are forwarded to `bin/propane`
 - app-root launches first run `bin/boomhauer --no-watch --prepare-only`; if that fails, `propane` exits non-zero and points at `.boomhauer/last_build_error.log`
+- on macOS, `propane` builds with `bin/build-apple` instead of `make` and runs `.boomhauer/apple/boomhauer-app` from a source checkout (a packaged release runs its shipped `.boomhauer/build/boomhauer-app`); FD-pressure checks use `lsof` instead of `/proc`
 - when `ARLEN_FRAMEWORK_ROOT` points at a packaged release payload, `propane` runs directly from that payload and reuses `app/.boomhauer/build/boomhauer-app` without requiring a full Arlen checkout
 - when a packaged release app root already carries `.boomhauer/build/boomhauer-app`,
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
@@ -918,6 +920,25 @@ Load and print merged runtime config.
 
 - `--env <name>`: select environment overlay
 - `--json`: deterministic pretty JSON output (sorted keys when runtime supports `NSJSONWritingSortedKeys`)
+
+### `arlen webpush <generate-keys|public-key> [--json]`
+
+VAPID keys for the notifications module's Web Push channel. No app or build is
+required.
+
+- `generate-keys`: create a P-256 key pair and print it as
+  `ARLEN_WEBPUSH_VAPID_PUBLIC_KEY=` / `ARLEN_WEBPUSH_VAPID_PRIVATE_KEY=` lines for
+  the server environment. `--json` prints `{"privateKey": ..., "publicKey": ...}`.
+- `public-key [--stdin]`: print the public key (the browser
+  `applicationServerKey`) for `ARLEN_WEBPUSH_VAPID_PRIVATE_KEY`, or for a private
+  key piped on stdin with `--stdin`. Private keys are never accepted as
+  arguments, which would leave them in shell history and process listings.
+  `--json` prints `{"publicKey": ...}`.
+
+Keys are base64url without padding: a 65-byte uncompressed public point and a
+32-byte private scalar. Exit status is `0` on success, `1` for an unusable key,
+and `2` for usage errors or a missing key. See
+[Notifications Module: Web Push](NOTIFICATIONS_MODULE.md#web-push).
 
 ## `boomhauer` Script (`bin/boomhauer`)
 
