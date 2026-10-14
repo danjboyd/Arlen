@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `arlen deploy push`/`release` can package a release on macOS.
+  `tools/deploy/build_release.sh` builds with `bin/build-apple` there and
+  copies `.boomhauer/apple/boomhauer-app` and `build/apple/{arlen,boomhauer}`
+  into the usual release layout, instead of failing in GNU `make`. The release
+  scripts also run under macOS `/bin/bash` 3.2 and BSD tools:
+  `build_release.sh` no longer aborts on empty `sharedPaths` or
+  `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
+  or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
+  physical paths, so a release under a symlinked directory such as macOS
+  `/var` is recognized as current. launchd service management is still open
+  (GitHub issue 148).
 - The notifications module has a `webpush` channel for browsers and installed
   web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
   RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and
