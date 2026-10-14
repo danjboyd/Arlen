@@ -16,6 +16,7 @@
 #import "ALNPg.h"
 #import "Arlen/ORM/ALNORMTypeScriptCodegen.h"
 #import "ALNSchemaCodegen.h"
+#import "ALNWebPush.h"
 
 static void PrintUsage(void) {
   fprintf(stderr,
@@ -41,7 +42,18 @@ static void PrintUsage(void) {
           "  check [--dry-run] [--json]\n"
           "  build [--dry-run] [--json]\n"
           "  config [--env <name>] [--json]\n"
-          "  doctor [--env <name>] [--json]\n");
+          "  doctor [--env <name>] [--json]\n"
+          "  webpush <generate-keys|public-key> [--json]\n");
+}
+
+static void PrintWebPushUsage(void) {
+  fprintf(stdout,
+          "Usage: arlen webpush <generate-keys|public-key> [--json]\n"
+          "\n"
+          "  generate-keys         Create a VAPID key pair for notificationsModule.webPush.\n"
+          "  public-key [--stdin]  Print the public key (the browser applicationServerKey) for\n"
+          "                        ARLEN_WEBPUSH_VAPID_PRIVATE_KEY, or for a private key read\n"
+          "                        from stdin. Private keys are never taken as arguments.\n");
 }
 
 static void PrintNewUsage(void) {
@@ -8127,6 +8139,77 @@ static int CommandDoctor(NSArray *args) {
   return (failCount == 0) ? 0 : 1;
 }
 
+static int CommandWebPush(NSArray *args) {
+  NSString *subcommand = ([args count] > 0) ? args[0] : @"";
+  if ([subcommand length] == 0 || [subcommand isEqualToString:@"--help"] || [subcommand isEqualToString:@"-h"]) {
+    PrintWebPushUsage();
+    return [subcommand length] == 0 ? 2 : 0;
+  }
+  BOOL asJSON = NO;
+  BOOL fromStdin = NO;
+  for (NSUInteger idx = 1; idx < [args count]; idx++) {
+    NSString *arg = args[idx];
+    if ([arg isEqualToString:@"--json"]) {
+      asJSON = YES;
+    } else if ([arg isEqualToString:@"--stdin"] && [subcommand isEqualToString:@"public-key"]) {
+      fromStdin = YES;
+    } else {
+      fprintf(stderr, "arlen webpush: unknown option %s\n", [arg UTF8String]);
+      return 2;
+    }
+  }
+
+  NSError *error = nil;
+  NSDictionary *keys = nil;
+  if ([subcommand isEqualToString:@"generate-keys"]) {
+    keys = ALNWebPushGenerateVAPIDKeyPair(&error);
+  } else if ([subcommand isEqualToString:@"public-key"]) {
+    NSString *privateKey = nil;
+    if (fromStdin) {
+      NSData *input = [[NSFileHandle fileHandleWithStandardInput] readDataToEndOfFile];
+      privateKey = [[NSString alloc] initWithData:input ?: [NSData data] encoding:NSUTF8StringEncoding];
+    } else {
+      privateKey = [[NSProcessInfo processInfo] environment][@"ARLEN_WEBPUSH_VAPID_PRIVATE_KEY"];
+    }
+    if ([Trimmed(privateKey) length] == 0) {
+      fprintf(stderr, "arlen webpush: set ARLEN_WEBPUSH_VAPID_PRIVATE_KEY or pass the key on stdin with --stdin\n");
+      return 2;
+    }
+    NSString *publicKey = ALNWebPushVAPIDPublicKeyForPrivateKey(privateKey, &error);
+    keys = (publicKey != nil) ? @{ @"publicKey" : publicKey } : nil;
+  } else {
+    fprintf(stderr, "arlen webpush: unknown subcommand %s\n", [subcommand UTF8String]);
+    PrintWebPushUsage();
+    return 2;
+  }
+  if (keys == nil) {
+    fprintf(stderr, "arlen webpush: %s\n", [[error localizedDescription] UTF8String]);
+    return 1;
+  }
+
+  if (asJSON) {
+    NSData *json = [ALNJSONSerialization dataWithJSONObject:keys options:StableJSONWritingOptions() error:&error];
+    if (json == nil) {
+      fprintf(stderr, "arlen webpush: %s\n", [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    fprintf(stdout, "%s\n", [[[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding] UTF8String]);
+    return 0;
+  }
+  if (keys[@"privateKey"] == nil) {
+    fprintf(stdout, "%s\n", [keys[@"publicKey"] UTF8String]);
+    return 0;
+  }
+  fprintf(stdout,
+          "# VAPID keys for notificationsModule.webPush. Keep the private key out of the\n"
+          "# repository; set these in the server environment.\n"
+          "ARLEN_WEBPUSH_VAPID_PUBLIC_KEY=%s\n"
+          "ARLEN_WEBPUSH_VAPID_PRIVATE_KEY=%s\n",
+          [keys[@"publicKey"] UTF8String],
+          [keys[@"privateKey"] UTF8String]);
+  return 0;
+}
+
 static int CommandConfig(NSArray *args) {
   NSString *environment = @"development";
   BOOL asJSON = NO;
@@ -10981,7 +11064,8 @@ static int CommandModule(NSArray *args) {
 static NSArray<NSString *> *TopLevelCompletionCandidates(void) {
   return @[ @"new", @"generate", @"boomhauer", @"jobs", @"propane", @"deploy", @"completion",
             @"migrate", @"module", @"schema-codegen", @"dataverse-codegen", @"typed-sql-codegen",
-            @"typescript-codegen", @"routes", @"test", @"perf", @"check", @"build", @"config", @"doctor" ];
+            @"typescript-codegen", @"routes", @"test", @"perf", @"check", @"build", @"config", @"doctor",
+            @"webpush" ];
 }
 
 static NSArray<NSString *> *DeploySubcommandCompletionCandidates(void) {
@@ -11220,6 +11304,9 @@ int main(int argc, const char *argv[]) {
     }
     if ([command isEqualToString:@"module"]) {
       return CommandModule(args);
+    }
+    if ([command isEqualToString:@"webpush"]) {
+      return CommandWebPush(args);
     }
     if ([command isEqualToString:@"schema-codegen"]) {
       return CommandSchemaCodegen(args);
