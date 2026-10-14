@@ -6,6 +6,7 @@
 
 #import "ALNDataCompat.h"
 #import "ALNHTTPCompat.h"
+#import "ALNJSONSerialization.h"
 #import "ALNSecurityPrimitives.h"
 
 static NSString *WPTrimmed(id value) {
@@ -335,7 +336,9 @@ NSTimeInterval ALNWebPushRetryAfterSeconds(NSString *value, NSDate *now) {
 @end
 
 static NSString *WPJSONLiteral(id object) {
-  NSData *data = [NSJSONSerialization dataWithJSONObject:object ?: @{} options:0 error:NULL];
+  // ALNJSONSerialization (yyjson) leaves "/" unescaped on every platform; Apple's
+  // NSJSONSerialization writes "<\/script>" and would diverge from GNUstep.
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:object ?: @{} options:0 error:NULL];
   NSString *json = (data != nil) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : @"{}";
   // Keep the literal inert inside a script even if a value contains "</script>",
   // and escape the separators that end a line in pre-ES2019 string literals.
