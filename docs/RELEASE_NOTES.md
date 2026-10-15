@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The `mcp` module has an explicit local-development identity,
+  `mcp.development.trustLoopback`. It applies only to loopback requests with no
+  credentials, `Origin` or proxy-forwarding headers, and is refused outside
+  development/test, on a non-loopback host, or with `mcp.oauth`. The MCP docs
+  now explain that app identity middleware must be registered from a plugin
+  to run before the module (#185).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.
