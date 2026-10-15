@@ -5353,6 +5353,23 @@
       XCTAssertFalse([errorPage containsString:escapeSequence]);
     }
 
+    // Issue 177: the page's inline styles must not be blocked by the app's
+    // default CSP, and the page must not allow scripts.
+    int headerCurlCode = 0;
+    NSString *errorHeaders = [self
+        runShellCapture:[NSString stringWithFormat:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/", port]
+               exitCode:&headerCurlCode];
+    XCTAssertEqual(0, headerCurlCode);
+    XCTAssertTrue([errorHeaders containsString:
+                                    @"Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';"],
+                  @"%@", errorHeaders);
+    XCTAssertFalse([errorHeaders containsString:@"default-src 'self'"], @"%@", errorHeaders);
+    XCTAssertFalse([errorHeaders containsString:@"script-src"], @"%@", errorHeaders);
+    // Two CSP headers would intersect, and the default would still block the styles.
+    XCTAssertEqual((NSUInteger)2,
+                   [[[errorHeaders lowercaseString] componentsSeparatedByString:@"content-security-policy:"] count],
+                   @"expected exactly one CSP header: %@", errorHeaders);
+
     NSString *jsonCommand = [NSString
         stringWithFormat:@"curl -sS -H 'Accept: application/json' http://127.0.0.1:%d/api/dev/build-error",
                          port];
@@ -5389,6 +5406,16 @@
                containing:@"hello from lite mode"
                   timeout:45.0];
     XCTAssertNotNil(recoveredPage);
+
+    // The relaxed CSP is scoped to the build-error page; app responses keep the default.
+    int recoveredCurlCode = 0;
+    NSString *recoveredHeaders = [self
+        runShellCapture:[NSString stringWithFormat:@"curl -sS -D - -o /dev/null http://127.0.0.1:%d/", port]
+               exitCode:&recoveredCurlCode];
+    XCTAssertEqual(0, recoveredCurlCode);
+    XCTAssertTrue([recoveredHeaders containsString:@"Content-Security-Policy: default-src 'self'"],
+                  @"%@", recoveredHeaders);
+    XCTAssertFalse([recoveredHeaders containsString:@"unsafe-inline"], @"%@", recoveredHeaders);
   } @finally {
     if ([server isRunning]) {
       (void)kill(server.processIdentifier, SIGTERM);
