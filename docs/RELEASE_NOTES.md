@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Stopping `arlen boomhauer`, `arlen propane` or `arlen jobs worker` now stops
+  the server. `arlen` ran them as a child process, which Apple's `NSTask`
+  puts in its own process group, so on macOS a Ctrl-C (or a signal to `arlen`)
+  ended `arlen` and left the server running and holding its port. `arlen` now
+  execs these commands, so the server keeps `arlen`'s pid and process group.
+
 - macOS deploy targets run under launchd. For `macos-*-apple-foundation`
   targets `arlen deploy init` generates `launchd/<label>.plist` (from the new
   `tools/deploy/launchd/arlen.plist`) and propane/jobs-worker wrappers that
