@@ -33,6 +33,54 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# macOS: build with the Apple toolchain and run under Xcode's xctest, which
+# takes a comma-separated -XCTest Class[/method] list and has no skip option.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  apple_selectors=""
+  for filter in ${filters[@]+"${filters[@]}"}; do
+    case "$filter" in
+      -skip-testing:*)
+        echo "run_app_tests: --skip is not supported on macOS (Xcode's xctest has no skip filter)" >&2
+        exit 2
+        ;;
+    esac
+    apple_selectors="${apple_selectors:+$apple_selectors,}${filter#-only-testing:AppTests/}"
+  done
+  bundle="$("$framework_root/tools/build_apple_app.sh" --app-root "$app_root" --framework-root "$framework_root" \
+    --build-tests --print-path)"
+  export ARLEN_APP_ROOT="$app_root"
+  export ARLEN_FRAMEWORK_ROOT="$framework_root"
+  cd "$app_root"
+  apple_args=()
+  if [[ -n "$apple_selectors" ]]; then
+    apple_args=(-XCTest "$apple_selectors")
+  fi
+  # Add the GNUstep runner's per-class summary lines ("HomeTests: 1 tests
+  # PASSED", "MissingTests: 1/1 tests FAILED") after each class suite.
+  set +e
+  xcrun xctest ${apple_args[@]+"${apple_args[@]}"} "$bundle" 2>&1 | awk '
+    { print }
+    /^Test Suite .* (passed|failed) at / {
+      suite = $0
+      sub(/^Test Suite \047/, "", suite)
+      sub(/\047 (passed|failed) at .*/, "", suite)
+      next
+    }
+    /^[ \t]*Executed [0-9]+ tests?, with [0-9]+ failures?/ {
+      if (suite != "" && suite !~ /\.xctest$/ && suite != "All tests" && suite != "Selected tests") {
+        total = $2
+        failed = $5
+        if (failed == 0) {
+          printf "%s: %d tests PASSED\n", suite, total
+        } else {
+          printf "%s: %d/%d tests FAILED\n", suite, failed, total
+        }
+      }
+      suite = ""
+    }'
+  exit "${PIPESTATUS[0]}"
+fi
+
 (cd "$app_root" && ARLEN_FRAMEWORK_ROOT="$framework_root" "$framework_root/bin/boomhauer" --build-tests)
 
 # shellcheck source=tools/source_gnustep_env.sh
@@ -67,4 +115,4 @@ if [[ -n "$runner_lib_dir" ]]; then
 fi
 export ARLEN_APP_ROOT="$app_root"
 cd "$app_root"
-exec "$runner" "${filters[@]}" "$app_root/.boomhauer/build/tests/AppTests.xctest"
+exec "$runner" ${filters[@]+"${filters[@]}"} "$app_root/.boomhauer/build/tests/AppTests.xctest"

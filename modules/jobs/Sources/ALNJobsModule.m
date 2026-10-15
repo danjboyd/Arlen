@@ -8,6 +8,7 @@
 #import "ALNRequest.h"
 
 NSString *const ALNJobsModuleErrorDomain = @"Arlen.Modules.Jobs.Error";
+NSString *const ALNJobsModuleRetryAfterSecondsErrorKey = @"ALNJobsModuleRetryAfterSeconds";
 
 static NSString *const ALNJobsManagedPayloadKey = @"aln.jobs_module";
 static NSUInteger const ALNJobsRunHistoryLimit = 20;
@@ -1317,7 +1318,6 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
                handlerError:(NSError *)handlerError
              baseRetryDelay:(NSTimeInterval)baseRetryDelay {
   (void)worker;
-  (void)handlerError;
   NSDictionary *metadata = [self jobDefinitionMetadataForIdentifier:JMTrimmedString(job.name)] ?: @{};
   NSDictionary *retryBackoff = [metadata[@"retryBackoff"] isKindOfClass:[NSDictionary class]] ? metadata[@"retryBackoff"] : @{};
   NSString *strategy = JMLowerTrimmedString(retryBackoff[@"strategy"]);
@@ -1346,6 +1346,15 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
       [retryBackoff[@"maxSeconds"] respondsToSelector:@selector(doubleValue)] ? [retryBackoff[@"maxSeconds"] doubleValue] : 0.0;
   if (maxSeconds > 0.0 && delay > maxSeconds) {
     delay = maxSeconds;
+  }
+  // A server-requested delay (for example HTTP Retry-After) is a floor that the
+  // backoff cap does not lower; it is bounded at one day.
+  id retryAfter = handlerError.userInfo[ALNJobsModuleRetryAfterSecondsErrorKey];
+  if ([retryAfter respondsToSelector:@selector(doubleValue)]) {
+    NSTimeInterval requested = MIN([retryAfter doubleValue], 86400.0);
+    if (requested > delay) {
+      delay = requested;
+    }
   }
   if (delay < 0.0) {
     delay = 0.0;
