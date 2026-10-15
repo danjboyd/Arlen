@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-10-15
+
+A patch release with two fixes found while preparing the 0.2.0 announcement.
+
+- The installer's PATH hint now names the startup file your login shell reads
+  (`~/.zprofile` for zsh, the macOS default) instead of `~/.profile`, which
+  zsh ignores.
+
+- The `boomhauer` build-error page shows its styling again. The app's
+  default `default-src 'self'` CSP blocked the page's inline styles, so it
+  rendered as unstyled text. The page now sends its own CSP, which allows
+  inline styles and nothing else (#177).
+
 ## 0.2.0 — 2026-10-15
 
 Arlen now installs with one command on Linux and Apple Silicon Macs, and
