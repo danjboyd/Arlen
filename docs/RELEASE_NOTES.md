@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.1 — 2026-10-15
+
+A patch release with two fixes found while preparing the 0.2.0 announcement.
+
 - The installer's PATH hint now names the startup file your login shell reads
   (`~/.zprofile` for zsh, the macOS default) instead of `~/.profile`, which
   zsh ignores.
