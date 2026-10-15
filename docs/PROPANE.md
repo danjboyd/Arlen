@@ -51,6 +51,20 @@ Run from an app root, or set:
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 
+On macOS, `propane` builds with the Apple toolchain (`bin/build-apple`) instead
+of GNU `make`, and runs `.boomhauer/apple/boomhauer-app` (or
+`build/apple/boomhauer` outside an app root) from a source checkout. It runs
+under the system `/bin/bash` 3.2. A packaged release keeps the
+`.boomhauer/build/` layout on every platform, and `propane` runs its shipped
+binary; packaging a release on macOS is tracked in GitHub issue 148.
+
+`propane` and `jobs-worker` treat a framework root as a packaged release
+only when it has a compiled `build/arlen` and no source checkout. A source
+checkout is a root with `GNUmakefile` and `src/Arlen`. A built checkout
+therefore always goes through the `boomhauer --prepare-only` rebuild, so the
+launchers never run an app binary left over from an earlier build (GitHub
+issue 150).
+
 ## Propane Accessories
 
 Define in `config/app.plist`:
@@ -218,8 +232,11 @@ Stable FD-pressure fields include:
 
 ## FD-Pressure Propane Accessories
 
-On Linux, `propane` can sample worker descriptor pressure through `/proc` and
-emit lifecycle diagnostics before descriptor exhaustion breaks request handling.
+`propane` samples worker descriptor pressure and emits lifecycle diagnostics
+before descriptor exhaustion breaks request handling. On Linux it reads
+`/proc/$pid/fd` and `/proc/$pid/limits`. On macOS it lists the worker's numeric
+descriptors with `lsof` and uses propane's own `ulimit -n` as the soft limit,
+which workers inherit.
 The checks are disabled only by setting thresholds to `0`; warning diagnostics
 default on.
 

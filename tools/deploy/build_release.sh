@@ -90,6 +90,34 @@ resolve_compiled_binary() {
   return 1
 }
 
+# read_manifest_status <manifest> <version>
+# Prints the manifest's status; fails unless it is a JSON object of <version>
+# with a string status. A function, not a heredoc inside $(...), which macOS
+# bash 3.2 misparses.
+read_manifest_status() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+path, expected_version = sys.argv[1], sys.argv[2]
+with open(path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+if not isinstance(payload, dict):
+    raise SystemExit("manifest JSON must be an object")
+
+version = payload.get("version")
+if not isinstance(version, str) or version != expected_version:
+    raise SystemExit("manifest version must be " + expected_version)
+
+status = payload.get("status")
+if not isinstance(status, str) or not status:
+    raise SystemExit("manifest missing string field 'status'")
+
+print(status)
+PY
+}
+
 copy_path_if_exists() {
   local src="$1"
   local dest="$2"
@@ -579,28 +607,7 @@ if [[ "$allow_missing_certification" != "1" ]]; then
   fi
 
   set +e
-  certification_check_output="$(python3 - "$certification_manifest" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-if not isinstance(payload, dict):
-    raise SystemExit("manifest JSON must be an object")
-
-version = payload.get("version")
-if not isinstance(version, str) or version != "phase9j-release-certification-v1":
-    raise SystemExit("manifest version must be phase9j-release-certification-v1")
-
-status = payload.get("status")
-if not isinstance(status, str) or not status:
-    raise SystemExit("manifest missing string field 'status'")
-
-print(status)
-PY
-)"
+  certification_check_output="$(read_manifest_status "$certification_manifest" phase9j-release-certification-v1)"
   certification_check_rc=$?
   set -e
   if [[ "$certification_check_rc" -ne 0 ]]; then
@@ -632,28 +639,7 @@ PY
   fi
 
   set +e
-  json_perf_check_output="$(python3 - "$json_performance_manifest" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
-    payload = json.load(handle)
-
-if not isinstance(payload, dict):
-    raise SystemExit("manifest JSON must be an object")
-
-version = payload.get("version")
-if not isinstance(version, str) or version != "phase10e-json-performance-v1":
-    raise SystemExit("manifest version must be phase10e-json-performance-v1")
-
-status = payload.get("status")
-if not isinstance(status, str) or not status:
-    raise SystemExit("manifest missing string field 'status'")
-
-print(status)
-PY
-)"
+  json_perf_check_output="$(read_manifest_status "$json_performance_manifest" phase10e-json-performance-v1)"
   json_perf_check_rc=$?
   set -e
   if [[ "$json_perf_check_rc" -ne 0 ]]; then
@@ -693,7 +679,7 @@ if [[ -e "$release_dir" ]]; then
     1
 fi
 
-for shared_path in "${shared_paths[@]}"; do
+for shared_path in ${shared_paths[@]+"${shared_paths[@]}"}; do
   # App-relative, no traversal: activation links <release>/app/<path> to shared/<path>.
   if [[ -z "$shared_path" || "$shared_path" == /* || "/$shared_path/" == */../* || "/$shared_path/" == */./* ||
         "$shared_path" == *//* ]]; then
@@ -744,7 +730,7 @@ fi
 
 if [[ "$dry_run" == "1" ]]; then
   if [[ "$output_json" != "1" ]]; then
-    for command in "${pre_package_commands[@]}"; do
+    for command in ${pre_package_commands[@]+"${pre_package_commands[@]}"}; do
       echo "build_release.sh dry-run: would run pre-package command: $command"
     done
   fi
@@ -760,7 +746,7 @@ fi
 # the app is compiled and copied, so their outputs are packaged (GitHub issue 66).
 # With --json, callers capture stdout and stderr together, so command output is
 # only reported (in the error payload) when a command fails.
-for command in "${pre_package_commands[@]}"; do
+for command in ${pre_package_commands[@]+"${pre_package_commands[@]}"}; do
   if [[ "$output_json" != "1" ]]; then
     echo "build_release.sh: running pre-package command: $command" >&2
   fi
@@ -786,7 +772,18 @@ $command_tail" \
   rm -f "$command_log"
 done
 
-make -C "$framework_root" arlen boomhauer >/dev/null
+# Releases use one layout on every platform (app/.boomhauer/build/boomhauer-app,
+# framework/build/{arlen,boomhauer}). macOS builds with the Apple toolchain,
+# which writes .boomhauer/apple/ and build/apple/, so copy from there.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  "$framework_root/bin/build-apple" --with-boomhauer >/dev/null
+  framework_binary_dir="$framework_root/build/apple"
+  app_binary_dir="$app_root/.boomhauer/apple"
+else
+  make -C "$framework_root" arlen boomhauer >/dev/null
+  framework_binary_dir="$framework_root/build"
+  app_binary_dir="$app_root/.boomhauer/build"
+fi
 
 if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
   ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
@@ -795,7 +792,7 @@ fi
 
 mkdir -p "$release_dir/app" "$release_dir/framework" "$release_dir/metadata"
 if [[ ${#shared_paths[@]} -gt 0 ]]; then
-  printf '%s\n' "${shared_paths[@]}" >"$release_dir/metadata/shared_paths"
+  printf '%s\n' ${shared_paths[@]+"${shared_paths[@]}"} >"$release_dir/metadata/shared_paths"
 fi
 
 # Package app payload.
@@ -808,7 +805,7 @@ copy_path_if_exists "$app_root/app_lite.m" "$release_dir/app/app_lite.m"
 copy_path_if_exists "$app_root/db/migrations" "$release_dir/app/db/migrations"
 
 packaged_runtime_binary="$release_dir/app/.boomhauer/build/boomhauer-app"
-if packaged_runtime_binary="$(copy_compiled_binary_if_exists "$app_root/.boomhauer/build/boomhauer-app" \
+if packaged_runtime_binary="$(copy_compiled_binary_if_exists "$app_binary_dir/boomhauer-app" \
   "$release_dir/app/.boomhauer/build/boomhauer-app" 2>/dev/null)"; then
   :
 else
@@ -817,15 +814,17 @@ fi
 
 # Package runtime/tooling payload used by deploy scripts.
 copy_path_if_exists "$framework_root/bin" "$release_dir/framework/bin"
+# bin/boomhauer sources it.
+copy_path_if_exists "$framework_root/tools/platform.sh" "$release_dir/framework/tools/platform.sh"
 packaged_framework_boomhauer="$release_dir/framework/build/boomhauer"
-if packaged_framework_boomhauer="$(copy_compiled_binary_if_exists "$framework_root/build/boomhauer" \
+if packaged_framework_boomhauer="$(copy_compiled_binary_if_exists "$framework_binary_dir/boomhauer" \
   "$release_dir/framework/build/boomhauer" 2>/dev/null)"; then
   :
 else
   packaged_framework_boomhauer="$release_dir/framework/build/boomhauer"
 fi
 packaged_arlen_binary="$release_dir/framework/build/arlen"
-if packaged_arlen_binary="$(copy_compiled_binary_if_exists "$framework_root/build/arlen" \
+if packaged_arlen_binary="$(copy_compiled_binary_if_exists "$framework_binary_dir/arlen" \
   "$release_dir/framework/build/arlen" 2>/dev/null)"; then
   :
 else
@@ -897,7 +896,7 @@ EOF
 
 required_env_keys_blob=""
 if [[ ${#required_env_keys[@]} -gt 0 ]]; then
-  printf -v required_env_keys_blob '%s\n' "${required_env_keys[@]}"
+  printf -v required_env_keys_blob '%s\n' ${required_env_keys[@]+"${required_env_keys[@]}"}
 fi
 
 ARLEN_RELEASE_APP_GIT_SHA="$app_git_sha" ARLEN_RELEASE_APP_GIT_DIRTY="$app_git_dirty" \

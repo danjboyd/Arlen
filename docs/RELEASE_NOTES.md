@@ -2,6 +2,100 @@
 
 ## Unreleased
 
+- The integration and durable-jobs suites run on macOS as Apple XCTest
+  bundles. `tools/build_apple_xctest.sh --suite integration|durable-jobs` builds
+  them and the binaries they launch (example servers, `eoc-smoke-render`,
+  `durable-job-probe`). `arlen test --integration` runs the integration bundle
+  and `arlen test`/`--all` runs unit then integration on macOS. `tools/ci/run_durable_jobs.sh`
+  works on macOS. All 206 integration tests are discovered on Apple, and tests
+  of GNUstep-only lanes skip there through the new `ALNSkipOnApple()`. Test
+  helpers are portable: `ALNTestFrameworkBuildCommand()`,
+  `ALNTestAppBinaryRelativePath()`, an Apple `ALNTestClientCompileCommand()`
+  (new `tools/apple_compile_program.sh`), and child-process lookup through
+  `ps -A` instead of GNU `ps --ppid`. Before, the lookup returned 0 on macOS
+  and the test's `kill(0, SIGKILL)` killed the test runner. On macOS
+  `arlen test --app` now prints the same per-class summary lines as the
+  GNUstep runner (GitHub issue 153).
+
+- Apple app builds (`tools/build_apple_app.sh`, used by `boomhauer` and
+  `propane` on macOS) handle module templates like the GNUstep build. A module
+  template overridden by the app (`templates/modules/<id>/...`) is no longer
+  compiled twice, which failed the link with a duplicate
+  `ALNEOCRender_modules_...` symbol. Only the outputs of the current templates
+  are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
+  ignored (GitHub issue 152).
+
+- `arlen deploy push`/`release` can package a release on macOS.
+  `tools/deploy/build_release.sh` builds with `bin/build-apple` there and
+  copies `.boomhauer/apple/boomhauer-app` and `build/apple/{arlen,boomhauer}`
+  into the usual release layout, instead of failing in GNU `make`. The release
+  scripts also run under macOS `/bin/bash` 3.2 and BSD tools:
+  `build_release.sh` no longer aborts on empty `sharedPaths` or
+  `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
+  or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
+  physical paths, so a release under a symlinked directory such as macOS
+  `/var` is recognized as current. launchd service management is still open
+  (GitHub issue 148).
+- The notifications module has a `webpush` channel for browsers and installed
+  web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
+  RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and
+  RFC 8292 VAPID with 12-hour tokens reused per push service; requests carry
+  `TTL`, `Urgency` and `Topic`. Definitions implement
+  `notificationsModuleWebPushMessageForPayload:runtime:error:`; a `nudge`
+  message sends no content. Messages over 3993 bytes, bad topics and unknown
+  urgencies are rejected when queued. New user routes under
+  `/notifications/api/push/` manage the signed-in user's subscriptions, and the
+  module serves a service worker (with `Service-Worker-Allowed: /`) and a
+  `window.ArlenWebPush` helper that asks for permission from a user gesture.
+  Subscription endpoints must be on a known push-service host unless
+  `webPush.allowedEndpointHosts` widens the list. `404`/`410` marks a
+  subscription inactive; `429`, `5xx` and timeouts retry only the failed devices
+  after `Retry-After`. The channel is off by default
+  (`notificationsModule.webPush.enabled`, `ARLEN_WEBPUSH_*` environment
+  variables), and `POST /notifications/api/push/test` is registered only with
+  `webPush.testRoute.enabled`. `arlen webpush generate-keys` and
+  `arlen webpush public-key` create and inspect VAPID keys.
+- A jobs-module job can set `ALNJobsModuleRetryAfterSecondsErrorKey` in its
+  failure's `userInfo` to delay its next attempt by at least that many seconds,
+  past the `retryBackoff` cap, up to one day.
+
+- `boomhauer --watch` on macOS now handles build failures the way the
+  GNUstep path does. A failed build serves the diagnostic error page through
+  the framework `boomhauer`, writes `.boomhauer/last_build_error.{log,meta}`,
+  retries every `ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, and switches back
+  to the app once a rebuild succeeds. Before, a broken first build exited watch
+  mode, and a broken rebuild kept serving the old binary. `--prepare-only`
+  failures also record `last_build_error.*` and print the log. The watcher now
+  execs the server in its background job, so stopping `boomhauer` no longer
+  leaves the app server running, and file changes are detected by fractional
+  mtime and ctime (GitHub issue 151).
+- `arlen build`, `check`, `test`, `routes` and `test --app` work on macOS
+  without GNU `make`. `build` runs `bin/build-apple --with-boomhauer`, `check`
+  runs `tools/test_apple.sh`, `test`/`test --unit` run the Apple XCTest unit
+  bundle, and `routes` runs `bin/boomhauer --print-routes`. `arlen test --app`
+  builds the app's tests into `.boomhauer/apple/tests/AppTests.xctest` with the
+  new `tools/build_apple_app.sh --build-tests` and runs them with
+  `xcrun xctest`. `build`/`check` JSON payloads add `toolchain`. `arlen perf`
+  and `arlen test --integration` exit `2` on macOS with a GNUstep-only message
+  instead of failing inside `make` (GitHub issue 146).
+- `propane` and `jobs-worker` run on macOS. They build with the Apple
+  toolchain instead of `make` and run the app from
+  `.boomhauer/apple/boomhauer-app`, and `propane`'s FD-pressure checks use
+  `lsof` where `/proc` is missing. `propane`, `jobs-worker` and `arlen doctor`
+  no longer use bash 4 syntax that macOS `/bin/bash` 3.2 rejects: `${var,,}`,
+  a heredoc inside `< <(...)`, and expanding empty arrays under `set -u`.
+  Before, `propane` aborted at startup on macOS. `ShellPortabilityTests` guards the scripts that run on
+  macOS against those constructs (GitHub issue 144).
+
+- Apple builds are incremental. `tools/build_apple.sh`, `build_apple_app.sh`
+  and `build_apple_xctest.sh` record clang depfiles and skip objects whose
+  source and headers are unchanged, and skip archiving or linking when no input
+  changed. Changing the compiler or flags clears the object cache. Generated
+  templates are reused through the `eocc` manifest instead of being deleted on
+  every run. A no-op `bin/build-apple` now takes under a second instead of
+  ~20s, so each `arlen` command on macOS no longer pays for a full rebuild
+  (GitHub issue 142).
+
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The
   old checks compared `objCType` with `@encode(BOOL)`, which is `"B"` on Apple
@@ -62,6 +156,15 @@
   `ARLEN_TSAN_UNIT_ITERATIONS` (GitHub issue 113). Failed tests are never
   retried; a new `linux-quality` check keeps `-retry-tests-on-failure` out of
   the build and CI wiring.
+
+- `propane` and `jobs-worker` no longer run a stale app binary from a
+  built source checkout. A built checkout also has `build/arlen`, so the
+  launchers treated it as a packaged release and ran whatever
+  `.boomhauer/build/boomhauer-app` an earlier build had left. That meant code
+  changes did not take effect until boomhauer was rerun. Only a framework root
+  without `GNUmakefile` and `src/Arlen` counts as a packaged release now;
+  packaged releases from `arlen deploy push` still run their shipped binary
+  (GitHub issue 150).
 
 ## 0.1.0 — 2026-10-07
 
