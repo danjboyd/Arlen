@@ -72,6 +72,42 @@
   return payload ?: @{};
 }
 
+- (void)testServerCommandsStayInTheCallersProcessGroup {
+  // arlen boomhauer, propane and jobs worker must run the server in the
+  // caller's process group, so a terminal Ctrl-C (or a signal to that group)
+  // stops the server instead of only arlen.
+  NSString *root = [self createFrameworkFixtureWithAppleBuilder:NO];
+  NSError *error = nil;
+  NSString *pgidScript = @"#!/usr/bin/env bash\n"
+                         @"python3 -c 'import os; print(\"server pgid=%d\" % os.getpgrp())'\n";
+  for (NSString *name in @[ @"bin/boomhauer", @"bin/propane", @"bin/jobs-worker" ]) {
+    NSString *script = [root stringByAppendingPathComponent:name];
+    XCTAssertTrue(ALNTestWriteUTF8File(script, pgidScript, &error), @"%@", error);
+    XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @0755 }
+                                                   ofItemAtPath:script
+                                                          error:&error],
+                  @"%@", error);
+  }
+  for (NSString *arguments in @[ @"boomhauer", @"propane", @"jobs worker" ]) {
+    int exitCode = -1;
+    NSString *output = [self runArlen:[NSString stringWithFormat:@"%@ && python3 -c 'import os; "
+                                                                 @"print(\"caller pgid=%%d\" %% os.getpgrp())'",
+                                                                 arguments]
+                        frameworkRoot:root
+                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode, @"%@: %@", arguments, output);
+    NSArray<NSString *> *lines = [[output stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]
+        componentsSeparatedByString:@"\n"];
+    XCTAssertEqual((NSUInteger)2, [lines count], @"%@: %@", arguments, output);
+    if ([lines count] == 2) {
+      NSString *serverGroup = [lines[0] stringByReplacingOccurrencesOfString:@"server pgid=" withString:@""];
+      NSString *callerGroup = [lines[1] stringByReplacingOccurrencesOfString:@"caller pgid=" withString:@""];
+      XCTAssertEqualObjects(callerGroup, serverGroup, @"%@: %@", arguments, output);
+    }
+  }
+  [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
+}
+
 - (void)testBuildAndCheckUseThePlatformToolchain {
   NSString *root = [self createFrameworkFixtureWithAppleBuilder:YES];
   NSDictionary *build = [self dryRunPayload:@"build" frameworkRoot:root];

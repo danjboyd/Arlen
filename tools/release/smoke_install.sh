@@ -21,7 +21,9 @@ cleanup() {
     sleep 1
     kill -KILL -- "-$server_pid" 2>/dev/null || true
   fi
-  rm -rf "$work"
+  # A slow-dying server can still be writing under $work; never let cleanup
+  # turn a passing smoke into a failure.
+  rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT
 

@@ -11,6 +11,13 @@ full unit, integration and durable-jobs suites running in Apple CI. Linux
 gains a public, rootless toolchain path through gnustep-cli. The
 notifications module gains a Web Push channel.
 
+- Stopping `arlen boomhauer`, `arlen propane` or `arlen jobs worker` now stops
+  the server. `arlen` ran them as a child process, which `NSTask` puts in its
+  own process group on both Apple and GNUstep, so a Ctrl-C (or a signal to
+  `arlen`) ended `arlen` and left the server running and holding its port.
+  `arlen` now execs these commands, so the server keeps `arlen`'s pid and
+  process group.
+
 - Install with one command. Each release now ships downloadable archives,
   and `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`
   installs Arlen to `~/.local/share/arlen/<version>` with an `arlen` launcher
