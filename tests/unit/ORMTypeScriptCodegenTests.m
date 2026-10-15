@@ -232,6 +232,57 @@
   XCTAssertTrue([[error localizedDescription] containsString:@"OpenAPI"]);
 }
 
+- (void)testClientReactAndMetaTargetsRenderFromOpenAPIWithoutDescriptors {
+  // Issue 183: apps without the ORM generate client/react/meta from OpenAPI alone.
+  // meta.ts describes x-arlen resources, which name ORM entities, so the meta
+  // case uses the fixture without its ORM-backed resources.
+  NSMutableDictionary *openAPIWithoutResources = [[self openAPIFixture] mutableCopy];
+  openAPIWithoutResources[@"x-arlen"] = @{ @"workspace" : [self openAPIFixture][@"x-arlen"][@"workspace"] ?: @{} };
+  for (NSArray<NSString *> *targets in @[ @[ @"client" ], @[ @"client,react" ], @[ @"react" ], @[ @"meta" ] ]) {
+    NSError *error = nil;
+    NSDictionary *openAPI = [targets containsObject:@"meta"] ? openAPIWithoutResources : [self openAPIFixture];
+    NSDictionary *artifacts =
+        [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                openAPISpecification:openAPI
+                                                        packageName:@"arlen-openapi-only-client"
+                                                            targets:targets
+                                                              error:&error];
+    XCTAssertNotNil(artifacts, @"targets %@: %@", targets, error);
+    XCTAssertNil(error, @"targets %@", targets);
+    NSDictionary *files = [artifacts[@"files"] isKindOfClass:[NSDictionary class]] ? artifacts[@"files"] : @{};
+    // client.ts imports the shared envelope types from models.ts.
+    XCTAssertNotNil(files[@"src/models.ts"], @"targets %@", targets);
+    XCTAssertTrue([files[@"src/models.ts"] containsString:@"ArlenErrorEnvelope"], @"targets %@", targets);
+    XCTAssertFalse([files[@"src/models.ts"] containsString:@"export interface Public"], @"targets %@", targets);
+    if ([[targets componentsJoinedByString:@","] containsString:@"react"]) {
+      XCTAssertNotNil(files[@"src/client.ts"]);
+      XCTAssertNotNil(files[@"src/react.ts"]);
+    }
+    if ([targets containsObject:@"meta"]) {
+      XCTAssertNotNil(files[@"src/meta.ts"]);
+    }
+  }
+}
+
+- (void)testModelTargetsStillRequireDescriptors {
+  for (NSArray<NSString *> *targets in @[ @[ @"models" ], @[ @"validators" ], @[ @"query" ], @[ @"all" ], @[ @"client,models" ], @[] ]) {
+    XCTAssertTrue([ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets], @"targets %@", targets);
+    NSError *error = nil;
+    NSDictionary *artifacts =
+        [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                openAPISpecification:[self openAPIFixture]
+                                                        packageName:nil
+                                                            targets:targets
+                                                              error:&error];
+    XCTAssertNil(artifacts, @"targets %@", targets);
+    XCTAssertTrue([[error localizedDescription] containsString:@"requires at least one ORM descriptor"],
+                  @"targets %@: %@", targets, error);
+  }
+  for (NSArray<NSString *> *targets in @[ @[ @"client" ], @[ @"react" ], @[ @"meta" ], @[ @"client", @"REACT" ], @[ @"realtime" ] ]) {
+    XCTAssertFalse([ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets], @"targets %@", targets);
+  }
+}
+
 - (void)testDuplicateOperationIDsFailClosed {
   NSDictionary *openAPI = @{
     @"openapi" : @"3.1.0",
@@ -386,6 +437,42 @@
                                                encoding:NSUTF8StringEncoding
                                                   error:NULL];
   XCTAssertTrue([models containsString:@"export interface PublicUser"]);
+}
+
+- (void)testTypeScriptCodegenCLIGeneratesClientWithoutORMManifest {
+  // Issue 183: no db/schema/arlen_orm_manifest.json and no --orm-input.
+  NSString *appRoot = ALNTestTemporaryDirectory(@"orm_typescript_codegen_openapi_only");
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+  NSString *openAPIPath = ALNTestPathFromRepoRoot(@"tests/fixtures/phase28/openapi_contract.json");
+  NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
+  NSString *prefix =
+      [NSString stringWithFormat:@"%@ && cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ typescript-codegen --openapi-input %@ --output-dir out --manifest build/arlen_typescript.json --force",
+                                 ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
+                                 ALNTestShellQuote(appRoot),
+                                 ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),
+                                 ALNTestShellQuote(openAPIPath)];
+
+  int exitCode = 0;
+  NSString *output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target client,react"], &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  for (NSString *relativePath in @[ @"out/src/models.ts", @"out/src/client.ts", @"out/src/react.ts" ]) {
+    XCTAssertTrue([fileManager fileExistsAtPath:[appRoot stringByAppendingPathComponent:relativePath]],
+                  @"%@ missing: %@", relativePath, output);
+  }
+
+  // Targets that need entities still report the missing manifest.
+  output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target models"], &exitCode);
+  XCTAssertNotEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"arlen_orm_manifest.json"], @"%@", output);
+
+  // An explicit --orm-input path that doesn't exist is still an error.
+  output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target client --orm-input missing.json"], &exitCode);
+  XCTAssertNotEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"missing.json"], @"%@", output);
 }
 
 @end
