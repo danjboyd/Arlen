@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- macOS deploy targets run under launchd. For `macos-*-apple-foundation`
+  targets `arlen deploy init` generates `launchd/<label>.plist` (from the new
+  `tools/deploy/launchd/arlen.plist`) and propane/jobs-worker wrappers that
+  export the target's env file, since launchd has no `EnvironmentFile`. The
+  doctor checks the plist and `launchctl`. On macOS, `arlen deploy`
+  `status`/`doctor` read the job with `launchctl print`, `restart`/`reload`
+  default to `launchctl kickstart -k`/`kill HUP`, and `logs --service` tails
+  `<releasePath>/logs/<label>.log`. `ARLEN_LAUNCHD_DOMAIN` selects a domain
+  other than `system`. The default service name for macOS targets is
+  `arlen.<target>` (GitHub issue 148).
 - `arlen perf` runs on macOS. `tests/performance/run_perf.sh` builds the profile
   servers with the Apple toolchain (new `tools/build_apple_xctest.sh
   --tools-only`), runs them from `build/apple/`, and times runs with `python3`
@@ -43,8 +53,8 @@
   `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
   or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
   physical paths, so a release under a symlinked directory such as macOS
-  `/var` is recognized as current. launchd service management is still open
-  (GitHub issue 148).
+  `/var` is recognized as current. Running the service under launchd is
+  covered in its own entry (GitHub issue 148).
 - The notifications module has a `webpush` channel for browsers and installed
   web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
   RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and

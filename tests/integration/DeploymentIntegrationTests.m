@@ -13,6 +13,7 @@
 
 #include <limits.h>
 #include <sys/utsname.h>
+#include <unistd.h>
 
 // `readlink -f` reports physical paths, while temp directories can sit under a
 // symlink (macOS /var -> /private/var). Compare against the physical path.
@@ -1722,6 +1723,185 @@ static NSString *ALNHostDeployProfile(void) {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
+}
+
+// GitHub issue 148: macOS targets run as launchd jobs. Generation does not
+// depend on the host, so this runs on every platform.
+- (void)testArlenDeployInitGeneratesLaunchdArtifactsForMacOSTargets {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-launchd-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-launchd-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *releasePath = [workRoot stringByAppendingPathComponent:@"srv/myapp"];
+    NSString *envFile = [workRoot stringByAppendingPathComponent:@"etc/myapp.env"];
+    NSString *deployConfig = [NSString stringWithFormat:
+        @"{ deployment = { schema = \"phase32-deploy-targets-v1\"; targets = {\n"
+         "  mac = { host = \"localhost\"; releasePath = \"%@\"; profile = \"macos-arm64-apple-foundation\";\n"
+         "          runtimeStrategy = \"system\"; runtimeAction = \"restart\"; environment = \"production\";\n"
+         "          configuration = { envFile = \"%@\"; };\n"
+         "          init = { runtimeUser = \"_arlen\"; runtimeGroup = \"_arlen\"; }; };\n"
+         "}; }; }\n",
+        releasePath, envFile];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/deploy.plist"] content:deployConfig]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"int main(void) { return 0; }\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    NSString *initOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                       "deploy init mac --app-root %@ --json",
+                                                      appRoot, repoRoot, repoRoot, appRoot]
+                                        exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", initOutput);
+
+    NSString *generatedRoot = [appRoot stringByAppendingPathComponent:@"build/deploy/targets/mac"];
+    NSString *plistPath = [generatedRoot stringByAppendingPathComponent:@"launchd/arlen.mac.plist"];
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"systemd"]]);
+    NSData *plistData = [NSData dataWithContentsOfFile:plistPath];
+    XCTAssertNotNil(plistData, @"%@", plistPath);
+    NSDictionary *job = plistData != nil ? [NSPropertyListSerialization propertyListWithData:plistData
+                                                                                       options:0
+                                                                                        format:NULL
+                                                                                         error:NULL]
+                                         : nil;
+    XCTAssertTrue([job isKindOfClass:[NSDictionary class]], @"%@", plistPath);
+    NSString *propaneWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/propane-wrapper"];
+    XCTAssertEqualObjects(@"arlen.mac", job[@"Label"]);
+    XCTAssertEqualObjects(@[ propaneWrapper ], job[@"ProgramArguments"]);
+    XCTAssertEqualObjects(@"_arlen", job[@"UserName"]);
+    XCTAssertEqualObjects([releasePath stringByAppendingPathComponent:@"releases/current/app"],
+                          job[@"EnvironmentVariables"][@"ARLEN_APP_ROOT"]);
+    XCTAssertEqualObjects([releasePath stringByAppendingPathComponent:@"logs/arlen.mac.log"], job[@"StandardOutPath"]);
+    XCTAssertEqualObjects(@YES, job[@"KeepAlive"]);
+
+    NSString *wrapper = [NSString stringWithContentsOfFile:propaneWrapper encoding:NSUTF8StringEncoding error:NULL];
+    NSString *envFileLine = [NSString stringWithFormat:@"ENV_FILE='%@'", envFile];
+    XCTAssertTrue([wrapper containsString:envFileLine], @"%@", wrapper);
+    XCTAssertTrue([wrapper containsString:@"releases/current/framework/bin/propane' --env production"], @"%@", wrapper);
+    NSString *readme = [NSString stringWithContentsOfFile:[generatedRoot stringByAppendingPathComponent:@"README.txt"]
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+    XCTAssertTrue([readme containsString:@"sudo launchctl bootstrap system /Library/LaunchDaemons/arlen.mac.plist"], @"%@", readme);
+
+    NSString *doctorOutput = [self runShellCapture:[NSString stringWithFormat:
+                                                        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen "
+                                                         "deploy doctor mac --app-root %@ --json",
+                                                        appRoot, repoRoot, repoRoot, appRoot]
+                                          exitCode:&code];
+    NSDictionary *doctor = [self parseJSONDictionaryFromOutput:doctorOutput context:@"arlen deploy doctor mac --json"];
+    NSMutableDictionary *statuses = [NSMutableDictionary dictionary];
+    for (NSDictionary *check in [doctor[@"checks"] isKindOfClass:[NSArray class]] ? doctor[@"checks"] : @[]) {
+      statuses[check[@"id"]] = check[@"status"];
+    }
+    XCTAssertEqualObjects(@"pass", statuses[@"target_launchd_plist"], @"%@", doctorOutput);
+    XCTAssertEqualObjects(@"pass", statuses[@"target_runtime_wrapper"], @"%@", doctorOutput);
+    XCTAssertNil(statuses[@"target_systemd_unit"], @"%@", doctorOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+// On macOS, deploy status/logs read a launchd job. The job runs in a per-user
+// domain (selected with ARLEN_LAUNCHD_DOMAIN), since the system domain needs
+// root.
+- (void)testArlenDeployStatusAndLogsReadLaunchdJobOnMacOS {
+#if !defined(__APPLE__)
+  XCTSkipUnless(NO, @"launchd is macOS-only");
+#else
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-launchd-status"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+  NSString *label = [NSString stringWithFormat:@"dev.arlen.test.%d", (int)getpid()];
+  NSString *domain = nil;
+  NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"srv/releases"];
+  NSString *logPath = [workRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"srv/logs/%@.log", label]];
+  NSString *plistPath = [workRoot stringByAppendingPathComponent:@"job.plist"];
+  @try {
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[releasesDir stringByAppendingPathComponent:@"r1"]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:[releasesDir stringByAppendingPathComponent:@"current"]
+                                                       withDestinationPath:[releasesDir stringByAppendingPathComponent:@"r1"]
+                                                                     error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:[logPath stringByDeletingLastPathComponent]
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:NULL]);
+    NSDictionary *job = @{
+      @"Label" : label,
+      @"ProgramArguments" : @[ @"/bin/sh", @"-c", @"echo launchd-job-started; exec sleep 300" ],
+      @"EnvironmentVariables" : @{ @"ARLEN_APP_ROOT" : @"/srv/app" },
+      @"StandardOutPath" : logPath,
+      @"StandardErrorPath" : logPath,
+      @"KeepAlive" : @YES,
+    };
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:job
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:NULL];
+    XCTAssertTrue([plistData writeToFile:plistPath atomically:YES]);
+    // A login session has gui/<uid>; a headless session may only accept user/<uid>.
+    int code = 1;
+    NSString *bootstrap = @"";
+    for (NSString *candidate in @[ @"gui", @"user" ]) {
+      domain = [NSString stringWithFormat:@"%@/%d", candidate, (int)getuid()];
+      bootstrap = [self runShellCapture:[NSString stringWithFormat:@"launchctl bootstrap %@ %@ 2>&1",
+                                                                  domain, [self shellQuoted:plistPath]]
+                               exitCode:&code];
+      if (code == 0) {
+        break;
+      }
+    }
+    XCTSkipUnless(code == 0, @"launchd refused a per-user job here: %@", bootstrap);
+
+    NSString *arlenEnv = [NSString stringWithFormat:@"ARLEN_LAUNCHD_DOMAIN=%@ ARLEN_FRAMEWORK_ROOT=%@", domain, repoRoot];
+    __block NSString *status = @"";
+    BOOL running = ALNTestWaitUntil(10.0, 0.2, ^BOOL {
+      int statusCode = 0;
+      status = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@ %@/build/arlen deploy status "
+                                                                 "--releases-dir %@ --service %@ --json",
+                                                                workRoot, arlenEnv, repoRoot, releasesDir, label]
+                            exitCode:&statusCode];
+      NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:[status dataUsingEncoding:NSUTF8StringEncoding]
+                                                              options:0
+                                                                error:NULL];
+      NSDictionary *service = [payload isKindOfClass:[NSDictionary class]] ? payload[@"service"] : nil;
+      return [service isKindOfClass:[NSDictionary class]] && [service[@"state"] isEqual:@"active"];
+    });
+    XCTAssertTrue(running, @"%@", status);
+
+    NSString *logs = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@ %@/build/arlen deploy logs "
+                                                                     "--releases-dir %@ --service %@ --lines 5 --json",
+                                                                    workRoot, arlenEnv, repoRoot, releasesDir, label]
+                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", logs);
+    NSDictionary *logsPayload = [self parseJSONDictionaryFromOutput:logs context:@"arlen deploy logs --service"];
+    XCTAssertEqualObjects(@"launchd", logsPayload[@"log_source"]);
+    XCTAssertEqualObjects(logPath, logsPayload[@"log_file"]);
+    XCTAssertTrue([logsPayload[@"captured_output"] containsString:@"launchd-job-started"], @"%@", logs);
+  } @finally {
+    if (domain != nil) {
+      (void)[self runShellCapture:[NSString stringWithFormat:@"launchctl bootout %@/%@ 2>/dev/null", domain, label]
+                         exitCode:NULL];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+#endif
 }
 
 - (void)testArlenDeployNamedTargetListDryrunAndInitUseCheckedInDeployConfig {
