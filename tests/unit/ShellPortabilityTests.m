@@ -19,10 +19,18 @@
     @"bin/build-apple",
     @"bin/jobs-worker",
     @"bin/propane",
+    @"tools/apple_compile_program.sh",
     @"tools/build_apple.sh",
     @"tools/build_apple_app.sh",
     @"tools/build_apple_xctest.sh",
+    @"tools/ci/run_durable_jobs.sh",
+    @"tools/deploy/activate_release.sh",
+    @"tools/deploy/build_release.sh",
+    @"tools/deploy/rollback_release.sh",
+    @"tools/deploy/smoke_release.sh",
+    @"tools/deploy/validate_operability.sh",
     @"tools/platform.sh",
+    @"tools/run_app_tests.sh",
     @"tools/test_apple.sh",
     @"tools/test_apple_xctest.sh",
   ];
@@ -75,13 +83,15 @@
 }
 
 // Under `set -u`, bash 3.2 treats "${arr[@]}" on an empty array as unbound.
-// propane and jobs-worker keep many arrays that are empty in normal runs
-// (no async workers, no passthrough args), so every expansion is guarded as
-// ${arr[@]+"${arr[@]}"}.
+// propane, jobs-worker and the release scripts keep many arrays that are empty
+// in normal runs (no async workers, passthrough args, shared paths or
+// pre-package commands), so every expansion is guarded as ${arr[@]+"${arr[@]}"}.
 - (void)testSupervisorScriptsGuardArrayExpansions {
   NSString *unguarded = @"(?<!\\+)\"\\$\\{[A-Za-z_][A-Za-z0-9_]*\\[@\\]\\}\"";
   NSMutableArray<NSString *> *violations = [NSMutableArray array];
-  for (NSString *script in @[ @"bin/propane", @"bin/jobs-worker" ]) {
+  for (NSString *script in @[
+         @"bin/jobs-worker", @"bin/propane", @"tools/deploy/build_release.sh", @"tools/deploy/rollback_release.sh"
+       ]) {
     [violations addObjectsFromArray:[self violationsInScript:script
                                                matchingRegex:unguarded
                                                       reason:@"unguarded array expansion"]];

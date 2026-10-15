@@ -797,9 +797,11 @@ Apple toolchain.
 Run framework tests.
 
 - default: equivalent to `--all`
-- macOS: `--unit`, `--all` and the default run the Apple XCTest unit bundle
-  (`tools/test_apple_xctest.sh`). The integration suite is GNUstep-only for
-  now, so `--all` notes that on stderr and `--integration` exits `2`.
+- macOS: runs the Apple XCTest bundles through `tools/test_apple_xctest.sh`:
+  `--unit` runs `--suite unit`, `--integration` runs `--suite integration`, and
+  `--all` and the default run both. Integration tests of GNUstep-only lanes
+  (the GNU make build graph, the perf, fault-injection, fuzz and sanitizer
+  lanes) report as skipped on macOS.
 
 ### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
 

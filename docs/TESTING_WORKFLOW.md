@@ -502,7 +502,9 @@ workflow runs this target explicitly. Use `make phase26-orm-unit` and
 
 ## Durable jobs acceptance
 
-Run `source tools/source_gnustep_env.sh` then `make ci-durable-jobs`. The gate
+Run `source tools/source_gnustep_env.sh` then `make ci-durable-jobs`; on macOS
+run `bash tools/ci/run_durable_jobs.sh`, which builds and runs the Apple
+`ArlenDurableJobsTests` bundle and `build/apple/durable-job-probe`. The gate
 creates a disposable PostgreSQL Unix-socket cluster and runs the repo-local
 XCTest bundle plus independent producer/consumer executables. PostgreSQL server
 binaries must be installed; `ARLEN_TEST_PG_BIN` overrides `pg_config --bindir`.
