@@ -1433,9 +1433,11 @@
   NSString *script =
       [self readFile:[repoRoot stringByAppendingPathComponent:@"tests/performance/run_perf.sh"]];
 
+  // The pinned GNUstep baselines stay the default; macOS uses machine-local
+  // baselines under build/ (GitHub issue 147).
+  XCTAssertTrue([script containsString:@"default_baseline_root=\"tests/performance/baselines\""]);
   XCTAssertTrue([script containsString:
-                            @"baseline_root=\"${ARLEN_PERF_BASELINE_ROOT:-tests/performance/"
-                             @"baselines}\""]);
+                            @"baseline_root=\"${ARLEN_PERF_BASELINE_ROOT:-$default_baseline_root}\""]);
   XCTAssertTrue([script containsString:
                             @"policy_root=\"${ARLEN_PERF_POLICY_ROOT:-tests/performance/"
                              @"policies}\""]);

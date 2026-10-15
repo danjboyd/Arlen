@@ -5,6 +5,7 @@
 
 #import "ALNJobsModule.h"
 #import "ALNModuleSystem.h"
+#import "ALNNotificationsWebPush.h"
 #import "ALNServices.h"
 
 @class ALNApplication;
@@ -46,6 +47,15 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
                                                                  error:
                                                                      (NSError *_Nullable *_Nullable)error;
 - (NSArray<NSString *> *)notificationsModuleDefaultChannels;
+// The `webpush` channel. Keys: title (required unless nudge), body, url, tag,
+// topic (<= 32 base64url chars; collapses repeats), ttl (seconds), urgency
+// (very-low|low|normal|high), nudge (BOOL: send no content, the service worker
+// shows the configured fallback text), and recipient or recipients.
+- (nullable NSDictionary *)notificationsModuleWebPushMessageForPayload:(NSDictionary *)payload
+                                                               runtime:
+                                                                   (ALNNotificationsModuleRuntime *)runtime
+                                                                 error:
+                                                                     (NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -113,6 +123,23 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
                                             forRecipient:(NSString *)recipient
                                                    error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)dashboardSummary;
+
+// Web Push (notificationsModule.webPush). Subscriptions belong to a recipient (the
+// auth subject); endpoints must be https on an allowed push-service host.
+@property(nonatomic, strong, nullable) id<ALNWebPushTransport> webPushTransport;
+- (NSDictionary *)webPushClientConfiguration;
+- (nullable NSDictionary *)saveWebPushSubscription:(NSDictionary *)subscription
+                                         userAgent:(nullable NSString *)userAgent
+                                      forRecipient:(NSString *)recipient
+                                             error:(NSError *_Nullable *_Nullable)error;
+- (BOOL)removeWebPushSubscriptionWithEndpoint:(NSString *)endpoint
+                                 forRecipient:(NSString *)recipient
+                                        error:(NSError *_Nullable *_Nullable)error;
+- (NSArray<NSDictionary *> *)webPushSubscriptionsForRecipient:(NSString *)recipient;
+/// Sends a fixed test message to the recipient's active subscriptions, bypassing
+/// notification definitions, preferences and the job queue.
+- (nullable NSDictionary *)sendWebPushTestToRecipient:(NSString *)recipient
+                                                error:(NSError *_Nullable *_Nullable)error;
 
 @end
 

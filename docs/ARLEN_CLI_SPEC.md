@@ -209,6 +209,12 @@ Behavior:
 - runs bootstrap diagnostics before any framework build requirement
 - supports machine-readable output for onboarding and CI gating
 
+### 4.12a `arlen webpush <generate-keys|public-key> [--json]`
+
+- generates a VAPID key pair for the notifications module's Web Push channel
+- derives the public key from `ARLEN_WEBPUSH_VAPID_PRIVATE_KEY` or stdin; never
+  accepts a private key as an argument
+
 ### 4.13 `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
 - introspects PostgreSQL `information_schema` for non-system schemas

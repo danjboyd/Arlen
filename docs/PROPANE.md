@@ -58,6 +58,13 @@ under the system `/bin/bash` 3.2. A packaged release keeps the
 `.boomhauer/build/` layout on every platform, and `propane` runs its shipped
 binary; packaging a release on macOS is tracked in GitHub issue 148.
 
+`propane` and `jobs-worker` treat a framework root as a packaged release
+only when it has a compiled `build/arlen` and no source checkout. A source
+checkout is a root with `GNUmakefile` and `src/Arlen`. A built checkout
+therefore always goes through the `boomhauer --prepare-only` rebuild, so the
+launchers never run an app binary left over from an earlier build (GitHub
+issue 150).
+
 ## Propane Accessories
 
 Define in `config/app.plist`:

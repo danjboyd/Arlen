@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+is_macos=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  is_macos=1
+fi
+
 mkdir -p build/perf
 report_file="build/perf/latest.json"
 summary_csv="build/perf/latest.csv"
@@ -48,7 +53,13 @@ if [[ "$PROFILE_NAME" == "default" && "$concurrency" == "1" ]]; then
   echo "perf: note: default profile is CI regression-oriented. For external comparisons use ARLEN_PERF_PROFILE=comparison_http."
 fi
 
-baseline_root="${ARLEN_PERF_BASELINE_ROOT:-tests/performance/baselines}"
+# Committed baselines are recorded on Linux hosts. On macOS the default is a
+# host-local root under build/, so the first run records this Mac's baseline.
+default_baseline_root="tests/performance/baselines"
+if (( is_macos == 1 )); then
+  default_baseline_root="build/perf/baselines/macos-$(uname -m)"
+fi
+baseline_root="${ARLEN_PERF_BASELINE_ROOT:-$default_baseline_root}"
 policy_root="${ARLEN_PERF_POLICY_ROOT:-tests/performance/policies}"
 baseline_file="${ARLEN_PERF_BASELINE:-${baseline_root}/${PROFILE_NAME}.json}"
 policy_file="${ARLEN_PERF_POLICY:-${policy_root}/${PROFILE_NAME}.json}"
@@ -69,8 +80,23 @@ else
   skip_gate="${ARLEN_PERF_SKIP_GATE:-0}"
 fi
 
+# macOS builds with the Apple toolchain into build/apple/: boomhauer through
+# bin/build-apple, the example servers with the integration suite's tools.
+if (( is_macos == 1 )) && [[ "$SERVER_BINARY" == ./build/* ]]; then
+  SERVER_BINARY="./build/apple/${SERVER_BINARY#./build/}"
+fi
 if [[ "${ARLEN_PERF_SKIP_BUILD:-0}" != "1" ]]; then
-  make "${MAKE_TARGETS[@]}" >/dev/null
+  if (( is_macos == 0 )); then
+    make "${MAKE_TARGETS[@]}" >/dev/null
+  else
+    ./bin/build-apple --with-boomhauer >/dev/null
+    for target in "${MAKE_TARGETS[@]}"; do
+      if [[ "$target" != "boomhauer" ]]; then
+        ./tools/build_apple_xctest.sh --suite integration --tools-only >/dev/null
+        break
+      fi
+    done
+  fi
 fi
 
 port="${ARLEN_PERF_PORT:-3301}"
@@ -80,7 +106,7 @@ for arg in "${SERVER_ARGS[@]}"; do
 done
 
 launch_cmd=(env)
-for env_pair in "${SERVER_ENV[@]}"; do
+for env_pair in ${SERVER_ENV[@]+"${SERVER_ENV[@]}"}; do
   launch_cmd+=("$env_pair")
 done
 launch_cmd+=("$SERVER_BINARY")
@@ -114,6 +140,11 @@ fi
 
 mem_before_kb="$(ps -o rss= -p "$server_pid" | awk '{print $1+0}')"
 
+# BSD date has no %N.
+now_ns() {
+  python3 -c 'import time; print(time.time_ns())'
+}
+
 percentile() {
   local file="$1"
   local p="$2"
@@ -141,7 +172,7 @@ run_benchmark_once() {
   lat_sorted="$(mktemp)"
 
   local start_ns end_ns
-  start_ns="$(date +%s%N)"
+  start_ns="$(now_ns)"
   local url="http://127.0.0.1:${port}${path}"
   if (( concurrency <= 1 )); then
     for _ in $(seq 1 "$requests_local"); do
@@ -152,7 +183,7 @@ run_benchmark_once() {
       | xargs -P "$concurrency" -I{} curl -o /dev/null -sS -w "%{time_total}\n" "$url" \
           >>"$lat_raw"
   fi
-  end_ns="$(date +%s%N)"
+  end_ns="$(now_ns)"
 
   awk '{printf "%.6f\n", ($1*1000.0)}' "$lat_raw" | sort -n >"$lat_sorted"
   local p50 p95 p99 max reqps duration_s

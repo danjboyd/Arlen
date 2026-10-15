@@ -33,23 +33,23 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 | GNUstep config tool | `source /path/to/Arlen/tools/source_gnustep_env.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
 | XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
 
-## Apple Baseline (2026-04-08)
+## Apple Baseline (2026-10-08)
 
-This is the closed Apple-runtime baseline on the `mac` branch. It
-is a verified build/runtime contract, not a claim that every Linux/GNUstep
-test lane has already been migrated to Apple-native XCTest bundles.
+This is the closed Apple-runtime baseline. It is a verified build/runtime
+contract, not a claim that every Linux/GNUstep test lane runs on Apple; see
+`docs/APPLE_PLATFORM.md` for the Linux-only areas.
 
 | Component | Command | Observed baseline |
 | --- | --- | --- |
 | OS family | `uname -s` | `Darwin` |
 | Architecture | `uname -m` | `arm64` |
-| OS version | `sw_vers -productVersion` | `26.4` |
+| OS version | `sw_vers -productVersion` | `26.5.1` |
 | Active developer dir | `xcode-select -p` | `/Applications/Xcode.app/Contents/Developer` |
 | Apple SDK | `xcrun --show-sdk-path` | `/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk` |
 | C/ObjC compiler | `xcrun --find clang` | `/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang` |
 | XCTest CLI | `xcrun --find xctest` | `/Applications/Xcode.app/Contents/Developer/usr/bin/xctest` |
 | Homebrew | `brew --prefix` | `/opt/homebrew` |
-| OpenSSL package | `brew list --versions openssl@3` | `openssl@3 3.6.0` |
+| OpenSSL package | `brew list --versions openssl@3` | `openssl@3 3.6.2` |
 
 Apple path notes:
 
@@ -59,8 +59,11 @@ Apple path notes:
 - use `bash ./tools/ci/run_apple_baseline_confidence.sh` for the artifact-backed
   Apple baseline
 - do not source GNUstep bootstrap scripts on the Apple path
-- Apple XCTest availability is now verified with `tools/apple_xctest_smoke.sh`
-- full repo-native Objective-C Apple XCTest bundle migration remains future work
+- Apple XCTest availability is verified with `tools/apple_xctest_smoke.sh`
+- the repo-native Apple XCTest bundles are built by
+  `tools/build_apple_xctest.sh --suite unit|integration|durable-jobs` and run
+  by `./tools/test_apple_xctest.sh` (`arlen test`); `./tools/test_apple.sh`
+  runs the unit bundle plus the runtime checks
 
 ## Known libobjc2 Defect: Instance `@synchronized`
 
