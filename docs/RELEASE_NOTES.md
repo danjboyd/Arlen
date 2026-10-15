@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `arlen perf` runs on macOS. `tests/performance/run_perf.sh` builds the profile
+  servers with the Apple toolchain (new `tools/build_apple_xctest.sh
+  --tools-only`), runs them from `build/apple/`, and times runs with `python3`
+  instead of `date +%s%N`, which BSD `date` lacks. On macOS the baseline root
+  defaults to the host-local `build/perf/baselines/macos-<arch>`, since the
+  committed baselines are Linux host recordings. The perf scripts use
+  `datetime.timezone.utc`, so they also run on Python 3.9 (macOS's system
+  `python3`) (GitHub issue 147).
+
 - The integration and durable-jobs suites run on macOS as Apple XCTest
   bundles. `tools/build_apple_xctest.sh --suite integration|durable-jobs` builds
   them and the binaries they launch (example servers, `eoc-smoke-render`,
