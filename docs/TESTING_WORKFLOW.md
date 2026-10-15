@@ -645,6 +645,33 @@ with `#if`; skip it with `XCTSkip` so discovery stays the same everywhere.
 Logs go to `build/release_confidence/apple_unit/`. The `apple-baseline` job
 runs this script and uploads that directory on failure.
 
+## Apple integration and durable-jobs suites
+
+On macOS with full Xcode and the same Homebrew packages:
+
+```bash
+bash tools/ci/run_apple_integration_suite.sh
+bash tools/ci/run_durable_jobs.sh
+```
+
+`run_apple_integration_suite.sh` builds the Apple XCTest integration bundle,
+starts a private PostgreSQL on a Unix socket, and runs every integration test.
+It sets `ARLEN_PG_TEST_DSN` in URI form
+(`postgresql://user@/postgres?host=<socket dir>`), because some tests pass the
+DSN unquoted to `psql`. It then checks discovery against
+`tests/fixtures/test_inventory/ArlenIntegrationTests.tests.txt`. Nested
+`arlen test --app` runs print their own app test cases (`HomeTests`,
+`HomeControllerTests`, `MissingTests`) into the same log, so the script drops
+those classes before the inventory check. GNUstep-only tests skip with
+`XCTSkip`.
+
+`run_durable_jobs.sh` runs the Apple durable-jobs bundle on macOS and
+`make durable-jobs-tests` elsewhere, each against its own private cluster.
+
+Logs go to `build/release_confidence/apple_integration/` and
+`build/release_confidence/durable_jobs.log`. The `apple-baseline` job runs both
+scripts after the unit suite and uploads those logs on failure.
+
 ## Live PostgreSQL regression gate
 
 Run `bash tools/ci/run_postgres_regressions.sh` with the supported clang GNUstep
