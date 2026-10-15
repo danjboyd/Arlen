@@ -30,6 +30,13 @@ apps can live anywhere. Run `install.sh --help` for the prefix and version
 options. If you downloaded the archive with a browser, pass it with
 `--archive`; the installer clears the quarantine flag.
 
+`~/.local/bin` is not on the `PATH` of a new Mac. If `arlen` is not found,
+add it in the startup file of the default shell, zsh, and open a new terminal:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile
+```
+
 The prebuilt tools stay in use while the installed framework sources and the
 OpenSSL location match the release. If you edit the installed sources, or
 OpenSSL moves, `build-apple` rebuilds the framework once with your toolchain

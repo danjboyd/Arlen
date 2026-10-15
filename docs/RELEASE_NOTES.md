@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The installer's PATH hint now names the startup file your login shell reads
+  (`~/.zprofile` for zsh, the macOS default) instead of `~/.profile`, which
+  zsh ignores.
+
 ## 0.2.0 — 2026-10-15
 
 Arlen now installs with one command on Linux and Apple Silicon Macs, and

@@ -45,6 +45,29 @@ class SourceArchiveTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
 
 
+class InstallPathHintTests(unittest.TestCase):
+    def test_path_hint_names_the_login_shell_startup_file(self):
+        bash_rc = "~/.bash_profile" if os.uname().sysname == "Darwin" else "~/.bashrc"
+        expected = {"/bin/zsh": "~/.zprofile", "/bin/bash": bash_rc,
+                    "/bin/sh": "~/.profile"}
+        with tempfile.TemporaryDirectory() as out:
+            subprocess.run(
+                ["bash", str(REPO_ROOT / "tools/release/package_framework.sh"),
+                 "--version", "9.8.7", "--kind", "source", "--out", out],
+                check=True, cwd=REPO_ROOT, stdout=subprocess.DEVNULL)
+            for shell, rc in expected.items():
+                with self.subTest(shell=shell):
+                    result = subprocess.run(
+                        ["bash", str(REPO_ROOT / "tools/install.sh"),
+                         "--archive", str(Path(out) / "arlen-9.8.7.tar.gz"), "--no-build",
+                         "--prefix", str(Path(out) / "prefix"),
+                         "--bin-dir", str(Path(out) / "bin")],
+                        env={"PATH": "/usr/bin:/bin", "HOME": out, "SHELL": shell,
+                             "TMPDIR": out},
+                        check=True, capture_output=True, text=True)
+                    self.assertIn(f">> {rc}\n", result.stdout + result.stderr)
+
+
 class ManagedToolchainEnvTests(unittest.TestCase):
     def _fake_root(self, base, managed):
         root = Path(base) / "gs"
