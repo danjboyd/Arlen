@@ -190,9 +190,16 @@ chmod 755 "$launcher"
 
 say "installed Arlen $version at $dest"
 say "launcher: $launcher"
+# Name the startup file the user's login shell actually reads: zsh (the macOS
+# default) ignores ~/.profile, and macOS Terminal starts bash as a login shell.
+case "$(basename "${SHELL:-}")" in
+  zsh) shell_rc="~/.zprofile" ;;
+  bash) if [[ "$platform" == "macos" ]]; then shell_rc="~/.bash_profile"; else shell_rc="~/.bashrc"; fi ;;
+  *) shell_rc="~/.profile" ;;
+esac
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
-  *) say "add $bin_dir to your PATH, for example: echo 'export PATH=\"$bin_dir:\$PATH\"' >> ~/.profile" ;;
+  *) say "add $bin_dir to your PATH, for example: echo 'export PATH=\"$bin_dir:\$PATH\"' >> $shell_rc" ;;
 esac
 cat <<EOF
 

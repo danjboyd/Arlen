@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The installer's PATH hint now names the startup file your login shell reads
+  (`~/.zprofile` for zsh, the macOS default) instead of `~/.profile`, which
+  zsh ignores.
+
 - The `boomhauer` build-error page shows its styling again. The app's
   default `default-src 'self'` CSP blocked the page's inline styles, so it
   rendered as unstyled text. The page now sends its own CSP, which allows
