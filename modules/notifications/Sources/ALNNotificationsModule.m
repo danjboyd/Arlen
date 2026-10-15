@@ -9,6 +9,9 @@
 #import "ALNContext.h"
 #import "ALNRequest.h"
 #import "ALNRealtime.h"
+#import "ALNResponse.h"
+#import "ALNSecurityPrimitives.h"
+#import "ALNWebPush.h"
 
 NSString *const ALNNotificationsModuleErrorDomain = @"Arlen.Modules.Notifications.Error";
 
@@ -451,6 +454,163 @@ static NSDictionary *NMWebhookPreviewRepresentation(NSDictionary *request) {
   };
 }
 
+static NSArray<NSString *> *NMRecipientsFromInAppEntry(NSDictionary *entry);
+
+// Hosts of the browser push services. Subscription endpoints come from browsers,
+// so the server only POSTs to these unless an app widens the list ("*" allows any
+// https host).
+static NSArray<NSString *> *NMWebPushDefaultAllowedHosts(void) {
+  return @[ @"push.apple.com", @"fcm.googleapis.com", @"push.services.mozilla.com", @"notify.windows.com" ];
+}
+
+static BOOL NMWebPushEndpointIsAllowed(NSURL *endpoint, NSArray<NSString *> *allowedHosts) {
+  if (endpoint == nil || ![[[endpoint scheme] lowercaseString] isEqualToString:@"https"]) {
+    return NO;
+  }
+  NSString *host = [[endpoint host] lowercaseString];
+  if ([host length] == 0 || [endpoint user] != nil || [endpoint password] != nil) {
+    return NO;
+  }
+  for (NSString *rawAllowed in allowedHosts ?: @[]) {
+    NSString *allowed = NMLowerTrimmedString(rawAllowed);
+    if ([allowed isEqualToString:@"*"]) {
+      return YES;
+    }
+    if ([allowed hasPrefix:@"."]) {
+      allowed = [allowed substringFromIndex:1];
+    }
+    if ([allowed length] > 0 &&
+        ([host isEqualToString:allowed] || [host hasSuffix:[@"." stringByAppendingString:allowed]])) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static NSArray<NSString *> *NMWebPushUrgencies(void) {
+  return @[ @"very-low", @"low", @"normal", @"high" ];
+}
+
+static NSDictionary *NMNormalizedWebPushMessage(NSDictionary *rawMessage, NSDictionary *payload, NSError **error) {
+  NSDictionary *raw = NMNormalizeDictionary(rawMessage);
+  BOOL nudge = [raw[@"nudge"] respondsToSelector:@selector(boolValue)] && [raw[@"nudge"] boolValue];
+  NSString *title = NMTrimmedString(raw[@"title"]);
+  if (!nudge && [title length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"web push messages require a title, or nudge: YES for a content-free push",
+                       nil);
+    }
+    return nil;
+  }
+  NSString *topic = NMTrimmedString(raw[@"topic"]);
+  if ([topic length] > 0 && !ALNWebPushTopicIsValid(topic)) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"web push topic must be 1-32 base64url characters",
+                       @{ @"topic" : topic });
+    }
+    return nil;
+  }
+  NSString *urgency = NMLowerTrimmedString(raw[@"urgency"]);
+  if ([urgency length] > 0 && ![NMWebPushUrgencies() containsObject:urgency]) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"web push urgency must be very-low, low, normal or high",
+                       @{ @"urgency" : urgency });
+    }
+    return nil;
+  }
+  id ttl = [raw[@"ttl"] respondsToSelector:@selector(doubleValue)] && [raw[@"ttl"] doubleValue] >= 0.0
+               ? @((long long)[raw[@"ttl"] doubleValue])
+               : [NSNull null];
+
+  NSMutableArray<NSString *> *recipients = [NSMutableArray arrayWithArray:NMRecipientsFromInAppEntry(raw)];
+  NSString *payloadRecipient = NMTrimmedString(payload[@"recipient"]);
+  if ([payloadRecipient length] == 0) {
+    payloadRecipient = NMTrimmedString(payload[@"recipientSubject"]);
+  }
+  if ([recipients count] == 0 && [payloadRecipient length] > 0) {
+    [recipients addObject:payloadRecipient];
+  }
+  if ([recipients count] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"web push notification requires at least one recipient",
+                       nil);
+    }
+    return nil;
+  }
+
+  NSMutableDictionary *content = [NSMutableDictionary dictionary];
+  if (nudge) {
+    content[@"nudge"] = @YES;
+  } else {
+    content[@"title"] = title;
+    for (NSString *key in @[ @"body", @"url", @"tag" ]) {
+      if ([NMTrimmedString(raw[key]) length] > 0) {
+        content[key] = NMTrimmedString(raw[key]);
+      }
+    }
+  }
+  NSData *payloadData = [NSJSONSerialization dataWithJSONObject:content options:0 error:NULL] ?: [NSData data];
+  if ([payloadData length] > ALNWebPushMaxPlaintextLength) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       [NSString stringWithFormat:@"web push payload is %lu bytes; the limit is %lu",
+                                                  (unsigned long)[payloadData length],
+                                                  (unsigned long)ALNWebPushMaxPlaintextLength],
+                       @{ @"bytes" : @([payloadData length]) });
+    }
+    return nil;
+  }
+  return @{
+    @"title" : nudge ? @"" : title,
+    @"body" : nudge ? @"" : NMTrimmedString(raw[@"body"]),
+    @"url" : nudge ? @"" : NMTrimmedString(raw[@"url"]),
+    @"tag" : nudge ? @"" : NMTrimmedString(raw[@"tag"]),
+    @"topic" : topic,
+    @"ttl" : ttl,
+    @"urgency" : urgency,
+    @"nudge" : @(nudge),
+    @"recipients" : recipients,
+    @"payloadData" : payloadData,
+  };
+}
+
+static NSDictionary *NMWebPushPreviewRepresentation(NSDictionary *message) {
+  NSDictionary *normalized = NMNormalizeDictionary(message);
+  return @{
+    @"title" : NMTrimmedString(normalized[@"title"]),
+    @"body" : NMTrimmedString(normalized[@"body"]),
+    @"url" : NMTrimmedString(normalized[@"url"]),
+    @"tag" : NMTrimmedString(normalized[@"tag"]),
+    @"topic" : NMTrimmedString(normalized[@"topic"]),
+    @"urgency" : NMTrimmedString(normalized[@"urgency"]),
+    @"nudge" : @([normalized[@"nudge"] boolValue]),
+    @"recipients" : NMNormalizeArray(normalized[@"recipients"]),
+  };
+}
+
+static NSDictionary *NMWebPushPublicSubscription(NSDictionary *subscription) {
+  NSDictionary *entry = NMNormalizeDictionary(subscription);
+  NSURL *endpoint = [NSURL URLWithString:NMTrimmedString(entry[@"endpoint"])];
+  return @{
+    @"subscriptionID" : NMTrimmedString(entry[@"subscriptionID"]),
+    @"endpointHost" : [[endpoint host] lowercaseString] ?: @"",
+    @"userAgent" : NMTrimmedString(entry[@"userAgent"]),
+    @"createdAt" : entry[@"createdAt"] ?: @0,
+    @"lastSuccessAt" : entry[@"lastSuccessAt"] ?: @0,
+    @"active" : @([entry[@"active"] boolValue]),
+    @"inactiveReason" : NMTrimmedString(entry[@"inactiveReason"]),
+    @"inactiveAt" : entry[@"inactiveAt"] ?: @0,
+  };
+}
+
+static NSString *NMEnvironmentValue(NSString *name) {
+  return NMTrimmedString([[NSProcessInfo processInfo] environment][name]);
+}
+
 static NSArray<NSString *> *NMRecipientsFromInAppEntry(NSDictionary *entry) {
   NSMutableArray<NSString *> *recipients = [NSMutableArray array];
   for (id rawRecipient in NMNormalizeArray(entry[@"recipients"])) {
@@ -550,6 +710,17 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, assign) BOOL webPushEnabled;
+@property(nonatomic, strong) ALNWebPushVAPIDKey *webPushVAPIDKey;
+@property(nonatomic, copy) NSString *webPushSubject;
+@property(nonatomic, assign) NSTimeInterval webPushDefaultTTL;
+@property(nonatomic, copy) NSString *webPushDefaultUrgency;
+@property(nonatomic, copy) NSArray<NSString *> *webPushAllowedHosts;
+@property(nonatomic, assign) NSUInteger webPushMaxSubscriptionsPerRecipient;
+@property(nonatomic, assign) BOOL webPushTestRouteEnabled;
+@property(nonatomic, copy) NSDictionary *webPushNudgeDefaults;
+@property(nonatomic, strong) ALNNotificationsWebPushSubscriptionStore *webPushStore;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *webPushTokenCache;
 
 - (BOOL)registerNotificationDefinition:(id<ALNNotificationDefinition>)definition
                                 source:(NSString *)source
@@ -581,6 +752,12 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                                         channels:(NSArray<NSString *> *)channels
                                                            error:(NSError **)error;
 - (NSDictionary *)inboxSummaryLockedForRecipient:(NSString *)recipient;
+- (nullable NSDictionary *)deliverWebPushMessage:(NSDictionary *)message
+                                      identifier:(NSString *)identifier
+                                         payload:(NSDictionary *)payload
+                                      jobPayload:(NSDictionary *)jobPayload
+                                          policy:(NSDictionary *)policy
+                                           error:(NSError **)error;
 
 @end
 
@@ -612,8 +789,126 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     _realtimeHub = [ALNRealtimeHub sharedHub];
     _persistenceEnabled = NO;
     _statePath = @"";
+    _webPushEnabled = NO;
+    _webPushSubject = @"";
+    _webPushDefaultTTL = 86400.0;
+    _webPushDefaultUrgency = @"normal";
+    _webPushAllowedHosts = NMWebPushDefaultAllowedHosts();
+    _webPushMaxSubscriptionsPerRecipient = 10;
+    _webPushNudgeDefaults = @{};
+    _webPushStore = [[ALNNotificationsWebPushSubscriptionStore alloc] initWithPath:nil];
+    _webPushTokenCache = [NSMutableDictionary dictionary];
   }
   return self;
+}
+
+// notificationsModule.webPush. The ARLEN_WEBPUSH_* environment variables override
+// the plist so the VAPID private key never has to live in the repository.
+- (BOOL)configureWebPushWithModuleConfig:(NSDictionary *)moduleConfig error:(NSError **)error {
+  NSDictionary *config = NMNormalizeDictionary(moduleConfig[@"webPush"]);
+  NSDictionary *vapid = NMNormalizeDictionary(config[@"vapid"]);
+  BOOL enabled = [config[@"enabled"] respondsToSelector:@selector(boolValue)] && [config[@"enabled"] boolValue];
+  NSString *enabledOverride = [NMEnvironmentValue(@"ARLEN_WEBPUSH_ENABLED") lowercaseString];
+  if ([enabledOverride length] > 0) {
+    enabled = [@[ @"1", @"true", @"yes", @"on" ] containsObject:enabledOverride];
+  }
+  NSString *publicKey = [NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_PUBLIC_KEY") length] > 0
+                            ? NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_PUBLIC_KEY")
+                            : NMTrimmedString(vapid[@"publicKey"]);
+  NSString *privateKey = [NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_PRIVATE_KEY") length] > 0
+                             ? NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_PRIVATE_KEY")
+                             : NMTrimmedString(vapid[@"privateKey"]);
+  NSString *subject = [NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_SUBJECT") length] > 0
+                          ? NMEnvironmentValue(@"ARLEN_WEBPUSH_VAPID_SUBJECT")
+                          : NMTrimmedString(vapid[@"subject"]);
+
+  ALNWebPushVAPIDKey *key = nil;
+  if (enabled) {
+    NSError *keyError = nil;
+    key = [ALNWebPushVAPIDKey keyWithPublicKey:publicKey privateKey:privateKey error:&keyError];
+    if (key == nil) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"notificationsModule.webPush is enabled but its VAPID keys are unusable: %@",
+                                                    keyError.localizedDescription ?: @"invalid key"],
+                         nil);
+      }
+      return NO;
+    }
+    // Apple's push service rejects tokens without a contact subject.
+    if (![subject hasPrefix:@"mailto:"] && ![subject hasPrefix:@"https://"]) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorInvalidConfiguration,
+                         @"notificationsModule.webPush.vapid.subject must be a mailto: or https: URL",
+                         nil);
+      }
+      return NO;
+    }
+  }
+
+  NSTimeInterval ttl = [config[@"ttlSeconds"] respondsToSelector:@selector(doubleValue)] ? [config[@"ttlSeconds"] doubleValue] : 86400.0;
+  NSString *urgency = NMLowerTrimmedString(config[@"urgency"]);
+  if (![NMWebPushUrgencies() containsObject:urgency]) {
+    urgency = @"normal";
+  }
+  NSArray *hosts = [config[@"allowedEndpointHosts"] isKindOfClass:[NSArray class]] ? config[@"allowedEndpointHosts"]
+                                                                                   : NMWebPushDefaultAllowedHosts();
+  NSUInteger maxSubscriptions = [config[@"maxSubscriptionsPerRecipient"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                    ? [config[@"maxSubscriptionsPerRecipient"] unsignedIntegerValue]
+                                    : 10;
+  NSDictionary *testRoute = NMNormalizeDictionary(config[@"testRoute"]);
+  NSDictionary *nudge = NMNormalizeDictionary(config[@"nudge"]);
+  NSMutableDictionary *nudgeDefaults = [NSMutableDictionary dictionary];
+  nudgeDefaults[@"title"] = [NMTrimmedString(nudge[@"title"]) length] > 0 ? NMTrimmedString(nudge[@"title"]) : @"New notification";
+  nudgeDefaults[@"body"] = [NMTrimmedString(nudge[@"body"]) length] > 0 ? NMTrimmedString(nudge[@"body"]) : @"Open the app to see it.";
+  nudgeDefaults[@"url"] = [NMTrimmedString(nudge[@"url"]) length] > 0 ? NMTrimmedString(nudge[@"url"]) : @"/";
+  for (NSString *imageKey in @[ @"icon", @"badge" ]) {
+    if ([NMTrimmedString(nudge[imageKey]) length] > 0) {
+      nudgeDefaults[imageKey] = NMTrimmedString(nudge[imageKey]);
+    }
+  }
+
+  id<ALNWebPushTransport> transport = nil;
+  NSString *transportClass = NMTrimmedString(config[@"transportClass"]);
+  if ([transportClass length] > 0) {
+    Class klass = NSClassFromString(transportClass);
+    transport = (klass != Nil) ? [[klass alloc] init] : nil;
+    if (transport == nil || ![transport conformsToProtocol:@protocol(ALNWebPushTransport)]) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"web push transport %@ is invalid", transportClass],
+                         @{ @"class" : transportClass });
+      }
+      return NO;
+    }
+  }
+
+  // Subscriptions live beside the module state file; the test environment and
+  // disabled persistence keep them in memory.
+  NSDictionary *subscriptions = NMNormalizeDictionary(config[@"subscriptions"]);
+  NSString *storePath = NMTrimmedString(subscriptions[@"path"]);
+  if ([storePath length] > 0) {
+    storePath = [storePath hasPrefix:@"/"] ? storePath : [self.application pathRelativeToAppRoot:storePath];
+  } else if ([self.statePath length] > 0) {
+    storePath = [[self.statePath stringByDeletingPathExtension] stringByAppendingString:@"-webpush.plist"];
+  }
+
+  [self.lock lock];
+  self.webPushEnabled = enabled;
+  self.webPushVAPIDKey = key;
+  self.webPushSubject = subject ?: @"";
+  self.webPushDefaultTTL = MIN(MAX(ttl, 0.0), 2419200.0);
+  self.webPushDefaultUrgency = urgency;
+  self.webPushAllowedHosts = hosts;
+  self.webPushMaxSubscriptionsPerRecipient = MIN(MAX(maxSubscriptions, (NSUInteger)1), (NSUInteger)100);
+  self.webPushTestRouteEnabled =
+      [testRoute[@"enabled"] respondsToSelector:@selector(boolValue)] && [testRoute[@"enabled"] boolValue];
+  self.webPushNudgeDefaults = nudgeDefaults;
+  self.webPushStore = [[ALNNotificationsWebPushSubscriptionStore alloc] initWithPath:storePath];
+  self.webPushTransport = transport ?: [[ALNWebPushHTTPTransport alloc] init];
+  [self.webPushTokenCache removeAllObjects];
+  [self.lock unlock];
+  return YES;
 }
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
@@ -670,6 +965,9 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.lock unlock];
 
   if (![self loadPersistedStateWithError:error]) {
+    return NO;
+  }
+  if (![self configureWebPushWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
 
@@ -854,6 +1152,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 }
 
 - (NSDictionary *)resolvedConfigSummary {
+  NSDictionary *webPushSubscriptions = [self.webPushStore summary] ?: @{};
   [self.lock lock];
   NSDictionary *summary = @{
     @"prefix" : self.prefix ?: @"/notifications",
@@ -868,6 +1167,15 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"fanoutEventCount" : @([self.recentFanoutEvents count]),
     @"persistenceEnabled" : @(self.persistenceEnabled),
     @"statePath" : self.statePath ?: @"",
+    @"webPush" : @{
+      @"enabled" : @(self.webPushEnabled),
+      @"vapidPublicKey" : self.webPushVAPIDKey.publicKey ?: @"",
+      @"subject" : self.webPushSubject ?: @"",
+      @"allowedEndpointHosts" : self.webPushAllowedHosts ?: @[],
+      @"subscriptionStorePath" : self.webPushStore.path ?: @"",
+      @"testRouteEnabled" : @(self.webPushTestRouteEnabled),
+      @"subscriptions" : webPushSubscriptions,
+    },
   };
   [self.lock unlock];
   return summary;
@@ -1062,6 +1370,30 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     }
   }
 
+  NSDictionary *webPushMessage = nil;
+  if ([normalizedChannels containsObject:@"webpush"]) {
+    if (![definition respondsToSelector:@selector(notificationsModuleWebPushMessageForPayload:runtime:error:)]) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                         @"notification does not support the webpush channel",
+                         @{ @"identifier" : notificationID });
+      }
+      return nil;
+    }
+    NSError *pushError = nil;
+    NSDictionary *rawMessage =
+        [definition notificationsModuleWebPushMessageForPayload:normalizedPayload runtime:self error:&pushError];
+    webPushMessage = (rawMessage != nil) ? NMNormalizedWebPushMessage(rawMessage, normalizedPayload, &pushError) : nil;
+    if (webPushMessage == nil) {
+      if (error != NULL) {
+        *error = pushError ?: NMError(ALNNotificationsModuleErrorDeliveryFailed,
+                                      @"notification did not produce a web push message",
+                                      @{ @"identifier" : notificationID });
+      }
+      return nil;
+    }
+  }
+
   return @{
     @"identifier" : notificationID,
     @"metadata" : metadata ?: @{},
@@ -1070,6 +1402,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"message" : message ?: [NSNull null],
     @"inAppEntry" : inAppEntry ?: [NSNull null],
     @"webhook" : webhookRequest ?: [NSNull null],
+    @"webpush" : webPushMessage ?: [NSNull null],
   };
 }
 
@@ -1089,6 +1422,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   ALNMailMessage *message = [artifacts[@"message"] isKindOfClass:[ALNMailMessage class]] ? artifacts[@"message"] : nil;
   NSDictionary *inAppEntry = [artifacts[@"inAppEntry"] isKindOfClass:[NSDictionary class]] ? artifacts[@"inAppEntry"] : nil;
   NSDictionary *webhookRequest = [artifacts[@"webhook"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webhook"] : nil;
+  NSDictionary *webPushMessage = [artifacts[@"webpush"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webpush"] : nil;
   NSArray<NSString *> *preferenceRecipients = NMPreferenceRecipientsFromPayloadAndEntry(normalizedPayload, inAppEntry ?: @{});
 
   NSMutableArray *jobIDs = [NSMutableArray array];
@@ -1165,6 +1499,18 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                   deliveryID:@""
                                      message:NMWebhookPreviewRepresentation(webhookRequest)
                                 errorMessage:nil];
+    } else if ([channel isEqualToString:@"webpush"] && webPushMessage != nil) {
+      for (NSString *recipient in NMNormalizeArray(webPushMessage[@"recipients"])) {
+        [self appendOutboxEntryForNotification:artifacts[@"identifier"]
+                                       channel:channel
+                                     recipient:recipient
+                                        status:@"queued"
+                                         jobID:jobID
+                                         queue:queue
+                                    deliveryID:@""
+                                       message:NMWebPushPreviewRepresentation(webPushMessage)
+                                  errorMessage:nil];
+      }
     }
   }
   if (![self persistStateWithError:error]) {
@@ -1258,6 +1604,9 @@ notificationIdentifier:(NSString *)identifier
     @"email" : message ? [message dictionaryRepresentation] : @{},
     @"in_app" : inAppEntry ?: @{},
     @"webhook" : webhookRequest ? NMWebhookPreviewRepresentation(webhookRequest) : @{},
+    @"webpush" : [artifacts[@"webpush"] isKindOfClass:[NSDictionary class]]
+                     ? NMWebPushPreviewRepresentation(artifacts[@"webpush"])
+                     : @{},
     @"recipients" : NMPreferenceRecipientsFromPayloadAndEntry(artifacts[@"payload"], inAppEntry ?: @{}),
   };
 }
@@ -1454,6 +1803,30 @@ notificationIdentifier:(NSString *)identifier
     }
   }
 
+  // Web Push runs last: a targeted retry job carries only this channel, so failing
+  // the job here never re-sends another channel.
+  NSDictionary *webPushMessage = [artifacts[@"webpush"] isKindOfClass:[NSDictionary class]] ? artifacts[@"webpush"] : nil;
+  if ([channels containsObject:@"webpush"] && webPushMessage != nil) {
+    NSDictionary *metadata = NMNormalizeDictionary(artifacts[@"metadata"]);
+    NSDictionary *policy = NMNormalizeDictionary(NMNormalizeDictionary(metadata[@"channelPolicies"])[@"webpush"]);
+    NSDictionary *pushSummary = [self deliverWebPushMessage:webPushMessage
+                                                 identifier:identifier
+                                                    payload:payload
+                                                 jobPayload:jobPayload
+                                                     policy:policy
+                                                      error:error];
+    if (pushSummary == nil) {
+      (void)[self persistStateWithError:NULL];
+      return nil;
+    }
+    if ([pushSummary[@"delivered"] boolValue]) {
+      [deliveredChannels addObject:@"webpush"];
+    } else {
+      [skippedChannels addObject:@"webpush"];
+    }
+    [deliveryIDs addObjectsFromArray:NMNormalizeArray(pushSummary[@"deliveryIDs"])];
+  }
+
   NSDictionary *summary = @{
     @"notification" : identifier,
     @"channels" : deliveredChannels,
@@ -1464,6 +1837,430 @@ notificationIdentifier:(NSString *)identifier
     return nil;
   }
   return summary;
+}
+
+#pragma mark - Web Push
+
+- (NSDictionary *)webPushClientConfiguration {
+  [self.lock lock];
+  NSDictionary *configuration = @{
+    @"enabled" : @(self.webPushEnabled),
+    @"vapidPublicKey" : (self.webPushEnabled ? self.webPushVAPIDKey.publicKey : nil) ?: @"",
+    @"serviceWorkerPath" : NMPathJoin(self.prefix, @"push/service-worker.js"),
+    @"clientScriptPath" : NMPathJoin(self.prefix, @"push/client.js"),
+    @"apiPrefix" : self.apiPrefix ?: @"/notifications/api",
+    @"testRouteEnabled" : @(self.webPushTestRouteEnabled),
+  };
+  [self.lock unlock];
+  return configuration;
+}
+
+- (NSDictionary *)saveWebPushSubscription:(NSDictionary *)subscription
+                                userAgent:(NSString *)userAgent
+                             forRecipient:(NSString *)recipient
+                                    error:(NSError **)error {
+  NSString *owner = NMTrimmedString(recipient);
+  if ([owner length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed, @"recipient is required", @{ @"field" : @"recipient" });
+    }
+    return nil;
+  }
+  if (!self.webPushEnabled) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorPolicyRejected, @"web push is disabled", nil);
+    }
+    return nil;
+  }
+  NSDictionary *raw = NMNormalizeDictionary(subscription);
+  NSDictionary *keys = NMNormalizeDictionary(raw[@"keys"]);
+  NSString *endpoint = NMTrimmedString(raw[@"endpoint"]);
+  NSString *p256dh = [NMTrimmedString(keys[@"p256dh"]) length] > 0 ? NMTrimmedString(keys[@"p256dh"]) : NMTrimmedString(raw[@"p256dh"]);
+  NSString *auth = [NMTrimmedString(keys[@"auth"]) length] > 0 ? NMTrimmedString(keys[@"auth"]) : NMTrimmedString(raw[@"auth"]);
+  NSURL *endpointURL = ([endpoint length] > 0 && [endpoint length] <= 2048) ? [NSURL URLWithString:endpoint] : nil;
+  [self.lock lock];
+  NSArray *allowedHosts = self.webPushAllowedHosts;
+  NSUInteger maxPerRecipient = self.webPushMaxSubscriptionsPerRecipient;
+  ALNNotificationsWebPushSubscriptionStore *store = self.webPushStore;
+  [self.lock unlock];
+  if (!NMWebPushEndpointIsAllowed(endpointURL, allowedHosts)) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"push endpoint must be an https URL on an allowed push service host",
+                       @{ @"endpointHost" : [[endpointURL host] lowercaseString] ?: @"" });
+    }
+    return nil;
+  }
+  NSData *p256dhData = ([p256dh length] > 0) ? ALNDataFromBase64URLString(p256dh) : nil;
+  NSData *authData = ([auth length] > 0) ? ALNDataFromBase64URLString(auth) : nil;
+  // Encrypting an empty message checks the point is on P-256 and the secret is 16 bytes.
+  if (p256dhData == nil || authData == nil ||
+      ALNWebPushEncryptPayload([NSData data], p256dhData, authData, nil, nil, NULL) == nil) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed, @"push subscription keys are invalid", nil);
+    }
+    return nil;
+  }
+  NSDictionary *record = [store saveSubscriptionWithEndpoint:endpoint
+                                                      p256dh:p256dh
+                                                        auth:auth
+                                                   userAgent:userAgent
+                                                forRecipient:owner
+                                             maxPerRecipient:maxPerRecipient
+                                                       error:error];
+  return (record != nil) ? NMWebPushPublicSubscription(record) : nil;
+}
+
+- (BOOL)removeWebPushSubscriptionWithEndpoint:(NSString *)endpoint
+                                 forRecipient:(NSString *)recipient
+                                        error:(NSError **)error {
+  return [self.webPushStore removeSubscriptionWithEndpoint:endpoint forRecipient:recipient error:error];
+}
+
+- (NSArray<NSDictionary *> *)webPushSubscriptionsForRecipient:(NSString *)recipient {
+  NSMutableArray *subscriptions = [NSMutableArray array];
+  for (NSDictionary *entry in [self.webPushStore subscriptionsForRecipient:recipient includeInactive:YES]) {
+    [subscriptions addObject:NMWebPushPublicSubscription(entry)];
+  }
+  return subscriptions;
+}
+
+// VAPID tokens last 12 hours (RFC 8292 allows 24) and are reused per push-service
+// origin until an hour before they expire.
+- (NSString *)webPushAuthorizationForEndpoint:(NSURL *)endpoint error:(NSError **)error {
+  NSString *audience = ALNWebPushAudienceForEndpoint(endpoint);
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  [self.lock lock];
+  NSDictionary *cached = (audience != nil) ? self.webPushTokenCache[audience] : nil;
+  ALNWebPushVAPIDKey *key = self.webPushVAPIDKey;
+  NSString *subject = self.webPushSubject;
+  [self.lock unlock];
+  if ([cached[@"refreshAt"] doubleValue] > now && [cached[@"header"] length] > 0) {
+    return cached[@"header"];
+  }
+  if (audience == nil || key == nil) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorInvalidConfiguration, @"web push is not configured with VAPID keys", nil);
+    }
+    return nil;
+  }
+  NSString *header = [key authorizationHeaderForAudience:audience
+                                                 subject:subject
+                                              expiration:[NSDate dateWithTimeIntervalSince1970:now + 12.0 * 3600.0]
+                                                   error:error];
+  if (header != nil) {
+    [self.lock lock];
+    self.webPushTokenCache[audience] = @{ @"header" : header, @"refreshAt" : @(now + 11.0 * 3600.0) };
+    [self.lock unlock];
+  }
+  return header;
+}
+
+// One encrypted POST. Outcomes: delivered, expired (the subscription is gone),
+// retry (429, 5xx or no response) and failed (any other rejection).
+- (NSDictionary *)sendWebPushMessage:(NSDictionary *)message toSubscription:(NSDictionary *)subscription {
+  NSURL *endpoint = [NSURL URLWithString:NMTrimmedString(subscription[@"endpoint"])];
+  [self.lock lock];
+  NSArray *allowedHosts = self.webPushAllowedHosts;
+  id<ALNWebPushTransport> transport = self.webPushTransport;
+  NSTimeInterval defaultTTL = self.webPushDefaultTTL;
+  NSString *defaultUrgency = self.webPushDefaultUrgency;
+  [self.lock unlock];
+
+  if (!NMWebPushEndpointIsAllowed(endpoint, allowedHosts)) {
+    return @{ @"outcome" : @"failed", @"status" : @0, @"error" : @"push endpoint host is not allowed" };
+  }
+  NSData *body = ALNWebPushEncryptPayload([message[@"payloadData"] isKindOfClass:[NSData class]] ? message[@"payloadData"] : [NSData data],
+                                          ALNDataFromBase64URLString(NMTrimmedString(subscription[@"p256dh"])) ?: [NSData data],
+                                          ALNDataFromBase64URLString(NMTrimmedString(subscription[@"auth"])) ?: [NSData data],
+                                          nil,
+                                          nil,
+                                          NULL);
+  if (body == nil) {
+    return @{ @"outcome" : @"expired", @"status" : @0, @"error" : @"subscription keys are invalid" };
+  }
+  NSError *authorizationError = nil;
+  NSString *authorization = [self webPushAuthorizationForEndpoint:endpoint error:&authorizationError];
+  if (authorization == nil) {
+    return @{ @"outcome" : @"failed", @"status" : @0, @"error" : authorizationError.localizedDescription ?: @"VAPID signing failed" };
+  }
+
+  NSTimeInterval ttl = [message[@"ttl"] respondsToSelector:@selector(doubleValue)] ? [message[@"ttl"] doubleValue] : defaultTTL;
+  NSString *urgency = [NMTrimmedString(message[@"urgency"]) length] > 0 ? NMTrimmedString(message[@"urgency"]) : defaultUrgency;
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:endpoint];
+  [request setHTTPMethod:@"POST"];
+  [request setHTTPBody:body];
+  [request setTimeoutInterval:15.0];
+  [request setValue:authorization forHTTPHeaderField:@"Authorization"];
+  [request setValue:[NSString stringWithFormat:@"%lld", (long long)ttl] forHTTPHeaderField:@"TTL"];
+  [request setValue:urgency forHTTPHeaderField:@"Urgency"];
+  [request setValue:@"aes128gcm" forHTTPHeaderField:@"Content-Encoding"];
+  [request setValue:@"application/octet-stream" forHTTPHeaderField:@"Content-Type"];
+  if ([NMTrimmedString(message[@"topic"]) length] > 0) {
+    [request setValue:NMTrimmedString(message[@"topic"]) forHTTPHeaderField:@"Topic"];
+  }
+
+  NSError *transportError = nil;
+  NSDictionary *response = [transport webPushSendRequest:request error:&transportError];
+  if (response == nil) {
+    return @{
+      @"outcome" : @"retry",
+      @"status" : @0,
+      @"retryAfter" : @(-1),
+      @"error" : transportError.localizedDescription ?: @"push service did not respond",
+    };
+  }
+  NSInteger status = [response[@"status"] integerValue];
+  NSDictionary *headers = NMNormalizeDictionary(response[@"headers"]);
+  NSTimeInterval retryAfter = ALNWebPushRetryAfterSeconds(NMTrimmedString(headers[@"retry-after"]), [NSDate date]);
+  NSString *outcome = @"failed";
+  if (status >= 200 && status < 300) {
+    outcome = @"delivered";
+  } else if (status == 404 || status == 410) {
+    outcome = @"expired";
+  } else if (status == 429 || status >= 500) {
+    outcome = @"retry";
+  }
+  return @{
+    @"outcome" : outcome,
+    @"status" : @(status),
+    @"retryAfter" : @(retryAfter),
+    @"deliveryID" : NMTrimmedString(headers[@"location"]),
+    @"error" : [outcome isEqualToString:@"delivered"]
+                   ? @""
+                   : [NSString stringWithFormat:@"push service returned HTTP %ld", (long)status],
+  };
+}
+
+// Sends to each subscription and records the outcome. Delivered subscriptions note
+// the time; expired ones are kept but marked inactive so the app can tell the user.
+- (NSDictionary *)sendWebPushMessage:(NSDictionary *)message
+                     toSubscriptions:(NSArray<NSDictionary *> *)subscriptions
+                        notification:(NSString *)identifier {
+  NSDictionary *preview = NMWebPushPreviewRepresentation(message);
+  NSMutableArray *results = [NSMutableArray array];
+  NSMutableArray *deliveryIDs = [NSMutableArray array];
+  NSMutableArray *retryIDs = [NSMutableArray array];
+  NSTimeInterval retryAfter = 0.0;
+  NSUInteger deliveredCount = 0;
+  for (NSDictionary *subscription in subscriptions) {
+    NSString *subscriptionID = NMTrimmedString(subscription[@"subscriptionID"]);
+    NSDictionary *result = [self sendWebPushMessage:message toSubscription:subscription];
+    NSString *outcome = result[@"outcome"];
+    NSString *status = @"failed";
+    if ([outcome isEqualToString:@"delivered"]) {
+      status = @"delivered";
+      deliveredCount += 1;
+      [self.webPushStore recordSuccessForSubscriptionID:subscriptionID];
+      [deliveryIDs addObject:[result[@"deliveryID"] length] > 0 ? result[@"deliveryID"]
+                                                                  : [@"webpush:" stringByAppendingString:subscriptionID]];
+    } else if ([outcome isEqualToString:@"expired"]) {
+      status = @"expired";
+      [self.webPushStore deactivateSubscriptionID:subscriptionID reason:result[@"error"] ?: @"expired"];
+    } else if ([outcome isEqualToString:@"retry"]) {
+      status = @"retrying";
+      [retryIDs addObject:subscriptionID];
+      retryAfter = MAX(retryAfter, [result[@"retryAfter"] doubleValue]);
+    }
+    NSMutableDictionary *entryMessage = [preview mutableCopy];
+    entryMessage[@"subscriptionID"] = subscriptionID;
+    entryMessage[@"endpointHost"] = [[[NSURL URLWithString:NMTrimmedString(subscription[@"endpoint"])] host] lowercaseString] ?: @"";
+    entryMessage[@"httpStatus"] = result[@"status"] ?: @0;
+    [self appendOutboxEntryForNotification:identifier
+                                   channel:@"webpush"
+                                 recipient:NMTrimmedString(subscription[@"recipient"])
+                                    status:status
+                                     jobID:@""
+                                     queue:@""
+                                deliveryID:[status isEqualToString:@"delivered"] ? [deliveryIDs lastObject] : @""
+                                   message:entryMessage
+                              errorMessage:result[@"error"]];
+    [results addObject:@{
+      @"subscriptionID" : subscriptionID,
+      @"endpointHost" : entryMessage[@"endpointHost"],
+      @"outcome" : outcome ?: @"failed",
+      @"status" : result[@"status"] ?: @0,
+      @"error" : result[@"error"] ?: @"",
+    }];
+  }
+  return @{
+    @"results" : results,
+    @"deliveredCount" : @(deliveredCount),
+    @"deliveryIDs" : deliveryIDs,
+    @"retryIDs" : retryIDs,
+    @"retryAfter" : @(retryAfter),
+  };
+}
+
+- (NSDictionary *)deliverWebPushMessage:(NSDictionary *)message
+                             identifier:(NSString *)identifier
+                                payload:(NSDictionary *)payload
+                             jobPayload:(NSDictionary *)jobPayload
+                                 policy:(NSDictionary *)policy
+                                  error:(NSError **)error {
+  NSArray<NSString *> *recipients = NMNormalizeArray(message[@"recipients"]);
+  NSDictionary *preview = NMWebPushPreviewRepresentation(message);
+  if (!self.webPushEnabled) {
+    [self appendOutboxEntryForNotification:identifier
+                                   channel:@"webpush"
+                                 recipient:([recipients count] > 0) ? recipients[0] : @""
+                                    status:@"suppressed"
+                                     jobID:@""
+                                     queue:@""
+                                deliveryID:@""
+                                   message:preview
+                              errorMessage:@"web push is disabled"];
+    return @{ @"delivered" : @NO, @"deliveryIDs" : @[] };
+  }
+
+  NSMutableArray<NSString *> *enabledRecipients = [NSMutableArray array];
+  for (NSString *recipient in recipients) {
+    if ([self channel:@"webpush" enabledForRecipient:recipient notificationIdentifier:identifier defaultEnabled:YES]) {
+      [enabledRecipients addObject:recipient];
+      continue;
+    }
+    [self appendOutboxEntryForNotification:identifier
+                                   channel:@"webpush"
+                                 recipient:recipient
+                                    status:@"suppressed"
+                                     jobID:@""
+                                     queue:@""
+                                deliveryID:@""
+                                   message:preview
+                              errorMessage:@"suppressed by preference policy"];
+  }
+
+  // A retry job names the subscriptions that still need this message, so devices
+  // that already received it are not notified twice.
+  NSMutableArray<NSString *> *targetIDs = [NSMutableArray array];
+  for (id rawID in NMNormalizeArray(jobPayload[@"webPushSubscriptionIDs"])) {
+    if ([NMTrimmedString(rawID) length] > 0) {
+      [targetIDs addObject:NMTrimmedString(rawID)];
+    }
+  }
+  BOOL targeted = ([targetIDs count] > 0);
+  NSMutableArray<NSDictionary *> *subscriptions = [NSMutableArray array];
+  if (targeted) {
+    for (NSString *subscriptionID in targetIDs) {
+      NSDictionary *subscription = [self.webPushStore subscriptionWithID:subscriptionID];
+      if ([subscription[@"active"] boolValue] && [enabledRecipients containsObject:NMTrimmedString(subscription[@"recipient"])]) {
+        [subscriptions addObject:subscription];
+      }
+    }
+  } else {
+    for (NSString *recipient in enabledRecipients) {
+      NSArray *active = [self.webPushStore subscriptionsForRecipient:recipient includeInactive:NO];
+      if ([active count] == 0) {
+        [self appendOutboxEntryForNotification:identifier
+                                       channel:@"webpush"
+                                     recipient:recipient
+                                        status:@"skipped"
+                                         jobID:@""
+                                         queue:@""
+                                    deliveryID:@""
+                                       message:preview
+                                  errorMessage:@"no active push subscriptions"];
+      }
+      [subscriptions addObjectsFromArray:active];
+    }
+  }
+
+  NSDictionary *sent = [self sendWebPushMessage:message toSubscriptions:subscriptions notification:identifier];
+  NSArray *retryIDs = NMNormalizeArray(sent[@"retryIDs"]);
+  NSTimeInterval retryAfter = [sent[@"retryAfter"] doubleValue];
+  if ([retryIDs count] > 0) {
+    if (targeted) {
+      NSMutableDictionary *details = [@{ @"subscriptionIDs" : retryIDs } mutableCopy];
+      if (retryAfter > 0.0) {
+        details[ALNJobsModuleRetryAfterSecondsErrorKey] = @(retryAfter);
+      }
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"push service asked for a retry", details);
+      }
+      return nil;
+    }
+    NSDictionary *backoff = NMNormalizedRetryBackoff(policy[@"retryBackoff"]);
+    NSTimeInterval delay = MAX(retryAfter, [backoff[@"baseSeconds"] doubleValue]);
+    NSMutableDictionary *options = [@{
+      @"queue" : [NMTrimmedString(policy[@"queue"]) length] > 0 ? NMTrimmedString(policy[@"queue"]) : @"default",
+      @"source" : @"notification",
+      @"notBefore" : [NSDate dateWithTimeIntervalSinceNow:delay],
+    } mutableCopy];
+    if ([policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)] &&
+        [policy[@"maxAttempts"] unsignedIntegerValue] > 0) {
+      options[@"maxAttempts"] = policy[@"maxAttempts"];
+    }
+    if ([policy[@"retryBackoff"] isKindOfClass:[NSDictionary class]]) {
+      options[@"retryBackoff"] = policy[@"retryBackoff"];
+    }
+    NSError *enqueueError = nil;
+    NSString *jobID = [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:ALNNotificationsDispatchJobIdentifier
+                                                                         payload:@{
+                                                                           @"identifier" : identifier ?: @"",
+                                                                           @"payload" : payload ?: @{},
+                                                                           @"channels" : @[ @"webpush" ],
+                                                                           @"webPushSubscriptionIDs" : retryIDs,
+                                                                         }
+                                                                         options:options
+                                                                           error:&enqueueError];
+    if ([jobID length] == 0) {
+      if (error != NULL) {
+        *error = enqueueError ?: NMError(ALNNotificationsModuleErrorDeliveryFailed, @"could not schedule a web push retry", nil);
+      }
+      return nil;
+    }
+  }
+  return @{
+    @"delivered" : @([sent[@"deliveredCount"] unsignedIntegerValue] > 0),
+    @"deliveryIDs" : NMNormalizeArray(sent[@"deliveryIDs"]),
+  };
+}
+
+- (NSDictionary *)sendWebPushTestToRecipient:(NSString *)recipient error:(NSError **)error {
+  NSString *owner = NMTrimmedString(recipient);
+  if ([owner length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed, @"recipient is required", @{ @"field" : @"recipient" });
+    }
+    return nil;
+  }
+  if (!self.webPushEnabled) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorPolicyRejected, @"web push is disabled", nil);
+    }
+    return nil;
+  }
+  NSArray *subscriptions = [self.webPushStore subscriptionsForRecipient:owner includeInactive:NO];
+  if ([subscriptions count] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorNotFound, @"no active push subscriptions for this recipient", nil);
+    }
+    return nil;
+  }
+  [self.lock lock];
+  NSString *url = NMTrimmedString(self.webPushNudgeDefaults[@"url"]);
+  [self.lock unlock];
+  NSDictionary *message = NMNormalizedWebPushMessage(@{
+    @"title" : @"Test notification",
+    @"body" : @"Web Push is working on this device.",
+    @"url" : ([url length] > 0) ? url : @"/",
+    @"tag" : @"arlen-webpush-test",
+    @"recipient" : owner,
+  },
+                                                     @{}, error);
+  if (message == nil) {
+    return nil;
+  }
+  NSDictionary *sent = [self sendWebPushMessage:message toSubscriptions:subscriptions notification:@"webpush.test"];
+  if (![self persistStateWithError:error]) {
+    return nil;
+  }
+  return @{
+    @"recipient" : owner,
+    @"sentCount" : @([subscriptions count]),
+    @"deliveredCount" : sent[@"deliveredCount"] ?: @0,
+    @"results" : sent[@"results"] ?: @[],
+  };
 }
 
 - (NSDictionary *)testSendNotificationIdentifier:(NSString *)identifier
@@ -1694,6 +2491,7 @@ notificationIdentifier:(NSString *)identifier
 - (NSDictionary *)dashboardSummary {
   NSArray *definitions = [self registeredNotifications];
   NSArray *outbox = [self outboxSnapshot];
+  NSDictionary *webPushSubscriptions = [self.webPushStore summary] ?: @{};
   NSUInteger unreadInboxCount = 0;
   [self.lock lock];
   for (NSString *recipient in self.inboxByRecipient) {
@@ -1711,6 +2509,7 @@ notificationIdentifier:(NSString *)identifier
       @{ @"label" : @"Unread Inbox", @"value" : @(unreadInboxCount) },
       @{ @"label" : @"Preference Recipients", @"value" : @([self.preferencesByRecipient count]) },
       @{ @"label" : @"Realtime fanout", @"value" : @([self.recentFanoutEvents count]) },
+      @{ @"label" : @"Push subscriptions", @"value" : webPushSubscriptions[@"activeSubscriptionCount"] ?: @0 },
     ],
     @"recentOutbox" : ([outbox count] > 10) ? [outbox subarrayWithRange:NSMakeRange(MAX((NSInteger)[outbox count] - 10, 0), 10)] : outbox,
     @"recentFanout" : ([[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[]),
@@ -2182,6 +2981,133 @@ notificationIdentifier:(NSString *)identifier
   return nil;
 }
 
+- (NSInteger)statusForWebPushError:(NSError *)error {
+  switch (error.code) {
+  case ALNNotificationsModuleErrorNotFound:
+    return 404;
+  case ALNNotificationsModuleErrorPolicyRejected:
+    return 409;
+  case ALNNotificationsModuleErrorValidationFailed:
+    return 422;
+  default:
+    return 500;
+  }
+}
+
+- (BOOL)renderWebPushError:(NSError *)error fallback:(NSString *)fallback {
+  [self setStatus:[self statusForWebPushError:error]];
+  [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: fallback } error:NULL];
+  return YES;
+}
+
+- (NSString *)webPushRecipientForContext:(ALNContext *)ctx {
+  NSString *recipient = NMTrimmedString([ctx authSubject]);
+  if ([recipient length] == 0) {
+    [self setStatus:401];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : @"authentication required" } error:NULL];
+    return nil;
+  }
+  return recipient;
+}
+
+- (id)apiWebPushConfig:(ALNContext *)ctx {
+  (void)ctx;
+  [self renderJSONEnvelopeWithData:[self.runtime webPushClientConfiguration] meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiWebPushSubscriptions:(ALNContext *)ctx {
+  NSString *recipient = [self webPushRecipientForContext:ctx];
+  if (recipient == nil) {
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:@{
+    @"recipient" : recipient,
+    @"subscriptions" : [self.runtime webPushSubscriptionsForRecipient:recipient] ?: @[],
+  }
+                              meta:nil
+                             error:NULL];
+  return nil;
+}
+
+- (id)apiWebPushSubscribe:(ALNContext *)ctx {
+  NSString *recipient = [self webPushRecipientForContext:ctx];
+  if (recipient == nil) {
+    return nil;
+  }
+  NSDictionary *parameters = [self requestParameters];
+  NSDictionary *subscription = [parameters[@"subscription"] isKindOfClass:[NSDictionary class]] ? parameters[@"subscription"] : parameters;
+  NSError *error = nil;
+  NSDictionary *saved = [self.runtime saveWebPushSubscription:subscription
+                                                    userAgent:[self headerValueForName:@"user-agent"]
+                                                 forRecipient:recipient
+                                                        error:&error];
+  if (saved == nil) {
+    [self renderWebPushError:error fallback:@"subscription failed"];
+    return nil;
+  }
+  [self setStatus:201];
+  [self renderJSONEnvelopeWithData:@{ @"subscription" : saved } meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiWebPushUnsubscribe:(ALNContext *)ctx {
+  NSString *recipient = [self webPushRecipientForContext:ctx];
+  if (recipient == nil) {
+    return nil;
+  }
+  NSDictionary *parameters = [self requestParameters];
+  NSString *endpoint = NMTrimmedString(parameters[@"endpoint"]);
+  NSString *subscriptionID = NMTrimmedString(parameters[@"subscriptionID"]);
+  NSError *error = nil;
+  BOOL removed = NO;
+  if ([endpoint length] > 0) {
+    removed = [self.runtime removeWebPushSubscriptionWithEndpoint:endpoint forRecipient:recipient error:&error];
+  } else if ([subscriptionID length] > 0) {
+    removed = [self.runtime.webPushStore removeSubscriptionID:subscriptionID forRecipient:recipient error:&error];
+  } else {
+    error = NMError(ALNNotificationsModuleErrorValidationFailed, @"endpoint or subscriptionID is required", nil);
+  }
+  if (error != nil) {
+    [self renderWebPushError:error fallback:@"unsubscribe failed"];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:@{ @"removed" : @(removed) } meta:nil error:NULL];
+  return nil;
+}
+
+- (id)apiWebPushTest:(ALNContext *)ctx {
+  NSString *recipient = [self webPushRecipientForContext:ctx];
+  if (recipient == nil) {
+    return nil;
+  }
+  NSError *error = nil;
+  NSDictionary *result = [self.runtime sendWebPushTestToRecipient:recipient error:&error];
+  if (result == nil) {
+    [self renderWebPushError:error fallback:@"test push failed"];
+    return nil;
+  }
+  [self renderJSONEnvelopeWithData:result meta:nil error:NULL];
+  return nil;
+}
+
+// Served from a route rather than a static file so it can carry
+// Service-Worker-Allowed: / and control pages outside the module's path.
+- (id)webPushServiceWorker:(ALNContext *)ctx {
+  [ctx.response setHeader:@"Service-Worker-Allowed" value:@"/"];
+  [ctx.response setHeader:@"Cache-Control" value:@"no-cache"];
+  NSString *script = ALNWebPushServiceWorkerScript(self.runtime.webPushNudgeDefaults ?: @{});
+  [self renderData:[script dataUsingEncoding:NSUTF8StringEncoding] contentType:@"text/javascript; charset=utf-8"];
+  return nil;
+}
+
+- (id)webPushClientScript:(ALNContext *)ctx {
+  [ctx.response setHeader:@"Cache-Control" value:@"no-cache"];
+  [self renderData:[ALNWebPushClientScript() dataUsingEncoding:NSUTF8StringEncoding]
+       contentType:@"text/javascript; charset=utf-8"];
+  return nil;
+}
+
 - (id)apiPreferences:(ALNContext *)ctx {
   NSString *recipient = [[ctx authSubject] length] > 0 ? [ctx authSubject] : ([self stringParamForName:@"recipient"] ?: @"");
   [self renderJSONEnvelopeWithData:@{
@@ -2526,6 +3452,49 @@ notificationIdentifier:(NSString *)identifier
                               name:@"notifications_api_preferences_update"
                    controllerClass:[ALNNotificationsModuleController class]
                             action:@"apiUpdatePreferences"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/push/config"
+                              name:@"notifications_api_push_config"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiWebPushConfig"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/push/subscriptions"
+                              name:@"notifications_api_push_subscriptions"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiWebPushSubscriptions"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/push/subscriptions"
+                              name:@"notifications_api_push_subscribe"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiWebPushSubscribe"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/push/unsubscribe"
+                              name:@"notifications_api_push_unsubscribe"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"apiWebPushUnsubscribe"];
+  BOOL webPushTestRoute = [[runtime webPushClientConfiguration][@"testRouteEnabled"] boolValue];
+  if (webPushTestRoute) {
+    [application registerRouteMethod:@"POST"
+                                path:@"/push/test"
+                                name:@"notifications_api_push_test"
+                     controllerClass:[ALNNotificationsModuleController class]
+                              action:@"apiWebPushTest"];
+  }
+  [application endRouteGroup];
+
+  // The service worker and helper are static scripts without user data, so they
+  // need no session; registration also fetches them outside a page request.
+  [application beginRouteGroupWithPrefix:runtime.prefix guardAction:nil formats:nil];
+  [application registerRouteMethod:@"GET"
+                              path:@"/push/service-worker.js"
+                              name:@"notifications_push_service_worker"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"webPushServiceWorker"];
+  [application registerRouteMethod:@"GET"
+                              path:@"/push/client.js"
+                              name:@"notifications_push_client_script"
+                   controllerClass:[ALNNotificationsModuleController class]
+                            action:@"webPushClientScript"];
   [application endRouteGroup];
 
   NSArray *adminRoutes = @[
@@ -2562,7 +3531,14 @@ notificationIdentifier:(NSString *)identifier
     @"notifications_api_queue",
     @"notifications_api_preferences",
     @"notifications_api_preferences_update",
+    @"notifications_api_push_config",
+    @"notifications_api_push_subscriptions",
+    @"notifications_api_push_subscribe",
+    @"notifications_api_push_unsubscribe",
   ];
+  if (webPushTestRoute) {
+    userRoutes = [userRoutes arrayByAddingObject:@"notifications_api_push_test"];
+  }
   for (NSString *routeName in userRoutes) {
     [application configureRouteNamed:routeName
                        requestSchema:nil

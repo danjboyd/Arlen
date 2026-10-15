@@ -1,6 +1,6 @@
 # Notifications Module
 
-The first-party `notifications` module productizes durable email, in-app, and webhook delivery on top of the `jobs` module, `ALNMailAdapter`, and the application webhook adapter.
+The first-party `notifications` module productizes durable email, in-app, webhook, and Web Push delivery on top of the `jobs` module, `ALNMailAdapter`, and the application webhook adapter.
 
 ## Install
 
@@ -25,6 +25,7 @@ Notification definitions may also implement:
 
 - `notificationsModuleDefaultChannels`
 - `notificationsModuleWebhookRequestForPayload:runtime:error:`
+- `notificationsModuleWebPushMessageForPayload:runtime:error:` (see [Web Push](#web-push))
 
 Configure provider classes and the optional preference hook in app config:
 
@@ -63,6 +64,7 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
   - email through `ALNMailAdapter`
   - in-app inbox entries with durable inbox/outbox/preference state
   - webhook delivery through the application webhook adapter
+  - Web Push to subscribed browsers and home-screen web apps (see [Web Push](#web-push))
 - notification metadata may provide `channelPolicies` per channel for queue, max-attempt, and retry-backoff routing
 - explicit channel queueing records queued audit entries before worker delivery and can fan out into per-channel jobs
 - in-app delivery publishes realtime fanout on `notifications.inbox.<recipient>`
@@ -70,6 +72,196 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
 - inbox entry metadata may include `href` or `path`; the HTML inbox renders that as a first-class deep link
 
 Requested channels are validated against the notification definition before queueing or previewing.
+
+## Web Push
+
+The `webpush` channel sends notifications to browsers and installed web apps
+that are not open, including iOS 16.4+ home-screen web apps. Messages use RFC 8030
+delivery, RFC 8291 `aes128gcm` encryption (the push service relays ciphertext
+only), and RFC 8292 VAPID identification. The encryption is tested against the
+RFC 8291 test vectors.
+
+### Enable it
+
+Web Push is off by default. Generate a VAPID key pair once per deployment and put
+it in the server environment; the private key never belongs in the repository:
+
+```bash
+./build/arlen webpush generate-keys
+# ARLEN_WEBPUSH_VAPID_PUBLIC_KEY=B...
+# ARLEN_WEBPUSH_VAPID_PRIVATE_KEY=...
+```
+
+```plist
+notificationsModule = {
+  webPush = {
+    enabled = YES;
+    vapid = {
+      subject = "mailto:ops@example.com";
+    };
+    nudge = {
+      title = "Helpdesk";
+      body = "Something needs your attention.";
+      url = "/";
+    };
+  };
+};
+```
+
+The environment overrides the plist: `ARLEN_WEBPUSH_ENABLED`,
+`ARLEN_WEBPUSH_VAPID_PUBLIC_KEY`, `ARLEN_WEBPUSH_VAPID_PRIVATE_KEY` and
+`ARLEN_WEBPUSH_VAPID_SUBJECT`. With Web Push enabled, the module refuses to
+start when the keys are malformed or do not match, or when the subject is not a
+`mailto:` or `https:` URL (Apple's push service requires a contact subject).
+`arlen webpush public-key` prints the public key for the private key in the
+environment.
+
+Keep the key pair stable: browsers bind each subscription to the public key, so
+a new pair invalidates every existing subscription. The client helper notices a
+changed key and resubscribes the next time the user subscribes.
+
+### Define a push message
+
+Add `webpush` to a definition's channels and implement
+`notificationsModuleWebPushMessageForPayload:runtime:error:`:
+
+```objc
+- (NSDictionary *)notificationsModuleWebPushMessageForPayload:(NSDictionary *)payload
+                                                      runtime:(ALNNotificationsModuleRuntime *)runtime
+                                                        error:(NSError **)error {
+  return @{
+    @"recipient" : payload[@"recipient"],
+    @"title" : @"Your turn",
+    @"body" : @"Ticket 42 is waiting for your confirmation.",
+    @"url" : @"/tickets/42",
+    @"tag" : @"ticket-42",
+    @"topic" : @"ticket-42",
+    @"urgency" : @"high",
+    @"ttl" : @3600,
+  };
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `title` | Required unless `nudge` is set. |
+| `body`, `url`, `tag` | Shown by the service worker. `url` opens on click and must be on the app's origin; other origins open `/`. `tag` replaces an earlier notification with the same tag on the device. |
+| `topic` | Up to 32 base64url characters. The push service keeps only the latest undelivered message per topic. |
+| `urgency` | `very-low`, `low`, `normal` (default) or `high`. |
+| `ttl` | Seconds the push service holds an undelivered message (default `webPush.ttlSeconds`, 1 day). |
+| `nudge` | `YES` sends no content at all; the device shows `webPush.nudge` text. Use it when notification text must not leave the server. |
+| `recipient` / `recipients` | Auth subjects to notify; defaults to the payload's `recipient`. |
+
+The encoded message must fit in 3993 bytes, the limit for a single 4096-byte
+encrypted record. Larger messages, invalid topics and unknown urgencies are
+rejected when the notification is queued or previewed, never truncated.
+
+iOS has no silent push: every push displays a notification. The service worker
+always shows one, falling back to the `nudge` text for content-free or unreadable
+messages.
+
+### Subscribe a device
+
+Load the client helper and call `ArlenWebPush.subscribe()` from a click or tap
+handler. iOS only grants notification permission in response to a user gesture,
+and only to web apps installed on the home screen, so the app needs a web app
+manifest and the user must add it to the home screen first.
+
+```html
+<meta name="csrf-token" content="<%= $csrfToken %>">
+<script src="/notifications/push/client.js"
+        data-api-prefix="/notifications/api"
+        data-service-worker="/notifications/push/service-worker.js"
+        data-scope="/"></script>
+<button id="enable-push">Turn on notifications</button>
+<script>
+  document.getElementById('enable-push').addEventListener('click', function () {
+    ArlenWebPush.subscribe().then(function () { /* subscribed */ },
+                                  function (error) { console.warn(error.message); });
+  });
+</script>
+```
+
+Pass `csrfToken` into the template context from the controller
+(`-[ALNController csrfToken]`). The helper sends it from the `csrf-token` meta tag
+(or a `data-csrf-token` attribute) in the `X-CSRF-Token` header; set
+`data-csrf-header` if the app changed `csrf.headerName`. `ArlenWebPush` also
+provides `status()`, `unsubscribe()`, `listSubscriptions()` and `sendTest()`.
+
+The service worker is served from `/notifications/push/service-worker.js` with
+`Service-Worker-Allowed: /`, so it can control the whole app (`scope: "/"`). It
+shows the title, body and tag, opens `url` on click, and focuses an already open
+window for that URL.
+
+### Subscriptions
+
+Subscriptions belong to the signed-in user (the auth subject); the routes ignore
+any recipient in the request body. Each subscription records its endpoint, keys,
+user agent, creation time and last successful delivery.
+
+- Endpoints must be `https` on a known push service: `push.apple.com`,
+  `fcm.googleapis.com`, `push.services.mozilla.com` or `notify.windows.com`, and
+  their subdomains. Browsers supply the endpoint, so this list keeps the server
+  from posting to arbitrary hosts. Widen it with `webPush.allowedEndpointHosts`
+  (`"*"` allows any https host).
+- A device's endpoint is unique: subscribing it again refreshes it, and
+  subscribing it under another user moves it to that user.
+- Each user keeps at most `webPush.maxSubscriptionsPerRecipient` subscriptions
+  (default 10); the oldest are dropped.
+- When a push service answers `404` or `410`, the subscription is marked inactive
+  with a reason and time instead of being deleted, so the app can show "this
+  device stopped receiving notifications". Subscribing again reactivates it.
+
+Subscriptions are stored in `var/module_state/notifications-<environment>-webpush.plist`
+beside the module state file (override with `webPush.subscriptions.path`), and in
+memory in the `test` environment. Every read and write re-reads the file under an
+advisory lock, so the app server and `arlen jobs worker` on the same host share
+one view. Run them on one host, or point both at shared storage that supports
+`flock`.
+
+### Delivery and retries
+
+Each queued `webpush` job sends one encrypted `POST` per active subscription of
+each recipient, with `TTL`, `Urgency`, `Topic`, `Content-Encoding: aes128gcm` and
+a VAPID `Authorization` header. VAPID tokens expire after 12 hours and are reused
+per push service.
+
+- `2xx`: delivered; the subscription's last-success time is updated.
+- `404`/`410`: the subscription is marked inactive.
+- `429`, `5xx` or no response: only the failed devices are retried, in a new
+  `webpush` job, after the push service's `Retry-After` or the channel's retry
+  backoff, whichever is longer. Devices that already received the message are
+  not notified again. That retry job then follows the channel's `maxAttempts` and
+  `retryBackoff` policy and never retries sooner than a `Retry-After`.
+- Any other status fails that device and is recorded in the outbox.
+
+The channel respects `ALNNotificationPreferenceHook` and per-user preferences
+(`webpush` channel key), like the other channels. With Web Push disabled, queued
+`webpush` deliveries are recorded as `suppressed`.
+
+### Send a test
+
+`-[ALNNotificationsModuleRuntime sendWebPushTestToRecipient:error:]` sends a fixed
+test message to a user's devices, bypassing definitions, preferences and the
+queue. Set `webPush.testRoute.enabled = YES` to also expose it to signed-in users
+as `POST /notifications/api/push/test` for their own devices; the route is off by
+default.
+
+### Web Push configuration
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `webPush.enabled` | `NO` | Master switch per environment (`ARLEN_WEBPUSH_ENABLED`). |
+| `webPush.vapid.publicKey` / `privateKey` | empty | Prefer `ARLEN_WEBPUSH_VAPID_PUBLIC_KEY` / `ARLEN_WEBPUSH_VAPID_PRIVATE_KEY`. |
+| `webPush.vapid.subject` | empty | `mailto:` or `https:` contact (`ARLEN_WEBPUSH_VAPID_SUBJECT`). |
+| `webPush.ttlSeconds` | `86400` | Default TTL, capped at 28 days. |
+| `webPush.urgency` | `normal` | Default urgency. |
+| `webPush.allowedEndpointHosts` | push services above | Hosts subscriptions may use. |
+| `webPush.maxSubscriptionsPerRecipient` | `10` | Devices kept per user (1-100). |
+| `webPush.nudge.title` / `body` / `url` / `icon` / `badge` | `New notification` / `Open the app to see it.` / `/` | Text the service worker shows for content-free pushes. |
+| `webPush.testRoute.enabled` | `NO` | Registers `POST /notifications/api/push/test`. |
+| `webPush.subscriptions.path` | beside the state file | Subscription store; relative paths resolve against the app root. |
+| `webPush.transportClass` | libcurl transport | Class conforming to `ALNWebPushTransport`, for tests or custom egress. |
 
 ## Surfaces
 
@@ -101,6 +293,16 @@ JSON routes:
 - `POST /notifications/api/test-send`
 - `GET /notifications/api/preferences`
 - `POST /notifications/api/preferences`
+- `GET /notifications/api/push/config`
+- `GET /notifications/api/push/subscriptions`
+- `POST /notifications/api/push/subscriptions`
+- `POST /notifications/api/push/unsubscribe`
+- `POST /notifications/api/push/test` (only with `webPush.testRoute.enabled`)
+
+Scripts (no session required; they contain no user data):
+
+- `GET /notifications/push/service-worker.js`
+- `GET /notifications/push/client.js`
 
 The notifications API is included in module OpenAPI output.
 
@@ -112,7 +314,7 @@ The notifications API is included in module OpenAPI output.
   - `admin` role
   - AAL2 step-up
 
-That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, and preferences require AAL1; outbox, preview, and test-send require `admin` plus AAL2.
+That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, preferences, and the `push/*` routes require AAL1; outbox, preview, and test-send require `admin` plus AAL2. Push subscription routes act only on the signed-in user's own subscriptions, and their `POST` requests go through the app's CSRF policy.
 
 ## Admin UI Integration
 
@@ -132,8 +334,11 @@ Manifest defaults:
 - sender: `notifications@example.test`
 - preference hook class: empty
 - persistence: enabled outside `test`, with an auto-resolved module state path when no explicit path is provided
+- Web Push: disabled
 
 ## Current Limits
 
-- first-party channels stop at email, in-app, and webhook; SMS/chat vendor integrations remain future add-ons
+- first-party channels stop at email, in-app, webhook, and Web Push; SMS/chat vendor integrations remain future add-ons
+- Web Push sends one encrypted record per message (at most 3993 bytes of message JSON); Safari's Declarative Web Push format is not supported yet
+- the Web Push subscription store is a locked file, shared by processes on one host
 - preview/test-send are first-party module flows, not a generalized template authoring UI

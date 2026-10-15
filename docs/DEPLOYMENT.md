@@ -133,8 +133,8 @@ and `release`) builds with `bin/build-apple` and copies the Apple binaries into
 the same release layout as GNUstep (`app/.boomhauer/build/boomhauer-app`,
 `framework/build/{arlen,boomhauer}`), so `propane` and the deploy helpers run a
 Mac release the same way. That makes Mac-to-Mac (`macos-arm64-apple-foundation`)
-a same-profile deployment. The service-manager runbook and `--service` actions
-are still systemd-only; a launchd path is tracked in GitHub issue 148.
+a same-profile deployment. macOS targets run as launchd daemons instead of
+systemd units; see [macOS launchd Runbook](#8b-macos-launchd-runbook).
 
 ### 4.3 Project Deployment Configuration
 
@@ -749,7 +749,9 @@ Linux/Debian-style targets.
 It currently creates:
 
 - release/shared/log/tmp directories under the declared `releasePath`
-- generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`
+- generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`,
+  or for `macos-*-apple-foundation` targets a launchd plist under
+  `build/deploy/targets/<target>/launchd/<label>.plist`
 - generated env example under `build/deploy/targets/<target>/env/`
 - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
 - generated README with operator follow-up steps
@@ -968,6 +970,45 @@ pre-release deploy wiring to Arlen-managed release activation.
 Detailed steps:
 
 - `docs/SYSTEMD_RUNBOOK.md`
+
+
+## 8b. macOS launchd Runbook
+
+macOS targets (`profile = "macos-arm64-apple-foundation"`) run as launchd
+daemons. For these targets `arlen deploy init <target>` generates:
+
+- `build/deploy/targets/<target>/launchd/<label>.plist`: the daemon definition,
+  rendered from `tools/deploy/launchd/arlen.plist`. The label is the target's
+  `service` (default `arlen.<target>`). It sets `UserName`/`GroupName` from
+  `init.runtimeUser`/`runtimeGroup`, the activation-owned `ARLEN_APP_ROOT` and
+  `ARLEN_FRAMEWORK_ROOT`, `KeepAlive`, and sends output to
+  `<releasePath>/logs/<label>.log`.
+- `bin/propane-wrapper` and `bin/jobs-worker-wrapper`: launchd has no
+  `EnvironmentFile`, so the plist starts propane through a wrapper that
+  exports `configuration.envFile` first. Keep that file to plain `KEY=value`
+  lines.
+
+Install and load:
+
+```text
+sudo install -o root -g wheel -m 644 build/deploy/targets/<target>/launchd/<label>.plist /Library/LaunchDaemons/
+sudo launchctl bootstrap system /Library/LaunchDaemons/<label>.plist
+```
+
+`arlen deploy` uses launchd when it runs on macOS, with `--service <label>`:
+
+- `status` and `doctor` read the job with `launchctl print system/<label>`
+  (`running` reports as `active`; the doctor checks runtime roots from the
+  job's environment).
+- `release --runtime-action restart` runs `launchctl kickstart -k
+  system/<label>`; `reload` sends HUP (`launchctl kill HUP`), which propane
+  handles as a rolling reload. `--runtime-restart-command` and
+  `--runtime-reload-command` still override them, e.g. with `sudo -n`.
+- `logs` tails `<releasePath>/logs/<label>.log` (`log_source: launchd`).
+
+`ARLEN_LAUNCHD_DOMAIN` selects another domain than `system`, such as
+`gui/<uid>` for a per-user agent; drop `UserName`/`GroupName` from the plist
+for an agent.
 
 ## 8. Rollback Workflow
 

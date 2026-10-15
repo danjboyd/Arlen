@@ -61,7 +61,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Admin UI Module](ADMIN_UI_MODULE.md): admin resources, filters, exports, and `/admin/api`.
 - [Durable Jobs](DURABLE_JOBS.md): PostgreSQL queues, transactional enqueue, renewable leases, crash recovery, and durable results.
 - [Jobs Module](JOBS_MODULE.md): `/jobs` HTML plus `/jobs/api` JSON/OpenAPI surface.
-- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences plus admin preview/outbox/test-send flows.
+- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences, email, webhook and Web Push delivery, plus admin preview/outbox/test-send flows.
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
 - [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.
@@ -85,7 +85,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Systemd Runbook](SYSTEMD_RUNBOOK.md): systemd unit template and incident collection steps.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
-- [Apple Platform Contract](APPLE_PLATFORM.md): current Apple-runtime support boundary on macOS, including the verified auth/runtime lane.
+- [Apple Platform Contract](APPLE_PLATFORM.md): what runs on macOS (development, production, launchd deploys) and what is still Linux-only.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 
 ## Reference

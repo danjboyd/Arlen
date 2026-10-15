@@ -22,6 +22,7 @@
     @"tools/apple_compile_program.sh",
     @"tools/build_apple.sh",
     @"tools/build_apple_app.sh",
+    @"tests/performance/run_perf.sh",
     @"tools/build_apple_xctest.sh",
     @"tools/ci/run_durable_jobs.sh",
     @"tools/deploy/activate_release.sh",

@@ -52,23 +52,21 @@ To also attempt the repo-root smoke server build:
 
 ## 4. Current Scope
 
-What the closed Apple baseline covers now:
+macOS is supported for development and production. On a Mac:
 
-- Apple-native bootstrap/build entrypoint
-- Apple doctor checks
-- centralized portability helpers
-- Apple XCTest smoke verification through `tools/apple_xctest_smoke.sh`
-- repo-native Apple XCTest bundle build/run entrypoints through
-  `tools/build_apple_xctest.sh` and `tools/test_apple_xctest.sh`
-- Apple `tools/test_apple.sh` verification lane for the full Apple XCTest unit
-  suite plus runtime, security, scaffolded-app, and example-app coverage
-- repo-native `tools/ci/run_apple_baseline_confidence.sh` artifact lane under
-  `build/release_confidence/phase30/`
-- Apple `bin/boomhauer` support for repo-root and app-root execution,
-  including watch-mode rebuild/restart handling
-- optional backend discovery for `libpq` and ODBC-style transports through
-  Apple-aware environment and Homebrew prefix detection
-- macOS CI coverage for the Apple-runtime baseline
+- `./bin/arlen new|generate|build|check|routes|test|perf|doctor` work without
+  GNU `make`; builds are incremental and land in `build/apple/`.
+- `bin/boomhauer` runs repo-root and app-root servers, with watch mode and the
+  diagnostic build-error page.
+- `arlen test` runs the Apple XCTest unit and integration bundles, and
+  `arlen test --app` runs an app's own tests.
+- `propane` and `jobs-worker` supervise production workers.
+- `arlen deploy` packages releases and manages them as launchd daemons; see
+  [Deployment](DEPLOYMENT.md#8b-macos-launchd-runbook).
+- `libpq` and ODBC-style transports are found through Homebrew prefixes.
+
+What is still Linux-only is listed in
+[Apple Platform](APPLE_PLATFORM.md#known-characterized-gaps).
 
 ## 5. Verify the Apple Runtime
 
