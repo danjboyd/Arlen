@@ -111,6 +111,13 @@ arlen boomhauer --port 3000
 Open <http://127.0.0.1:3000/>. Then try `/healthz` and the interactive API
 explorer at `/openapi`.
 
+<p align="center">
+  <img src="docs/images/openapi-explorer.png" width="760"
+       alt="Arlen's built-in OpenAPI explorer: an operation picker for GET /api/reference/status, a Try It Out button, and an HTTP 200 JSON response">
+</p>
+<p align="center"><sub>Every app serves its generated OpenAPI spec with a built-in
+explorer at <code>/openapi</code> (shown here: <code>examples/api_reference</code>).</sub></p>
+
 Next, add a route:
 
 ```bash
