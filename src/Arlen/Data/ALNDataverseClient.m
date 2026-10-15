@@ -126,9 +126,7 @@ static NSData *ALNDataverseJSONStringData(id object, NSError **error) {
     return nil;
   }
   NSJSONWritingOptions options = 0;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return [ALNJSONSerialization dataWithJSONObject:object options:options error:error];
 }
 
