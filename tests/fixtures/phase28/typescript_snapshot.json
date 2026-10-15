@@ -37,9 +37,9 @@
       "sha256": "4004e2bf316d0fb3a77fbb4a362e31b81525a376d68733ca3cbb654aced98de7"
     },
     "src/react.ts": {
-      "bytes": 7360,
+      "bytes": 7363,
       "lines": 194,
-      "sha256": "5d2de6e56c19c71634b711881e55aa8458baa12ddbd4031d8681227154c99289"
+      "sha256": "ce2941a6f7bb6ac5e38cd622dd0c85819feee0efa6079e7748ea54d526318df7"
     },
     "src/realtime.ts": {
       "bytes": 9225,
