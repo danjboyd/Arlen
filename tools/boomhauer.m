@@ -1787,6 +1787,13 @@ static void ApplyBuildErrorResponseHeaders(ALNResponse *response, NSInteger auto
   [response setHeader:@"Cache-Control" value:@"no-store, max-age=0"];
   [response setHeader:@"Pragma" value:@"no-cache"];
   [response setHeader:@"Expires" value:@"0"];
+  // The page carries its own <style> block and ANSI-colour style attributes,
+  // which the app's default `default-src 'self'` CSP blocks. Nonces cannot
+  // cover style attributes, so this response allows inline styles and
+  // nothing else: no scripts, connections, images or frames.
+  [response setHeader:@"Content-Security-Policy"
+                value:@"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
+                      @"form-action 'none'; frame-ancestors 'none'"];
   if (autoRefreshSeconds > 0) {
     [response setHeader:@"Refresh" value:[NSString stringWithFormat:@"%ld", (long)autoRefreshSeconds]];
   }
