@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reference launchd daemon for an Arlen site on macOS, the counterpart of
+  tools/deploy/systemd/arlen@.service. `arlen deploy init` renders it for
+  targets with a macos-*-apple-foundation profile. Install it as
+  /Library/LaunchDaemons/{{LABEL}}.plist (owned by root:wheel, mode 644) and
+  load it with `sudo launchctl bootstrap system <plist>`.
+  launchd has no EnvironmentFile, so the program is the generated propane
+  wrapper, which sources the site env file before starting propane.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{LABEL}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{PROGRAM}}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{RELEASE_PATH}}/releases/current/app</string>
+  <key>UserName</key>
+  <string>{{USER}}</string>
+  <key>GroupName</key>
+  <string>{{GROUP}}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ARLEN_APP_ROOT</key>
+    <string>{{RELEASE_PATH}}/releases/current/app</string>
+    <key>ARLEN_FRAMEWORK_ROOT</key>
+    <string>{{RELEASE_PATH}}/releases/current/framework</string>
+    <key>ARLEN_LOG_FORMAT</key>
+    <string>json</string>
+    <key>ARLEN_LOG_LEVEL</key>
+    <string>info</string>
+    <key>ARLEN_PERFORMANCE_LOGGING</key>
+    <string>1</string>
+    <key>ARLEN_TRACE_PROPAGATION_ENABLED</key>
+    <string>1</string>
+    <key>ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED</key>
+    <string>1</string>
+    <key>ARLEN_HEALTH_DETAILS_ENABLED</key>
+    <string>1</string>
+    <key>ARLEN_READINESS_REQUIRES_STARTUP</key>
+    <string>1</string>
+    <key>ARLEN_METRICS_ENABLED</key>
+    <string>1</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>1</integer>
+  <key>ExitTimeOut</key>
+  <integer>15</integer>
+  <key>Umask</key>
+  <integer>23</integer>
+  <key>StandardOutPath</key>
+  <string>{{LOG_PATH}}</string>
+  <key>StandardErrorPath</key>
+  <string>{{LOG_PATH}}</string>
+</dict>
+</plist>

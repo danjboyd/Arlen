@@ -28,6 +28,49 @@
 
 - `arlen doctor` no longer warns that `xctest` is missing when the vendored
   `tools-xctest` runner is present. That runner is what `arlen test` uses.
+- macOS deploy targets run under launchd. For `macos-*-apple-foundation`
+  targets `arlen deploy init` generates `launchd/<label>.plist` (from the new
+  `tools/deploy/launchd/arlen.plist`) and propane/jobs-worker wrappers that
+  export the target's env file, since launchd has no `EnvironmentFile`. The
+  doctor checks the plist and `launchctl`. On macOS, `arlen deploy`
+  `status`/`doctor` read the job with `launchctl print`, `restart`/`reload`
+  default to `launchctl kickstart -k`/`kill HUP`, and `logs --service` tails
+  `<releasePath>/logs/<label>.log`. `ARLEN_LAUNCHD_DOMAIN` selects a domain
+  other than `system`. The default service name for macOS targets is
+  `arlen.<target>` (GitHub issue 148).
+
+- `arlen perf` runs on macOS. `tests/performance/run_perf.sh` builds the profile
+  servers with the Apple toolchain (new `tools/build_apple_xctest.sh
+  --tools-only`), runs them from `build/apple/`, and times runs with `python3`
+  instead of `date +%s%N`, which BSD `date` lacks. On macOS the baseline root
+  defaults to the host-local `build/perf/baselines/macos-<arch>`, since the
+  committed baselines are Linux host recordings. The perf scripts use
+  `datetime.timezone.utc`, so they also run on Python 3.9 (macOS's system
+  `python3`) (GitHub issue 147).
+
+- The integration and durable-jobs suites run on macOS as Apple XCTest
+  bundles. `tools/build_apple_xctest.sh --suite integration|durable-jobs` builds
+  them and the binaries they launch (example servers, `eoc-smoke-render`,
+  `durable-job-probe`). `arlen test --integration` runs the integration bundle
+  and `arlen test`/`--all` runs unit then integration on macOS. `tools/ci/run_durable_jobs.sh`
+  works on macOS. All 206 integration tests are discovered on Apple, and tests
+  of GNUstep-only lanes skip there through the new `ALNSkipOnApple()`. Test
+  helpers are portable: `ALNTestFrameworkBuildCommand()`,
+  `ALNTestAppBinaryRelativePath()`, an Apple `ALNTestClientCompileCommand()`
+  (new `tools/apple_compile_program.sh`), and child-process lookup through
+  `ps -A` instead of GNU `ps --ppid`. Before, the lookup returned 0 on macOS
+  and the test's `kill(0, SIGKILL)` killed the test runner. On macOS
+  `arlen test --app` now prints the same per-class summary lines as the
+  GNUstep runner (GitHub issue 153).
+
+- Apple app builds (`tools/build_apple_app.sh`, used by `boomhauer` and
+  `propane` on macOS) handle module templates like the GNUstep build. A module
+  template overridden by the app (`templates/modules/<id>/...`) is no longer
+  compiled twice, which failed the link with a duplicate
+  `ALNEOCRender_modules_...` symbol. Override paths match exactly, including
+  case, as on GNUstep, even on case-insensitive APFS. Only the outputs of the current templates
+  are compiled, so a stale generated `.m` left under `.boomhauer/apple/gen/` is
+  ignored (GitHub issue 152).
 
 - `arlen deploy push`/`release` can package a release on macOS.
   `tools/deploy/build_release.sh` builds with `bin/build-apple` there and
@@ -38,8 +81,8 @@
   `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
   or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
   physical paths, so a release under a symlinked directory such as macOS
-  `/var` is recognized as current. launchd service management is still open
-  (GitHub issue 148).
+  `/var` is recognized as current. Running the service under launchd is
+  covered in its own entry (GitHub issue 148).
 - The notifications module has a `webpush` channel for browsers and installed
   web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
   RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and

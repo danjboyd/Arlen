@@ -288,7 +288,8 @@ For `main`, require:
 Do not require by default:
 
 - confidence
-- Apple baseline
+- Apple baseline (now runs the full Apple unit, integration and durable-jobs
+  bundles, but stays nonblocking)
 - Windows preview
 - nightly thread-race / experimental lanes
 - release certification
@@ -484,8 +485,13 @@ private cluster; a missing server fails provisioning. Existing unit discovery
 runs `HTTPCompatTests` and `DataverseRegressionTests`, which use loopback peers
 and captured transports/injected sleepers rather than public providers.
 
-`apple-baseline` additionally runs `tools/ci/run_apple_client_data_regressions.sh`
-with the same HTTP/retry tests and live timestamp regression using Apple XCTest.
+`apple-baseline` additionally runs `tools/ci/run_apple_unit_suite.sh`: the full
+Apple XCTest unit bundle against a private PostgreSQL, which includes the same
+HTTP/retry tests and live timestamp regression, followed by a check of
+discovered tests against the shared unit inventory. It then runs
+`tools/ci/run_apple_integration_suite.sh` (the Apple integration bundle against
+a private PostgreSQL with a URI-form DSN, checked against the shared integration
+inventory) and `tools/ci/run_durable_jobs.sh` (the Apple durable-jobs bundle).
 Its bootstrap installs Homebrew `postgresql@17` and `libpq` in addition to
 `openssl@3`; the script selects their paths explicitly and uses a private Unix
 socket PostgreSQL cluster. Apple builds link system libcurl for the new HTTP
@@ -496,6 +502,10 @@ required check is renamed or promoted: branch protection continues to require
 `linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and
 `docs-quality / docs-gate`. Apple confidence remains nonblocking globally, but
 these changes require its contract regression evidence before issue closure.
+The integration and durable-jobs steps run inside the same `apple-baseline`
+job, so they add no check name; `apple-baseline` stays out of the required set
+listed under Branch Protection Guidance. Promote it only under the criteria
+there, and update that section and the repository settings in the same change.
 
 ## Live PostgreSQL regression coverage
 

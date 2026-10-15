@@ -371,7 +371,7 @@ Named targets:
 
 `arlen deploy logs`
 
-- streams `journalctl -u <unit>` when `--service <unit>` is supplied
+- streams `journalctl -u <unit>` when `--service <unit>` is supplied; on macOS it tails the launchd job's log, `<releasePath>/logs/<label>.log`
 - can tail an explicit file with `--file <path>`
 - otherwise reports active release metadata pointers (`manifest.json`, `README.txt`, `release.env`, optional lifecycle log path)
 - when `[target]` has SSH transport metadata, delegates logs to the remote host
@@ -406,7 +406,7 @@ Release-only options:
 - `--env <name>`: migration environment (default: `production`)
 - `--base-url <url>`: verify `GET /healthz` after activation
 - `--skip-migrate`: skip the migration step during activation
-- `--service <name>`: systemd unit for status/rollback/log operations
+- `--service <name>`: systemd unit for status/rollback/log operations; on macOS the launchd job label (`system/<label>`, or the domain in `ARLEN_LAUNCHD_DOMAIN`), restarted with `launchctl kickstart -k` and reloaded with `launchctl kill HUP`. See DEPLOYMENT.md, "macOS launchd Runbook".
 - `--runtime-action <reload|restart|none>`: runtime action used by `deploy release` and `deploy rollback` when `--service` is set
 - `--runtime-restart-command <shell>`: non-interactive restart command override, for example `sudo -n systemctl restart arlen@myapp`
 - `--runtime-reload-command <shell>`: non-interactive reload command override
@@ -837,9 +837,11 @@ Apple toolchain.
 Run framework tests.
 
 - default: equivalent to `--all`
-- macOS: `--unit`, `--all` and the default run the Apple XCTest unit bundle
-  (`tools/test_apple_xctest.sh`). The integration suite is GNUstep-only for
-  now, so `--all` notes that on stderr and `--integration` exits `2`.
+- macOS: runs the Apple XCTest bundles through `tools/test_apple_xctest.sh`:
+  `--unit` runs `--suite unit`, `--integration` runs `--suite integration`, and
+  `--all` and the default run both. Integration tests of GNUstep-only lanes
+  (the GNU make build graph, the perf, fault-injection, fuzz and sanitizer
+  lanes) report as skipped on macOS.
 
 ### `arlen test --app [--only Class[/method]] [--skip Class[/method]] [--app-root <path>]`
 
@@ -867,7 +869,14 @@ See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests).
 
 Run performance suite and regression gate (`make perf`).
 
-GNUstep only for now. On macOS it exits `2` without running anything.
+On macOS it runs `tests/performance/run_perf.sh` directly, which builds the
+profile servers with the Apple toolchain (`bin/build-apple`, and
+`tools/build_apple_xctest.sh --suite integration --tools-only` for the example
+servers) and runs them from `build/apple/`. The committed baselines are
+recorded on Linux hosts, so on macOS the baseline root defaults to
+`build/perf/baselines/macos-<arch>`: the first run records this Mac's baseline
+and later runs are gated against it. Set `ARLEN_PERF_BASELINE_ROOT` to use
+another root.
 
 Profile selection is environment-driven:
 

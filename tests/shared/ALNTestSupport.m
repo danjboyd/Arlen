@@ -346,12 +346,35 @@ NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
   return child;
 }
 
+NSString *ALNTestFrameworkBuildCommand(NSString *targets) {
+#if defined(__APPLE__)
+  (void)targets;
+  return @"./bin/build-apple --with-boomhauer";
+#else
+  return [NSString stringWithFormat:@"make %@", targets ?: @""];
+#endif
+}
+
+NSString *ALNTestAppBinaryRelativePath(void) {
+#if defined(__APPLE__)
+  return @".boomhauer/apple/boomhauer-app";
+#else
+  return @".boomhauer/build/boomhauer-app";
+#endif
+}
+
 NSString *ALNTestClientCompileCommand(NSArray<NSString *> *sources, NSString *includeDirectory, NSString *output) {
   NSMutableArray *quoted = [NSMutableArray array];
   for (NSString *source in sources) {
     [quoted addObject:ALNTestShellQuote(source)];
   }
   NSString *includes = [includeDirectory length] ? [@"-I" stringByAppendingString:ALNTestShellQuote(includeDirectory)] : @"";
+#if defined(__APPLE__)
+  return [NSString stringWithFormat:@"%@ --output %@ %@ %@",
+                                    ALNTestShellQuote([ALNTestRepoRoot()
+                                        stringByAppendingPathComponent:@"tools/apple_compile_program.sh"]),
+                                    ALNTestShellQuote(output), includes, [quoted componentsJoinedByString:@" "]];
+#endif
   return [NSString stringWithFormat:@"%@ && make -C %@ test-client-program %@ %@ %@",
       ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()), ALNTestShellQuote(ALNTestRepoRoot()),
       ALNTestShellQuote([@"CLIENT_SOURCES=" stringByAppendingString:[quoted componentsJoinedByString:@" "]]),
