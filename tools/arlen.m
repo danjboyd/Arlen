@@ -1,6 +1,9 @@
 #import <Foundation/Foundation.h>
+#import <errno.h>
 #import <stdio.h>
 #import <stdlib.h>
+#import <string.h>
+#import <unistd.h>
 
 #import "ALNDataCompat.h"
 #import "ALNConfig.h"
@@ -501,6 +504,18 @@ static int RunShellCommand(NSString *command) {
   [task launch];
   [task waitUntilExit];
   return task.terminationStatus;
+}
+
+// Replaces arlen with `bash -lc command`. Used for the long-running servers
+// (boomhauer, propane, jobs worker), whose commands end in `exec`, so the
+// server ends up with arlen's pid and process group. As an NSTask child it got
+// its own process group on Apple, so a terminal Ctrl-C or a signal to arlen
+// stopped arlen and left the server running.
+static int ExecShellCommand(NSString *command) {
+  fflush(NULL);
+  execl("/bin/bash", "bash", "-lc", [command UTF8String], (char *)NULL);
+  fprintf(stderr, "arlen: failed to run /bin/bash: %s\n", strerror(errno));
+  return 127;
 }
 
 static NSString *TaskCommandDescription(NSString *launchPath, NSArray<NSString *> *arguments) {
@@ -5619,10 +5634,10 @@ static int CommandBoomhauer(NSArray *args) {
   NSString *suffix =
       ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
 
-  NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/boomhauer%@",
+  NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ exec ./bin/boomhauer%@",
                                                  ShellQuote(frameworkRoot), ShellQuote(appRoot),
                                                  ShellQuote(frameworkRoot), suffix];
-  return RunShellCommand(command);
+  return ExecShellCommand(command);
 }
 
 static int CommandPropane(NSArray *args) {
@@ -5639,9 +5654,9 @@ static int CommandPropane(NSArray *args) {
   NSString *suffix = ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
 
   NSString *command = [NSString
-      stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/propane%@",
+      stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ exec ./bin/propane%@",
                        ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot), suffix];
-  return RunShellCommand(command);
+  return ExecShellCommand(command);
 }
 
 static int CommandJobs(NSArray *args) {
@@ -5670,9 +5685,9 @@ static int CommandJobs(NSArray *args) {
   NSString *suffix = ([quoted count] > 0) ? [NSString stringWithFormat:@" %@", [quoted componentsJoinedByString:@" "]] : @"";
 
   NSString *command =
-      [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ ./bin/jobs-worker%@",
+      [NSString stringWithFormat:@"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ exec ./bin/jobs-worker%@",
                                  ShellQuote(frameworkRoot), ShellQuote(appRoot), ShellQuote(frameworkRoot), suffix];
-  return RunShellCommand(command);
+  return ExecShellCommand(command);
 }
 
 static int CommandRoutes(void) {
