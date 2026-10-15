@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def read_json(path: Path):
@@ -599,7 +599,7 @@ def main() -> int:
     measured_repeats = as_int(os.environ.get("ARLEN_PHASED_MEASURED_REPEATS", measured.get("repeats", 3)))
     pairs = parse_pairs(protocol.get("pairs", []))
 
-    run_id = args.run_id or dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    run_id = args.run_id or dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 

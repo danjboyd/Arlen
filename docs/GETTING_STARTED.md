@@ -155,8 +155,8 @@ See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
 
 These commands also work on macOS, where they build with the Apple toolchain
 instead of `make`. `arlen check` runs the Apple verification lane there, and
-`arlen test` runs the Apple unit and integration bundles. `arlen perf` is
-GNUstep-only for now.
+`arlen test` runs the Apple unit and integration bundles. `arlen perf` gates
+against a baseline recorded on the same Mac.
 
 ## 7. Choose the Next Guide
 
@@ -302,6 +302,10 @@ When you move your Arlen framework pin, re-run `arlen module upgrade <name>
 `arlen module doctor`. Module sources can change without a version bump; see
 [Upgrade a Module](MODULES.md#6-upgrade-a-module). An upgrade keeps a module you
 disabled disabled.
+
+To push notifications to phones and browsers, enable the notifications module's
+Web Push channel: `arlen webpush generate-keys` prints a VAPID key pair for the
+server environment. See [Notifications Module: Web Push](NOTIFICATIONS_MODULE.md#web-push).
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)

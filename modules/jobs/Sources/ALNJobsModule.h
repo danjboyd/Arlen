@@ -14,6 +14,9 @@
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNJobsModuleErrorDomain;
+// A job that fails with this key in its error's userInfo (an NSNumber of seconds)
+// is retried no sooner than that, even when its backoff policy would run it earlier.
+extern NSString *const ALNJobsModuleRetryAfterSecondsErrorKey;
 
 typedef NS_ENUM(NSInteger, ALNJobsModuleErrorCode) {
   ALNJobsModuleErrorInvalidConfiguration = 1,

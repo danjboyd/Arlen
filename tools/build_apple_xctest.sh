@@ -16,6 +16,7 @@ fi
 
 suite="unit"
 print_bundle_path=0
+tools_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -27,11 +28,17 @@ while [[ $# -gt 0 ]]; do
       print_bundle_path=1
       shift
       ;;
+    --tools-only)
+      tools_only=1
+      shift
+      ;;
     --help|-h)
       cat <<'USAGE'
-Usage: build_apple_xctest.sh [--suite unit|integration|durable-jobs] [--print-bundle-path]
+Usage: build_apple_xctest.sh [--suite unit|integration|durable-jobs] [--tools-only] [--print-bundle-path]
 
-Builds Apple XCTest bundles under build/apple/tests/.
+Builds Apple XCTest bundles under build/apple/tests/. --tools-only builds only
+the binaries a suite launches, not the bundle (tests/performance/run_perf.sh
+uses it for the example servers).
 
   unit          tests/unit (default)
   integration   tests/integration, plus the example servers it launches
@@ -274,18 +281,20 @@ case "$suite" in
     ;;
 esac
 
-compile_sources "${sources[@]}"
-objects=("${compiled_objects[@]}")
+if [[ $tools_only -eq 0 ]]; then
+  compile_sources "${sources[@]}"
+  objects=("${compiled_objects[@]}")
 
-link_manifest="$obj_root/.link/$bundle_name.inputs"
-if ! aln_apple_link_is_current "$link_manifest" "$bundle_bin" "${objects[@]}" "$framework_lib"; then
-  rm -rf "$bundle_root"
-  mkdir -p "$bundle_root/Contents/MacOS"
-  "$clang_path" "${objc_flags[@]}" "${objects[@]}" "$framework_lib" -o "$bundle_bin" "${link_flags[@]}"
-  aln_apple_record_link_inputs "$link_manifest" "${objects[@]}" "$framework_lib"
+  link_manifest="$obj_root/.link/$bundle_name.inputs"
+  if ! aln_apple_link_is_current "$link_manifest" "$bundle_bin" "${objects[@]}" "$framework_lib"; then
+    rm -rf "$bundle_root"
+    mkdir -p "$bundle_root/Contents/MacOS"
+    "$clang_path" "${objc_flags[@]}" "${objects[@]}" "$framework_lib" -o "$bundle_bin" "${link_flags[@]}"
+    aln_apple_record_link_inputs "$link_manifest" "${objects[@]}" "$framework_lib"
+  fi
+  sed -e "s/ArlenUnitTests/$bundle_name/g" -e "s/com\.arlen\.tests\.apple\.unit/com.arlen.tests.apple.$suite/" \
+    "$repo_root/tests/Info-apple-unit.plist" >"$bundle_root/Contents/Info.plist"
 fi
-sed -e "s/ArlenUnitTests/$bundle_name/g" -e "s/com\.arlen\.tests\.apple\.unit/com.arlen.tests.apple.$suite/" \
-  "$repo_root/tests/Info-apple-unit.plist" >"$bundle_root/Contents/Info.plist"
 
 # Binaries the suites launch, matching the GNUstep build's build/ outputs.
 case "$suite" in
@@ -340,6 +349,6 @@ ensure_wrapper "$build_root/arlen" "$repo_root/build/arlen"
 ensure_wrapper "$build_root/boomhauer" "$repo_root/build/boomhauer"
 ensure_wrapper "$build_root/eocc" "$repo_root/build/eocc"
 
-if [[ $print_bundle_path -eq 1 ]]; then
+if [[ $print_bundle_path -eq 1 && $tools_only -eq 0 ]]; then
   printf '%s\n' "$bundle_root"
 fi

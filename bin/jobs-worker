@@ -153,16 +153,18 @@ if (( is_checkout_framework_root == 0 && is_release_framework_root == 0 )); then
   exit 1
 fi
 
-# A macOS source checkout builds with the Apple toolchain and writes the app to
-# .boomhauer/apple/. Packaged releases keep .boomhauer/build/ on every platform.
-# A checkout there can also carry a build/arlen wrapper
-# (tools/build_apple_xctest.sh), so only a non-checkout root counts as a
-# packaged release.
+# Only a non-checkout root counts as a packaged release. A built checkout also
+# has build/arlen, but its app binary may be stale, so it must go through the
+# boomhauer prepare step (GitHub issue 150). A macOS source checkout builds with
+# the Apple toolchain and writes the app to .boomhauer/apple/; packaged releases
+# keep .boomhauer/build/ on every platform.
 app_build_binary="$app_root/.boomhauer/build/boomhauer-app"
-prefer_packaged_binary="$is_release_framework_root"
+prefer_packaged_binary=0
+if (( is_release_framework_root == 1 && is_checkout_framework_root == 0 )); then
+  prefer_packaged_binary=1
+fi
 if [[ "$(uname -s)" == "Darwin" ]] && (( is_checkout_framework_root == 1 )); then
   app_build_binary="$app_root/.boomhauer/apple/boomhauer-app"
-  prefer_packaged_binary=0
 fi
 
 if [[ ! -f "$app_root/config/app.plist" ]] || ! app_root_has_sources "$app_root"; then

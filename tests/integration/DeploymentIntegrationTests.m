@@ -3406,6 +3406,84 @@ static NSString *ALNHostDeployProfile(void) {
   }
 }
 
+- (void)testCheckoutRuntimeLaunchersRebuildStaleAppBinary_Issue150 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-issue-150-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-issue-150-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  propaneAccessories = {\n"
+                                  "    workerCount = 1;\n"
+                                  "    jobWorkerCount = 0;\n"
+                                  "  };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  logFormat = \"json\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "int main(int argc, const char *argv[]) { (void)argc; (void)argv; return 0; }\n"]);
+
+    // A built checkout has build/arlen and bin/propane, which also make it look
+    // like a packaged release. The launchers must still rebuild the app rather
+    // than run whatever binary an earlier build left behind.
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+#if defined(__APPLE__)
+    NSString *appBinary = [appRoot stringByAppendingPathComponent:@".boomhauer/apple/boomhauer-app"];
+#else
+    NSString *appBinary = [appRoot stringByAppendingPathComponent:@".boomhauer/build/boomhauer-app"];
+#endif
+    NSString *staleLog = [workRoot stringByAppendingPathComponent:@"stale-binary.log"];
+    NSString *staleScript = [NSString stringWithFormat:@"#!/usr/bin/env bash\nprintf '%%s\\n' \"$0\" >> %@\nexit 0\n",
+                                                       [self shellQuoted:staleLog]];
+
+    NSArray<NSString *> *launchers = @[ @"propane", @"jobs-worker" ];
+    for (NSString *launcher in launchers) {
+      // Plant the stale binary with an old mtime so the app build treats it as
+      // out of date relative to freshly compiled objects.
+      XCTAssertTrue([self writeFile:appBinary content:staleScript]);
+      XCTAssertTrue([self makeExecutableAtPath:appBinary]);
+      NSString *touchOutput = [self runShellCapture:[NSString stringWithFormat:@"touch -t 200001010000 %@",
+                                                                               [self shellQuoted:appBinary]]
+                                            exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", touchOutput);
+
+      NSString *extraArgs = [launcher isEqualToString:@"propane"]
+                                ? [NSString stringWithFormat:@"--workers 1 --job-worker-count 0 --pid-file %@",
+                                                             [self shellQuoted:[workRoot stringByAppendingPathComponent:@"propane.pid"]]]
+                                : @"";
+      NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                   @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@/bin/%@ "
+                                                    "--env production --once %@",
+                                                   [self shellQuoted:appRoot], [self shellQuoted:appRoot],
+                                                   [self shellQuoted:repoRoot], [self shellQuoted:repoRoot],
+                                                   launcher, extraArgs]
+                                      exitCode:&code];
+      XCTAssertEqual(0, code, @"%@: %@", launcher, output);
+
+      NSString *staleLogText =
+          [NSString stringWithContentsOfFile:staleLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+      XCTAssertEqualObjects(@"", staleLogText, @"%@ ran the stale app binary", launcher);
+      NSString *binaryText = [NSString stringWithContentsOfFile:appBinary encoding:NSUTF8StringEncoding error:nil];
+      XCTAssertFalse([binaryText hasPrefix:@"#!"], @"%@ did not rebuild the app binary", launcher);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 - (void)testReleasePackagingDereferencesCompiledRuntimeSymlink_ARLEN_BUG_018 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-symlink-app"];
@@ -4630,7 +4708,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10EJSONPerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10e-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4686,7 +4764,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10GDispatchPerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10g-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4738,7 +4816,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10HHTTPParsePerformanceGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10h-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -4792,7 +4870,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10LRouteMatchInvestigationGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10l-confidence"];
   XCTAssertNotNil(outputRoot);
@@ -5449,7 +5527,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MBlobThroughputGeneratorProducesExpectedPack {
-  ALNSkipOnApple(@"Linux perf lane; macOS perf is issue 147");
+  ALNSkipOnApple(@"Linux perf lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-blob-throughput"];
   XCTAssertNotNil(outputRoot);

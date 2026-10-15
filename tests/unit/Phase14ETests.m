@@ -6,6 +6,7 @@
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNStorageModule.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase14EDocumentsCollection : NSObject <ALNStorageCollectionDefinition>
 @end
@@ -42,9 +43,24 @@
 @end
 
 @interface Phase14ETests : XCTestCase
+@property(nonatomic, copy) NSString *appRoot;
 @end
 
 @implementation Phase14ETests
+
+- (void)setUp {
+  [super setUp];
+  // Outside the test environment the storage module keeps state under
+  // <appRoot>/var/module_state; keep it out of the working directory.
+  self.appRoot = ALNTestTemporaryDirectory(@"phase14e-app");
+}
+
+- (void)tearDown {
+  if (self.appRoot != nil) {
+    [[NSFileManager defaultManager] removeItemAtPath:self.appRoot error:nil];
+  }
+  [super tearDown];
+}
 
 - (ALNApplication *)application {
   return [[ALNApplication alloc] initWithConfig:@{
@@ -68,6 +84,7 @@
   }
   return [[ALNApplication alloc] initWithConfig:@{
     @"environment" : environment,
+    @"appRoot" : self.appRoot ?: NSTemporaryDirectory(),
     @"logFormat" : @"json",
     @"csrf" : @{ @"enabled" : @NO },
     @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
