@@ -227,6 +227,9 @@ send step-up there.
 105).
 `auth` moved to `1.5.1` and `mcp` to `1.0.3` so booleans are detected correctly
 on Apple arm64 (GitHub issue 132).
+`notifications` moved to `1.1.0` for the Web Push channel, and `jobs` to `1.1.0`
+for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
+(GitHub issue 173).
 
 ## MCP tools
 
