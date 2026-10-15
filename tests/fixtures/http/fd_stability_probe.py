@@ -1,5 +1,6 @@
 import os
 import socket
+import subprocess
 
 # Substituted by HTTPIntegrationTests; no third-party packages required.
 PORT = __PORT__
@@ -8,6 +9,8 @@ ROUNDS = 400
 
 def descriptors():
     fd_dir = '/proc/%d/fd' % SERVER_PID
+    if not os.path.isdir(fd_dir):
+        return lsof_descriptors()
     total = 0
     dev_null = 0
     for entry in os.listdir(fd_dir):
@@ -17,6 +20,20 @@ def descriptors():
                 dev_null += 1
         except OSError:
             pass
+    return total, dev_null
+
+def lsof_descriptors():
+    # Without /proc (macOS): numeric descriptors as lsof reports them, as
+    # `f<fd>` lines each followed by its `n<name>` line.
+    output = subprocess.run(['lsof', '-nP', '-a', '-p', str(SERVER_PID), '-d', '0-999999', '-F', 'fn'],
+                            capture_output=True, text=True).stdout
+    total = 0
+    dev_null = 0
+    for line in output.splitlines():
+        if line.startswith('f'):
+            total += 1
+        elif line == 'n/dev/null':
+            dev_null += 1
     return total, dev_null
 
 def request(method, path, headers=b''):

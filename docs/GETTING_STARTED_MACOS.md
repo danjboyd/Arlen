@@ -96,6 +96,20 @@ For the repeatable artifact pack, run:
 bash ./tools/ci/run_apple_baseline_confidence.sh
 ```
 
+The integration and durable-jobs suites also build as Apple XCTest bundles:
+
+```bash
+./tools/test_apple_xctest.sh --suite integration   # or: ./bin/arlen test --integration
+bash tools/ci/run_durable_jobs.sh                   # disposable PostgreSQL cluster
+```
+
+`tools/build_apple_xctest.sh --suite integration` also builds the binaries the
+suite launches (the example servers and `eoc-smoke-render`) under
+`build/apple/`, with exec wrappers at the `build/` paths the tests use. Set
+`ARLEN_PG_TEST_DSN` to include the PostgreSQL integration tests. Tests of
+GNUstep-only lanes (the GNU make build graph, perf, fault-injection, fuzz and
+sanitizer generators) report as skipped.
+
 ## 6. Read Next
 
 - `docs/APPLE_PLATFORM.md`
@@ -105,5 +119,6 @@ bash ./tools/ci/run_apple_baseline_confidence.sh
 The build links macOS system libcurl for `ALNSynchronousHTTPResult`; custom link
 commands also need `-lcurl`. For live database and client contract regressions,
 install `postgresql@17` and `libpq`, then run
-`bash tools/ci/run_apple_client_data_regressions.sh`. See
+`bash tools/ci/run_apple_unit_suite.sh` (the full unit bundle against a private
+PostgreSQL, as Apple CI runs it). See
 [HTTP client](HTTP_CLIENT.md) and [Testing workflow](TESTING_WORKFLOW.md).
