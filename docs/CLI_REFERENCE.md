@@ -1021,6 +1021,7 @@ Behavior:
 - watch mode retries failed builds automatically (`ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, default `2`) even when no additional watched-file fingerprint change is observed
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- requests run on `runtimeLimits.maxConcurrentHTTPWorkers` worker threads (default `8`). An idle keep-alive connection releases its worker after `runtimeLimits.keepAliveParkAfterMilliseconds` (default `5`) and is picked up again when its next request arrives (see `docs/CONFIGURATION_REFERENCE.md`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:

@@ -42,8 +42,27 @@ apps need first.
 - `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
   and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog
-- `connectionTimeoutSeconds`: request/connection timeout baseline
+- `connectionTimeoutSeconds`: request/connection timeout baseline. It also
+  limits how long an idle keep-alive connection stays open between requests.
 - `enableReusePort`: opt-in socket reuse for supported deployments
+- `runtimeLimits`: HTTP server concurrency limits
+  - `maxConcurrentHTTPWorkers` (default `8`): threads that run requests.
+  - `maxConcurrentHTTPSessions` (default `256`): open HTTP connections,
+    including idle keep-alive connections. Further connections get a `503`.
+  - `maxQueuedHTTPConnections` (default `256`): connections waiting for a
+    worker.
+  - `keepAliveParkAfterMilliseconds` (default `5`, `0` parks at once): after a
+    keep-alive response, a worker waits this long for the next request on the
+    same connection. If none starts, the connection is handed to a watcher
+    thread and the worker moves on, so idle browser connections don't hold
+    workers. The watcher hands the connection back to a worker when the next
+    request arrives, and closes it after `connectionTimeoutSeconds`. Pipelined
+    requests are served without parking. Windows builds and the serialized
+    `requestDispatchMode` keep each connection on one worker.
+  - Server-sent event streams and WebSocket sessions hold a worker for as long
+    as they stay open. Size `maxConcurrentHTTPWorkers` above the number of
+    streams you expect to be open at once, plus headroom for ordinary
+    requests.
 
 Generated apps start with:
 
