@@ -305,7 +305,11 @@ else
   check_command "clang" "fail" "Install compiler toolchain and ensure PATH is configured."
   check_command "make" "fail" "Install make and ensure PATH is configured."
   check_command "bash" "fail" "Install bash and ensure PATH is configured."
-  check_command "xctest" "warn" "Install Debian package 'tools-xctest' for test execution."
+  if [[ -f "$repo_root/vendor/tools-xctest/GNUmakefile" ]]; then
+    add_check "tool_xctest" "pass" "vendored tools-xctest runner present (built on first 'arlen test')"
+  else
+    check_command "xctest" "warn" "Run 'git submodule update --init vendor/tools-xctest' or install tools-xctest for test execution."
+  fi
   check_command "python3" "warn" "Install python3 for helper scripts and JSON doctor output."
   check_command "curl" "warn" "Install curl for integration smoke checks."
 

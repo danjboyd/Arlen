@@ -24,7 +24,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Start Here
 
 - [First App Guide](FIRST_APP_GUIDE.md): shortest path to scaffold, run, and extend your first app.
-- [Getting Started](GETTING_STARTED.md): build Arlen, create an app, add a route, and choose the next guide.
+- [Getting Started](GETTING_STARTED.md): install the toolchain and Arlen (release installer or checkout), create an app, add a route, and choose the next guide.
 - [Getting Started Quickstart](GETTING_STARTED_QUICKSTART.md): the minimum-friction first-app path.
 - [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer entry paths.
 - [Getting Started on macOS](GETTING_STARTED_MACOS.md): Apple-runtime bootstrap path for macOS without GNUstep.

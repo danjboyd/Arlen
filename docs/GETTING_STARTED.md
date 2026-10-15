@@ -19,37 +19,87 @@ manifest property names or `objectForColumnName:` with the original SQL name.
 Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
 schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
 
-## 1. Prerequisites
+## 1. Install a clang-built GNUstep Toolchain
 
-- a clang-built GNUstep toolchain
-- `tools-xctest` (`xctest` command)
+Arlen needs clang, the `libobjc2` runtime, and `gnustep-base`. Distro GNUstep
+packages built with GCC will not work.
 
-Initialize GNUstep in your shell. The repo helper also works with managed
-toolchains that expose `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`:
+If you don't already have one, install the managed toolchain from
+[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
+`~/.local/share/gnustep-cli` and needs no root except for host packages.
+
+The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
+the release's signature. Arlen is verified with it on:
+
+- Debian 13 "trixie", amd64 and arm64
+- Ubuntu 26.04 LTS "resolute", amd64
+
+Each distribution gets its own toolchain build. Debian 12, Ubuntu 24.04, and
+Ubuntu on arm64 are not covered yet.
 
 ```bash
-source /path/to/Arlen/tools/source_gnustep_env.sh
+curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
+  | sh -s -- --yes setup --user
+sudo apt-get install -y libssl-dev
 ```
 
-Run the bootstrap diagnostic first:
+`--yes` lets setup install host prerequisites (clang, libcurl, libffi, ICU,
+and so on) with `sudo apt-get`. Leave it off to print the command and run it
+yourself. Arlen also needs the OpenSSL development package (`libssl-dev`),
+which the toolchain does not install. To use PostgreSQL, install the client
+library too (`libpq5`, or `libpq-dev` for the headers). Arlen's env helper finds this toolchain on its own when
+`/usr/GNUstep` is absent.
+
+If you already have a clang-built GNUstep, for example under `/usr/GNUstep`,
+use it as is. On other distributions, build clang + libobjc2 + GNUstep from
+source with [gnustep/tools-scripts](https://github.com/gnustep/tools-scripts). For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+
+## 2. Install Arlen
+
+### From a release (recommended)
 
 ```bash
-/path/to/Arlen/bin/arlen doctor
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
 ```
 
-If you want structured output for automation:
+The installer:
+
+1. downloads the latest release archive and checks it against `SHA256SUMS`;
+2. unpacks it to `~/.local/share/arlen/<version>`;
+3. builds the framework once against your toolchain, which takes about a
+   minute;
+4. writes an `arlen` launcher to `~/.local/bin`.
+
+The launcher sets up the GNUstep environment by itself, so you don't need to
+source anything. Make sure `~/.local/bin` is on your `PATH`, then check your
+setup:
 
 ```bash
-/path/to/Arlen/bin/arlen doctor --json
+arlen doctor
 ```
 
-For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+Useful installer options:
 
-## 2. Build Arlen
+- `--version X.Y.Z` pins a release.
+- `--prefix DIR` and `--bin-dir DIR` move the install.
+- `--archive FILE` installs an archive you already downloaded.
 
-From repository root:
+To upgrade, rerun the installer. Earlier versions stay under
+`~/.local/share/arlen/`. The launcher follows `current`, so set
+`ARLEN_HOME=~/.local/share/arlen/<version>` to run an older one.
+
+With the installer, every `/path/to/Arlen/bin/arlen` in the rest of this
+guide is just `arlen`.
+
+### From a git checkout
+
+Use a checkout to work on Arlen itself or to track `main`:
 
 ```bash
+git clone --recursive https://github.com/danjboyd/Arlen.git
+cd Arlen
+source tools/source_gnustep_env.sh
+./bin/arlen doctor
 make all
 ```
 
@@ -58,6 +108,12 @@ This builds the main tools you will use first:
 - `build/arlen`
 - `build/boomhauer`
 - `build/eocc`
+
+If you want structured doctor output for automation:
+
+```bash
+/path/to/Arlen/bin/arlen doctor --json
+```
 
 ## 3. Create Your First App
 
@@ -226,7 +282,7 @@ framework tests require no tenant or public deployment.
 OAuth metadata requests use certificate-chain and hostname verification with a 256 KiB response
 limit, a five-second total deadline per document, and redirect/non-200 rejection.
 GNUstep uses a bounded libcurl transport (development headers/library with TLS
-and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev`). This works
+and asynchronous DNS required; Debian/Ubuntu: `libcurl4-openssl-dev` or `libcurl4-gnutls-dev`). This works
 on startup and maintenance threads without pumping application run-loop callbacks.
 Apple retains Foundation transport. GNUstep metadata uses libcurl's CA configuration,
 not GNUstep TLS user defaults. The general-purpose `ALNSynchronousURLRequest` helper

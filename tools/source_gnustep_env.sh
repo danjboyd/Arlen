@@ -36,6 +36,18 @@ _aln_source_gnustep_env_main() {
   set +u
   # shellcheck disable=SC1090
   source "$resolved_gnustep_sh"
+
+  # gnustep-cli managed toolchains keep libdispatch and other non-GNUstep
+  # libraries in <root>/lib, which GNUstep.sh does not add to the search path.
+  local managed_root
+  managed_root="$(cd "$(dirname "$resolved_gnustep_sh")/../../.." 2>/dev/null && pwd)"
+  if [[ -n "$managed_root" && -f "$managed_root/toolchain-manifest.json" && -d "$managed_root/lib" ]]; then
+    case ":${LD_LIBRARY_PATH:-}:" in
+      *":$managed_root/lib:"*) ;;
+      *) export LD_LIBRARY_PATH="$managed_root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+  fi
+
   if [[ $restore_nounset -eq 1 ]]; then
     set -u
   fi

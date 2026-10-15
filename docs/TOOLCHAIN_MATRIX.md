@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-04-15
+Last updated: 2026-10-13
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -99,6 +99,36 @@ That helper resolves the active GNUstep shell init path in this order:
 3. `gnustep-config --variable=GNUSTEP_MAKEFILES`
 4. `/clang64/share/GNUstep/Makefiles/GNUstep.sh`
 5. `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh`
+6. a gnustep-cli managed toolchain at `~/.local/share/gnustep-cli` or
+   `/opt/gnustep-cli`. When the resolved toolchain is a gnustep-cli root
+   (it has `toolchain-manifest.json`), the helper also prepends `<root>/lib`
+   to `LD_LIBRARY_PATH`, because that is where those toolchains keep
+   `libdispatch` and GNUstep.sh does not add it.
+
+The gnustep-cli stable `v0.1.0` managed toolchain (`linux-amd64-clang`,
+libobjc2 2.3, gnustep-base 1.31.1, republished 2026-10-13 as a Debian 13
+build) was verified with Arlen on Debian 13 amd64 on 2026-10-13. Install it
+with the release-asset bootstrap,
+`https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh`.
+That script verifies the production-signed manifest. The raw script at the
+repo's `v0.1.0` tag installs the `0.1.0-dev` prerelease instead.
+
+gnustep-cli builds a toolchain per distribution:
+
+| Distribution | Toolchain target | ICU | glibc | clang |
+|---|---|---|---|---|
+| Debian 13 (amd64) | `linux-amd64-clang` | 76 | 2.41 | 19 |
+| Debian 13 (arm64) | `linux-arm64-clang` | 76 | 2.41 | 19 |
+| Ubuntu 26.04 LTS | `linux-ubuntu2604-amd64-clang` | 78 | 2.43 | 21 |
+
+Both are verified with Arlen by the `linux-public-toolchain` CI lane, which
+runs in clean containers (arm64 on a GitHub arm runner). Debian 12,
+Ubuntu 24.04, and Ubuntu arm64 have not been verified with Arlen. Besides the toolchain's own host prerequisites, Arlen
+needs `libssl-dev`. The GnuTLS libcurl that the toolchain installs
+(`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. The
+check covered bootstrap `setup --user`, `make all`, `arlen new`, and
+`boomhauer` serving `/healthz`. It is the documented public Linux toolchain
+path; see `docs/GETTING_STARTED.md`.
 
 Contributors who already source a managed toolchain env script can keep doing
 that, as long as it exposes a valid `GNUSTEP_SH` or `GNUSTEP_MAKEFILES`.
@@ -223,7 +253,9 @@ Linux/GNUstep deploy confidence now validates three layers:
 - app config presence (`config/app.plist`)
 - GNUstep script availability
 - required tool commands (`clang`, `make`, `bash`)
-- recommended tool commands (`xctest`, `python3`, `curl`)
+- test runner: the vendored `tools-xctest` when `vendor/tools-xctest` is
+  present, otherwise `xctest` on `PATH`
+- recommended tool commands (`python3`, `curl`)
 - `gnustep-config` execution after sourcing GNUstep
 - `dispatch/dispatch.h` availability after GNUstep init
 - `libpq` presence check (when `ldconfig` is available)

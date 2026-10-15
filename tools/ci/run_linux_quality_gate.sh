@@ -10,6 +10,7 @@ python3 ./tools/ci/check_runtime_json_abstraction.py --repo-root "$repo_root"
 python3 ./tools/ci/test_junit_report.py
 python3 ./tools/ci/test_xctest_repetition_policy.py
 python3 ./tools/ci/test_check_test_inventory.py
+python3 ./tools/ci/test_release_packaging.py
 # Builds the unit and integration bundles, which runs freshly built tools
 # (eocc) that need the GNUstep runtime libraries on the loader path.
 source "$repo_root/tools/source_gnustep_env.sh"

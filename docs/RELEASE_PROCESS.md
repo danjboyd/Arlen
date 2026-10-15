@@ -105,8 +105,29 @@ Release notes must include a link to:
    gh release create vX.Y.Z --verify-tag --title "Arlen X.Y.Z" --notes-file <notes.md>
    ```
 
-Publishing the release triggers `release-certification`, which first rejects a
-tag that does not match `ALNModuleSystemFrameworkVersion`.
+Publishing the release triggers two workflows. Each first rejects a tag that
+does not match `ALNModuleSystemFrameworkVersion`:
+
+- `release-certification` runs the certification pack.
+- `release-assets` builds the downloadable archives, smoke-tests an install
+  from each one, and attaches them to the release:
+  - `arlen-X.Y.Z.tar.gz`: the source tree plus vendored `tools-xctest`. It is
+    used on Linux, where `install.sh` builds it once.
+  - `arlen-X.Y.Z-macos-arm64.tar.gz`: prebuilt Apple framework tools.
+  - `install.sh` and `SHA256SUMS`.
+
+  The README's install command,
+  `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`,
+  depends on these assets. After publishing, confirm that the release page
+  lists all four files. To rebuild them, run `release-assets` with
+  `workflow_dispatch`, giving the `tag` and `upload: true`.
+
+To build or test the archives locally:
+
+```bash
+tools/release/package_framework.sh --version X.Y.Z --kind source --out build/release-assets
+tools/release/smoke_install.sh build/release-assets/arlen-X.Y.Z.tar.gz
+```
 
 ## 4. Perf Trend Artifacts
 
@@ -135,6 +156,7 @@ Keep these visible but non-required unless the support statement changes:
 - `apple-baseline / apple-baseline`
 - `windows-preview / windows-preview`
 - `release-certification / release-certification`
+- `release-assets / *`
 
 ## 6. Release Workflow
 

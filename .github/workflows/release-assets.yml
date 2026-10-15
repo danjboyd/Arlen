@@ -1,0 +1,132 @@
+name: release-assets
+
+# Builds the downloadable release archives, smoke-tests each one through
+# tools/install.sh, and attaches them to the GitHub release together with
+# install.sh and SHA256SUMS. See docs/RELEASE_PROCESS.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build assets for (e.g. v0.2.0)"
+        required: true
+      upload:
+        description: "Attach the assets to the release"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  source-archive:
+    name: release-assets / source-archive
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          submodules: recursive
+
+      - name: Check release version
+        run: |
+          python3 ./tools/ci/check_release_version.py --repo-root . --tag "$RELEASE_TAG"
+
+      - name: Install build dependencies
+        env:
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Package source archive
+        run: |
+          bash ./tools/release/package_framework.sh --version "${RELEASE_TAG#v}" --kind source --out build/release-assets
+
+      - name: Smoke-test install from the source archive
+        run: |
+          source tools/source_gnustep_env.sh
+          bash ./tools/release/smoke_install.sh "build/release-assets/arlen-${RELEASE_TAG#v}.tar.gz"
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-source
+          path: build/release-assets/
+          if-no-files-found: error
+
+  macos-arm64-archive:
+    name: release-assets / macos-arm64-archive
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          submodules: recursive
+
+      - name: Select full Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Install Apple build dependencies
+        env:
+          ARLEN_CI_APPLE_STRATEGY: brew
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Package prebuilt macOS archive
+        run: |
+          bash ./tools/release/package_framework.sh --version "${RELEASE_TAG#v}" --kind macos-arm64 --out build/release-assets
+
+      - name: Smoke-test install from the macOS archive
+        run: |
+          bash ./tools/release/smoke_install.sh "build/release-assets/arlen-${RELEASE_TAG#v}-macos-arm64.tar.gz"
+
+      - name: Upload macOS archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-macos-arm64
+          path: build/release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: release-assets / publish
+    needs: [source-archive, macos-arm64-archive]
+    if: github.event_name == 'release' || inputs.upload
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: build/downloaded
+
+      - name: Assemble assets
+        run: |
+          mkdir -p build/publish
+          find build/downloaded -name '*.tar.gz' -exec cp {} build/publish/ \;
+          cp tools/install.sh build/publish/install.sh
+          (cd build/publish && sha256sum *.tar.gz install.sh | sort -k2 > SHA256SUMS)
+          cat build/publish/SHA256SUMS
+
+      - name: Attach assets to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" build/publish/* --clobber --repo "$GITHUB_REPOSITORY"

@@ -2,12 +2,48 @@
 
 ## Unreleased
 
-- Stopping `arlen boomhauer`, `arlen propane` or `arlen jobs worker` now stops
-  the server. `arlen` ran them as a child process, which Apple's `NSTask`
-  puts in its own process group, so on macOS a Ctrl-C (or a signal to `arlen`)
-  ended `arlen` and left the server running and holding its port. `arlen` now
-  execs these commands, so the server keeps `arlen`'s pid and process group.
+## 0.2.0 — 2026-10-15
 
+Arlen now installs with one command on Linux and Apple Silicon Macs, and
+macOS is a supported development and production platform (build, test,
+`boomhauer`, `propane`, `jobs-worker`, `perf` and launchd deploys), with the
+full unit, integration and durable-jobs suites running in Apple CI. Linux
+gains a public, rootless toolchain path through gnustep-cli. The
+notifications module gains a Web Push channel.
+
+- Stopping `arlen boomhauer`, `arlen propane` or `arlen jobs worker` now stops
+  the server. `arlen` ran them as a child process, which `NSTask` puts in its
+  own process group on both Apple and GNUstep, so a Ctrl-C (or a signal to
+  `arlen`) ended `arlen` and left the server running and holding its port.
+  `arlen` now execs these commands, so the server keeps `arlen`'s pid and
+  process group.
+
+- Install with one command. Each release now ships downloadable archives,
+  and `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`
+  installs Arlen to `~/.local/share/arlen/<version>` with an `arlen` launcher
+  in `~/.local/bin`. Downloads are checked against `SHA256SUMS`.
+  - Apple Silicon Macs (macOS 14 or later) get prebuilt framework tools, so
+    nothing is compiled at install time. Intel Macs are not supported yet.
+  - Linux gets a source archive that the installer builds once.
+  - On Linux the launcher sets up the GNUstep environment, so there is no
+    `source` step.
+
+  The new `release-assets` workflow builds the archives and smoke-tests an
+  install from each one. See `docs/GETTING_STARTED.md` and
+  `docs/CLI_REFERENCE.md`.
+
+- Linux has a public toolchain path. Arlen now works with the
+  [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed
+  clang/libobjc2 toolchain (stable `v0.1.0`), which installs without root.
+  Arlen is verified with it on Debian 13 (amd64 and arm64) and Ubuntu 26.04
+  LTS (amd64). The new `linux-public-toolchain` CI lane checks all three in
+  clean containers. When
+  `/usr/GNUstep` is absent, `tools/source_gnustep_env.sh` finds the toolchain
+  under `~/.local/share/gnustep-cli` or `/opt/gnustep-cli`, and puts its
+  `libdispatch` directory on `LD_LIBRARY_PATH`.
+
+- `arlen doctor` no longer warns that `xctest` is missing when the vendored
+  `tools-xctest` runner is present. That runner is what `arlen test` uses.
 - macOS deploy targets run under launchd. For `macos-*-apple-foundation`
   targets `arlen deploy init` generates `launchd/<label>.plist` (from the new
   `tools/deploy/launchd/arlen.plist`) and propane/jobs-worker wrappers that

@@ -61,24 +61,51 @@ A controller that serves an HTML page and a JSON endpoint:
 EOC templates (`.html.eoc`) compile to Objective-C at build time. Output is
 HTML-escaped by default, and template errors report the file and line.
 
-## Quick Start
+## Install
 
-You need a **clang-built GNUstep toolchain** on Linux, or full Xcode plus
-Homebrew `openssl@3` on macOS. `arlen doctor` checks your setup and explains anything that's
-missing.
+One command installs the latest release and puts an `arlen` command in
+`~/.local/bin`:
 
 ```bash
-git clone --recursive https://github.com/danjboyd/Arlen.git
-cd Arlen
-source tools/source_gnustep_env.sh   # Linux; skip on macOS
-./bin/arlen doctor
-make all                             # macOS: ./bin/build-apple
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+```
 
-# create and run an app
-mkdir -p ~/arlen-apps && cd ~/arlen-apps
-/path/to/Arlen/bin/arlen new MyApp
+First install your platform's toolchain:
+
+| Platform | Prerequisites | What the installer does |
+|---|---|---|
+| **macOS, Apple Silicon** | macOS 14 or later, the Xcode Command Line Tools (`xcode-select --install`), and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
+| **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
+| **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
+
+The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
+verified with it on **Debian 13** (amd64 and arm64) and **Ubuntu 26.04 LTS**
+(amd64). Debian 12, Ubuntu 24.04, and Ubuntu on arm64 are not covered yet. Install it, plus the OpenSSL
+headers Arlen links against:
+
+```bash
+curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
+  | sh -s -- --yes setup --user
+sudo apt-get install -y libssl-dev
+```
+
+Releases unpack to `~/.local/share/arlen/<version>`. Every download is checked
+against the release's `SHA256SUMS`. Rerun the installer to upgrade, or pass
+`--version X.Y.Z` to pin a release. `arlen doctor` checks your setup and
+explains anything that's missing. Platform details are in
+[Getting Started (Linux)](docs/GETTING_STARTED.md) and
+[Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md).
+
+Prefer a git checkout? Run `git clone --recursive https://github.com/danjboyd/Arlen.git`,
+then `make all` on Linux (after `source tools/source_gnustep_env.sh`) or
+`./bin/build-apple` on macOS, and use `./bin/arlen`.
+
+## Quick Start
+
+```bash
+arlen new MyApp
 cd MyApp
-/path/to/Arlen/bin/arlen boomhauer --port 3000
+arlen boomhauer --port 3000
 ```
 
 Open <http://127.0.0.1:3000/>. Then try `/healthz` and the interactive API
@@ -87,7 +114,7 @@ explorer at `/openapi`.
 Next, add a route:
 
 ```bash
-/path/to/Arlen/bin/arlen generate endpoint Hello --route /hello --method GET --template
+arlen generate endpoint Hello --route /hello --method GET --template
 ```
 
 Prefer a single file? `arlen new MyApp --lite` puts the controller, routes, and
@@ -168,7 +195,7 @@ and docs lanes.
 | macOS, Apple runtime | Verified for development and production (propane, launchd deploys). See [Apple Platform](docs/APPLE_PLATFORM.md) for the Linux-only test lanes. |
 | Windows, CLANG64 | Preview. |
 
-The current release is **v0.1.0**. Arlen follows semantic versioning; while it
+The current release is **v0.2.0**. Arlen follows semantic versioning; while it
 is on `0.x`, minor releases may still change public API, with migration notes.
 See [Releases](https://github.com/danjboyd/Arlen/releases) and
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md). The capability-level
