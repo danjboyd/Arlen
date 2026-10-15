@@ -9,7 +9,7 @@ preview, and what is in flight. For engineering history, see
 | Platform | Toolchain | Status |
 |---|---|---|
 | Linux | clang-built GNUstep | Production baseline. Authoritative target. |
-| macOS | Apple Objective-C runtime | Supported for development. Core build/test/run loop verified; ops tooling and some test lanes are Linux-only (see `docs/APPLE_PLATFORM.md`). |
+| macOS | Apple Objective-C runtime | Supported for development and production: CLI, boomhauer, propane/jobs-worker, release packaging and launchd deploys; unit, integration and durable-jobs suites pass. Sanitizer/fuzz/fault lanes and integration CI are Linux-only (see `docs/APPLE_PLATFORM.md`). |
 | Windows | CLANG64 | Preview. Packaged-release contract, not the primary production target. |
 
 ## Capability Maturity

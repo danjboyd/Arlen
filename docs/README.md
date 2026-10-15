@@ -85,7 +85,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Systemd Runbook](SYSTEMD_RUNBOOK.md): systemd unit template and incident collection steps.
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
-- [Apple Platform Contract](APPLE_PLATFORM.md): current Apple-runtime support boundary on macOS, including the verified auth/runtime lane.
+- [Apple Platform Contract](APPLE_PLATFORM.md): what runs on macOS (development, production, launchd deploys) and what is still Linux-only.
 - [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
 
 ## Reference

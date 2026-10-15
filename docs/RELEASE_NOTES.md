@@ -12,6 +12,7 @@
   `<releasePath>/logs/<label>.log`. `ARLEN_LAUNCHD_DOMAIN` selects a domain
   other than `system`. The default service name for macOS targets is
   `arlen.<target>` (GitHub issue 148).
+
 - `arlen perf` runs on macOS. `tests/performance/run_perf.sh` builds the profile
   servers with the Apple toolchain (new `tools/build_apple_xctest.sh
   --tools-only`), runs them from `build/apple/`, and times runs with `python3`
