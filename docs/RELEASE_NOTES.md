@@ -53,8 +53,8 @@
   `prePackageCommands` arrays, `rollback_release.sh` no longer uses `mapfile`
   or `find -printf`, and `rollback_release.sh`/`smoke_release.sh` compare
   physical paths, so a release under a symlinked directory such as macOS
-  `/var` is recognized as current. launchd service management is still open
-  (GitHub issue 148).
+  `/var` is recognized as current. Running the service under launchd is
+  covered in its own entry (GitHub issue 148).
 - The notifications module has a `webpush` channel for browsers and installed
   web apps, including iOS 16.4+ home-screen apps (GitHub issue 173). Messages use
   RFC 8291 `aes128gcm` encryption, tested against the RFC's vectors, and
