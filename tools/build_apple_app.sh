@@ -222,10 +222,18 @@ transpile_app_templates() {
         continue
       fi
       # An app template at templates/modules/<id>/<path> overrides the
-      # module's own; it is transpiled with the app templates instead.
+      # module's own; it is transpiled with the app templates instead. Match
+      # paths exactly: a -f test would also match a name that differs only in
+      # case on case-insensitive APFS, which GNUstep builds don't.
+      override_root="$app_root/templates/modules/$module_id"
+      overrides=""
+      if [[ -d "$override_root" ]]; then
+        overrides="$(cd "$override_root" && find . -type f -name '*.html.eoc' | sed 's|^\./||')"
+      fi
       module_templates=()
       while IFS= read -r template_path; do
-        if [[ -f "$app_root/templates/modules/$module_id/${template_path#"$template_root"/}" ]]; then
+        if [[ -n "$overrides" ]] &&
+          printf '%s\n' "$overrides" | grep -Fxq -- "${template_path#"$template_root"/}"; then
           continue
         fi
         module_templates+=("$template_path")

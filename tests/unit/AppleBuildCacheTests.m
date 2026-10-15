@@ -34,7 +34,9 @@
 }
 
 - (void)testObjectTracksSourceAndHeadersFromDepfile {
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+  XCTSkip(@"The Apple build cache helpers run only on macOS");
+#endif
   NSString *output = [self runCacheScript:
       @"printf '#define X 1\\n' > 'my h.h'\n"
       @"printf '#include \"my h.h\"\\nint f(void) { return X; }\\n' > a.c\n"
@@ -58,11 +60,12 @@
                         @"source-touched=stale\n"
                         @"header-removed=stale\n",
                         output);
-#endif
 }
 
 - (void)testLinkTracksInputMtimesAndInputList {
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+  XCTSkip(@"The Apple build cache helpers run only on macOS");
+#endif
   NSString *output = [self runCacheScript:
       @"check() { if aln_apple_link_is_current m out \"${@:2}\"; then echo \"$1=current\"; else echo \"$1=stale\"; fi; }\n"
       @"touch a.o b.o\n"
@@ -77,20 +80,39 @@
                         @"input-dropped=stale\n"
                         @"input-touched=stale\n",
                         output);
+}
+
+- (void)testDashPrefixedPathsAreNotReadAsFindOptions {
+#if !defined(__APPLE__)
+  XCTSkip(@"The Apple build cache helpers run only on macOS");
 #endif
+  NSString *output = [self runCacheScript:
+      @"touch ref; sleep 0.01; touch -- -newer-file -older-file; sleep 0.01; touch ref\n"
+      @"check() { if aln_apple_any_newer ref \"${@:2}\"; then echo \"$1=newer\"; else echo \"$1=current\"; fi; }\n"
+      @"check older -older-file\n"
+      @"sleep 0.01; touch -- -newer-file\n"
+      @"check newer -older-file -newer-file\n"
+      @"check missing -absent\n"];
+  XCTAssertEqualObjects(@"older=current\n"
+                        @"newer=newer\n"
+                        @"missing=newer\n",
+                        output);
 }
 
 - (void)testSDKPathIsTheSameForEverySDKAlias {
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+  XCTSkip(@"The Apple build cache helpers run only on macOS");
+#endif
   NSString *output = [self runCacheScript:
       @"sdk_dir=\"$(dirname \"$(aln_apple_sdk_path)\")\"\n"
       @"for sdk in \"$sdk_dir\"/MacOSX*.sdk; do SDKROOT=\"$sdk\" aln_apple_sdk_path; done | sort -u | wc -l | tr -d ' '\n"];
   XCTAssertEqualObjects(@"1\n", output);
-#endif
 }
 
 - (void)testFingerprintChangeClearsObjectRoot {
-#if defined(__APPLE__)
+#if !defined(__APPLE__)
+  XCTSkip(@"The Apple build cache helpers run only on macOS");
+#endif
   NSString *output = [self runCacheScript:
       @"aln_apple_reset_on_flag_change obj clang -O0\n"
       @"touch obj/a.o\n"
@@ -99,7 +121,6 @@
       @"aln_apple_reset_on_flag_change obj clang -O2\n"
       @"[[ -f obj/a.o ]] || echo new-flags=cleared\n"];
   XCTAssertEqualObjects(@"same-flags=kept\nnew-flags=cleared\n", output);
-#endif
 }
 
 @end

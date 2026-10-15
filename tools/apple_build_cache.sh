@@ -27,8 +27,16 @@ aln_apple_any_newer() {
   local ref="$1"
   shift
   [[ $# -gt 0 ]] || return 1
+  # find would read a path that starts with "-" as an option.
+  local paths=() path
+  for path in "$@"; do
+    case "$path" in
+      -*) paths+=("./$path") ;;
+      *) paths+=("$path") ;;
+    esac
+  done
   local newer
-  newer="$(find "$@" -prune -newer "$ref" 2>/dev/null)" || return 0
+  newer="$(find "${paths[@]}" -prune -newer "$ref" 2>/dev/null)" || return 0
   [[ -n "$newer" ]]
 }
 
