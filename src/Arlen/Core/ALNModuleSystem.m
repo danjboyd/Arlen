@@ -5,7 +5,7 @@
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNModuleSystemErrorDomain = @"Arlen.ModuleSystem.Error";
-NSString *const ALNModuleSystemFrameworkVersion = @"0.1.0";
+NSString *const ALNModuleSystemFrameworkVersion = @"0.2.0";
 
 static NSString *ALNModuleTrim(id value) {
   if (![value isKindOfClass:[NSString class]]) {

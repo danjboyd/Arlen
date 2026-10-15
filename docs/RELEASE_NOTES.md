@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-10-15
+
+Arlen now installs with one command on Linux and Apple Silicon Macs, and
+macOS is a supported development and production platform (build, test,
+`boomhauer`, `propane`, `jobs-worker`, `perf` and launchd deploys), with the
+full unit, integration and durable-jobs suites running in Apple CI. Linux
+gains a public, rootless toolchain path through gnustep-cli. The
+notifications module gains a Web Push channel.
+
 - Install with one command. Each release now ships downloadable archives,
   and `curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash`
   installs Arlen to `~/.local/share/arlen/<version>` with an `arlen` launcher
