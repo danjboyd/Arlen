@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
+  GNUstep.sh. On Linux it and `smoke_release.sh` source
+  `tools/source_gnustep_env.sh` before they build and run binaries. Before,
+  the freshly built `eocc` couldn't load `libgnustep-base` and the build
+  stopped. `build_release.sh` also uses the same test as `propane` to decide
+  whether an app has sources, so an app with sources but no `src/main.m` now
+  ships its binary. Before, `propane` tried to rebuild that app from the
+  release, which it can't do. Together these kept the `release-certification`
+  workflow from ever passing (#181).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

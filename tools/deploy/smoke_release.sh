@@ -232,6 +232,12 @@ run_release_health_check() {
   return 0
 }
 
+# The packaged app binary that propane starts below links the GNUstep runtime,
+# so it needs the libraries on the loader path too (issue 181).
+if [[ "$(uname -s)" == "Linux" ]]; then
+  source "$framework_root/tools/source_gnustep_env.sh"
+fi
+
 "$framework_root/tools/deploy/build_release.sh" \
   --app-root "$app_root" \
   --framework-root "$framework_root" \
