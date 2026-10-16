@@ -39,8 +39,10 @@ BOOL ALNPlatformGMTimeUTC(const time_t *seconds, struct tm *utc);
 // fopen() for an NSString path. -fileSystemRepresentation is UTF-16 on
 // Windows GNUstep, so this uses _wfopen there and fopen elsewhere.
 FILE *_Nullable ALNPlatformOpenFile(NSString *path, const char *mode);
-// Memory-mapped file contents. The MSYS2 gnustep-base package on Windows has
-// no +dataWithContentsOfFile:options:error:, only +dataWithContentsOfMappedFile:.
+// Memory-mapped file contents. On Windows a read-only file mapping
+// (CreateFileMappingW/MapViewOfFile): the MSYS2 gnustep-base has no
+// +dataWithContentsOfFile:options:error:, and its +dataWithContentsOfMappedFile:
+// reads the whole file into the heap (no HAVE_MMAP).
 NSData *_Nullable ALNPlatformMappedFileData(NSString *path, NSError *_Nullable *_Nullable error);
 // Opens (creating, 0600) the lock file at path and blocks until this process
 // holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
