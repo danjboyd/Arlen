@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
+  managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
+  toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming
+  `C:\msys64`. Code added since the Windows lane last ran was made portable
+  again (UTF-16 file paths, Winsock timeouts, no `getrlimit`/`pthread`/`execl`
+  on Windows), apps built by `boomhauer` get the framework's Windows flags,
+  and a pointer stored in an `unsigned long` (32 bits on 64-bit Windows) no
+  longer truncates. Windows test lanes now run through the vendored
+  tools-xctest runner (#116), and make no longer relinks every tool and
+  rebuilds the framework on each run on Windows.
+- `arlen new /absolute/path` creates the app at that path. It used to be
+  nested under the current directory on every platform.
+- `make` parses faster: module template paths no longer spawn a shell per
+  template (about 0.3 s per invocation on Linux, about 15 s on Windows).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

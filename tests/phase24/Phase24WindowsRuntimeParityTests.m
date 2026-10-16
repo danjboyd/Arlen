@@ -32,7 +32,13 @@
 }
 
 - (int)randomPort {
-  return 35000 + (int)(rand() % 2000);
+  // rand() was never seeded, so every run picked 35041 first and collided with
+  // servers left behind by an earlier run that hit the time allowance.
+  uint32_t value = 0;
+  if (!ALNPlatformFillRandomBytes(&value, sizeof(value))) {
+    value = (uint32_t)ALNPlatformProcessIdentifier() ^ (uint32_t)ALNPlatformNowMilliseconds();
+  }
+  return 35000 + (int)(value % 2000);
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {

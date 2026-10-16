@@ -41,6 +41,37 @@ Checked-in wrappers:
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
 
+`run_clang64.ps1` finds the MSYS2 root itself: `-MsysRoot`, then
+`ARLEN_MSYS_ROOT`, then the gnustep-cli managed toolchain
+(`%LOCALAPPDATA%\gnustep-cli`, then `%ProgramFiles%\gnustep-cli`), then a stock
+MSYS2 at `C:\msys64`. Arlen's runtime uses the same search order to find
+`bash.exe`, `libpq` and ODBC (`ALNPlatformWindowsMSYSRoots`).
+
+### Toolchain from gnustep-cli
+
+The public way to get a `CLANG64` GNUstep toolchain is the gnustep-cli
+PowerShell bootstrap. Pass the stable manifest explicitly; the bootstrap
+script at the `v0.1.0` tag otherwise selects `0.1.0-dev`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json
+```
+
+It installs to `%LOCALAPPDATA%\gnustep-cli`, which is itself an MSYS2 root
+with `pacman`. It does not include libcurl; install it inside that root:
+
+```sh
+pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl
+```
+
+Known issues in the `v0.1.0` Windows toolchain, worked around by Arlen's
+build: libdispatch's `os/generic_win_base.h` redefines `mode_t` (Arlen
+compiles with `-DHAVE_MODE_T=1`) and `pthread_attr_t` (Arlen sources avoid
+`<pthread.h>`); the shipped gnustep-base predates
+`+dataWithContentsOfFile:options:error:` (use `ALNPlatformMappedFileData`);
+and drives mount under `/cygdrive/c` rather than `/c`. Fixes for the first two
+are queued for the next gnustep-cli Windows republish.
+
 For Windows runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
 MSYS2 `CLANG64` GNUstep managed-toolchain manifests and Windows bootstrap
@@ -55,7 +86,6 @@ Expected inside the active `CLANG64` environment:
 - `make`
 - `bash`
 - `gnustep-config`
-- `xctest`
 - `libdispatch`
 - libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`)
 

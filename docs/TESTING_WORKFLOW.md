@@ -174,9 +174,8 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
 
 Test bundles compile against and link the vendored `libXCTest`, so these
 features do not depend on the host's packaged `tools-xctest`. The Windows
-preview lane still builds against its toolchain's XCTest (issue #116);
-`tests/ALNXCTestCompat.h` keeps the shared helpers compiling there and falls
-back to the previous behavior.
+preview lanes use the vendored runner too (issue #116); the gnustep-cli Windows
+toolchain ships no XCTest of its own.
 
 ## 1. Focused Lanes
 

@@ -21,42 +21,29 @@ runners; it is not a new required merge-gate lane by itself.
 ## Windows Test Runner
 
 The Windows preview lanes (`make phase24-windows-db-smoke` and
-`make phase24-windows-runtime-tests`) don't use the vendored fork. They build
-against the toolchain's XCTest and run bundles through
-`tools/arlen_xctest_runner.m`, so they get no filters, time limits, JUnit
-reports, skips or attachments. GitHub issue #116 tracks moving them to the fork.
+`make phase24-windows-runtime-tests`) build and run the vendored tools-xctest
+fork, the same runner as Linux and macOS (issue #116), so they get filters,
+per-test time limits, JUnit reports, skips and attachments. The make wiring
+for Windows:
 
-As of 2026-10-08 the move hasn't been verified on Windows: `windows-preview` is
-disabled and no Windows runner is registered.
+- the vendored runner is `obj/xctest.exe` and is built with
+  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1` (the gnustep-cli Windows toolchain's
+  libdispatch header otherwise clashes with MinGW's `mode_t`);
+- `xctest_runtime_env` puts the vendored `XCTest-0.dll` directory on `PATH`
+  instead of `LD_LIBRARY_PATH`;
+- test bundle binaries are named `<bundle>.dll`, because MinGW appends `.exe`
+  to an extensionless `-o` path and GNUstep's `NSBundle` loads `<name>.dll`.
 
-The fork itself is no longer a blocker. Since `v0.5.0` (pinned here) it builds
-and passes `make check` on MSYS2 `CLANG64` in its own CI
-(danjboyd/tools-xctest#28). On Windows it leaves out `-host` and
-`libXCTestHost`, which need `LD_PRELOAD` and which Arlen doesn't use; its
-metrics use the Windows process APIs, and parallel workers find `xctest`
-without `/proc`.
+Verified on 2026-10-16 on an otvm `windows-2022` lease with the gnustep-cli
+`v0.1.0` managed toolchain: `phase24-windows-db-smoke` passes (2/2) through
+the vendored runner. `phase24-windows-runtime-tests` still fails:
+`testBoomhauerWatchRecoversFromBuildFailure` exceeds the 300 s time allowance
+because boomhauer rebuilds the framework inside the test on that 2-vCPU VM
+(cause not yet found). `tools/arlen_xctest_runner.m` stays in the tree until
+the runtime lane is green; then delete it with `XCTEST_BUNDLE_RUNNER_*`.
 
-What remains is Arlen's make wiring, which assumes Linux:
-
-- `VENDORED_XCTEST` names `obj/xctest`, but gnustep-make builds
-  `obj/xctest.exe` on Windows. The prerequisite never exists, so every run
-  would rebuild the runner from clean.
-- `xctest_runtime_env` points `LD_LIBRARY_PATH` at the vendored
-  `libXCTest`. Windows finds DLLs through `PATH`.
-- Windows builds compile with `-DGNUSTEP_WITHOUT_DLL=1`. Whether bundles
-  built that way link correctly against a DLL `libXCTest` is unknown until
-  a Windows build tries it.
-
-To finish the move once a Windows runner is back:
-
-1. In `GNUmakefile`, use `$(EXEEXT)`/`.exe` for `VENDORED_XCTEST` on Windows,
-   prepend the vendored library directory to `PATH` in `xctest_runtime_env`,
-   and remove the `ARLEN_USE_VENDORED_XCTEST := 0` override.
-2. Point the phase24 targets at `$(call xctest_run,...)`, then delete
-   `tools/arlen_xctest_runner.m`, `XCTEST_BUNDLE_RUNNER_*` and its object from
-   `ALL_OBJECTS`.
-3. Run `make phase24-windows-confidence` on the runner, and update this
-   section, `docs/WINDOWS_CLANG64.md` and `docs/TESTING_WORKFLOW.md`.
+`windows-preview` still has no registered self-hosted runner, so its jobs
+queue and are cancelled; registering one is an infrastructure decision.
 
 ## Goal
 
