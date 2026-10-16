@@ -23,6 +23,9 @@
   nested under the current directory on every platform.
 - `make` parses faster: module template paths no longer spawn a shell per
   template (about 0.3 s per invocation on Linux, about 15 s on Windows).
+- `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
+  string, number, boolean or `null`) instead of failing the whole query
+  (#182).
 
 ## 0.2.1 — 2026-10-15
 

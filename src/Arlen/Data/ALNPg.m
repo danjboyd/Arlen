@@ -1527,7 +1527,10 @@ static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
   case ALNPGOIDOID_JSONB: {
     NSData *jsonData = [stringValue dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
     if (jsonData != nil) {
-      decoded = [ALNJSONSerialization JSONObjectWithData:jsonData options:0 error:error];
+      // json/jsonb columns may hold scalar documents ('"s"', '42', 'true', 'null').
+      decoded = [ALNJSONSerialization JSONObjectWithData:jsonData
+                                                 options:NSJSONReadingAllowFragments
+                                                   error:error];
       if (decoded == nil && error != NULL && *error != nil) {
         NSError *jsonError = *error;
         NSString *detail = [NSString stringWithFormat:@"column %@ JSON decode failed: %@",
