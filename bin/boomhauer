@@ -126,9 +126,37 @@ windows_preview=0
 if detect_windows_preview; then
   windows_preview=1
 fi
+# Match the framework build's flags (GNUmakefile): on Windows CLANG64 llhttp is
+# off by default, GNUstep is linked statically, and libdispatch's header needs
+# HAVE_MODE_T next to MinGW's mode_t.
+default_enable_llhttp=1
+platform_objc_flags=""
+platform_link_libs="-ldl"
+if [[ $windows_preview -eq 1 ]]; then
+  default_enable_llhttp=0
+  platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -DARLEN_WINDOWS_PREVIEW=1"
+  platform_link_libs="-lws2_32 -lbcrypt"
+fi
 
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
+framework_eocc_target="$framework_root/build/eocc"
+if [[ $windows_preview -eq 1 ]]; then
+  # The make target carries the .exe suffix the linker adds on Windows.
+  framework_eocc_target="$framework_root/build/eocc.exe"
+fi
+framework_boomhauer_target="$framework_root/build/boomhauer"
+[[ $windows_preview -eq 1 ]] && framework_boomhauer_target="$framework_root/build/boomhauer.exe"
+
+# Release archives without build/obj (Windows) carry build/.release-prebuilt;
+# while it matches, trust the prebuilt framework instead of `make -q`.
+if [[ -f "$framework_root/tools/release_prebuilt.sh" ]]; then
+  source "$framework_root/tools/release_prebuilt.sh"
+fi
+framework_prebuilt_is_current() {
+  declare -F aln_release_prebuilt_is_current >/dev/null 2>&1 &&
+    aln_release_prebuilt_is_current "$framework_root" "$@"
+}
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
@@ -520,6 +548,9 @@ fi
 state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
+# The linker writes boomhauer-app.exe on Windows; name the make target the same
+# way so it is not permanently missing (relinking the app on every build).
+[[ $windows_preview -eq 1 ]] && app_binary="$app_binary.exe"
 app_makefile="$build_root/AppGNUmakefile"
 framework_lib="$framework_root/build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
@@ -593,7 +624,7 @@ runtime_fingerprint() {
     printf 'app_root|%s\n' "$app_root"
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
-    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
+    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
     append_fingerprint_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
     append_fingerprint_entries "$framework_root" "framework" src modules GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
@@ -667,7 +698,7 @@ transpile_templates() {
         rm -rf "$gen_root/modules/$module_id" "$module_manifest_root/$module_id.json"
         continue
       fi
-      "$framework_root/build/eocc" \
+      "$framework_eocc_target" \
         --template-root "$module_template_root" \
         --output-dir "$gen_root" \
         --manifest "$module_manifest_root/$module_id.json" \
@@ -687,7 +718,7 @@ transpile_templates() {
     return
   fi
 
-  "$framework_root/build/eocc" \
+  "$framework_eocc_target" \
     --template-root "$app_root/templates" \
     --output-dir "$app_template_root" \
     --manifest "$app_template_root/manifest.json" \
@@ -809,7 +840,7 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -c %s -o %s\n\n' \
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
       "$dep_path" "$source_path" "$object_path"
   done
   for source_path in "${test_sources[@]}" "$entry"; do
@@ -822,14 +853,14 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -I%s -MMD -MP -MF %s -c %s -o %s\n\n' \
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -I%s -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
       "$app_root/tests" "$dep_path" "$source_path" "$object_path"
   done
 }
 
 emit_app_makefile() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local gnustep_objc_flags
   local gnustep_base_libs
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
@@ -906,8 +937,8 @@ emit_app_makefile() {
     printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
     printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
     printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
-    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\n' "$gnustep_base_libs"
-    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
+    printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch -lcurl %s\n' "$gnustep_base_libs" "$platform_link_libs"
+    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1 %s\n' "$enable_yyjson" "$enable_llhttp" "$platform_objc_flags"
     printf 'INCLUDE_FLAGS :='
     for source_path in "${include_args[@]}"; do
       printf ' %s' "$source_path"
@@ -932,7 +963,7 @@ emit_app_makefile() {
       dep_path="${object_path%.o}.d"
       printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
       printf '>mkdir -p $(@D)\n'
-      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -c %s -o %s\n\n' \
+      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
         "$dep_path" "$source_path" "$object_path"
     done
     emit_app_test_rules
@@ -944,7 +975,8 @@ emit_app_makefile() {
 }
 
 framework_artifacts_are_current() {
-  make -q -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >/dev/null 2>&1
+  framework_prebuilt_is_current "$framework_eocc_target" "$framework_lib" ||
+    make -q -C "$framework_root" "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
 }
 
 framework_archive_contains_sanitizers() {
@@ -985,7 +1017,7 @@ ensure_framework_artifacts_ready() {
       echo "boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"
       if {
         make -C "$framework_root" clean &&
-          make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib"
+          make -C "$framework_root" "$framework_eocc_target" "$framework_lib"
       } >"$output_file" 2>&1; then
         if [[ -s "$output_file" ]]; then
           cat "$output_file"
@@ -994,7 +1026,7 @@ ensure_framework_artifacts_ready() {
         local status=$?
         record_build_failure \
           "tooling" \
-          "make -C $framework_root clean && make -C $framework_root $framework_root/build/eocc $framework_lib" \
+          "make -C $framework_root clean && make -C $framework_root $framework_eocc_target $framework_lib" \
           "$status" \
           "$output_file"
         return "$status"
@@ -1004,13 +1036,13 @@ ensure_framework_artifacts_ready() {
     fi
   else
     echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
-    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$output_file" 2>&1; then
+    if make -C "$framework_root" "$framework_eocc_target" "$framework_lib" >"$output_file" 2>&1; then
       if [[ -s "$output_file" ]]; then
         cat "$output_file"
       fi
     else
       local status=$?
-      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$output_file"
+      record_build_failure "tooling" "make -C $framework_root $framework_eocc_target $framework_lib" "$status" "$output_file"
       return "$status"
     fi
   fi
@@ -1061,7 +1093,7 @@ run_app_make_target() {
 
 compile_app() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local tmp_output
   tmp_output="$(mktemp)"
 
@@ -1141,10 +1173,14 @@ error_server_ready=0
 next_build_retry_at=0
 
 ensure_error_server_built() {
-  if [[ $error_server_ready -eq 1 && -x "$framework_root/build/boomhauer" ]]; then
+  if [[ $error_server_ready -eq 1 && -x "$framework_boomhauer_target" ]]; then
     return 0
   fi
 
+  if framework_prebuilt_is_current "$framework_boomhauer_target"; then
+    error_server_ready=1
+    return 0
+  fi
   if ! make -C "$framework_root" boomhauer >/dev/null; then
     echo "boomhauer: failed to build fallback dev error server" >&2
     return 1

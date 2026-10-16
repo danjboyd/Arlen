@@ -133,7 +133,7 @@
                           content:@"#import <Foundation/Foundation.h>\n"]);
 
     NSString *outputPath = [fixtureRoot stringByAppendingPathComponent:@"arlen-build-output.json"];
-    NSString *arlenPath = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+    NSString *arlenPath = ALNTestExecutablePath([repoRoot stringByAppendingPathComponent:@"build/arlen"]);
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:arlenPath],
                   @"expected test-unit prerequisite to build executable %@", arlenPath);
     NSString *command = [NSString stringWithFormat:
@@ -230,7 +230,7 @@
   XCTAssertTrue([makefile containsString:@"$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)"]);
   XCTAssertTrue([makefile containsString:@"UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))"]);
   XCTAssertTrue([makefile containsString:@"INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))"]);
-  XCTAssertTrue([makefile containsString:@"XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner"]);
+  XCTAssertFalse([makefile containsString:@"XCTEST_BUNDLE_RUNNER"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTests.xctest"]);
   XCTAssertTrue([makefile containsString:@"define xctest_filter_args"]);
@@ -252,7 +252,9 @@
   XCTAssertTrue([makefile containsString:@"LD_LIBRARY_PATH=\"$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}\""]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(UNIT_TEST_TARGET_NAME))"]);
   XCTAssertTrue([makefile containsString:@"$(call xctest_filter_args,$(INTEGRATION_TEST_TARGET_NAME))"]);
-  XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)"]);
+  // Windows lanes run through the vendored tools-xctest runner too (issue 116).
+  XCTAssertTrue([makefile containsString:@"phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_RUNNER_PREREQ)"]);
+  XCTAssertTrue([makefile containsString:@"$(call xctest_run,$(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE))"]);
   XCTAssertTrue([makefile containsString:@"phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests"]);
   XCTAssertTrue([makefile containsString:@"windows-confidence:"]);
   XCTAssertTrue([makefile containsString:@"bash ./tools/ci/run_windows_confidence.sh"]);
@@ -389,7 +391,9 @@
   XCTAssertTrue([makefile containsString:@"MODULE_TRANSPILE_STATE := $(MODULE_GEN_DIR)/.transpile.state"]);
   XCTAssertTrue([makefile containsString:@"ROOT_TEMPLATE_DIRS := $(shell if [ -d $(TEMPLATE_ROOT) ]; then find $(TEMPLATE_ROOT) -type d | sort; fi)"]);
   XCTAssertTrue([makefile containsString:@"framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)"]);
-  XCTAssertTrue([makefile containsString:@"-MMD -MP -MF $(@:.o=.d) -c $< -o $@"]);
+  // -MT joined to its value: MSYS2 leaves it unconverted, so on Windows the
+  // depfile names the object the way make does and header edits rebuild it.
+  XCTAssertTrue([makefile containsString:@"-MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@"]);
   XCTAssertTrue([makefile containsString:
                               @"$(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) "
                                "--manifest $(ROOT_TEMPLATE_MANIFEST) $(TEMPLATE_FILES);"]);
@@ -426,6 +430,27 @@
   XCTAssertTrue([makefile containsString:@"$(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)"]);
 }
 
+// The build-flags sentinel hashes GNUSTEP_SH. On Windows a shell started by a
+// native process (xctest, an app) sees GNUSTEP_MAKEFILES as C:/..., so the
+// resolver must print one spelling or each side deletes the other's sentinel
+// and rebuilds the whole framework (boomhauer's [1/4] step under phase24).
+- (void)testGNUstepResolverPrintsOnePathSpellingOnWindows {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *resolver = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
+  XCTAssertTrue([resolver containsString:@"if [[ \"$path\" =~ ^[A-Za-z]:[\\\\/] ]]; then"]);
+  XCTAssertTrue([resolver containsString:@"[[ -z \"$cygpath_bin\" && -x /usr/bin/cygpath ]] && cygpath_bin=/usr/bin/cygpath"]);
+  XCTAssertTrue([resolver containsString:@"path=\"$(\"$cygpath_bin\" -u \"$path\")\""]);
+}
+
+// core.autocrlf=true (Git for Windows' default) must not put CRLF into
+// scripts, recipes or fixtures; only the HTTP wire fixtures keep CRLF.
+- (void)testGitAttributesCheckOutLFEverywhere {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *attributes = [self readFile:[repoRoot stringByAppendingPathComponent:@".gitattributes"]];
+  XCTAssertTrue([attributes containsString:@"\n* text=auto eol=lf\n"]);
+  XCTAssertTrue([attributes containsString:@"\n*.http -text\n"]);
+}
+
 - (void)testBoomhauerGeneratedAppMakefileEnforcesARCAndFrameworkReuse {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
@@ -438,13 +463,13 @@
   XCTAssertTrue([script containsString:
                              @"printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC "
                               "-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s "
-                              "-DARGON2_NO_THREADS=1\\n'"]);
+                              "-DARGON2_NO_THREADS=1 %s\\n'"]);
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
                               "$(ALL_OBJECTS) $(FRAMEWORK_LIB) -o $(APP_BINARY) $(BASE_LINK_LIBS)\\n\\n'"]);
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
-                              "-MMD -MP -MF %s -c %s -o %s\\n\\n'"]);
+                              "-MMD -MP -MF %s -MT$@ -c %s -o %s\\n\\n'"]);
 }
 
 - (void)testDoctorAndCLIUseResolvedGNUstepContract {
@@ -553,19 +578,23 @@
   NSString *script = [self readFile:scriptPath];
 
   XCTAssertTrue([script containsString:@"local enable_yyjson=\"${ARLEN_ENABLE_YYJSON:-1}\""]);
-  XCTAssertTrue([script containsString:@"local enable_llhttp=\"${ARLEN_ENABLE_LLHTTP:-1}\""]);
+  // llhttp defaults to on, except on Windows CLANG64 where the framework build turns it off.
+  XCTAssertTrue([script containsString:@"local enable_llhttp=\"${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}\""]);
+  XCTAssertTrue([script containsString:@"default_enable_llhttp=1"]);
   XCTAssertTrue([script containsString:@"ARLEN_ENABLE_YYJSON must be 0 or 1"]);
   XCTAssertTrue([script containsString:@"ARLEN_ENABLE_LLHTTP must be 0 or 1"]);
   XCTAssertTrue([script containsString:@"framework_lib=\"$framework_root/build/lib/libArlenFramework.a\""]);
   XCTAssertTrue([script containsString:@"framework_artifacts_are_current() {"]);
-  XCTAssertTrue([script containsString:@"make -q -C \"$framework_root\" \"$framework_root/build/eocc\" \"$framework_lib\""]);
+  XCTAssertTrue([script containsString:@"make -q -C \"$framework_root\" \"$framework_eocc_target\" \"$framework_lib\""]);
+  XCTAssertTrue([script containsString:@"framework_eocc_target=\"$framework_root/build/eocc\""]);
   XCTAssertTrue([script containsString:@"find \"$framework_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
                 @"boomhauer app build must include first-party framework module headers");
   XCTAssertTrue([script containsString:@"find \"$app_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
                 @"boomhauer app build must include vendored app module headers");
   XCTAssertTrue([script containsString:@"-DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s"]);
   XCTAssertTrue([script containsString:@"-DARGON2_NO_THREADS=1"]);
-  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\\n' \"$gnustep_base_libs\""]);
+  XCTAssertTrue([script containsString:@"printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch -lcurl %s\\n' \"$gnustep_base_libs\" \"$platform_link_libs\""]);
+  XCTAssertTrue([script containsString:@"platform_link_libs=\"-ldl\""]);
   XCTAssertTrue([script containsString:@"-ldispatch"]);
 }
 
@@ -1001,6 +1030,9 @@
 }
 
 - (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fakebin"];
@@ -1173,6 +1205,9 @@
 }
 
 - (void)testTSANScriptStopsOnInstrumentedFailureBeforeRuntimeProbe {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fakebin"];
@@ -1288,6 +1323,9 @@
 }
 
 - (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];
@@ -1519,6 +1557,9 @@
 }
 
 - (void)testModuleVersionCheckRequiresBumpWhenModuleSourcesChange {
+  int gitCode = 0;
+  (void)ALNTestRunShellCapture(@"command -v git", &gitCode);
+  XCTSkipUnless(gitCode == 0, @"git is not on the shell PATH (MSYS2 CLANG64 does not inherit Git for Windows)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *checker = [repoRoot stringByAppendingPathComponent:@"tools/ci/check_module_versions.py"];
   NSString *work = [self createTempDirectoryWithPrefix:@"module-version-policy"];

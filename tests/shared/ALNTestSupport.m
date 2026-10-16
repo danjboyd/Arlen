@@ -6,6 +6,14 @@
 #import <ctype.h>
 #import <string.h>
 #import <unistd.h>
+#import <fcntl.h>
+#if defined(_WIN32)
+#import <io.h>
+#import <windows.h>
+#endif
+#import <errno.h>
+
+#import "ALNPlatform.h"
 
 static NSString *const ALNTestSupportErrorDomain = @"Arlen.TestSupport.Error";
 
@@ -191,6 +199,18 @@ NSString *ALNTestTemporaryDirectory(NSString *prefix) {
   NSString *templatePath =
       [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX",
                                                                                          sanitizedPrefix]];
+#if defined(_WIN32)
+  // No mkdtemp on MinGW, and -fileSystemRepresentation is UTF-16 there; a
+  // UUID-named directory created exclusively is just as unique.
+  NSString *uniquePath = [templatePath stringByReplacingOccurrencesOfString:@"XXXXXX"
+                                                                 withString:[[NSUUID UUID] UUIDString]];
+  return [[NSFileManager defaultManager] createDirectoryAtPath:uniquePath
+                                   withIntermediateDirectories:NO
+                                                    attributes:nil
+                                                         error:NULL]
+             ? uniquePath
+             : nil;
+#else
   const char *templateCString = [templatePath fileSystemRepresentation];
   char *buffer = strdup(templateCString);
   char *created = (buffer != NULL) ? mkdtemp(buffer) : NULL;
@@ -200,6 +220,7 @@ NSString *ALNTestTemporaryDirectory(NSString *prefix) {
                          : nil;
   free(buffer);
   return result;
+#endif
 }
 
 BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {
@@ -268,7 +289,12 @@ NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds) {
 
 BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode) {
   // GNU timeout exits 124; a process killed by SIGALRM reports 128 + 14.
+#if defined(SIGALRM)
   return ALNTestShellHasGNUTimeout() ? (exitCode == 124) : (exitCode == 128 + SIGALRM);
+#else
+  // Windows has no SIGALRM; MSYS2 ships GNU coreutils timeout.
+  return exitCode == 124;
+#endif
 }
 
 NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
@@ -288,7 +314,7 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
 
     NSTask *task = [[NSTask alloc] init];
     task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
-    task.launchPath = @"/bin/bash";
+    task.launchPath = ALNTestBashPath();
     task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
 
     task.standardOutput = captureHandle;
@@ -359,7 +385,15 @@ NSString *ALNTestAppBinaryRelativePath(void) {
 #if defined(__APPLE__)
   return @".boomhauer/apple/boomhauer-app";
 #else
-  return @".boomhauer/build/boomhauer-app";
+  return ALNTestExecutablePath(@".boomhauer/build/boomhauer-app");
+#endif
+}
+
+NSString *ALNTestExecutablePath(NSString *path) {
+#if defined(_WIN32)
+  return [[path pathExtension] length] > 0 ? path : [path stringByAppendingPathExtension:@"exe"];
+#else
+  return path;
 #endif
 }
 
@@ -400,7 +434,7 @@ NSDictionary *ALNTestRunShellCaptureStreams(NSString *command) {
     }
     NSTask *task = [[NSTask alloc] init];
     task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
-    task.launchPath = @"/bin/bash";
+    task.launchPath = ALNTestBashPath();
     task.arguments = @[ @"-lc", command ?: @"" ];
     task.standardOutput = handles[0];
     task.standardError = handles[1];
@@ -427,11 +461,159 @@ BOOL ALNTestStopServerTask(NSTask *task) {
     return YES;
   }
   if ([task isRunning]) {
+#if defined(_WIN32)
+    // No signals on Windows, and ending a process does not end its children:
+    // an MSYS2 `exec` leaves bash waiting on the exec'd program, and servers
+    // started through a shell outlive it. Kill the whole tree, as the
+    // phase24 runtime tests do, then fall back to -terminate.
+    NSTask *killer = [[NSTask alloc] init];
+    killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+    killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", task.processIdentifier] ];
+    killer.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    killer.standardError = [NSFileHandle fileHandleWithNullDevice];
+    @try {
+      [killer launch];
+      [killer waitUntilExit];
+    } @catch (NSException *exception) {
+      (void)exception;
+    }
+    if (!ALNTestWaitForTaskExit(task, 5.0)) {
+      [task terminate];
+      (void)ALNTestWaitForTaskExit(task, 5.0);
+    }
+#else
     kill(task.processIdentifier, SIGTERM);
     if (!ALNTestWaitForTaskExit(task, 5.0)) {
       kill(task.processIdentifier, SIGKILL);
     }
+#endif
   }
   [task waitUntilExit];
   return ![task isRunning];
+}
+
+BOOL ALNTestCreatePipe(int fds[2], BOOL nonBlockingRead) {
+  fds[0] = -1;
+  fds[1] = -1;
+#if defined(_WIN32)
+  (void)nonBlockingRead;
+  return _pipe(fds, 1u << 20, _O_BINARY) == 0;
+#else
+  if (pipe(fds) != 0) {
+    return NO;
+  }
+  if (nonBlockingRead) {
+    int flags = fcntl(fds[0], F_GETFL);
+    if (flags < 0 || fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+      return NO;
+    }
+  }
+  return YES;
+#endif
+}
+
+uint32_t ALNTestRandomUniform(uint32_t upperBound) {
+  if (upperBound < 2) {
+    return 0;
+  }
+  // Rejection sampling, as arc4random_uniform does, to avoid modulo bias.
+  uint32_t limit = UINT32_MAX - (UINT32_MAX % upperBound);
+  uint32_t value = 0;
+  do {
+    if (!ALNPlatformFillRandomBytes(&value, sizeof(value))) {
+      value = (uint32_t)[[NSUUID UUID] hash];
+    }
+  } while (value >= limit);
+  return value % upperBound;
+}
+
+BOOL ALNTestProcessExists(int pid) {
+  if (pid <= 0) {
+    return NO;
+  }
+#if defined(_WIN32)
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, (DWORD)pid);
+  if (process == NULL) {
+    return NO;
+  }
+  BOOL running = (WaitForSingleObject(process, 0) == WAIT_TIMEOUT);
+  CloseHandle(process);
+  return running;
+#else
+  return kill(pid, 0) == 0 || errno == EPERM;
+#endif
+}
+
+NSString *ALNTestBashPath(void) {
+  return ALNPlatformBashPath();
+}
+
+NSString *ALNTestToolPath(NSString *tool) {
+  NSString *path = [[NSProcessInfo processInfo] environment][@"PATH"] ?: @"";
+#if defined(_WIN32)
+  NSString *separator = @";";
+  NSString *name = [[tool pathExtension] length] > 0 ? tool : [tool stringByAppendingPathExtension:@"exe"];
+#else
+  NSString *separator = @":";
+  NSString *name = tool;
+#endif
+  for (NSString *directory in [path componentsSeparatedByString:separator]) {
+    if ([directory length] == 0) {
+      continue;
+    }
+    NSString *candidate = [directory stringByAppendingPathComponent:name];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return tool;
+}
+
+NSString *ALNTestPlatformObjCFlags(void) {
+#if defined(_WIN32)
+  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
+#else
+  return @"";
+#endif
+}
+
+NSString *ALNTestPlatformLinkLibraries(void) {
+#if defined(_WIN32)
+  return @"-lws2_32 -lbcrypt";
+#else
+  return @"-ldl";
+#endif
+}
+
+int ALNTestKill(int pid, int signal) {
+#if defined(_WIN32)
+  if (signal != SIGTERM && signal != SIGKILL) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (pid <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  NSTask *killer = [[NSTask alloc] init];
+  killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+  killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", pid] ];
+  killer.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  killer.standardError = [NSFileHandle fileHandleWithNullDevice];
+  @try {
+    [killer launch];
+    [killer waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+    errno = ESRCH;
+    return -1;
+  }
+  if (killer.terminationStatus != 0) {
+    errno = ESRCH;
+    return -1;
+  }
+  return 0;
+#else
+  return kill(pid, signal);
+#endif
 }

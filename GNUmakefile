@@ -13,6 +13,15 @@ endif
 ifneq (,$(findstring mingw,$(GNUSTEP_HOST_OS)))
 ARLEN_WINDOWS_PREVIEW := 1
 endif
+# The linker writes <name>.exe on Windows. Naming the make targets the same way
+# keeps them from looking permanently missing, which relinked every tool, made
+# eocc look newer than the transpiled templates and rebuilt the framework on
+# every make (and every boomhauer start).
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+TOOL_EXEEXT := .exe
+else
+TOOL_EXEEXT :=
+endif
 BUILD_DIR := $(ROOT_DIR)/build
 OBJ_DIR := $(BUILD_DIR)/obj
 LIB_DIR := $(BUILD_DIR)/lib
@@ -21,27 +30,26 @@ MODULE_GEN_DIR := $(BUILD_DIR)/gen/module_templates
 MODULE_GEN_MANIFEST_DIR := $(MODULE_GEN_DIR)/manifests
 TECH_DEMO_GEN_DIR := $(BUILD_DIR)/gen/tech_demo_templates
 
-EOC_TOOL := $(BUILD_DIR)/eocc
-SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render
-BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer
-TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server
-API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
-PHASE28_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/phase28-reference-server
-AUTH_PRIMITIVES_SERVER_TOOL := $(BUILD_DIR)/auth-primitives-server
-MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
-ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
-ARLEN_TOOL := $(BUILD_DIR)/arlen
-JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench
-DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
-HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
-ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench
-BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
-PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke
-PHASE26_ORM_PERF_TOOL := $(BUILD_DIR)/phase26-orm-perf-smoke
-ARLEN_ORM_REFERENCE_TOOL := $(BUILD_DIR)/arlen-orm-reference
-MCP_EXAMPLE_TOOL := $(BUILD_DIR)/mcp-example
-PHASE27_SEARCH_CHARACTERIZE_TOOL := $(BUILD_DIR)/phase27-search-characterize
-XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner
+EOC_TOOL := $(BUILD_DIR)/eocc$(TOOL_EXEEXT)
+SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render$(TOOL_EXEEXT)
+BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer$(TOOL_EXEEXT)
+TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server$(TOOL_EXEEXT)
+API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server$(TOOL_EXEEXT)
+PHASE28_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/phase28-reference-server$(TOOL_EXEEXT)
+AUTH_PRIMITIVES_SERVER_TOOL := $(BUILD_DIR)/auth-primitives-server$(TOOL_EXEEXT)
+MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server$(TOOL_EXEEXT)
+ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example$(TOOL_EXEEXT)
+ARLEN_TOOL := $(BUILD_DIR)/arlen$(TOOL_EXEEXT)
+JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench$(TOOL_EXEEXT)
+DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench$(TOOL_EXEEXT)
+HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench$(TOOL_EXEEXT)
+ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench$(TOOL_EXEEXT)
+BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix$(TOOL_EXEEXT)
+PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke$(TOOL_EXEEXT)
+PHASE26_ORM_PERF_TOOL := $(BUILD_DIR)/phase26-orm-perf-smoke$(TOOL_EXEEXT)
+ARLEN_ORM_REFERENCE_TOOL := $(BUILD_DIR)/arlen-orm-reference$(TOOL_EXEEXT)
+MCP_EXAMPLE_TOOL := $(BUILD_DIR)/mcp-example$(TOOL_EXEEXT)
+PHASE27_SEARCH_CHARACTERIZE_TOOL := $(BUILD_DIR)/phase27-search-characterize$(TOOL_EXEEXT)
 ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
@@ -66,17 +74,17 @@ endif
 endif
 endif
 VENDORED_TOOLS_XCTEST_DIR := $(ROOT_DIR)/vendor/tools-xctest
-VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
 VENDORED_XCTEST_LIB_DIR := $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/obj
-ARLEN_USE_VENDORED_XCTEST ?= 1
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
-# Windows lanes still build against the toolchain's XCTest and run through
-# tools/arlen_xctest_runner.m. The fork builds on MSYS2 CLANG64 since v0.5.0,
-# but the vendored runner rules below assume Linux (no .exe suffix,
-# LD_LIBRARY_PATH instead of PATH). See issue #116 and the "Windows Test
-# Runner" section of docs/CI_ALIGNMENT.md for the steps to switch.
-ARLEN_USE_VENDORED_XCTEST := 0
+# gnustep-make names the runner xctest.exe on Windows, and the toolchain's
+# Foundation.h needs HAVE_MODE_T there (see FEATURE_FLAGS below).
+VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest.exe
+VENDORED_XCTEST_MAKE_ARGS := ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1
+else
+VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
+VENDORED_XCTEST_MAKE_ARGS :=
 endif
+ARLEN_USE_VENDORED_XCTEST ?= 1
 ifeq ($(ARLEN_USE_VENDORED_XCTEST),1)
 ARLEN_XCTEST ?= $(VENDORED_XCTEST)
 ARLEN_XCTEST_LD_LIBRARY_PATH ?= $(VENDORED_XCTEST_LIB_DIR)
@@ -148,53 +156,59 @@ FRAMEWORK_SRCS := $(FRAMEWORK_OBJC_SRCS) $(FRAMEWORK_C_SRCS)
 ARLEN_DATA_SRCS := $(shell find src/Arlen/Data -type f -name '*.m' | sort)
 JSON_SERIALIZATION_SRCS := src/Arlen/Support/ALNJSONSerialization.m $(YYJSON_C_SRCS)
 EOC_RUNTIME_SRCS := src/Arlen/MVC/Template/ALNEOCRuntime.m src/Arlen/MVC/Template/ALNEOCTranspiler.m
-XCTEST_BUNDLE_RUNNER_SRCS := tools/arlen_xctest_runner.m
 
 UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenUnitTests.xctest
-UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests
+# The bundle binary NSBundle loads. MinGW appends .exe to an extensionless
+# -o path even with -shared, and GNUstep on Windows looks for <name>.dll.
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+XCTEST_BUNDLE_BINARY_SUFFIX := .dll
+else
+XCTEST_BUNDLE_BINARY_SUFFIX :=
+endif
+UNIT_TEST_BIN := $(UNIT_TEST_BUNDLE)/ArlenUnitTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 UNIT_TEST_TARGET_NAME := $(notdir $(basename $(UNIT_TEST_BUNDLE)))
 INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenIntegrationTests.xctest
-INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests
+INTEGRATION_TEST_BIN := $(INTEGRATION_TEST_BUNDLE)/ArlenIntegrationTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 INTEGRATION_TEST_TARGET_NAME := $(notdir $(basename $(INTEGRATION_TEST_BUNDLE)))
 BROWSER_ERROR_AUDIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenBrowserErrorAudit.xctest
-BROWSER_ERROR_AUDIT_TEST_BIN := $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/ArlenBrowserErrorAudit
+BROWSER_ERROR_AUDIT_TEST_BIN := $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/ArlenBrowserErrorAudit$(XCTEST_BUNDLE_BINARY_SUFFIX)
 # Bundles whose discovered tests are tracked in tests/fixtures/test_inventory/.
 # The focused phase bundles recompile tests/unit sources that these already cover.
 TEST_INVENTORY_BUNDLES := $(UNIT_TEST_BUNDLE) $(INTEGRATION_TEST_BUNDLE)
 TEST_INVENTORY_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
 TEST_INVENTORY_DIR := $(ARLEN_TEST_RESULTS_DIR)/inventory
 PHASE20_SQL_BUILDER_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20SQLBuilderTests.xctest
-PHASE20_SQL_BUILDER_TEST_BIN := $(PHASE20_SQL_BUILDER_TEST_BUNDLE)/ArlenPhase20SQLBuilderTests
+PHASE20_SQL_BUILDER_TEST_BIN := $(PHASE20_SQL_BUILDER_TEST_BUNDLE)/ArlenPhase20SQLBuilderTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE20_SCHEMA_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20SchemaTests.xctest
-PHASE20_SCHEMA_TEST_BIN := $(PHASE20_SCHEMA_TEST_BUNDLE)/ArlenPhase20SchemaTests
+PHASE20_SCHEMA_TEST_BIN := $(PHASE20_SCHEMA_TEST_BUNDLE)/ArlenPhase20SchemaTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE20_POSTGRES_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20PostgresLiveTests.xctest
-PHASE20_POSTGRES_LIVE_TEST_BIN := $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)/ArlenPhase20PostgresLiveTests
+PHASE20_POSTGRES_LIVE_TEST_BIN := $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)/ArlenPhase20PostgresLiveTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE20_MSSQL_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20MSSQLLiveTests.xctest
-PHASE20_MSSQL_LIVE_TEST_BIN := $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)/ArlenPhase20MSSQLLiveTests
+PHASE20_MSSQL_LIVE_TEST_BIN := $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)/ArlenPhase20MSSQLLiveTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE20_ROUTING_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase20RoutingTests.xctest
-PHASE20_ROUTING_TEST_BIN := $(PHASE20_ROUTING_TEST_BUNDLE)/ArlenPhase20RoutingTests
+PHASE20_ROUTING_TEST_BIN := $(PHASE20_ROUTING_TEST_BUNDLE)/ArlenPhase20RoutingTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE21_TEMPLATE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase21TemplateTests.xctest
-PHASE21_TEMPLATE_TEST_BIN := $(PHASE21_TEMPLATE_TEST_BUNDLE)/ArlenPhase21TemplateTests
+PHASE21_TEMPLATE_TEST_BIN := $(PHASE21_TEMPLATE_TEST_BUNDLE)/ArlenPhase21TemplateTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE23_DATAVERSE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase23DataverseTests.xctest
-PHASE23_DATAVERSE_TEST_BIN := $(PHASE23_DATAVERSE_TEST_BUNDLE)/ArlenPhase23DataverseTests
+PHASE23_DATAVERSE_TEST_BIN := $(PHASE23_DATAVERSE_TEST_BUNDLE)/ArlenPhase23DataverseTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE25_LIVE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase25LiveTests.xctest
-PHASE25_LIVE_TEST_BIN := $(PHASE25_LIVE_TEST_BUNDLE)/ArlenPhase25LiveTests
+PHASE25_LIVE_TEST_BIN := $(PHASE25_LIVE_TEST_BUNDLE)/ArlenPhase25LiveTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE26_ORM_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase26ORMTests.xctest
-PHASE26_ORM_TEST_BIN := $(PHASE26_ORM_TEST_BUNDLE)/ArlenPhase26ORMTests
+PHASE26_ORM_TEST_BIN := $(PHASE26_ORM_TEST_BUNDLE)/ArlenPhase26ORMTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE26_ORM_UNIT_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase26ORMUnitTests.xctest
-PHASE26_ORM_UNIT_TEST_BIN := $(PHASE26_ORM_UNIT_TEST_BUNDLE)/ArlenPhase26ORMUnitTests
+PHASE26_ORM_UNIT_TEST_BIN := $(PHASE26_ORM_UNIT_TEST_BUNDLE)/ArlenPhase26ORMUnitTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE26_ORM_GENERATED_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase26ORMGeneratedTests.xctest
-PHASE26_ORM_GENERATED_TEST_BIN := $(PHASE26_ORM_GENERATED_TEST_BUNDLE)/ArlenPhase26ORMGeneratedTests
+PHASE26_ORM_GENERATED_TEST_BIN := $(PHASE26_ORM_GENERATED_TEST_BUNDLE)/ArlenPhase26ORMGeneratedTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE26_ORM_INTEGRATION_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase26ORMIntegrationTests.xctest
-PHASE26_ORM_INTEGRATION_TEST_BIN := $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)/ArlenPhase26ORMIntegrationTests
+PHASE26_ORM_INTEGRATION_TEST_BIN := $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)/ArlenPhase26ORMIntegrationTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase26ORMBackendParityTests.xctest
-PHASE26_ORM_BACKEND_PARITY_TEST_BIN := $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)/ArlenPhase26ORMBackendParityTests
+PHASE26_ORM_BACKEND_PARITY_TEST_BIN := $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)/ArlenPhase26ORMBackendParityTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE27_SEARCH_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase27SearchTests.xctest
-PHASE27_SEARCH_TEST_BIN := $(PHASE27_SEARCH_TEST_BUNDLE)/ArlenPhase27SearchTests
+PHASE27_SEARCH_TEST_BIN := $(PHASE27_SEARCH_TEST_BUNDLE)/ArlenPhase27SearchTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsDBSmokeTests.xctest
-PHASE24_WINDOWS_DB_SMOKE_TEST_BIN := $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)/ArlenPhase24WindowsDBSmokeTests
+PHASE24_WINDOWS_DB_SMOKE_TEST_BIN := $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)/ArlenPhase24WindowsDBSmokeTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE := $(BUILD_DIR)/tests/ArlenPhase24WindowsRuntimeParityTests.xctest
-PHASE24_WINDOWS_RUNTIME_TEST_BIN := $(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE)/ArlenPhase24WindowsRuntimeParityTests
+PHASE24_WINDOWS_RUNTIME_TEST_BIN := $(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE)/ArlenPhase24WindowsRuntimeParityTests$(XCTEST_BUNDLE_BINARY_SUFFIX)
 GNUSTEP_TEST_HOME := $(ROOT_DIR)/.gnustep-home
 
 UNIT_TEST_SRCS := $(shell find tests/unit -type f -name '*.m' | sort)
@@ -230,6 +244,9 @@ PIC_FLAG := -fPIC
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP) -DARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 FEATURE_FLAGS += -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1
+# Foundation.h includes <dispatch/dispatch.h>, whose os/generic_win_base.h
+# typedefs mode_t as int unless HAVE_MODE_T is set; MinGW already defines it.
+FEATURE_FLAGS += -DHAVE_MODE_T=1
 endif
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)
@@ -277,12 +294,11 @@ define repo_relative_path
 $(patsubst $(ROOT_DIR)/%,%,$(1))
 endef
 
+# modules/<id>/Resources/Templates/<rel> -> $(MODULE_GEN_DIR)/modules/<id>/<rel>.m.
+# Pure make functions: this runs several times per module template on every
+# make, and a $(shell) here cost ~20 s per make invocation on Windows/MSYS2.
 define module_generated_source_for
-$(shell path='$(1)'; \
-  module_id="$${path#modules/}"; \
-  module_id="$${module_id%%/*}"; \
-  relative_path="$${path#modules/$$module_id/Resources/Templates/}"; \
-  printf '%s/modules/%s/%s.m\n' "$(MODULE_GEN_DIR)" "$$module_id" "$$relative_path")
+$(MODULE_GEN_DIR)/modules/$(word 2,$(subst /, ,$(1)))/$(patsubst modules/$(word 2,$(subst /, ,$(1)))/Resources/Templates/%,%,$(1)).m
 endef
 
 define root_generated_source_for
@@ -324,9 +340,16 @@ define xctest_run
 mkdir -p "$(ARLEN_TEST_RESULTS_DIR)" && rm -rf "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1)).xml" "$(ARLEN_TEST_RESULTS_DIR)/$(call xctest_report_name,$(1))-attachments" && $(xctest_runtime_env) "$(ARLEN_XCTEST)" $(1) $(call xctest_ci_args,$(1))
 endef
 
+# Windows resolves DLLs (the vendored XCTest-0.dll) through PATH.
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+define xctest_runtime_env
+$(if $(strip $(ARLEN_XCTEST_LD_LIBRARY_PATH)),PATH="$(ARLEN_XCTEST_LD_LIBRARY_PATH):$$PATH" )
+endef
+else
 define xctest_runtime_env
 LD_PRELOAD="$(XCTEST_LD_PRELOAD)" $(if $(strip $(ARLEN_XCTEST_LD_LIBRARY_PATH)),LD_LIBRARY_PATH="$(ARLEN_XCTEST_LD_LIBRARY_PATH)$${LD_LIBRARY_PATH:+:$$LD_LIBRARY_PATH}" )ASAN_OPTIONS="$(ASAN_OPTIONS)" UBSAN_OPTIONS="$(UBSAN_OPTIONS)"
 endef
+endif
 
 define root_generated_source_rel_for
 $(call repo_relative_path,$(call root_generated_source_for,$(1)))
@@ -374,7 +397,6 @@ PHASE23_LIVE_SMOKE_ENTRY_OBJS := $(call objs_from,tools/phase23_dataverse_live_s
 PHASE26_ORM_PERF_ENTRY_OBJS := $(call objs_from,tools/phase26_orm_perf_smoke.m)
 ARLEN_ORM_REFERENCE_ENTRY_OBJS := $(call objs_from,examples/arlen_orm_reference/src/arlen_orm_reference.m)
 PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS := $(call objs_from,tools/phase27_search_characterize.m tests/shared/Phase27SearchTestSupport.m)
-XCTEST_BUNDLE_RUNNER_ENTRY_OBJS := $(call objs_from,$(XCTEST_BUNDLE_RUNNER_SRCS))
 UNIT_TEST_OBJS := $(call objs_from,$(UNIT_TEST_SRCS))
 INTEGRATION_TEST_OBJS := $(call objs_from,$(INTEGRATION_TEST_SRCS))
 BROWSER_ERROR_AUDIT_TEST_OBJS := $(call objs_from,$(BROWSER_ERROR_AUDIT_SRCS))
@@ -400,7 +422,7 @@ PHASE24_WINDOWS_RUNTIME_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_RUNTIME_
 
 MCP_EXAMPLE_OBJS := $(call objs_from,examples/mcp_app/main.m)
 
-ALL_OBJECTS := $(sort $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
+ALL_OBJECTS := $(sort $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
 .PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence windows-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter test-inventory-list test-inventory update-test-inventory browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
@@ -492,19 +514,19 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 define root_generated_object_rule
 $(call root_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call root_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call root_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call root_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define tech_demo_generated_object_rule
 $(call tech_demo_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call tech_demo_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define module_generated_object_rule
 $(call module_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call module_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call module_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call module_generated_source_rel_for,$(1)) -o $$@
 endef
 
 $(foreach root_template,$(TEMPLATE_FILES),$(eval $(call root_generated_object_rule,$(root_template))))
@@ -513,11 +535,11 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 
 $(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+>@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+>@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
 >@rm -f $@
@@ -654,10 +676,6 @@ $(SMOKE_RENDER_TOOL): $(SMOKE_RENDER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_G
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
-$(XCTEST_BUNDLE_RUNNER_TOOL): $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) | $(BUILD_DIR)
->@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(XCTEST_BUNDLE_RUNNER_ENTRY_OBJS) -o $(XCTEST_BUNDLE_RUNNER_TOOL) $(XCTEST_LINK_LIBS)
-
 $(UNIT_TEST_BIN): $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(UNIT_TEST_BUNDLE)/Resources
 >@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
@@ -760,7 +778,7 @@ vendored-xctest: $(VENDORED_XCTEST)
 # refreshes their mtimes), so a stale runner from an older pin is never reused.
 VENDORED_XCTEST_SOURCES := $(wildcard $(VENDORED_TOOLS_XCTEST_DIR)/GNUmakefile $(VENDORED_TOOLS_XCTEST_DIR)/main.m $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/*.[hm] $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/GNUmakefile*)
 $(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)
->source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR)
+>source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) $(VENDORED_XCTEST_MAKE_ARGS)
 
 test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
@@ -899,13 +917,13 @@ phase27-focused: phase27-search-tests
 phase27-confidence:
 >bash ./tools/ci/run_phase27_confidence.sh
 
-phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)
+phase24-windows-db-smoke: $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(XCTEST_BUNDLE_RUNNER_TOOL) $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE))
 
-phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_BUNDLE_RUNNER_TOOL)
+phase24-windows-runtime-tests: $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
 >mkdir -p $(GNUSTEP_TEST_HOME)/GNUstep/Defaults/.lck
->source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(XCTEST_BUNDLE_RUNNER_TOOL) $(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE)
+>source $(GNUSTEP_SH) && export HOME="$(GNUSTEP_TEST_HOME)" GNUSTEP_USER_DIR="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_ROOT="$(GNUSTEP_TEST_HOME)/GNUstep" GNUSTEP_USER_DEFAULTS_DIR="$(GNUSTEP_TEST_HOME)/GNUstep/Defaults" && $(call xctest_run,$(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE))
 
 phase24-windows-confidence: phase24-windows-db-smoke phase24-windows-runtime-tests
 
@@ -1163,7 +1181,7 @@ ci-durable-jobs:
 >bash tools/ci/run_durable_jobs.sh
 
 # Test bundles link the vendored libXCTest, so build it first.
-XCTEST_LINKED_TEST_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN) $(BROWSER_ERROR_AUDIT_TEST_BIN) $(PHASE20_SQL_BUILDER_TEST_BIN) $(PHASE20_SCHEMA_TEST_BIN) $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(PHASE20_MSSQL_LIVE_TEST_BIN) $(PHASE20_ROUTING_TEST_BIN) $(PHASE21_TEMPLATE_TEST_BIN) $(PHASE23_DATAVERSE_TEST_BIN) $(PHASE25_LIVE_TEST_BIN) $(PHASE26_ORM_TEST_BIN) $(PHASE26_ORM_UNIT_TEST_BIN) $(PHASE26_ORM_GENERATED_TEST_BIN) $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(PHASE27_SEARCH_TEST_BIN) $(DURABLE_JOBS_BIN)
+XCTEST_LINKED_TEST_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN) $(BROWSER_ERROR_AUDIT_TEST_BIN) $(PHASE20_SQL_BUILDER_TEST_BIN) $(PHASE20_SCHEMA_TEST_BIN) $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(PHASE20_MSSQL_LIVE_TEST_BIN) $(PHASE20_ROUTING_TEST_BIN) $(PHASE21_TEMPLATE_TEST_BIN) $(PHASE23_DATAVERSE_TEST_BIN) $(PHASE25_LIVE_TEST_BIN) $(PHASE26_ORM_TEST_BIN) $(PHASE26_ORM_UNIT_TEST_BIN) $(PHASE26_ORM_GENERATED_TEST_BIN) $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(PHASE27_SEARCH_TEST_BIN) $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(DURABLE_JOBS_BIN)
 $(XCTEST_LINKED_TEST_BINS): | $(XCTEST_RUNNER_PREREQ)
 
 -include $(DURABLE_JOBS_OBJ:.o=.d) $(DURABLE_JOB_PROBE_OBJ:.o=.d)
