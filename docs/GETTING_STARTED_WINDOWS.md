@@ -11,7 +11,8 @@ supported yet; it is planned for 0.4.0. Deploy to Linux or macOS.
 ## 1. Install the Toolchain
 
 You need 64-bit Windows and Windows PowerShell 5.1, which ships with Windows.
-Arlen is verified on Windows Server 2022.
+Arlen is verified on Windows Server 2022 Standard (build 20348). Windows 10
+and 11 use the same MSYS2 `CLANG64` stack and should work, but are untested.
 
 Install the gnustep-cli managed toolchain for your user. It is a full MSYS2
 tree with clang, GNUstep and libdispatch, and it installs to
@@ -38,8 +39,15 @@ the toolchain:
 > breaks the GNUstep headers. Use plain `pacman -S` as shown, and install
 > nothing else into the managed root unless these docs say to.
 
-For PostgreSQL apps, also install `mingw-w64-clang-x86_64-postgresql` (libpq)
-the same way, with plain `pacman -S`.
+Optional, for PostgreSQL apps only: install libpq the same way, with plain
+`pacman -S` and never `-Sy`/`-Syu`:
+
+```powershell
+& "$env:LOCALAPPDATA\gnustep-cli\usr\bin\bash.exe" -lc 'pacman -S --noconfirm --needed mingw-w64-clang-x86_64-postgresql'
+```
+
+Arlen loads `libpq-5.dll` from the toolchain at runtime. Without it, apps
+build but fail when they first connect to PostgreSQL.
 
 ## 2. Install Arlen
 
@@ -98,7 +106,8 @@ arlen boomhauer --port 3000
 ```
 
 Open <http://localhost:3000/>. `boomhauer` rebuilds and restarts the app when
-you change its sources, and shows build errors in the browser.
+you change its sources, and shows build errors in the browser. The app binary
+is `.boomhauer\build\boomhauer-app.exe`.
 
 ## 4. Work From a Source Checkout
 
@@ -115,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
 the GNUstep environment loaded. Inside it:
 
 ```sh
-make all          # about 95 seconds on a clean tree
+make all          # about 1.5 minutes on an 8-vCPU VM
 ./bin/arlen doctor
 ```
 
