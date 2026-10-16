@@ -154,7 +154,14 @@ workers = [threading.Thread(target=upload) for _ in range(8)]
 [w.join() for w in workers]
 done.set()
 sampler.join()
-assert all(s == 200 for s, _ in results), [s for s, _ in results]
+if not all(s == 200 for s, _ in results):
+    # Name the server's reason and the spool filesystem's free space: a spool
+    # write failure answers 500 with the errno in the body (issue 196).
+    fs = os.statvfs(SPOOL)
+    raise AssertionError([s for s, _ in results],
+                         sorted(set(r[:300] for s, r in results if s != 200)),
+                         'spool free MiB %.1f of %.1f' % (fs.f_bavail * fs.f_frsize / MIB,
+                                                          fs.f_blocks * fs.f_frsize / MIB))
 growth_mib = (peak[0] - baseline) / 1024.0
 print('rss_anon growth MiB %.1f' % growth_mib)
 # Spool threshold (1 MiB) x 8 plus buffers and fixed overhead; buffering would be >= 160 MiB.
