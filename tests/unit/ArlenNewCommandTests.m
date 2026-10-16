@@ -87,4 +87,29 @@
   [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
 }
 
+// GNU make splits targets at whitespace, so boomhauer could not build an app
+// under a path with a space ("No rule to make target .../My"); it now builds
+// through a space-free alias.
+- (void)testBoomhauerBuildsAnAppWhosePathContainsASpace {
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-new-space");
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  NSString *output = nil;
+  XCTAssertEqual(0, [self runNewWithTarget:@"My App" inDirectory:root output:&output], @"%@", output);
+  NSString *appRoot = [root stringByAppendingPathComponent:@"My App"];
+  int exitCode = -1;
+  NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+                                                  "ARLEN_FRAMEWORK_ROOT=%@ %@ --prepare-only 2>&1",
+                                                 ALNTestShellQuote(appRoot),
+                                                 ALNTestShellQuote(ALNTestRepoRoot()),
+                                                 ALNTestShellQuote(ALNTestPathFromRepoRoot(@"bin/boomhauer"))];
+  output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"app path contains whitespace; building through"], @"%@", output);
+  XCTAssertFalse([output containsString:@"No rule to make target"], @"%@", output);
+  [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+}
+
 @end
