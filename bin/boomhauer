@@ -126,6 +126,17 @@ windows_preview=0
 if detect_windows_preview; then
   windows_preview=1
 fi
+# Match the framework build's flags (GNUmakefile): on Windows CLANG64 llhttp is
+# off by default, GNUstep is linked statically, and libdispatch's header needs
+# HAVE_MODE_T next to MinGW's mode_t.
+default_enable_llhttp=1
+platform_objc_flags=""
+platform_link_libs="-ldl"
+if [[ $windows_preview -eq 1 ]]; then
+  default_enable_llhttp=0
+  platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -DARLEN_WINDOWS_PREVIEW=1"
+  platform_link_libs="-lws2_32 -lbcrypt"
+fi
 
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
@@ -593,7 +604,7 @@ runtime_fingerprint() {
     printf 'app_root|%s\n' "$app_root"
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
-    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
+    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
     append_fingerprint_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
     append_fingerprint_entries "$framework_root" "framework" src modules GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
@@ -829,7 +840,7 @@ ENTRY
 
 emit_app_makefile() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local gnustep_objc_flags
   local gnustep_base_libs
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
@@ -906,8 +917,8 @@ emit_app_makefile() {
     printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
     printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
     printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
-    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\n' "$gnustep_base_libs"
-    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
+    printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch -lcurl %s\n' "$gnustep_base_libs" "$platform_link_libs"
+    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1 %s\n' "$enable_yyjson" "$enable_llhttp" "$platform_objc_flags"
     printf 'INCLUDE_FLAGS :='
     for source_path in "${include_args[@]}"; do
       printf ' %s' "$source_path"
@@ -1061,7 +1072,7 @@ run_app_make_target() {
 
 compile_app() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local tmp_output
   tmp_output="$(mktemp)"
 
