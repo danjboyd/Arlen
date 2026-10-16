@@ -1653,17 +1653,18 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   NSString *directory = self.multipartSpoolDirectory;
   if (directory != nil) {
     self.multipartSpoolDirectory = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+    ALNPlatformRemoveItemWhenUnmapped(directory);
   }
 }
 
 - (void)removeTemporaryFiles {
   [self removeMultipartSpool];
-  // The mapping in `body` stays valid after the unlink on POSIX systems.
+  // `body` may still map the file: POSIX unlink keeps the mapping valid, and on
+  // Windows the removal finishes when the mapping is released.
   NSString *bodyPath = self.bodySpoolPath;
   if (bodyPath != nil) {
     self.bodySpoolPath = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:bodyPath error:NULL];
+    ALNPlatformRemoveItemWhenUnmapped(bodyPath);
   }
 }
 
