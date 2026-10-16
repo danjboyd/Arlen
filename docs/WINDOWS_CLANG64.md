@@ -168,5 +168,6 @@ Not planned:
   64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
 - **Production: not supported until 0.4.0.** Deploy production apps to Linux,
   the authoritative production baseline, or to macOS.
-- The Windows verification entry points are `make phase24-windows-confidence`
-  and `make windows-confidence`, run by the `windows-preview` CI lane.
+- The `windows-preview` CI lane runs `make phase24-windows-confidence` and
+  `make test-unit`. `make windows-confidence` (packaged release and deploy
+  parity) is a manual lane until Windows production support lands in 0.4.0.
