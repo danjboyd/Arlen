@@ -70,4 +70,21 @@
   [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
 }
 
+// A blank or "." name resolves to the current directory; refuse it rather than
+// scaffold (or, with --force, overwrite) the cwd.
+- (void)testBlankOrDotTargetIsRejectedAndLeavesTheDirectoryAlone {
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-new-blank");
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  for (NSString *target in @[ @"  ", @"." ]) {
+    NSString *output = nil;
+    XCTAssertEqual(2, [self runNewWithTarget:target inDirectory:root output:&output], @"'%@': %@", target, output);
+    XCTAssertTrue([output containsString:@"must name a new directory"], @"'%@': %@", target, output);
+  }
+  XCTAssertEqualObjects(@[], [[NSFileManager defaultManager] contentsOfDirectoryAtPath:root error:NULL]);
+  [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+}
+
 @end

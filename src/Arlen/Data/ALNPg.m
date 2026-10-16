@@ -185,12 +185,9 @@ static void *ALNOpenLibpqCandidate(const char *candidate) {
   if (candidate == NULL || candidate[0] == '\0') {
     return NULL;
   }
-  // For an absolute path, resolve the DLL's own dependencies from its
-  // directory (a bundled build/dll next to its OpenSSL), not only from the
-  // executable's directory and PATH.
-  BOOL absolute = (candidate[1] == ':') || candidate[0] == '\\' || candidate[0] == '/';
-  return (void *)(absolute ? LoadLibraryExA(candidate, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)
-                           : LoadLibraryA(candidate));
+  // An absolute path (the release's build/dll) also resolves its imports
+  // from its own directory; wide-character, so non-ASCII paths load.
+  return ALNPlatformLoadWindowsLibrary([NSString stringWithUTF8String:candidate] ?: @"");
 }
 
 static void *ALNLookupLibpqSymbol(void *handle, const char *symbolName) {

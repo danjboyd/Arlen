@@ -13,10 +13,12 @@ FOUNDATION_EXPORT BOOL ALNPlatformUsesGNUstepFoundation(void);
 FOUNDATION_EXPORT BOOL ALNNumberIsBoolean(id _Nullable value);
 // MSYS2 roots that may hold the CLANG64 toolchain on Windows, in search order:
 // ARLEN_MSYS_ROOT, the gnustep-cli managed toolchain (user, then system
-// install), then a stock MSYS2 at C:/msys64. Empty on other platforms.
+// install), then the root GNUSTEP_MAKEFILES points into (a stock C:/msys64 only
+// when it is the toolchain in use). Empty on other platforms.
 FOUNDATION_EXPORT NSArray<NSString *> *ALNPlatformWindowsMSYSRoots(void);
 // bash for `bash -lc` helpers: /bin/bash on POSIX. On Windows: ARLEN_BASH_PATH,
-// then usr/bin/bash.exe under the first MSYS2 root that has one, then bash.exe.
+// then usr/bin/bash.exe under the first MSYS2 root that has one, else the
+// managed root's path (which fails to launch: set ARLEN_BASH_PATH).
 FOUNDATION_EXPORT NSString *ALNPlatformBashPath(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void);
@@ -26,6 +28,12 @@ NSString *ALNPlatformISO8601Now(void);
 NSInteger ALNPlatformProcessIdentifier(void);
 void ALNPlatformSleepMilliseconds(NSUInteger milliseconds);
 BOOL ALNPlatformPathIsAbsolute(NSString *path);
+#if defined(_WIN32)
+// LoadLibraryW for a relative name; for an absolute path, LoadLibraryExW with
+// backslashes and LOAD_WITH_ALTERED_SEARCH_PATH so the DLL's own imports
+// resolve from its directory. Wide-character, so non-ASCII paths load.
+void *_Nullable ALNPlatformLoadWindowsLibrary(NSString *path);
+#endif
 BOOL ALNPlatformFillRandomBytes(void *buffer, size_t count);
 BOOL ALNPlatformGMTimeUTC(const time_t *seconds, struct tm *utc);
 // fopen() for an NSString path. -fileSystemRepresentation is UTF-16 on
