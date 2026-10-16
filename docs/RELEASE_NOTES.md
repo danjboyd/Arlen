@@ -7,7 +7,7 @@
   credentials, `Origin` or proxy-forwarding headers, and is refused outside
   development/test, on a non-loopback host, or with `mcp.oauth`. The MCP docs
   now explain that app identity middleware must be registered from a plugin
-  to run before the module (#185).
+  to run before the module (#185). `mcp` moves to `1.0.4`.
 
 ## 0.2.1 — 2026-10-15
 
