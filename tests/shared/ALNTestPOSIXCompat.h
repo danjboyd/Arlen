@@ -22,4 +22,16 @@ static inline int ALNTestCompatUnsetenv(const char *name) {
 #define unsetenv(name) ALNTestCompatUnsetenv((name))
 #endif
 
+// Signal numbers the tests pass to ALNTestKill. MinGW defines SIGTERM but
+// not these; Windows has no signals (ALNTestKill maps TERM/KILL to taskkill).
+#include <signal.h>
+#if defined(_WIN32)
+#ifndef SIGHUP
+#define SIGHUP 1
+#endif
+#ifndef SIGKILL
+#define SIGKILL 9
+#endif
+#endif
+
 #endif

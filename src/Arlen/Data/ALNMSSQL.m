@@ -468,7 +468,11 @@ static void *ALNOpenODBCCandidate(const char *candidate) {
   if (candidate == NULL || candidate[0] == '\0') {
     return NULL;
   }
-  return (void *)LoadLibraryA(candidate);
+  // As for libpq: an absolute path resolves its dependencies from its own
+  // directory.
+  BOOL absolute = (candidate[1] == ':') || candidate[0] == '\\' || candidate[0] == '/';
+  return (void *)(absolute ? LoadLibraryExA(candidate, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)
+                           : LoadLibraryA(candidate));
 }
 
 static void *ALNLookupODBCSymbol(void *handle, const char *symbolName) {

@@ -174,6 +174,13 @@ NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   [candidates addObject:@"libpq.5.dylib"];
   [candidates addObject:@"libpq.dylib"];
 #elif defined(_WIN32)
+  // The Windows release bundles libpq and its DLL closure under
+  // <framework>/build/dll, so nothing is installed into the toolchain root.
+  NSString *frameworkRoot = [[NSProcessInfo processInfo] environment][@"ARLEN_FRAMEWORK_ROOT"];
+  if ([frameworkRoot length] > 0) {
+    [candidates addObject:[frameworkRoot stringByAppendingPathComponent:@"build/dll/libpq-5.dll"]];
+    [candidates addObject:[frameworkRoot stringByAppendingPathComponent:@"build/dll/libpq.dll"]];
+  }
   ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libpq-5.dll", @"libpq.dll" ]);
   [candidates addObject:@"libpq-5.dll"];
   [candidates addObject:@"libpq.dll"];

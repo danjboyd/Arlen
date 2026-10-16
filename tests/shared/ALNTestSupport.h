@@ -79,6 +79,10 @@ FOUNDATION_EXPORT NSString *ALNTestToolPath(NSString *tool);
 // libdl but Winsock and BCrypt. Empty / -ldl elsewhere.
 FOUNDATION_EXPORT NSString *ALNTestPlatformObjCFlags(void);
 FOUNDATION_EXPORT NSString *ALNTestPlatformLinkLibraries(void);
+// kill() for tests. On Windows SIGTERM and SIGKILL end the process tree
+// (taskkill /T /F: Windows has no signals, and ending a process leaves its
+// children running); other signals fail with ENOSYS.
+FOUNDATION_EXPORT int ALNTestKill(int pid, int signal);
 // YES while a process with this pid exists (kill(pid, 0) on POSIX).
 FOUNDATION_EXPORT BOOL ALNTestProcessExists(int pid);
 

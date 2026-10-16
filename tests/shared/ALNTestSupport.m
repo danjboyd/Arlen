@@ -584,3 +584,36 @@ NSString *ALNTestPlatformLinkLibraries(void) {
   return @"-ldl";
 #endif
 }
+
+int ALNTestKill(int pid, int signal) {
+#if defined(_WIN32)
+  if (signal != SIGTERM && signal != SIGKILL) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (pid <= 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  NSTask *killer = [[NSTask alloc] init];
+  killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+  killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", pid] ];
+  killer.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  killer.standardError = [NSFileHandle fileHandleWithNullDevice];
+  @try {
+    [killer launch];
+    [killer waitUntilExit];
+  } @catch (NSException *exception) {
+    (void)exception;
+    errno = ESRCH;
+    return -1;
+  }
+  if (killer.terminationStatus != 0) {
+    errno = ESRCH;
+    return -1;
+  }
+  return 0;
+#else
+  return kill(pid, signal);
+#endif
+}
