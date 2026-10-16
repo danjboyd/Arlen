@@ -154,8 +154,6 @@ More detail on the `CLANG64` lanes and the packaged-release contract is in
   supported on Windows until 0.4.0.
 - **Repository-root `boomhauer`:** running `boomhauer` from the framework
   checkout root is not supported on Windows yet. Run it from an app root.
-- **Spaces in app paths:** `boomhauer` cannot build an app whose path
-  contains a space yet. Keep app directories free of spaces.
 - **Paths:** Windows long paths are off by default. Keep install roots and
   app directories short; `%LOCALAPPDATA%\Arlen` is fine.
 - **Symlinks:** a standard user cannot create symlinks on Windows. Arlen uses
