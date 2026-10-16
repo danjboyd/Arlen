@@ -51,7 +51,12 @@ with their parent.
 `windows-preview` runs on the self-hosted runner `arlen-windows-agent`
 (labels `self-hosted`, `Windows`, `X64`, `arlen`, `msys2-clang64`). That
 runner is a persistent VM, so the job is skipped for pull requests from forks.
-It stays non-required.
+It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`)
+and the unit suite (`make test-unit`). `make windows-confidence` (packaged
+release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
+development-only Windows scope; it returns with Windows production in 0.4.0
+(#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
+paths that the native `arlen.exe` cannot open.
 
 ## Goal
 
@@ -136,7 +141,8 @@ visible but non-required:
  - promotion rule: only promote if the platform support statement becomes
  authoritative and the lane stays stably green
 - `windows-preview`
- - purpose: validate Windows preview runtime and packaged release parity
+ - purpose: validate Windows runtime parity and the unit suite (packaged
+ release parity returns with Windows production in 0.4.0)
  - status: preview confidence, not a required merge gate
  - promotion rule: only promote if Windows leaves preview and the lane is
  operationally stable enough to protect real shipped behavior
