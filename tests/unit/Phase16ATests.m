@@ -119,7 +119,9 @@
 @implementation Phase16ATests
 
 - (NSString *)temporaryDirectory {
-  return ALNTestTemporaryDirectory(@"arlen-phase16a");
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16a");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {

@@ -561,7 +561,8 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
     ALNEOCClearTemplateRegistry();
   }
   dispatch_semaphore_signal(state.release);
-  (void)dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
+  XCTAssertEqual(0L, dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC)),
+                 @"monitor thread did not finish");
   XCTAssertEqual(ready, 0);
   XCTAssertEqual(state.waitResult, 0, @"Registry operations waited for the shared NSThread class monitor");
 #if !OS_OBJECT_USE_OBJC

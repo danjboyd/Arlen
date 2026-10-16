@@ -85,7 +85,9 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
 @implementation Phase16CTests
 
 - (NSString *)temporaryDirectory {
-  return ALNTestTemporaryDirectory(@"arlen-phase16c");
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16c");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath

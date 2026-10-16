@@ -51,7 +51,7 @@ port="${ARLEN_PHASE31_SMOKE_PORT:-3911}"
   --release-b phase31-b \
   --json >"$smoke_json"
 
-current_release="$(python3 - "$smoke_json" <<'PY' | tr -d $''
+current_release="$(python3 - "$smoke_json" <<'PY' | tr -d $'\r'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -59,7 +59,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 print(payload["current_release"])
 PY
 )"
-releases_dir="$(python3 - "$smoke_json" <<'PY' | tr -d $''
+releases_dir="$(python3 - "$smoke_json" <<'PY' | tr -d $'\r'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:

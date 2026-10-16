@@ -117,7 +117,9 @@ static void Phase16DResetOrderStore(void) {
 }
 
 - (NSString *)temporaryDirectory {
-  return ALNTestTemporaryDirectory(@"arlen-phase16d");
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16d");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {

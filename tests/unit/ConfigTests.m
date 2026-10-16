@@ -7,7 +7,6 @@
 #import "ALNConfig.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
-#import "../shared/ALNTestSupport.h"
 
 @interface ConfigTests : XCTestCase
 @end

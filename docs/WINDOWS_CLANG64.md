@@ -211,6 +211,7 @@ Current Windows support statement:
 - Windows on MSYS2 `CLANG64` is a supported preview workflow for framework
   development, runtime parity checks, and packaged release/deploy validation
 - the authoritative preview verification entrypoints are
-  `make phase24-windows-confidence` and `make windows-confidence`
+  `make phase24-windows-confidence` and `make test-unit` (CI);
+  `make windows-confidence` is a manual lane until Windows production in 0.4.0
 - Arlen does not yet claim broad production support for Windows deployments;
   Linux remains the authoritative production baseline

@@ -79,8 +79,8 @@ Workflow contract:
 
 - `.github/workflows/windows-preview.yml` must keep `submodules: recursive`
 - the job must run on `[self-hosted, Windows, X64, arlen, msys2-clang64]`
-- failure artifacts must include `build/phase24`, `build/release_confidence/phase31`,
-  and `build/tests`
+- failure artifacts must include `build/phase24`, `build/tests` and
+  `test-results` (JUnit)
 - the workflow remains non-required until the Windows support statement is
   deliberately promoted
 

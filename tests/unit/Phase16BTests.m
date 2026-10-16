@@ -150,7 +150,9 @@
 }
 
 - (NSString *)temporaryDirectory {
-  return ALNTestTemporaryDirectory(@"arlen-phase16b");
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16b");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {

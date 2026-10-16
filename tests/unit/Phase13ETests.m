@@ -883,7 +883,6 @@ static ALNContext *ALNTestStandInContext(void) {
   NSString *configPath = [tempApp stringByAppendingPathComponent:@"config/app.plist"];
   // Not +dataWithContentsOfFile:options:error:, which Windows gnustep-base 1.31 lacks.
   NSData *configData = [NSData dataWithContentsOfFile:configPath];
-  XCTAssertNil(error);
   XCTAssertNotNil(configData);
   NSPropertyListFormat format = NSPropertyListOpenStepFormat;
   NSDictionary *config = [NSPropertyListSerialization propertyListWithData:configData
