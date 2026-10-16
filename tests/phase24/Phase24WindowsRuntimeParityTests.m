@@ -327,7 +327,10 @@
                                                 success:&errorServerReady];
     XCTAssertTrue(errorServerReady, @"server log:\n%@",
                   [self readTextFile:serverLogPath]);
-    XCTAssertEqualObjects(@"degraded\n", healthBody);
+    // /healthz is a reserved built-in that app routes cannot shadow
+    // (docs/CLI_REFERENCE.md), so the diagnostic server answers "ok"; the
+    // build failure is reported by / and /api/dev/build-error below.
+    XCTAssertEqualObjects(@"ok\n", healthBody);
 
     BOOL errorPageSeen = NO;
     for (NSInteger attempt = 0; attempt < 30; attempt++) {

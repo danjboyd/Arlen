@@ -12,6 +12,13 @@
   longer truncates. Windows test lanes now run through the vendored
   tools-xctest runner (#116), and make no longer relinks every tool and
   rebuilds the framework on each run on Windows.
+- On Windows, `boomhauer` started from a native process (the test runner, an
+  app) no longer rebuilds the whole framework, header edits now rebuild the
+  objects that include them, and `propane` no longer rejects its own config
+  ("cluster enabled must be a boolean"). The repository now checks out LF
+  line endings on every platform (`.gitattributes`). `phase24-windows-runtime-tests`
+  passes, and the `windows-preview` workflow has a self-hosted runner (fork
+  pull requests are not run on it).
 - `arlen new /absolute/path` creates the app at that path. It used to be
   nested under the current directory on every platform.
 - `make` parses faster: module template paths no longer spawn a shell per

@@ -34,16 +34,24 @@ for Windows:
 - test bundle binaries are named `<bundle>.dll`, because MinGW appends `.exe`
   to an extensionless `-o` path and GNUstep's `NSBundle` loads `<name>.dll`.
 
-Verified on 2026-10-16 on an otvm `windows-2022` lease with the gnustep-cli
-`v0.1.0` managed toolchain: `phase24-windows-db-smoke` passes (2/2) through
-the vendored runner. `phase24-windows-runtime-tests` still fails:
-`testBoomhauerWatchRecoversFromBuildFailure` exceeds the 300 s time allowance
-because boomhauer rebuilds the framework inside the test on that 2-vCPU VM
-(cause not yet found). `tools/arlen_xctest_runner.m` stays in the tree until
-the runtime lane is green; then delete it with `XCTEST_BUNDLE_RUNNER_*`.
+Verified on 2026-10-16 on the `arlen-windows-agent` VM (Windows Server 2022,
+gnustep-cli `v0.1.0` managed toolchain): `phase24-windows-db-smoke` passes
+(2/2) and `phase24-windows-runtime-tests` passes (3/3, about 160 s) through
+the vendored runner. The old `arlen-xctest-runner` bundle loader is gone.
 
-`windows-preview` still has no registered self-hosted runner, so its jobs
-queue and are cancelled; registering one is an infrastructure decision.
+The runtime lane used to exceed its 300 s allowance because boomhauer rebuilt
+the whole framework inside the test: a shell started by `xctest.exe` saw
+`GNUSTEP_MAKEFILES` as `C:/...`, so `GNUSTEP_SH`, and the build-flags sentinel
+hash, had a second spelling. `tools/resolve_gnustep.sh` now prints the
+`cygpath -u` form. `tools/ci/run_windows_preview.sh` also stops any process
+still running from `build/phase24-temp` on exit, because a test stopped by its
+time allowance never reaches its cleanup and Windows does not end children
+with their parent.
+
+`windows-preview` runs on the self-hosted runner `arlen-windows-agent`
+(labels `self-hosted`, `Windows`, `X64`, `arlen`, `msys2-clang64`). That
+runner is a persistent VM, so the job is skipped for pull requests from forks.
+It stays non-required.
 
 ## Goal
 
@@ -140,6 +148,9 @@ diagnosis even while non-blocking.
 
 The current runner contract standardizes the intended platform-runner path:
 
+- Windows preview currently runs on the persistent `arlen-windows-agent` VM
+ (see "Windows Test Runner"); the longer-term direction is still an
+ OracleTestVMs-provisioned LAN Windows VM:
 - Windows preview should run on an OracleTestVMs-provisioned LAN Windows VM
  with the MSYS2 `CLANG64` GNUstep toolchain installed through
  the pinned `vendor/gnustep-cli-new` revision, then registered as a GitHub

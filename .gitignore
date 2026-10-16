@@ -1,6 +1,8 @@
 # GNUstep and general build output
 build/
 test-results/
+# HOME/GNUSTEP_USER_DIR for the make test targets (GNUSTEP_TEST_HOME)
+.gnustep-home/
 dist/
 obj/
 /obj*/

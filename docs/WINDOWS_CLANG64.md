@@ -137,13 +137,22 @@ Those lanes are intended to verify:
 - `jobs-worker` queued-job execution
 - `propane` request serving and reload handling
 
-The preview lanes use `arlen-xctest-runner` so a Windows host can load and run
-the XCTest bundle without depending on the stock bundle discovery path. They
-don't use the vendored `tools-xctest` fork that Linux and macOS lanes use yet,
-so Windows runs have no test filters, per-test time limits, JUnit reports or
-skips. GitHub issue #116 tracks the switch. The known blockers and the
-migration steps are listed in "Windows Test Runner" in
-[CI Alignment](CI_ALIGNMENT.md).
+The preview lanes run through the vendored `tools-xctest` fork, the same
+runner the Linux and macOS lanes use (GitHub issue #116), so Windows runs get
+test filters, per-test time limits, JUnit reports and skips. The Windows make
+wiring is described in "Windows Test Runner" in [CI Alignment](CI_ALIGNMENT.md).
+
+Windows checkout and shell notes:
+
+- the repository's `.gitattributes` checks every file out with LF, whatever
+  `core.autocrlf` says (Git for Windows defaults it to `true`); clone after
+  that file exists, or re-checkout with `git rm --cached -r . && git reset
+  --hard` if an older clone has CRLF scripts
+- the `CLANG64` `python3` is a native Windows program and prints CRLF; shell
+  code that captures its output must strip `\r`
+- a shell started by a native process (xctest, an app) sees MSYS2 path
+  variables in `C:/...` form; `tools/resolve_gnustep.sh` prints one spelling so
+  the framework's build-flags sentinel stays stable across both
 
 ## 4. Packaged Release Contract
 
