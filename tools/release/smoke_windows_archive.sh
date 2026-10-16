@@ -36,11 +36,26 @@ fi
 
 export ARLEN_FRAMEWORK_ROOT="$root"
 arlen="$root/bin/arlen"
-"$arlen" --help >/dev/null
 
 cd "$work"
 "$arlen" new SmokeApp
 cd SmokeApp
+
+# The bundled build/dll/libpq.dll and its imports must load. With no server
+# needed, a connection to port 1 has to fail inside libpq (connection
+# refused), not with "failed to load libpq".
+[[ -f "$root/build/dll/libpq.dll" ]] || { echo "smoke_windows_archive: build/dll/libpq.dll missing" >&2; exit 1; }
+pg_output="$("$arlen" migrate --dsn 'postgresql://smoke@127.0.0.1:1/smoke?connect_timeout=5' --dry-run 2>&1 || true)"
+if printf '%s' "$pg_output" | grep -qiE 'failed to load libpq|libpq shared library not found'; then
+  echo "smoke_windows_archive: the bundled libpq did not load:" >&2
+  printf '%s\n' "$pg_output" >&2
+  exit 1
+fi
+if ! printf '%s' "$pg_output" | grep -qiE 'connection refused|could not connect|connection to server'; then
+  echo "smoke_windows_archive: expected a libpq connection error from port 1, got:" >&2
+  printf '%s\n' "$pg_output" >&2
+  exit 1
+fi
 
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 "$arlen" boomhauer --port "$port" >"$work/boomhauer.log" 2>&1 </dev/null &
