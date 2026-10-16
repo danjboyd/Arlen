@@ -391,7 +391,9 @@
   XCTAssertTrue([makefile containsString:@"MODULE_TRANSPILE_STATE := $(MODULE_GEN_DIR)/.transpile.state"]);
   XCTAssertTrue([makefile containsString:@"ROOT_TEMPLATE_DIRS := $(shell if [ -d $(TEMPLATE_ROOT) ]; then find $(TEMPLATE_ROOT) -type d | sort; fi)"]);
   XCTAssertTrue([makefile containsString:@"framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)"]);
-  XCTAssertTrue([makefile containsString:@"-MMD -MP -MF $(@:.o=.d) -c $< -o $@"]);
+  // -MT joined to its value: MSYS2 leaves it unconverted, so on Windows the
+  // depfile names the object the way make does and header edits rebuild it.
+  XCTAssertTrue([makefile containsString:@"-MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@"]);
   XCTAssertTrue([makefile containsString:
                               @"$(EOC_TOOL) --template-root $(TEMPLATE_ROOT) --output-dir $(GEN_DIR) "
                                "--manifest $(ROOT_TEMPLATE_MANIFEST) $(TEMPLATE_FILES);"]);
@@ -428,6 +430,26 @@
   XCTAssertTrue([makefile containsString:@"$(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)"]);
 }
 
+// The build-flags sentinel hashes GNUSTEP_SH. On Windows a shell started by a
+// native process (xctest, an app) sees GNUSTEP_MAKEFILES as C:/..., so the
+// resolver must print one spelling or each side deletes the other's sentinel
+// and rebuilds the whole framework (boomhauer's [1/4] step under phase24).
+- (void)testGNUstepResolverPrintsOnePathSpellingOnWindows {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *resolver = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
+  XCTAssertTrue([resolver containsString:@"if [[ \"$path\" =~ ^[A-Za-z]:[\\\\/] ]] && command -v cygpath >/dev/null 2>&1; then"]);
+  XCTAssertTrue([resolver containsString:@"path=\"$(cygpath -u \"$path\")\""]);
+}
+
+// core.autocrlf=true (Git for Windows' default) must not put CRLF into
+// scripts, recipes or fixtures; only the HTTP wire fixtures keep CRLF.
+- (void)testGitAttributesCheckOutLFEverywhere {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *attributes = [self readFile:[repoRoot stringByAppendingPathComponent:@".gitattributes"]];
+  XCTAssertTrue([attributes containsString:@"\n* text=auto eol=lf\n"]);
+  XCTAssertTrue([attributes containsString:@"\n*.http -text\n"]);
+}
+
 - (void)testBoomhauerGeneratedAppMakefileEnforcesARCAndFrameworkReuse {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *scriptPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
@@ -446,7 +468,7 @@
                               "$(ALL_OBJECTS) $(FRAMEWORK_LIB) -o $(APP_BINARY) $(BASE_LINK_LIBS)\\n\\n'"]);
   XCTAssertTrue([script containsString:
                              @"printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) "
-                              "-MMD -MP -MF %s -c %s -o %s\\n\\n'"]);
+                              "-MMD -MP -MF %s -MT$@ -c %s -o %s\\n\\n'"]);
 }
 
 - (void)testDoctorAndCLIUseResolvedGNUstepContract {

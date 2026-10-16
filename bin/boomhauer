@@ -825,7 +825,7 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -c %s -o %s\n\n' \
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
       "$dep_path" "$source_path" "$object_path"
   done
   for source_path in "${test_sources[@]}" "$entry"; do
@@ -838,7 +838,7 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -I%s -MMD -MP -MF %s -c %s -o %s\n\n' \
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -I%s -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
       "$app_root/tests" "$dep_path" "$source_path" "$object_path"
   done
 }
@@ -948,7 +948,7 @@ emit_app_makefile() {
       dep_path="${object_path%.o}.d"
       printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
       printf '>mkdir -p $(@D)\n'
-      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -c %s -o %s\n\n' \
+      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
         "$dep_path" "$source_path" "$object_path"
     done
     emit_app_test_rules

@@ -517,19 +517,19 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 define root_generated_object_rule
 $(call root_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call root_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call root_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call root_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define tech_demo_generated_object_rule
 $(call tech_demo_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call tech_demo_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define module_generated_object_rule
 $(call module_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call module_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -c $(call module_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call module_generated_source_rel_for,$(1)) -o $$@
 endef
 
 $(foreach root_template,$(TEMPLATE_FILES),$(eval $(call root_generated_object_rule,$(root_template))))
@@ -538,11 +538,11 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 
 $(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+>@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+>@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
 >@rm -f $@
@@ -1188,7 +1188,7 @@ ci-durable-jobs:
 >bash tools/ci/run_durable_jobs.sh
 
 # Test bundles link the vendored libXCTest, so build it first.
-XCTEST_LINKED_TEST_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN) $(BROWSER_ERROR_AUDIT_TEST_BIN) $(PHASE20_SQL_BUILDER_TEST_BIN) $(PHASE20_SCHEMA_TEST_BIN) $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(PHASE20_MSSQL_LIVE_TEST_BIN) $(PHASE20_ROUTING_TEST_BIN) $(PHASE21_TEMPLATE_TEST_BIN) $(PHASE23_DATAVERSE_TEST_BIN) $(PHASE25_LIVE_TEST_BIN) $(PHASE26_ORM_TEST_BIN) $(PHASE26_ORM_UNIT_TEST_BIN) $(PHASE26_ORM_GENERATED_TEST_BIN) $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(PHASE27_SEARCH_TEST_BIN) $(DURABLE_JOBS_BIN)
+XCTEST_LINKED_TEST_BINS := $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN) $(BROWSER_ERROR_AUDIT_TEST_BIN) $(PHASE20_SQL_BUILDER_TEST_BIN) $(PHASE20_SCHEMA_TEST_BIN) $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(PHASE20_MSSQL_LIVE_TEST_BIN) $(PHASE20_ROUTING_TEST_BIN) $(PHASE21_TEMPLATE_TEST_BIN) $(PHASE23_DATAVERSE_TEST_BIN) $(PHASE25_LIVE_TEST_BIN) $(PHASE26_ORM_TEST_BIN) $(PHASE26_ORM_UNIT_TEST_BIN) $(PHASE26_ORM_GENERATED_TEST_BIN) $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(PHASE27_SEARCH_TEST_BIN) $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(DURABLE_JOBS_BIN)
 $(XCTEST_LINKED_TEST_BINS): | $(XCTEST_RUNNER_PREREQ)
 
 -include $(DURABLE_JOBS_OBJ:.o=.d) $(DURABLE_JOB_PROBE_OBJ:.o=.d)
