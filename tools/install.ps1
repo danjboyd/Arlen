@@ -247,7 +247,11 @@ $bootstrap = 'export PATH=/clang64/bin:/usr/bin:$PATH CC=clang CXX=clang++ ' +
   'exec "$arlen_home/bin/arlen" "$@"'
 # bash -l sources /etc/profile, which keeps the current directory only while
 # CHERE_INVOKING is set. Arguments follow "arlen" as $1, $2, ...
-& $envExe 'MSYSTEM=CLANG64' 'CHERE_INVOKING=1' "ARLEN_HOME_WIN=$arlenHome" '/usr/bin/bash' '-lc' $bootstrap 'arlen' @args
+# Windows PowerShell 5.1 does not escape double quotes inside arguments to a
+# native program, and env.exe parses its command line with the Windows rules,
+# so escape them as \" or bash receives a broken script.
+$nativeArgs = @($args | ForEach-Object { ([string]$_).Replace('"', '\"') })
+& $envExe 'MSYSTEM=CLANG64' 'CHERE_INVOKING=1' "ARLEN_HOME_WIN=$arlenHome" '/usr/bin/bash' '-lc' $bootstrap.Replace('"', '\"') 'arlen' @nativeArgs
 exit $LASTEXITCODE
 '@
   $launcherBody = $launcherBody.Replace('__CURRENT__', $current.Replace("'", "''")).Replace('__MSYS_ROOT__', $resolvedRoot.Replace("'", "''"))
