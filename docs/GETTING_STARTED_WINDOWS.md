@@ -37,18 +37,11 @@ the toolchain:
 > Refreshing the package database causes partial upgrades that break it. A
 > newer python breaks `pyexpat` against the shipped expat, and a newer clang
 > breaks the GNUstep headers. Use plain `pacman -S` as shown, and install
-> nothing else into the managed root unless these docs say to.
+> nothing else into the managed root.
 
-Optional, for PostgreSQL apps only, until the release zip bundles libpq:
-install it the same way, with plain
-`pacman -S` and never `-Sy`/`-Syu`:
-
-```powershell
-& "$env:LOCALAPPDATA\gnustep-cli\usr\bin\bash.exe" -lc 'pacman -S --noconfirm --needed mingw-w64-clang-x86_64-postgresql'
-```
-
-Arlen loads `libpq-5.dll` from the toolchain at runtime. Without it, apps
-build but fail when they first connect to PostgreSQL.
+You don't need to install a PostgreSQL client. The Arlen release ships
+`libpq-5.dll` and the DLLs it depends on, and the `arlen` launcher puts them on
+`PATH`.
 
 ## 2. Install Arlen
 
