@@ -6,6 +6,7 @@
 #import <unistd.h>
 
 #import "ALNDataCompat.h"
+#import "ALNPlatform.h"
 #import "ALNConfig.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
@@ -455,7 +456,7 @@ static void CloseFileHandleQuietly(NSFileHandle *handle) {
 
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ?: @"" ];
   NSString *stdoutPath = TaskCapturePath(@"arlen-shell-stdout");
   NSString *stderrPath = TaskCapturePath(@"arlen-shell-stderr");
@@ -496,7 +497,7 @@ static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
 
 static int RunShellCommand(NSString *command) {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ];
   task.standardInput = [NSFileHandle fileHandleWithStandardInput];
   task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
@@ -512,10 +513,16 @@ static int RunShellCommand(NSString *command) {
 // its own process group on Apple, so a terminal Ctrl-C or a signal to arlen
 // stopped arlen and left the server running.
 static int ExecShellCommand(NSString *command) {
+#if defined(_WIN32)
+  // Windows has no exec (MSVCRT's _exec spawns a new process and exits) and no
+  // signals for the process-group problem above, so run it as a waited child.
+  return RunShellCommand(command);
+#else
   fflush(NULL);
   execl("/bin/bash", "bash", "-lc", [command UTF8String], (char *)NULL);
   fprintf(stderr, "arlen: failed to run /bin/bash: %s\n", strerror(errno));
   return 127;
+#endif
 }
 
 static NSString *TaskCommandDescription(NSString *launchPath, NSArray<NSString *> *arguments) {
@@ -3185,7 +3192,7 @@ static NSString *FrameworkRootFromExecutablePath(void) {
 
   NSString *invocation = arguments[0];
   NSString *resolved = invocation;
-  if (![resolved hasPrefix:@"/"]) {
+  if (!ALNPlatformPathIsAbsolute(resolved)) {
     NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
     resolved = [cwd stringByAppendingPathComponent:resolved];
   }
@@ -4099,8 +4106,8 @@ static int CommandNew(NSArray *args) {
     }
   }
 
-  NSString *root =
-      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:appName];
+  // An absolute name (/srv/app, C:/apps/app) is used as is, not appended to the cwd.
+  NSString *root = ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], appName);
   NSError *error = nil;
   BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
   if (!ok) {
@@ -5580,7 +5587,7 @@ static NSString *ResolveFrameworkRootForCommandDetailed(NSString *commandName,
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *override = EnvValue("ARLEN_FRAMEWORK_ROOT");
   if ([override length] > 0) {
-    NSString *candidate = [override hasPrefix:@"/"]
+    NSString *candidate = ALNPlatformPathIsAbsolute(override)
                               ? [override stringByStandardizingPath]
                               : [[appRoot stringByAppendingPathComponent:override] stringByStandardizingPath];
     if (IsFrameworkRoot(candidate)) {
@@ -8167,7 +8174,7 @@ static int CommandDoctor(NSArray *args) {
   NSString *frameworkOverride = EnvValue("ARLEN_FRAMEWORK_ROOT");
   BOOL overrideInvalid = NO;
   if ([frameworkOverride length] > 0) {
-    NSString *candidate = [frameworkOverride hasPrefix:@"/"]
+    NSString *candidate = ALNPlatformPathIsAbsolute(frameworkOverride)
                               ? [frameworkOverride stringByStandardizingPath]
                               : [[appRoot stringByAppendingPathComponent:frameworkOverride]
                                     stringByStandardizingPath];
@@ -8825,7 +8832,7 @@ static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
     return root;
   }
   NSString *expanded = [candidate stringByExpandingTildeInPath];
-  if ([expanded hasPrefix:@"/"]) {
+  if (ALNPlatformPathIsAbsolute(expanded)) {
     return [expanded stringByStandardizingPath];
   }
   return [[root stringByAppendingPathComponent:expanded] stringByStandardizingPath];

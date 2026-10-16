@@ -1,4 +1,5 @@
 #import "ALNRequest.h"
+#import "../Support/ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
 
@@ -1679,7 +1680,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 }
 
 - (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
-  NSData *mapped = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+  NSData *mapped = ALNPlatformMappedFileData(path, error);
   if (mapped == nil) {
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
     return NO;

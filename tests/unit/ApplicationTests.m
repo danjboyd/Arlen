@@ -5,6 +5,7 @@
 #import <unistd.h>
 
 #import "ALNApplication.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNAuthProviderPresets.h"
 #import "ALNContext.h"
 #import "ALNController.h"

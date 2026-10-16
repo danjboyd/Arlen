@@ -191,6 +191,18 @@ NSString *ALNTestTemporaryDirectory(NSString *prefix) {
   NSString *templatePath =
       [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX",
                                                                                          sanitizedPrefix]];
+#if defined(_WIN32)
+  // No mkdtemp on MinGW, and -fileSystemRepresentation is UTF-16 there; a
+  // UUID-named directory created exclusively is just as unique.
+  NSString *uniquePath = [templatePath stringByReplacingOccurrencesOfString:@"XXXXXX"
+                                                                 withString:[[NSUUID UUID] UUIDString]];
+  return [[NSFileManager defaultManager] createDirectoryAtPath:uniquePath
+                                   withIntermediateDirectories:NO
+                                                    attributes:nil
+                                                         error:NULL]
+             ? uniquePath
+             : nil;
+#else
   const char *templateCString = [templatePath fileSystemRepresentation];
   char *buffer = strdup(templateCString);
   char *created = (buffer != NULL) ? mkdtemp(buffer) : NULL;
@@ -200,6 +212,7 @@ NSString *ALNTestTemporaryDirectory(NSString *prefix) {
                          : nil;
   free(buffer);
   return result;
+#endif
 }
 
 BOOL ALNTestWriteUTF8File(NSString *path, NSString *content, NSError **error) {
@@ -268,7 +281,12 @@ NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds) {
 
 BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode) {
   // GNU timeout exits 124; a process killed by SIGALRM reports 128 + 14.
+#if defined(SIGALRM)
   return ALNTestShellHasGNUTimeout() ? (exitCode == 124) : (exitCode == 128 + SIGALRM);
+#else
+  // Windows has no SIGALRM; MSYS2 ships GNU coreutils timeout.
+  return exitCode == 124;
+#endif
 }
 
 NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
@@ -427,10 +445,16 @@ BOOL ALNTestStopServerTask(NSTask *task) {
     return YES;
   }
   if ([task isRunning]) {
+#if defined(_WIN32)
+    // No signals on Windows; -terminate is TerminateProcess.
+    [task terminate];
+    (void)ALNTestWaitForTaskExit(task, 5.0);
+#else
     kill(task.processIdentifier, SIGTERM);
     if (!ALNTestWaitForTaskExit(task, 5.0)) {
       kill(task.processIdentifier, SIGKILL);
     }
+#endif
   }
   [task waitUntilExit];
   return ![task isRunning];

@@ -1,6 +1,7 @@
 #import "ALNModuleSystem.h"
 
 #import "ALNDataCompat.h"
+#import "ALNPlatform.h"
 #import "ALNApplication.h"
 #import "ALNSecurityPrimitives.h"
 
@@ -73,7 +74,7 @@ static NSString *ALNModuleResolvePath(NSString *basePath,
     return [basePath stringByStandardizingPath];
   }
   NSString *expanded = [candidate stringByExpandingTildeInPath];
-  if ([expanded hasPrefix:@"/"]) {
+  if (ALNPlatformPathIsAbsolute(expanded)) {
     return [expanded stringByStandardizingPath];
   }
   return [[basePath stringByAppendingPathComponent:expanded] stringByStandardizingPath];

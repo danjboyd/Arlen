@@ -5,6 +5,7 @@
 #import <string.h>
 
 #import "ALNConfig.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
 
 @interface ConfigTests : XCTestCase

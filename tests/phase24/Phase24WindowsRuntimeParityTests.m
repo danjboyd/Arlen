@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "ALNPlatform.h"
+
 #import <stdlib.h>
 #import <string.h>
 #import <unistd.h>
@@ -12,13 +14,12 @@
 
 - (NSString *)resolvedBashLaunchPath {
   NSString *override = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_BASH_PATH"];
-  NSArray<NSString *> *candidates = @[
-    [override isKindOfClass:[NSString class]] ? override : @"",
-    @"C:/msys64/usr/bin/bash.exe",
-    @"C:/msys64/usr/bin/bash",
-    @"/usr/bin/bash",
-    @"/bin/bash",
-  ];
+  NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+  [candidates addObject:[override isKindOfClass:[NSString class]] ? override : @""];
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    [candidates addObject:[root stringByAppendingPathComponent:@"usr/bin/bash.exe"]];
+  }
+  [candidates addObjectsFromArray:@[ @"/usr/bin/bash", @"/bin/bash" ]];
   for (NSString *candidate in candidates) {
     if ([candidate length] == 0) {
       continue;

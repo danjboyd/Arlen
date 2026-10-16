@@ -1,4 +1,5 @@
 #import "ALNMultipart.h"
+#import "../Support/ALNPlatform.h"
 #import "ALNPositiveInteger.h"
 #include <errno.h>
 #include <stdio.h>
@@ -30,9 +31,10 @@ static NSError *SpoolError(NSString *message, NSString *path) {
                          userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"%@ (%@: %s)", message, path, strerror(errno)]}];
 }
 // Atomic replace within one filesystem. Returns NO with errno set; EXDEV means copy instead.
-static BOOL ReplaceFile(NSString *from, NSString *to) {
+// Not ReplaceFile: <windows.h> defines that as a macro for ReplaceFileA/W.
+static BOOL ALNReplaceFile(NSString *from, NSString *to) {
 #if defined(_WIN32)
-  if (MoveFileExW([from fileSystemRepresentation], [to fileSystemRepresentation], MOVEFILE_REPLACE_EXISTING)) return YES;
+  if (MoveFileExW((const wchar_t *)[from fileSystemRepresentation], (const wchar_t *)[to fileSystemRepresentation], MOVEFILE_REPLACE_EXISTING)) return YES;
   errno = (GetLastError() == ERROR_NOT_SAME_DEVICE) ? EXDEV : EIO;
   return NO;
 #else
@@ -44,12 +46,12 @@ static BOOL ReplaceFile(NSString *from, NSString *to) {
 - (NSString *)temporaryFilePath { return self.backingMoved ? nil : self.backingPath; }
 - (NSData *)data {
   if (!self.backingPath) return [super data];
-  return [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:NULL] ?: [NSData data];
+  return ALNPlatformMappedFileData(self.backingPath, NULL) ?: [NSData data];
 }
 - (BOOL)writeToFile:(NSString *)path error:(NSError **)error {
   if (!self.backingPath) return [[super data] writeToFile:path options:NSDataWritingAtomic error:error];
   if (!self.backingMoved) {
-    if (ReplaceFile(self.backingPath, path)) {
+    if (ALNReplaceFile(self.backingPath, path)) {
       self.backingPath = path;
       self.backingMoved = YES;
       return YES;
@@ -60,7 +62,7 @@ static BOOL ReplaceFile(NSString *from, NSString *to) {
     }
   }
   // Across filesystems (or a second write): copy from the mapped file, never the heap.
-  NSData *mapped = [NSData dataWithContentsOfFile:self.backingPath options:NSDataReadingMappedAlways error:error];
+  NSData *mapped = ALNPlatformMappedFileData(self.backingPath, error);
   if (!mapped || ![mapped writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
   if (!self.backingMoved) {
     [[NSFileManager defaultManager] removeItemAtPath:self.backingPath error:NULL];
@@ -80,7 +82,7 @@ static NSString *SpoolRange(NSData *body, NSUInteger start, NSUInteger length, N
     if (error) *error = SpoolError(@"Could not create multipart spool file", path);
     return nil;
   }
-  FILE *file = fopen([path fileSystemRepresentation], "wb");
+  FILE *file = ALNPlatformOpenFile(path, "wb");
   if (!file) {
     if (error) *error = SpoolError(@"Could not open multipart spool file", path);
     return nil;

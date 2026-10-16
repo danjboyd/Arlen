@@ -41,7 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#if !defined(_WIN32)
 #include <sys/resource.h>
+#endif
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -889,6 +891,11 @@ static NSInteger ALNCurrentProcessFDCount(void) {
 }
 
 static NSInteger ALNCurrentProcessFDSoftLimit(void) {
+#if defined(_WIN32)
+  // Windows has no RLIMIT_NOFILE; sockets and handles have no comparable
+  // per-process soft limit, so report "unknown" as for RLIM_INFINITY.
+  return -1;
+#else
   struct rlimit limit;
   if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
     return -1;
@@ -897,6 +904,7 @@ static NSInteger ALNCurrentProcessFDSoftLimit(void) {
     return -1;
   }
   return (NSInteger)limit.rlim_cur;
+#endif
 }
 
 static NSDictionary *ALNDescriptorDiagnosticsForException(NSException *exception) {

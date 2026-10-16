@@ -3,6 +3,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ALNTestPOSIXCompat.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *ALNTestRepoRoot(void);

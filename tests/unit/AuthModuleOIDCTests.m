@@ -3,6 +3,7 @@
 #import <openssl/evp.h>
 #import <openssl/pem.h>
 #import "ALNCryptoCompat.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNAuthModule.h"
 #import "ALNEOCRuntime.h"

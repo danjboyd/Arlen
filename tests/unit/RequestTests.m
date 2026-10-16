@@ -4,6 +4,7 @@
 #import <stdlib.h>
 
 #import "ALNRequest.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface RequestTests : XCTestCase
 @end

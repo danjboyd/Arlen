@@ -2243,8 +2243,15 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       continue;
     }
 
+#if defined(_WIN32)
+    // Winsock takes the timeout as a DWORD of milliseconds, not a timeval.
+    DWORD timeoutDWORD = (DWORD)timeoutMillis;
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeoutDWORD, sizeof(timeoutDWORD));
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeoutDWORD, sizeof(timeoutDWORD));
+#else
     (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
     (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
+#endif
 
     if (connect(socketFD, candidate->ai_addr, candidate->ai_addrlen) == 0) {
       break;

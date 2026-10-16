@@ -92,6 +92,56 @@ static void ALNAppendPrefixLibraryCandidates(NSMutableArray<NSString *> *candida
   }
 }
 
+NSArray<NSString *> *ALNPlatformWindowsMSYSRoots(void) {
+#if defined(_WIN32)
+  NSDictionary<NSString *, NSString *> *environment = [[NSProcessInfo processInfo] environment];
+  NSMutableArray<NSString *> *roots = [NSMutableArray array];
+  NSString *override = environment[@"ARLEN_MSYS_ROOT"];
+  if ([override length] > 0) {
+    [roots addObject:override];
+  }
+  NSString *localAppData = environment[@"LOCALAPPDATA"];
+  if ([localAppData length] > 0) {
+    [roots addObject:[localAppData stringByAppendingPathComponent:@"gnustep-cli"]];
+  }
+  NSString *programFiles = environment[@"ProgramFiles"];
+  if ([programFiles length] > 0) {
+    [roots addObject:[programFiles stringByAppendingPathComponent:@"gnustep-cli"]];
+  }
+  [roots addObject:@"C:/msys64"];
+  return roots;
+#else
+  return @[];
+#endif
+}
+
+NSString *ALNPlatformBashPath(void) {
+#if defined(_WIN32)
+  NSString *override = [[NSProcessInfo processInfo] environment][@"ARLEN_BASH_PATH"];
+  if ([override length] > 0) {
+    return override;
+  }
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    NSString *candidate = [root stringByAppendingPathComponent:@"usr/bin/bash.exe"];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return @"bash.exe";
+#else
+  return @"/bin/bash";
+#endif
+}
+
+static void ALNAppendMSYSClang64BinCandidates(NSMutableArray<NSString *> *candidates,
+                                              NSArray<NSString *> *libraryNames) {
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    for (NSString *name in libraryNames) {
+      [candidates addObject:[[root stringByAppendingPathComponent:@"clang64/bin"] stringByAppendingPathComponent:name]];
+    }
+  }
+}
+
 NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   NSMutableArray<NSString *> *candidates = [NSMutableArray array];
   const char *envCandidate = getenv("ARLEN_LIBPQ_LIBRARY");
@@ -118,8 +168,7 @@ NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   [candidates addObject:@"libpq.5.dylib"];
   [candidates addObject:@"libpq.dylib"];
 #elif defined(_WIN32)
-  [candidates addObject:@"C:/msys64/clang64/bin/libpq-5.dll"];
-  [candidates addObject:@"C:/msys64/clang64/bin/libpq.dll"];
+  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libpq-5.dll", @"libpq.dll" ]);
   [candidates addObject:@"libpq-5.dll"];
   [candidates addObject:@"libpq.dll"];
 #else
@@ -160,8 +209,7 @@ NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void) {
   [candidates addObject:@"libiodbc.2.dylib"];
   [candidates addObject:@"libiodbc.dylib"];
 #elif defined(_WIN32)
-  [candidates addObject:@"C:/msys64/clang64/bin/libodbc-2.dll"];
-  [candidates addObject:@"C:/msys64/clang64/bin/libodbc.dll"];
+  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libodbc-2.dll", @"libodbc.dll" ]);
   [candidates addObject:@"odbc32.dll"];
   [candidates addObject:@"libodbc-2.dll"];
   [candidates addObject:@"libodbc.dll"];
@@ -307,4 +355,35 @@ BOOL ALNPlatformPathIsAbsolute(NSString *path) {
     }
   }
   return NO;
+}
+
+NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
+#if defined(_WIN32) && defined(GNUSTEP_BASE_LIBRARY)
+  NSData *data = [NSData dataWithContentsOfMappedFile:path];
+  if (data == nil && error != NULL) {
+    *error = [NSError errorWithDomain:NSCocoaErrorDomain
+                                 code:NSFileReadUnknownError
+                             userInfo:@{NSFilePathErrorKey : path ?: @""}];
+  }
+  return data;
+#else
+  return [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+#endif
+}
+
+FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
+  if ([path length] == 0 || mode == NULL) {
+    return NULL;
+  }
+#if defined(_WIN32)
+  wchar_t wideMode[8];
+  size_t idx = 0;
+  for (; mode[idx] != '\0' && idx < 7; idx++) {
+    wideMode[idx] = (wchar_t)(unsigned char)mode[idx];
+  }
+  wideMode[idx] = L'\0';
+  return _wfopen((const wchar_t *)[path fileSystemRepresentation], wideMode);
+#else
+  return fopen([path fileSystemRepresentation], mode);
+#endif
 }
