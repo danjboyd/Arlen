@@ -154,7 +154,8 @@ workers = [threading.Thread(target=upload) for _ in range(8)]
 [w.join() for w in workers]
 done.set()
 sampler.join()
-assert all(s == 200 for s, _ in results), [s for s, _ in results]
+# A failure's body names the cause (spool errors carry the path and strerror).
+assert all(s == 200 for s, _ in results), [(s, r[:300]) if s != 200 else s for s, r in results]
 growth_mib = (peak[0] - baseline) / 1024.0
 print('rss_anon growth MiB %.1f' % growth_mib)
 # Spool threshold (1 MiB) x 8 plus buffers and fixed overhead; buffering would be >= 160 MiB.
