@@ -19,7 +19,7 @@ local hosting.
 Before running repo-local build/test/doc commands, source
 `/path/to/Arlen/tools/source_gnustep_env.sh` or source your active GNUstep
 toolchain env directly for the Linux/GNUstep path. On macOS, use
-`GETTING_STARTED_MACOS.md`.
+`GETTING_STARTED_MACOS.md`; on Windows, use `GETTING_STARTED_WINDOWS.md`.
 
 ## Start Here
 
@@ -28,6 +28,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Getting Started Quickstart](GETTING_STARTED_QUICKSTART.md): the minimum-friction first-app path.
 - [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer entry paths.
 - [Getting Started on macOS](GETTING_STARTED_MACOS.md): Apple-runtime bootstrap path for macOS without GNUstep.
+- [Getting Started on Windows](GETTING_STARTED_WINDOWS.md): install the gnustep-cli `CLANG64` toolchain and Arlen with `install.ps1`, then build and run apps (development only until 0.4.0).
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime baseline.
 
 ## Building Apps
@@ -86,7 +87,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Route Policies](ROUTE_POLICIES.md): named access policies, proxy-aware source IP allowlisting, `/admin` policy wiring, diagnostics, and confidence checks.
 - [Release Process](RELEASE_PROCESS.md): semantic versioning, deprecations, and release checklist.
 - [Apple Platform Contract](APPLE_PLATFORM.md): what runs on macOS (development, production, launchd deploys) and what is still Linux-only.
-- [Windows CLANG64 Preview](WINDOWS_CLANG64.md): current `main`-branch Windows bootstrap, packaged-release preview contract, and support statement.
+- [Windows CLANG64](WINDOWS_CLANG64.md): the Windows support statement (development supported, production in 0.4.0), the `CLANG64` lanes, and the packaged-release contract.
 
 ## Reference
 
