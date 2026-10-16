@@ -41,6 +41,43 @@ Checked-in wrappers:
 - `scripts/run_clang64.ps1`
 - `scripts/run_clang64.sh`
 
+`run_clang64.ps1` finds the MSYS2 root itself: `-MsysRoot`, then
+`ARLEN_MSYS_ROOT`, then the gnustep-cli managed toolchain
+(`%LOCALAPPDATA%\gnustep-cli`, then `%ProgramFiles%\gnustep-cli`), then a stock
+MSYS2 at `C:\msys64`. Arlen's runtime uses the same search order to find
+`bash.exe`, `libpq` and ODBC (`ALNPlatformWindowsMSYSRoots`).
+
+### Toolchain from gnustep-cli
+
+The public way to get a `CLANG64` GNUstep toolchain is the gnustep-cli
+PowerShell bootstrap. Pass the stable manifest explicitly; the bootstrap
+script at the `v0.1.0` tag otherwise selects `0.1.0-dev`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json
+```
+
+It installs to `%LOCALAPPDATA%\gnustep-cli`, which is itself an MSYS2 root
+with `pacman`. It does not include libcurl; install it inside that root:
+
+```sh
+pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl
+```
+
+Never run `pacman -Sy` or `pacman -Syu` against the managed root, and don't
+install anything else into it. The managed root is a pinned toolchain: a
+database refresh makes later installs partial upgrades (one left the root's
+`python3` newer than its `expat`, so `import pyexpat` failed), and the live
+repository's current clang breaks the shipped gnustep-base headers.
+
+Known issues in the `v0.1.0` Windows toolchain, worked around by Arlen's
+build: libdispatch's `os/generic_win_base.h` redefines `mode_t` (Arlen
+compiles with `-DHAVE_MODE_T=1`) and `pthread_attr_t` (Arlen sources avoid
+`<pthread.h>`); the shipped gnustep-base predates
+`+dataWithContentsOfFile:options:error:` (use `ALNPlatformMappedFileData`);
+and drives mount under `/cygdrive/c` rather than `/c`. Fixes for the first two
+are queued for the next gnustep-cli Windows republish.
+
 For Windows runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
 MSYS2 `CLANG64` GNUstep managed-toolchain manifests and Windows bootstrap
@@ -55,7 +92,6 @@ Expected inside the active `CLANG64` environment:
 - `make`
 - `bash`
 - `gnustep-config`
-- `xctest`
 - `libdispatch`
 - libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`)
 
@@ -107,13 +143,22 @@ Those lanes are intended to verify:
 - `jobs-worker` queued-job execution
 - `propane` request serving and reload handling
 
-The preview lanes use `arlen-xctest-runner` so a Windows host can load and run
-the XCTest bundle without depending on the stock bundle discovery path. They
-don't use the vendored `tools-xctest` fork that Linux and macOS lanes use yet,
-so Windows runs have no test filters, per-test time limits, JUnit reports or
-skips. GitHub issue #116 tracks the switch. The known blockers and the
-migration steps are listed in "Windows Test Runner" in
-[CI Alignment](CI_ALIGNMENT.md).
+The preview lanes run through the vendored `tools-xctest` fork, the same
+runner the Linux and macOS lanes use (GitHub issue #116), so Windows runs get
+test filters, per-test time limits, JUnit reports and skips. The Windows make
+wiring is described in "Windows Test Runner" in [CI Alignment](CI_ALIGNMENT.md).
+
+Windows checkout and shell notes:
+
+- the repository's `.gitattributes` checks every file out with LF, whatever
+  `core.autocrlf` says (Git for Windows defaults it to `true`); clone after
+  that file exists, or re-checkout with `git rm --cached -r . && git reset
+  --hard` if an older clone has CRLF scripts
+- the `CLANG64` `python3` is a native Windows program and prints CRLF; shell
+  code that captures its output must strip `\r`
+- a shell started by a native process (xctest, an app) sees MSYS2 path
+  variables in `C:/...` form; `tools/resolve_gnustep.sh` prints one spelling so
+  the framework's build-flags sentinel stays stable across both
 
 ## 4. Packaged Release Contract
 
@@ -121,6 +166,15 @@ The current Windows packaged-release contract is now explicit:
 
 - build releases from an MSYS2 `CLANG64` shell with the GNUstep environment
   initialized
+- a release tree that ships `build/arlen.exe`, `build/boomhauer.exe`,
+  `build/eocc.exe` and `build/lib/libArlenFramework.a` without `build/obj`
+  carries `build/.release-prebuilt` (`source_digest`, `toolchain`,
+  `toolchain_sha256`; written by `aln_release_write_manifest` in
+  `tools/release_prebuilt.sh`). While the digest over the framework sources
+  and the gnustep-cli `toolchain_version` both still match, `bin/arlen` and
+  `boomhauer` use the prebuilt outputs instead of `make`. Any mismatch deletes
+  the manifest and the normal make checks rebuild from then on; a
+  `toolchain_sha256` mismatch alone only warns.
 - packaged release manifests record the actual runtime/helper paths for
   `arlen`, `boomhauer`, `propane`, `jobs-worker`, the app runtime binary, and
   the operability probe helper

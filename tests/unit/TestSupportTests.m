@@ -22,7 +22,7 @@
 }
 - (void)testServerCleanupReapsAnExecLaunchedProcess {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exec sleep 60" ];
   [task launch];
   int pid = task.processIdentifier;
@@ -31,13 +31,12 @@
   } @finally {
     XCTAssertTrue(ALNTestStopServerTask(task));
   }
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
   XCTAssertTrue(ALNTestStopServerTask(task));
 }
 - (void)testServerCleanupRunsAfterAnException {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exec sleep 60" ];
   [task launch];
   int pid = task.processIdentifier;
@@ -52,13 +51,12 @@
     caught = [exception.name isEqualToString:@"SimulatedTestFailure"];
   }
   XCTAssertTrue(caught);
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
 }
 - (void)testServerCleanupEscalatesWhenTermIsIgnored {
   NSString *ready = [ALNTestTemporaryDirectory(@"server-cleanup") stringByAppendingPathComponent:@"ready"];
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", [NSString stringWithFormat:@"trap '' TERM; touch %@; exec sleep 60", ALNTestShellQuote(ready)] ];
   [task launch];
   int pid = task.processIdentifier;
@@ -70,8 +68,7 @@
     XCTAssertTrue(ALNTestStopServerTask(task));
     [[NSFileManager defaultManager] removeItemAtPath:[ready stringByDeletingLastPathComponent] error:NULL];
   }
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
 }
 - (void)testWaitUntilReturnsOnceTheConditionHolds {
   __block NSUInteger checks = 0;
@@ -92,7 +89,7 @@
 }
 - (void)testWaitForTaskExitReapsTheTask {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/sh";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exit 3" ];
   [task launch];
   XCTAssertTrue(ALNTestWaitForTaskExit(task, 10.0));

@@ -6,6 +6,7 @@
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase16EOpsJob : NSObject <ALNJobsJobDefinition>
 @end
@@ -112,17 +113,7 @@
 @implementation Phase16ETests
 
 - (NSString *)temporaryDirectory {
-  NSString *template =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-phase16e-XXXXXX"];
-  const char *templateCString = [template fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  XCTAssertNotEqual(buffer, NULL);
-  char *created = mkdtemp(buffer);
-  XCTAssertNotEqual(created, NULL);
-  NSString *result = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:buffer
-                                                                                  length:strlen(buffer)];
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-phase16e");
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath includeJobs:(BOOL)includeJobs {

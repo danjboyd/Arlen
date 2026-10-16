@@ -174,9 +174,8 @@ Every XCTest make target runs the vendored `danjboyd/tools-xctest` runner with:
 
 Test bundles compile against and link the vendored `libXCTest`, so these
 features do not depend on the host's packaged `tools-xctest`. The Windows
-preview lane still builds against its toolchain's XCTest (issue #116);
-`tests/ALNXCTestCompat.h` keeps the shared helpers compiling there and falls
-back to the previous behavior.
+preview lanes use the vendored runner too (issue #116); the gnustep-cli Windows
+toolchain ships no XCTest of its own.
 
 ## 1. Focused Lanes
 
@@ -264,8 +263,8 @@ Windows-focused preview lanes:
 
 - `make phase24-windows-db-smoke`
  - focused PostgreSQL / ODBC loader smoke for MSYS2 `CLANG64`
- - uses `arlen-xctest-runner` to load the XCTest bundle directly, not the
- vendored fork (GitHub issue #116; see [CI Alignment](CI_ALIGNMENT.md))
+ - runs through the vendored tools-xctest fork, like every other lane
+ (GitHub issue #116; see [CI Alignment](CI_ALIGNMENT.md))
 - `make phase24-windows-runtime-tests`
  - Windows runtime/server parity coverage for `boomhauer`, `jobs-worker`, and
  `propane`

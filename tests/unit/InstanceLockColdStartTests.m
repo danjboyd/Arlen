@@ -46,9 +46,9 @@
     NSString *libraries = @"-framework Foundation -framework CoreFoundation -L\"${ARLEN_OPENSSL_PREFIX:-$(brew --prefix openssl@3)}/lib\" -lcrypto -lcurl";
 #else
     NSString *compiler = [NSString stringWithFormat:
-        @"%@ && clang $(gnustep-config --objc-flags) -fobjc-arc -fblocks -pthread",
-        ALNTestGNUstepSourceCommandForRepoRoot(repoRoot)];
-    NSString *libraries = @"$(gnustep-config --base-libs) -lcrypto -ldispatch -ldl -lcurl";
+        @"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -fblocks -pthread",
+        ALNTestGNUstepSourceCommandForRepoRoot(repoRoot), ALNTestPlatformObjCFlags()];
+    NSString *libraries = [NSString stringWithFormat:@"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl %@", ALNTestPlatformLinkLibraries()];
 #endif
     NSMutableString *sanitizers = [NSMutableString string];
     NSUInteger rounds = 2000;

@@ -463,6 +463,9 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 }
 
 - (void)testFileSystemAttachmentAdapterRejectsInvalidIDsAndSymlinkEscapes {
+#if defined(_WIN32)
+  XCTSkip(@"Creating symlinks needs SeCreateSymbolicLinkPrivilege on Windows");
+#endif
   NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3e-attachments"];
   NSError *adapterError = nil;
   ALNFileSystemAttachmentAdapter *adapter =
@@ -573,6 +576,9 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 }
 
 - (void)testFileBackedServiceAdaptersPersistPrivatePermissions {
+#if defined(_WIN32)
+  XCTSkip(@"NTFS has no POSIX permission bits; Windows access is per-user ACLs");
+#endif
   NSString *attachmentRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-attachment-perms"];
   ALNFileSystemAttachmentAdapter *attachmentAdapter =
       [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:attachmentRoot
