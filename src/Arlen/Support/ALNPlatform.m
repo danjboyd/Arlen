@@ -470,7 +470,7 @@ static void ALNFinishPendingRemoval(NSString *path) {
         [[NSFileManager defaultManager] removeItemAtPath:parent error:NULL]) {
       [pending removeObject:parentKey];
     }
-    } @finally {
+  } @finally {
     [ALNPendingRemovalLock() unlock];
   }
 }
@@ -505,12 +505,13 @@ static void ALNFinishPendingRemoval(NSString *path) {
 }
 @end
 
-static NSError *ALNPlatformMappedFileError(NSString *path) {
+// lastError is captured by the caller before anything (CloseHandle) can reset it.
+static NSError *ALNPlatformMappedFileError(NSString *path, DWORD lastError) {
   return [NSError errorWithDomain:NSCocoaErrorDomain
                              code:NSFileReadUnknownError
                          userInfo:@{
                            NSFilePathErrorKey : path ?: @"",
-                           @"ALNWindowsLastError" : @((unsigned long)GetLastError()),
+                           @"ALNWindowsLastError" : @((unsigned long)lastError),
                          }];
 }
 #endif
@@ -527,14 +528,14 @@ NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
                             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) {
     if (error != NULL) {
-      *error = ALNPlatformMappedFileError(path);
+      *error = ALNPlatformMappedFileError(path, GetLastError());
     }
     return nil;
   }
   LARGE_INTEGER size;
   if (!GetFileSizeEx(file, &size) || (unsigned long long)size.QuadPart > (unsigned long long)NSUIntegerMax) {
     if (error != NULL) {
-      *error = ALNPlatformMappedFileError(path);
+      *error = ALNPlatformMappedFileError(path, GetLastError());
     }
     CloseHandle(file);
     return nil;
@@ -544,18 +545,20 @@ NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
     return [NSData data];  // a zero-length file cannot be mapped
   }
   HANDLE mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
+  DWORD mappingError = (mapping == NULL) ? GetLastError() : 0;
   CloseHandle(file);  // the mapping keeps the file referenced
   if (mapping == NULL) {
     if (error != NULL) {
-      *error = ALNPlatformMappedFileError(path);
+      *error = ALNPlatformMappedFileError(path, mappingError);
     }
     return nil;
   }
   const void *view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+  DWORD viewError = (view == NULL) ? GetLastError() : 0;
   CloseHandle(mapping);  // the view keeps the mapping alive
   if (view == NULL) {
     if (error != NULL) {
-      *error = ALNPlatformMappedFileError(path);
+      *error = ALNPlatformMappedFileError(path, viewError);
     }
     return nil;
   }
@@ -574,6 +577,15 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
   NSMutableSet<NSString *> *pending = ALNPendingRemovalPaths();
   [ALNPendingRemovalLock() lock];
   @try {
+    // Retry earlier removals too. A pending path is otherwise finished only
+    // when one of its mapped views is released, so a delete blocked for another
+    // reason (an antivirus or indexer handle without share-delete) would stay
+    // on disk for the life of the process.
+    for (NSString *pendingKey in [pending allObjects]) {
+      if (![fileManager fileExistsAtPath:pendingKey] || [fileManager removeItemAtPath:pendingKey error:NULL]) {
+        [pending removeObject:pendingKey];
+      }
+    }
     if ([fileManager removeItemAtPath:path error:NULL] || ![fileManager fileExistsAtPath:path]) {
       return;
     }
@@ -593,7 +605,7 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
       }
     }
     [pending addObject:ALNRemovalKey(path)];
-    } @finally {
+  } @finally {
     [ALNPendingRemovalLock() unlock];
   }
 #else

@@ -153,7 +153,9 @@ space_free_path() {
   fi
   # Per user and private: in a shared /tmp another user could otherwise create
   # the directory first and swap an alias, so boomhauer built their sources.
-  local tmp_base="${TMPDIR:-/tmp}"
+  # In MSYS2 form: a C:/... TMPDIR would put a drive colon into make targets.
+  local tmp_base
+  tmp_base="$(normalize_host_path "${TMPDIR:-/tmp}")"
   [[ "$tmp_base" == *[[:space:]]* ]] && tmp_base="/tmp"
   local alias_parent="${tmp_base%/}/arlen-boomhauer-aliases-$(id -u)"
   if [[ ! -d "$alias_parent" ]]; then
@@ -187,6 +189,12 @@ space_free_path() {
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
 framework_root="$(space_free_path "$framework_root" framework)" || exit 1
+# Framework makes run with ROOT_DIR pinned to framework_root. make -C (and a
+# plain make after cd) take CURDIR from getcwd(), which resolves the alias
+# above, so the GNUmakefile's ROOT_DIR := $(CURDIR) would get the spaces back.
+framework_make() {
+  make -C "$framework_root" ROOT_DIR="$framework_root" "$@"
+}
 framework_eocc_target="$framework_root/build/eocc"
 if [[ $windows_preview -eq 1 ]]; then
   # The make target carries the .exe suffix the linker adds on Windows.
@@ -564,7 +572,7 @@ if [[ $is_app_root -eq 0 ]]; then
   cd "$framework_root"
   if [[ $watch_mode -eq 1 ]]; then
     if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
-      make arlen >/dev/null
+      framework_make arlen >/dev/null
       if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
         echo "boomhauer: expected compiled arlen binary under $framework_root/build" >&2
         exit 1
@@ -580,7 +588,7 @@ if [[ $is_app_root -eq 0 ]]; then
   fi
 
   if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
-    make boomhauer >/dev/null
+    framework_make boomhauer >/dev/null
     if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
       echo "boomhauer: expected compiled boomhauer binary under $framework_root/build" >&2
       exit 1
@@ -1024,7 +1032,7 @@ emit_app_makefile() {
 
 framework_artifacts_are_current() {
   framework_prebuilt_is_current "$framework_eocc_target" "$framework_lib" ||
-    make -q -C "$framework_root" "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
+    framework_make -q "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
 }
 
 framework_archive_contains_sanitizers() {
@@ -1064,8 +1072,8 @@ ensure_framework_artifacts_ready() {
     if framework_archive_contains_sanitizers; then
       echo "boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"
       if {
-        make -C "$framework_root" clean &&
-          make -C "$framework_root" "$framework_eocc_target" "$framework_lib"
+        framework_make clean &&
+          framework_make "$framework_eocc_target" "$framework_lib"
       } >"$output_file" 2>&1; then
         if [[ -s "$output_file" ]]; then
           cat "$output_file"
@@ -1084,7 +1092,7 @@ ensure_framework_artifacts_ready() {
     fi
   else
     echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
-    if make -C "$framework_root" "$framework_eocc_target" "$framework_lib" >"$output_file" 2>&1; then
+    if framework_make "$framework_eocc_target" "$framework_lib" >"$output_file" 2>&1; then
       if [[ -s "$output_file" ]]; then
         cat "$output_file"
       fi
@@ -1229,7 +1237,7 @@ ensure_error_server_built() {
     error_server_ready=1
     return 0
   fi
-  if ! make -C "$framework_root" boomhauer >/dev/null; then
+  if ! framework_make boomhauer >/dev/null; then
     echo "boomhauer: failed to build fallback dev error server" >&2
     return 1
   fi
