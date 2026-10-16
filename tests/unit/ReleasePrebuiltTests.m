@@ -75,4 +75,37 @@
   XCTAssertEqualObjects(@"trusted\nwarned\n", output);
 }
 
+// The check fails closed: with no SHA-256 tool or no toolchain version, no
+// manifest is written and none is trusted (empty used to equal empty).
+- (void)testMissingHasherOrToolchainVersionIsNeverTrusted {
+  NSString *output = [self runScenario:
+      @"mkdir -p src build tools-only; echo one > src/a.m; touch build/arlen.exe\n"
+      @"for tool in find sort tr xargs awk sed head rm mkdir; do cp \"$(command -v $tool)\" tools-only/ 2>/dev/null || ln -s \"$(command -v $tool)\" tools-only/$tool; done\n"
+      @"check() { if aln_release_prebuilt_is_current . build/arlen.exe 2>/dev/null; then echo \"$1=trusted\"; else echo \"$1=rebuild\"; fi; }\n"
+      @"state 0.1.0 aaa\n"
+      @"( PATH=\"$PWD/tools-only\"; aln_release_write_manifest . 2>/dev/null ) && echo wrote-without-hasher || echo no-hasher=refused\n"
+      @"printf 'source_digest=\\ntoolchain=0.1.0\\nbuild_flags=%s\\n' \"$(aln_release_build_flags)\" > build/.release-prebuilt\n"
+      @"( PATH=\"$PWD/tools-only\"; check empty-digest-no-hasher )\n"
+      @"export ARLEN_TOOLCHAIN_STATE_FILE=\"$PWD/missing.json\"\n"
+      @"aln_release_write_manifest . 2>/dev/null && echo wrote-without-toolchain || echo no-toolchain=refused\n"
+      @"printf 'source_digest=%s\\ntoolchain=\\nbuild_flags=%s\\n' \"$(aln_release_source_digest .)\" \"$(aln_release_build_flags)\" > build/.release-prebuilt\n"
+      @"check empty-toolchain\n"];
+  XCTAssertEqualObjects(@"no-hasher=refused\n"
+                        @"empty-digest-no-hasher=rebuild\n"
+                        @"no-toolchain=refused\n"
+                        @"empty-toolchain=rebuild\n",
+                        output);
+}
+
+// The build-flag environment the GNUmakefile sentinel tracks is part of the
+// manifest: an app built with ARLEN_ENABLE_LLHTTP=1 must not reuse a library
+// built without it.
+- (void)testBuildFlagChangeIsStale {
+  NSString *output = [self runScenario:
+      @"mkdir -p src build; echo one > src/a.m; touch build/arlen.exe\n"
+      @"state 0.1.0 aaa; unset ARLEN_ENABLE_LLHTTP; aln_release_write_manifest .\n"
+      @"if ARLEN_ENABLE_LLHTTP=1 aln_release_prebuilt_is_current . build/arlen.exe; then echo llhttp=trusted; else echo llhttp=rebuild; fi\n"];
+  XCTAssertEqualObjects(@"llhttp=rebuild\n", output);
+}
+
 @end
