@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 #import "ALNHTTPClient.h"
 #import "ALNLogger.h"
+#import "../shared/ALNTestSupport.h"
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -212,8 +213,7 @@
 
 - (void)testErrorsAndLogsNeverCarryCredentialsBodiesOrQueries {
   int fds[2];
-  XCTAssertEqual(0, pipe(fds));
-  fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+  XCTAssertTrue(ALNTestCreatePipe(fds, YES));
   ALNLogger *logger = [[ALNLogger alloc] initWithFormat:@"json"];
   logger.minimumLevel = ALNLogLevelInfo;
   logger.outputFileDescriptor = fds[1];

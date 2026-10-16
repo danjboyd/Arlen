@@ -7,6 +7,7 @@
 #import "ALNConfig.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface ConfigTests : XCTestCase
 @end
@@ -84,15 +85,7 @@
 }
 
 - (NSString *)createTempAppRoot {
-  NSString *templatePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-config-XXXXXX"];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-config");
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {

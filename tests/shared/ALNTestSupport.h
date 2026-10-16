@@ -55,6 +55,15 @@ FOUNDATION_EXPORT NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds);
 FOUNDATION_EXPORT BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode);
 FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     NSDictionary<NSString *, NSString *> *environment);
+// pipe() for log/stderr capture: _pipe with a 1 MiB binary buffer on Windows,
+// which has no pipe(). nonBlockingRead sets O_NONBLOCK on the read end where
+// the platform has it (POSIX); Windows anonymous pipes have no such mode.
+FOUNDATION_EXPORT BOOL ALNTestCreatePipe(int fds[_Nonnull 2], BOOL nonBlockingRead);
+// A uniform random value in [0, upperBound), for ports and unique names.
+// arc4random_uniform is not available on Windows (MinGW).
+FOUNDATION_EXPORT uint32_t ALNTestRandomUniform(uint32_t upperBound);
+// YES while a process with this pid exists (kill(pid, 0) on POSIX).
+FOUNDATION_EXPORT BOOL ALNTestProcessExists(int pid);
 
 NS_ASSUME_NONNULL_END
 

@@ -6,6 +6,7 @@
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNSearchModule.h"
+#import "../shared/ALNTestSupport.h"
 
 static BOOL gPhase16DSearchBuildShouldFail = NO;
 
@@ -116,17 +117,7 @@ static void Phase16DResetOrderStore(void) {
 }
 
 - (NSString *)temporaryDirectory {
-  NSString *template =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-phase16d-XXXXXX"];
-  const char *templateCString = [template fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  XCTAssertNotEqual(buffer, NULL);
-  char *created = mkdtemp(buffer);
-  XCTAssertNotEqual(created, NULL);
-  NSString *result = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:buffer
-                                                                                  length:strlen(buffer)];
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-phase16d");
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {

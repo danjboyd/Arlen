@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#if !defined(_WIN32)
 #import <dlfcn.h>
+#endif
 #import <objc/runtime.h>
 
 #import "../shared/ALNTestSupport.h"
@@ -400,6 +402,9 @@
 }
 
 - (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
+#if defined(_WIN32)
+  XCTSkip(@"Loads a library whose symbols resolve against the test bundle at dlopen time; Windows DLLs need import libraries instead");
+#else
   NSError *error = nil;
   NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
       classPrefix:@"ReservedRuntime" error:&error];
@@ -466,6 +471,7 @@
   XCTAssertEqual(ALNORMModelStateLoaded, model.state);
   [model markDetached];
   XCTAssertEqual(ALNORMModelStateDetached, model.state);
+#endif
 }
 
 - (void)testQuotedPhysicalNamesAndAliasCollisions {

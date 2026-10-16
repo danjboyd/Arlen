@@ -6,6 +6,14 @@
 #import <ctype.h>
 #import <string.h>
 #import <unistd.h>
+#import <fcntl.h>
+#if defined(_WIN32)
+#import <io.h>
+#import <windows.h>
+#endif
+#import <errno.h>
+
+#import "ALNPlatform.h"
 
 static NSString *const ALNTestSupportErrorDomain = @"Arlen.TestSupport.Error";
 
@@ -458,4 +466,56 @@ BOOL ALNTestStopServerTask(NSTask *task) {
   }
   [task waitUntilExit];
   return ![task isRunning];
+}
+
+BOOL ALNTestCreatePipe(int fds[2], BOOL nonBlockingRead) {
+  fds[0] = -1;
+  fds[1] = -1;
+#if defined(_WIN32)
+  (void)nonBlockingRead;
+  return _pipe(fds, 1u << 20, _O_BINARY) == 0;
+#else
+  if (pipe(fds) != 0) {
+    return NO;
+  }
+  if (nonBlockingRead) {
+    int flags = fcntl(fds[0], F_GETFL);
+    if (flags < 0 || fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+      return NO;
+    }
+  }
+  return YES;
+#endif
+}
+
+uint32_t ALNTestRandomUniform(uint32_t upperBound) {
+  if (upperBound < 2) {
+    return 0;
+  }
+  // Rejection sampling, as arc4random_uniform does, to avoid modulo bias.
+  uint32_t limit = UINT32_MAX - (UINT32_MAX % upperBound);
+  uint32_t value = 0;
+  do {
+    if (!ALNPlatformFillRandomBytes(&value, sizeof(value))) {
+      value = (uint32_t)[[NSUUID UUID] hash];
+    }
+  } while (value >= limit);
+  return value % upperBound;
+}
+
+BOOL ALNTestProcessExists(int pid) {
+  if (pid <= 0) {
+    return NO;
+  }
+#if defined(_WIN32)
+  HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, (DWORD)pid);
+  if (process == NULL) {
+    return NO;
+  }
+  BOOL running = (WaitForSingleObject(process, 0) == WAIT_TIMEOUT);
+  CloseHandle(process);
+  return running;
+#else
+  return kill(pid, 0) == 0 || errno == EPERM;
+#endif
 }

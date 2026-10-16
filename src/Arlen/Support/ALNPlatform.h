@@ -34,6 +34,12 @@ FILE *_Nullable ALNPlatformOpenFile(NSString *path, const char *mode);
 // Memory-mapped file contents. The MSYS2 gnustep-base package on Windows has
 // no +dataWithContentsOfFile:options:error:, only +dataWithContentsOfMappedFile:.
 NSData *_Nullable ALNPlatformMappedFileData(NSString *path, NSError *_Nullable *_Nullable error);
+// Opens (creating, 0600) the lock file at path and blocks until this process
+// holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
+// on Windows. Returns the descriptor, or -1 with errno set.
+int ALNPlatformOpenExclusiveLock(NSString *path);
+// Releases a lock from ALNPlatformOpenExclusiveLock and closes its descriptor.
+void ALNPlatformReleaseExclusiveLock(int descriptor);
 
 NS_ASSUME_NONNULL_END
 

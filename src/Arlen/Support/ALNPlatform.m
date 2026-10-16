@@ -9,12 +9,18 @@
 
 #if defined(_WIN32)
 #include <bcrypt.h>
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
+#include <sys/stat.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/time.h>
 #include <unistd.h>
 #endif
+#include <errno.h>
 
 NSString *ALNPlatformName(void) {
 #if defined(__APPLE__)
@@ -385,5 +391,59 @@ FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
   return _wfopen((const wchar_t *)[path fileSystemRepresentation], wideMode);
 #else
   return fopen([path fileSystemRepresentation], mode);
+#endif
+}
+
+int ALNPlatformOpenExclusiveLock(NSString *path) {
+  if ([path length] == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(_WIN32)
+  int descriptor = _wopen((const wchar_t *)[path fileSystemRepresentation],
+                          _O_RDWR | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE);
+  if (descriptor < 0) {
+    return -1;
+  }
+  HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
+  OVERLAPPED overlapped;
+  memset(&overlapped, 0, sizeof(overlapped));
+  if (handle == INVALID_HANDLE_VALUE ||
+      !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+    _close(descriptor);
+    errno = EIO;
+    return -1;
+  }
+  return descriptor;
+#else
+  int descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT, 0600);
+  if (descriptor < 0) {
+    return -1;
+  }
+  if (flock(descriptor, LOCK_EX) != 0) {
+    int savedErrno = errno;
+    close(descriptor);
+    errno = savedErrno;
+    return -1;
+  }
+  return descriptor;
+#endif
+}
+
+void ALNPlatformReleaseExclusiveLock(int descriptor) {
+  if (descriptor < 0) {
+    return;
+  }
+#if defined(_WIN32)
+  HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
+  if (handle != INVALID_HANDLE_VALUE) {
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    (void)UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &overlapped);
+  }
+  _close(descriptor);
+#else
+  (void)flock(descriptor, LOCK_UN);
+  close(descriptor);
 #endif
 }

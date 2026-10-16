@@ -3,7 +3,6 @@
 
 #import "ALNEOCRuntime.h"
 #import <dispatch/dispatch.h>
-#include <pthread.h>
 
 typedef struct {
   dispatch_semaphore_t held;
@@ -544,10 +543,15 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   RuntimeClassMonitorState state = {
     dispatch_semaphore_create(0), dispatch_semaphore_create(0), -1
   };
-  pthread_t thread;
-  int rc = pthread_create(&thread, NULL, HoldRuntimeClassMonitor, &state);
-  XCTAssertEqual(rc, 0);
-  if (rc != 0) { return; }
+  // NSThread, not pthread: on Windows <pthread.h> clashes with the pthread
+  // types libdispatch's headers (pulled in by Foundation) declare.
+  RuntimeClassMonitorState *statePointer = &state;
+  dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+  NSThread *thread = [[NSThread alloc] initWithBlock:^{
+    (void)HoldRuntimeClassMonitor(statePointer);
+    dispatch_semaphore_signal(finished);
+  }];
+  [thread start];
   long ready = dispatch_semaphore_wait(state.held, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   if (ready == 0) {
     ALNEOCRegisterTemplate(@"monitor-independent", RenderGreeting);
@@ -557,12 +561,13 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
     ALNEOCClearTemplateRegistry();
   }
   dispatch_semaphore_signal(state.release);
-  pthread_join(thread, NULL);
+  (void)dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
   XCTAssertEqual(ready, 0);
   XCTAssertEqual(state.waitResult, 0, @"Registry operations waited for the shared NSThread class monitor");
 #if !OS_OBJECT_USE_OBJC
   dispatch_release(state.held);
   dispatch_release(state.release);
+  dispatch_release(finished);
 #endif
 }
 

@@ -31,8 +31,7 @@
   } @finally {
     XCTAssertTrue(ALNTestStopServerTask(task));
   }
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
   XCTAssertTrue(ALNTestStopServerTask(task));
 }
 - (void)testServerCleanupRunsAfterAnException {
@@ -52,8 +51,7 @@
     caught = [exception.name isEqualToString:@"SimulatedTestFailure"];
   }
   XCTAssertTrue(caught);
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
 }
 - (void)testServerCleanupEscalatesWhenTermIsIgnored {
   NSString *ready = [ALNTestTemporaryDirectory(@"server-cleanup") stringByAppendingPathComponent:@"ready"];
@@ -70,8 +68,7 @@
     XCTAssertTrue(ALNTestStopServerTask(task));
     [[NSFileManager defaultManager] removeItemAtPath:[ready stringByDeletingLastPathComponent] error:NULL];
   }
-  XCTAssertEqual(-1, kill(pid, 0));
-  XCTAssertEqual(ESRCH, errno);
+  XCTAssertFalse(ALNTestProcessExists(pid));
 }
 - (void)testWaitUntilReturnsOnceTheConditionHolds {
   __block NSUInteger checks = 0;

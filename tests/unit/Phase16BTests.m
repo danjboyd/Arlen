@@ -7,6 +7,7 @@
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
 #import "ALNRealtime.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase16BNotification : NSObject <ALNNotificationDefinition>
 @end
@@ -149,17 +150,7 @@
 }
 
 - (NSString *)temporaryDirectory {
-  NSString *template =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-phase16b-XXXXXX"];
-  const char *templateCString = [template fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  XCTAssertNotEqual(buffer, NULL);
-  char *created = mkdtemp(buffer);
-  XCTAssertNotEqual(created, NULL);
-  NSString *result = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:buffer
-                                                                                  length:strlen(buffer)];
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(@"arlen-phase16b");
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {

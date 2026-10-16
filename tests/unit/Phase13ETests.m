@@ -220,15 +220,7 @@ static NSUInteger gPhase15UIContextCalls = 0;
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"phase15"]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix ?: @"phase15");
 }
 
 // Kept with the test's results (saved only if the test fails).
@@ -889,7 +881,8 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertTrue([payload[@"updated_files"] containsObject:@"config/app.plist"]);
 
   NSString *configPath = [tempApp stringByAppendingPathComponent:@"config/app.plist"];
-  NSData *configData = [NSData dataWithContentsOfFile:configPath options:0 error:&error];
+  // Not +dataWithContentsOfFile:options:error:, which Windows gnustep-base 1.31 lacks.
+  NSData *configData = [NSData dataWithContentsOfFile:configPath];
   XCTAssertNil(error);
   XCTAssertNotNil(configData);
   NSPropertyListFormat format = NSPropertyListOpenStepFormat;
