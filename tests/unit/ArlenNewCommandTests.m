@@ -112,4 +112,31 @@
   [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
 }
 
+// The alias directory must be the user's own and private: another user could
+// otherwise pre-create it in a shared tmp and swap an alias to their sources.
+- (void)testBoomhauerRefusesAnAliasDirectoryOthersCanWrite {
+#if defined(_WIN32)
+  XCTSkip(@"POSIX ownership and mode bits; under MSYS2 tmp is inside the user's own toolchain root");
+#endif
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-new-alias-perms");
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  NSString *output = nil;
+  XCTAssertEqual(0, [self runNewWithTarget:@"My App" inDirectory:root output:&output], @"%@", output);
+  NSString *tmp = [root stringByAppendingPathComponent:@"shared-tmp"];
+  int exitCode = -1;
+  NSString *command = [NSString stringWithFormat:
+      @"mkdir -p %@ && mkdir -m 777 %@/arlen-boomhauer-aliases-$(id -u) && chmod 777 %@/arlen-boomhauer-aliases-$(id -u) && "
+       "cd %@ && TMPDIR=%@ LD_PRELOAD='' XCTEST_LD_PRELOAD='' ARLEN_FRAMEWORK_ROOT=%@ %@ --prepare-only 2>&1",
+      ALNTestShellQuote(tmp), ALNTestShellQuote(tmp), ALNTestShellQuote(tmp),
+      ALNTestShellQuote([root stringByAppendingPathComponent:@"My App"]), ALNTestShellQuote(tmp),
+      ALNTestShellQuote(ALNTestRepoRoot()), ALNTestShellQuote(ALNTestPathFromRepoRoot(@"bin/boomhauer"))];
+  output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertNotEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"must be a directory owned by you and writable only by you"], @"%@", output);
+  [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+}
+
 @end
