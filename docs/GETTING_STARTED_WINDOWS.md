@@ -39,7 +39,8 @@ the toolchain:
 > breaks the GNUstep headers. Use plain `pacman -S` as shown, and install
 > nothing else into the managed root unless these docs say to.
 
-Optional, for PostgreSQL apps only: install libpq the same way, with plain
+Optional, for PostgreSQL apps only, until the release zip bundles libpq:
+install it the same way, with plain
 `pacman -S` and never `-Sy`/`-Syu`:
 
 ```powershell
@@ -112,10 +113,10 @@ is `.boomhauer\build\boomhauer-app.exe`.
 ## 4. Work From a Source Checkout
 
 To change the framework itself or run its test suites, work from a checkout.
-Clone it with Git for Windows:
+Clone it with Git for Windows, with line-ending conversion turned off:
 
 ```powershell
-git clone --recursive https://github.com/danjboyd/Arlen.git
+git clone -c core.autocrlf=false --recursive https://github.com/danjboyd/Arlen.git
 cd Arlen
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1
 ```
@@ -139,8 +140,17 @@ order: `ARLEN_MSYS_ROOT`, `%LOCALAPPDATA%\gnustep-cli`,
 `%ProgramFiles%\gnustep-cli`, then a stock MSYS2 at `C:\msys64`.
 
 The repository's `.gitattributes` keeps shell scripts and makefiles on LF line
-endings, whatever `core.autocrlf` is set to. A clone made before that file
-existed may have CRLF scripts that break bash. Clone again to fix it.
+endings, but it doesn't apply to the submodules under `vendor/`. With Git for
+Windows' default `core.autocrlf=true`, those would check out with CRLF line
+endings, which break bash. That's why the clone above sets
+`core.autocrlf=false`. To fix an existing clone, which may predate
+`.gitattributes`, re-check it out without CRLF conversion:
+
+```powershell
+git config core.autocrlf false
+git rm --cached -r -q . ; git reset --hard
+git submodule foreach "git config core.autocrlf false; git rm --cached -r -q . ; git reset --hard"
+```
 
 More detail on the `CLANG64` lanes and the packaged-release contract is in
 [Windows CLANG64](WINDOWS_CLANG64.md).
@@ -149,6 +159,8 @@ More detail on the `CLANG64` lanes and the packaged-release contract is in
 
 - **Production:** `propane`, `jobs-worker` and `arlen deploy` targets are not
   supported on Windows until 0.4.0.
+- **Repository-root `boomhauer`:** running `boomhauer` from the framework
+  checkout root is not supported on Windows yet. Run it from an app root.
 - **Paths:** Windows long paths are off by default. Keep install roots and
   app directories short; `%LOCALAPPDATA%\Arlen` is fine.
 - **Symlinks:** a standard user cannot create symlinks on Windows. Arlen uses

@@ -822,7 +822,7 @@ Build and run `boomhauer` for the current app root.
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
-- on Windows, runs inside the gnustep-cli `CLANG64` environment (the installed `arlen.cmd` and `scripts\run_clang64.ps1` both enter it) and builds `.boomhauer\build\boomhauer-app.exe`; watch mode and the build-error page work as on Linux
+- on Windows, runs inside the gnustep-cli `CLANG64` environment (the installed `arlen.cmd` and `scripts\run_clang64.ps1` both enter it) and builds `.boomhauer\build\boomhauer-app.exe`; watch mode and the build-error page work as on Linux. Run it from an app root: repository-root `boomhauer` is not supported on Windows yet
 
 ### `arlen jobs worker [worker args...]`
 
