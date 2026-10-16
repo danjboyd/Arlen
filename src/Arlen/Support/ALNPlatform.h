@@ -44,6 +44,11 @@ FILE *_Nullable ALNPlatformOpenFile(NSString *path, const char *mode);
 // +dataWithContentsOfFile:options:error:, and its +dataWithContentsOfMappedFile:
 // reads the whole file into the heap (no HAVE_MMAP).
 NSData *_Nullable ALNPlatformMappedFileData(NSString *path, NSError *_Nullable *_Nullable error);
+// Removes a file or directory that ALNPlatformMappedFileData may still have
+// mapped. POSIX unlink leaves existing mappings valid; Windows refuses to delete
+// a mapped file, so whatever cannot go yet is removed when its last mapped view
+// is released.
+void ALNPlatformRemoveItemWhenUnmapped(NSString *path);
 // Opens (creating, 0600) the lock file at path and blocks until this process
 // holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
 // on Windows. Returns the descriptor, or -1 with errno set.
