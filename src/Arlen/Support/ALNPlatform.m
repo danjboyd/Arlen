@@ -409,15 +409,94 @@ void *ALNPlatformLoadWindowsLibrary(NSString *path) {
 }
 #endif
 
-NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
-#if defined(_WIN32) && defined(GNUSTEP_BASE_LIBRARY)
-  NSData *data = [NSData dataWithContentsOfMappedFile:path];
-  if (data == nil && error != NULL) {
-    *error = [NSError errorWithDomain:NSCocoaErrorDomain
-                                 code:NSFileReadUnknownError
-                             userInfo:@{NSFilePathErrorKey : path ?: @""}];
+#if defined(_WIN32)
+// A read-only file mapping behind NSData. The MSYS2 gnustep-base is built
+// without HAVE_MMAP, so +dataWithContentsOfMappedFile: there reads the whole
+// file into the heap (a 256 MiB spool file grew private memory by 257 MiB),
+// which broke the spool-to-disk memory bound for request bodies and uploads.
+@interface ALNWindowsMappedFileData : NSData {
+  const void *_view;
+  NSUInteger _length;
+}
+- (instancetype)initWithView:(const void *)view length:(NSUInteger)length;
+@end
+
+@implementation ALNWindowsMappedFileData
+- (instancetype)initWithView:(const void *)view length:(NSUInteger)length {
+  if ((self = [super init])) {
+    _view = view;
+    _length = length;
   }
-  return data;
+  return self;
+}
+- (const void *)bytes {
+  return _view;
+}
+- (NSUInteger)length {
+  return _length;
+}
+- (void)dealloc {
+  if (_view != NULL) {
+    UnmapViewOfFile(_view);
+  }
+}
+@end
+
+static NSError *ALNPlatformMappedFileError(NSString *path) {
+  return [NSError errorWithDomain:NSCocoaErrorDomain
+                             code:NSFileReadUnknownError
+                         userInfo:@{
+                           NSFilePathErrorKey : path ?: @"",
+                           @"ALNWindowsLastError" : @((unsigned long)GetLastError()),
+                         }];
+}
+#endif
+
+NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
+#if defined(_WIN32)
+  NSMutableData *wide = [[[path ?: @"" stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  // Share everything, delete included: spool files are moved (an upload's
+  // -writeToFile:) or removed while their bytes are still mapped.
+  HANDLE file = CreateFileW((const wchar_t *)[wide bytes], GENERIC_READ,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  LARGE_INTEGER size;
+  if (!GetFileSizeEx(file, &size) || (unsigned long long)size.QuadPart > (unsigned long long)NSUIntegerMax) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    CloseHandle(file);
+    return nil;
+  }
+  if (size.QuadPart == 0) {
+    CloseHandle(file);
+    return [NSData data];  // a zero-length file cannot be mapped
+  }
+  HANDLE mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
+  CloseHandle(file);  // the mapping keeps the file referenced
+  if (mapping == NULL) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  const void *view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+  CloseHandle(mapping);  // the view keeps the mapping alive
+  if (view == NULL) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  return [[ALNWindowsMappedFileData alloc] initWithView:view length:(NSUInteger)size.QuadPart];
 #else
   return [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
 #endif
