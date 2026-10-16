@@ -41,8 +41,13 @@ function Install-Arlen {
   $ProgressPreference = "SilentlyContinue"
 
   $repoSlug = "danjboyd/Arlen"
-  $bootstrapSetup = "iwr https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
-    "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json"
+  # gnustep-cli publishes each toolchain version under the release tag of the
+  # same name; 0.1.0 is the toolchain Arlen's Windows support started with.
+  function BootstrapSetup([string]$ToolchainVersion) {
+    if (-not $ToolchainVersion) { $ToolchainVersion = "0.1.0" }
+    return "iwr https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v$ToolchainVersion/scripts/bootstrap/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
+      "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/release-manifest.json"
+  }
   function Say([string]$Message) { Write-Host "arlen-install: $Message" }
   function Die([string]$Message) { throw "arlen-install: error: $Message" }
 
@@ -81,7 +86,7 @@ no gnustep-cli managed MSYS2 CLANG64 toolchain was found (tried: $([string]::Joi
 Arlen's Windows release runs on the gnustep-cli managed toolchain. Install it
 for your user with the gnustep-cli PowerShell bootstrap:
 
-  $bootstrapSetup
+  $(BootstrapSetup "")
 
 Then rerun this installer. If the toolchain lives somewhere else, pass
 -MsysRoot or set ARLEN_MSYS_ROOT. See docs/GETTING_STARTED_WINDOWS.md.
@@ -180,9 +185,10 @@ a partial upgrade breaks its python and clang.
 Arlen $Version was built against gnustep-cli toolchain $wantToolchain, but $resolvedRoot has $($state.Version).
 Rerun the gnustep-cli bootstrap setup to install toolchain $($wantToolchain):
 
-  $bootstrapSetup
+  $(BootstrapSetup $wantToolchain)
 
-Then rerun this installer.
+Then rerun this installer. If that release isn't found, the Arlen $Version
+release notes name the gnustep-cli release to use.
 "@
     } elseif ($wantToolchainSha -and $state.Sha256 -and $state.Sha256 -ne $wantToolchainSha.ToLowerInvariant()) {
       Say "warning: $resolvedRoot has a different build of gnustep-cli toolchain $wantToolchain than Arlen $Version was built against; if arlen fails to start, rerun the gnustep-cli bootstrap setup"
@@ -192,9 +198,17 @@ Then rerun this installer.
     $dest = Join-Path $Prefix $Version
     if (Test-Path -LiteralPath $dest) {
       Say "replacing existing $dest"
-      Remove-Item -LiteralPath $dest -Recurse -Force
+      try {
+        Remove-Item -LiteralPath $dest -Recurse -Force
+      } catch {
+        Die "could not remove $($dest): $($_.Exception.Message)`nA file in it is probably in use. Stop any arlen or boomhauer running from this install, then rerun this installer."
+      }
     }
-    Move-Item -LiteralPath $top -Destination $dest
+    try {
+      Move-Item -LiteralPath $top -Destination $dest
+    } catch {
+      Die "could not move the release into $($dest): $($_.Exception.Message)"
+    }
   } finally {
     Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
   }
@@ -250,6 +264,51 @@ $bootstrap = 'export PATH=/clang64/bin:/usr/bin:$PATH CC=clang CXX=clang++ ' +
 # Windows PowerShell 5.1 does not escape double quotes inside arguments to a
 # native program, and env.exe parses its command line with the Windows rules,
 # so escape them as \" or bash receives a broken script.
+# Put this launcher in a Job Object that kills its members when the last handle
+# closes. Windows does not end children with their parent, so without it,
+# closing the console or ending this process left env.exe, bash and the
+# server running (and holding the port). Children join the job automatically.
+# The helper compiles once next to this script; failure only loses the cleanup.
+try {
+  if (-not ('ArlenLauncherJob1' -as [type])) {
+    $jobDll = Join-Path $PSScriptRoot 'arlen-launcher-job1.dll'
+    $jobSource = @"
+using System;
+using System.Runtime.InteropServices;
+public static class ArlenLauncherJob1 {
+  [StructLayout(LayoutKind.Sequential)] struct Basic {
+    public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags;
+    public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit;
+    public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass;
+  }
+  [StructLayout(LayoutKind.Sequential)] struct IoCounters { public ulong R, W, O, RB, WB, OB; }
+  [StructLayout(LayoutKind.Sequential)] struct Extended {
+    public Basic BasicLimits; public IoCounters Io; public UIntPtr ProcessMemoryLimit;
+    public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed;
+  }
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+  [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref Extended info, uint length);
+  [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  static IntPtr job;  // held until this process exits; closing it kills the tree
+  public static bool KillTreeOnExit() {
+    job = CreateJobObject(IntPtr.Zero, null);
+    if (job == IntPtr.Zero) return false;
+    Extended info = new Extended();
+    info.BasicLimits.LimitFlags = 0x2000;  // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if (!SetInformationJobObject(job, 9, ref info, (uint)Marshal.SizeOf(typeof(Extended)))) return false;
+    return AssignProcessToJobObject(job, GetCurrentProcess());
+  }
+}
+"@
+    if (-not (Test-Path -LiteralPath $jobDll)) {
+      try { Add-Type -TypeDefinition $jobSource -OutputAssembly $jobDll -OutputType Library } catch { }
+    }
+    if (Test-Path -LiteralPath $jobDll) { Add-Type -Path $jobDll } else { Add-Type -TypeDefinition $jobSource }
+  }
+  [void][ArlenLauncherJob1]::KillTreeOnExit()
+} catch {
+}
 $nativeArgs = @($args | ForEach-Object { ([string]$_).Replace('"', '\"') })
 & $envExe 'MSYSTEM=CLANG64' 'CHERE_INVOKING=1' "ARLEN_HOME_WIN=$arlenHome" '/usr/bin/bash' '-lc' $bootstrap.Replace('"', '\"') 'arlen' @nativeArgs
 exit $LASTEXITCODE
