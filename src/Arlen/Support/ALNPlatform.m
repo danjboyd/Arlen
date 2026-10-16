@@ -114,7 +114,19 @@ NSArray<NSString *> *ALNPlatformWindowsMSYSRoots(void) {
   if ([programFiles length] > 0) {
     [roots addObject:[programFiles stringByAppendingPathComponent:@"gnustep-cli"]];
   }
-  [roots addObject:@"C:/msys64"];
+  // Any other root (a stock C:\msys64) only when it is the toolchain in use,
+  // i.e. GNUSTEP_MAKEFILES points into it. An unprivileged user can create
+  // C:\msys64 on a host without MSYS2 and plant DLLs there, so it is never a
+  // default.
+  NSString *makefiles = [environment[@"GNUSTEP_MAKEFILES"] stringByReplacingOccurrencesOfString:@"\\"
+                                                                                       withString:@"/"];
+  NSRange clang64 = [makefiles rangeOfString:@"/clang64/share/GNUstep/Makefiles" options:NSCaseInsensitiveSearch];
+  if (clang64.location != NSNotFound && clang64.location > 0) {
+    NSString *activeRoot = [makefiles substringToIndex:clang64.location];
+    if (ALNPlatformPathIsAbsolute(activeRoot) && ![roots containsObject:activeRoot]) {
+      [roots addObject:activeRoot];
+    }
+  }
   return roots;
 #else
   return @[];
@@ -133,7 +145,11 @@ NSString *ALNPlatformBashPath(void) {
       return candidate;
     }
   }
-  return @"bash.exe";
+  // Not a bare "bash.exe": that could resolve to System32's bash.exe (WSL). Name
+  // the managed toolchain's path so the launch error says where bash belongs
+  // (or set ARLEN_BASH_PATH).
+  NSString *managedRoot = [ALNPlatformWindowsMSYSRoots() firstObject] ?: @"C:/gnustep-cli";
+  return [managedRoot stringByAppendingPathComponent:@"usr/bin/bash.exe"];
 #else
   return @"/bin/bash";
 #endif
@@ -222,8 +238,9 @@ NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void) {
   [candidates addObject:@"libiodbc.2.dylib"];
   [candidates addObject:@"libiodbc.dylib"];
 #elif defined(_WIN32)
-  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libodbc-2.dll", @"libodbc.dll" ]);
+  // The system ODBC driver manager first, then the toolchain's unixODBC.
   [candidates addObject:@"odbc32.dll"];
+  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libodbc-2.dll", @"libodbc.dll" ]);
   [candidates addObject:@"libodbc-2.dll"];
   [candidates addObject:@"libodbc.dll"];
 #else
@@ -370,6 +387,28 @@ BOOL ALNPlatformPathIsAbsolute(NSString *path) {
   return NO;
 }
 
+#if defined(_WIN32)
+void *ALNPlatformLoadWindowsLibrary(NSString *path) {
+  if ([path length] == 0) {
+    return NULL;
+  }
+  BOOL absolute = ALNPlatformPathIsAbsolute(path);
+  // LOAD_WITH_ALTERED_SEARCH_PATH wants backslashes, and paths built with
+  // -stringByAppendingPathComponent: mix them.
+  NSString *native = absolute ? [path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] : path;
+  NSMutableData *wide = [[native dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  if (wide == nil) {
+    return NULL;
+  }
+  [wide appendBytes:"\0\0" length:2];
+  const wchar_t *widePath = (const wchar_t *)[wide bytes];
+  // An absolute path resolves the DLL's own imports from its directory (a
+  // bundled build/dll next to its OpenSSL), not only the exe's and PATH.
+  return (void *)(absolute ? LoadLibraryExW(widePath, NULL, LOAD_WITH_ALTERED_SEARCH_PATH)
+                           : LoadLibraryW(widePath));
+}
+#endif
+
 NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
 #if defined(_WIN32) && defined(GNUSTEP_BASE_LIBRARY)
   NSData *data = [NSData dataWithContentsOfMappedFile:path];
@@ -408,7 +447,7 @@ int ALNPlatformOpenExclusiveLock(NSString *path) {
   }
 #if defined(_WIN32)
   int descriptor = _wopen((const wchar_t *)[path fileSystemRepresentation],
-                          _O_RDWR | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE);
+                          _O_RDWR | _O_CREAT | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
   if (descriptor < 0) {
     return -1;
   }

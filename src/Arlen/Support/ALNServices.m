@@ -2242,9 +2242,11 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   if (timeoutMillis <= 0) {
     timeoutMillis = 2500;
   }
+#if !defined(_WIN32)
   struct timeval timeoutValue;
   timeoutValue.tv_sec = timeoutMillis / 1000;
   timeoutValue.tv_usec = (timeoutMillis % 1000) * 1000;
+#endif
 
   for (struct addrinfo *candidate = result; candidate != NULL; candidate = candidate->ai_next) {
     socketFD = socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
