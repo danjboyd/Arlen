@@ -64,6 +64,12 @@ with `pacman`. It does not include libcurl; install it inside that root:
 pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl
 ```
 
+Never run `pacman -Sy` or `pacman -Syu` against the managed root, and don't
+install anything else into it. The managed root is a pinned toolchain: a
+database refresh makes later installs partial upgrades (one left the root's
+`python3` newer than its `expat`, so `import pyexpat` failed), and the live
+repository's current clang breaks the shipped gnustep-base headers.
+
 Known issues in the `v0.1.0` Windows toolchain, worked around by Arlen's
 build: libdispatch's `os/generic_win_base.h` redefines `mode_t` (Arlen
 compiles with `-DHAVE_MODE_T=1`) and `pthread_attr_t` (Arlen sources avoid
@@ -160,6 +166,15 @@ The current Windows packaged-release contract is now explicit:
 
 - build releases from an MSYS2 `CLANG64` shell with the GNUstep environment
   initialized
+- a release tree that ships `build/arlen.exe`, `build/boomhauer.exe`,
+  `build/eocc.exe` and `build/lib/libArlenFramework.a` without `build/obj`
+  carries `build/.release-prebuilt` (`source_digest`, `toolchain`,
+  `toolchain_sha256`; written by `aln_release_write_manifest` in
+  `tools/release_prebuilt.sh`). While the digest over the framework sources
+  and the gnustep-cli `toolchain_version` both still match, `bin/arlen` and
+  `boomhauer` use the prebuilt outputs instead of `make`. Any mismatch deletes
+  the manifest and the normal make checks rebuild from then on; a
+  `toolchain_sha256` mismatch alone only warns.
 - packaged release manifests record the actual runtime/helper paths for
   `arlen`, `boomhauer`, `propane`, `jobs-worker`, the app runtime binary, and
   the operability probe helper

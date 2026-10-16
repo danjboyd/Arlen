@@ -22,7 +22,7 @@
 }
 - (void)testServerCleanupReapsAnExecLaunchedProcess {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exec sleep 60" ];
   [task launch];
   int pid = task.processIdentifier;
@@ -36,7 +36,7 @@
 }
 - (void)testServerCleanupRunsAfterAnException {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exec sleep 60" ];
   [task launch];
   int pid = task.processIdentifier;
@@ -56,7 +56,7 @@
 - (void)testServerCleanupEscalatesWhenTermIsIgnored {
   NSString *ready = [ALNTestTemporaryDirectory(@"server-cleanup") stringByAppendingPathComponent:@"ready"];
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", [NSString stringWithFormat:@"trap '' TERM; touch %@; exec sleep 60", ALNTestShellQuote(ready)] ];
   [task launch];
   int pid = task.processIdentifier;
@@ -89,7 +89,7 @@
 }
 - (void)testWaitForTaskExitReapsTheTask {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/sh";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-c", @"exit 3" ];
   [task launch];
   XCTAssertTrue(ALNTestWaitForTaskExit(task, 10.0));

@@ -304,7 +304,10 @@ static void Phase16DResetOrderStore(void) {
   XCTAssertNotNil(queued);
   XCTAssertNil(error);
 
-  NSDictionary *workerSummary = [[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error];
+  // One job: the failed rebuild is retried with retryDelaySeconds = 0, and on
+  // a ~1 ms clock (Windows) that retry can be due in the same worker pass,
+  // which would record a second failure.
+  NSDictionary *workerSummary = [[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:1 error:&error];
   XCTAssertNotNil(workerSummary);
   XCTAssertNil(error);
 

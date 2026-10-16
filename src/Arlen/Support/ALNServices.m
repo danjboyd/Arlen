@@ -499,6 +499,15 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
   return value;
 }
 
+// A job is due when notBefore <= now. Stored notBefore values round-trip
+// through timeIntervalSince1970, which can leave a job enqueued in the same
+// clock tick ~1e-7 s after "now", so an immediate dequeue missed it (often with
+// GNUstep's ~1 ms clock on Windows; rarely elsewhere). Absorb that rounding
+// only: 1 microsecond, far below any real scheduling delay.
+static BOOL ALNJobIsDue(NSDate *notBefore, NSDate *now) {
+  return notBefore == nil || [notBefore timeIntervalSinceDate:now] <= 1e-6;
+}
+
 static NSDate *ALNDateFromTimestampValue(id value, NSDate *defaultValue) {
   if ([value isKindOfClass:[NSDate class]]) {
     return value;
@@ -1033,7 +1042,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       continue;
     }
     ALNJobEnvelope *current = (ALNJobEnvelope *)candidate;
-    if ([current.notBefore compare:now] != NSOrderedDescending) {
+    if (ALNJobIsDue(current.notBefore, now)) {
       foundIndex = idx;
       selected = current;
       break;
@@ -1598,7 +1607,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   ALNJobEnvelope *selected = nil;
   for (NSUInteger idx = 0; idx < [pending count]; idx++) {
     ALNJobEnvelope *candidate = [pending[idx] isKindOfClass:[ALNJobEnvelope class]] ? pending[idx] : nil;
-    if (candidate != nil && [candidate.notBefore compare:now] != NSOrderedDescending) {
+    if (candidate != nil && ALNJobIsDue(candidate.notBefore, now)) {
       foundIndex = idx;
       selected = candidate;
       break;

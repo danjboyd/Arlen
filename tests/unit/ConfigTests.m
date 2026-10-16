@@ -71,10 +71,16 @@
       XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error], @"%@", bad);
       XCTAssertTrue([error.localizedDescription containsString:@"spoolDirectory"], @"%@", error);
     }
-    XCTAssertTrue([self writeFile:path content:@"{ requestLimits = { spoolThresholdBytes = \"4096\"; spoolDirectory = \"/var/spool/arlen\"; }; }"]);
+#if defined(_WIN32)
+    NSString *spoolDirectory = @"C:/var/spool/arlen";  // absolute needs a drive on Windows
+#else
+    NSString *spoolDirectory = @"/var/spool/arlen";
+#endif
+    XCTAssertTrue(([self writeFile:path content:[NSString stringWithFormat:
+        @"{ requestLimits = { spoolThresholdBytes = \"4096\"; spoolDirectory = \"%@\"; }; }", spoolDirectory]]));
     NSDictionary *spoolConfig = [ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:NULL];
     XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolThresholdBytes"], @4096);
-    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolDirectory"], @"/var/spool/arlen");
+    XCTAssertEqualObjects(spoolConfig[@"requestLimits"][@"spoolDirectory"], spoolDirectory);
     XCTAssertTrue([self writeFile:path content:@"{ requestLimits = invalid; }"]);
     NSError *error = nil;
     XCTAssertNil([ALNConfig loadConfigAtRoot:root environment:@"test" includeModules:NO error:&error]);

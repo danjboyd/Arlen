@@ -19,6 +19,22 @@
   line endings on every platform (`.gitattributes`). `phase24-windows-runtime-tests`
   passes, and the `windows-preview` workflow has a self-hosted runner (fork
   pull requests are not run on it).
+- An OIDC authorization callback validated in the same clock tick its state
+  was issued in could be rejected as "exceeded the configured age window":
+  rebuilding `issuedAt` from seconds since 1970 left it ~1e-7 s in the future.
+  Callbacks now allow 1 s of future skew. The same rounding made a job
+  enqueued "now" in the file job adapter not due for an immediate dequeue.
+  Both were common on Windows (GNUstep's clock there ticks in ~1 ms steps)
+  and possible anywhere.
+- On Windows, `ALNLogger` wrote to stderr even when `outputFileDescriptor`
+  named another descriptor; boomhauer relinked the app on every build (the
+  make target lacked `.exe`); and the notifications module's Web Push store
+  did not compile (it now locks with `LockFileEx`). The unit test suite builds
+  and runs on Windows.
+- Release archives built without `build/obj` (the planned Windows zip) carry
+  `build/.release-prebuilt`. While it matches the tree and toolchain,
+  `bin/arlen` and `boomhauer` use the prebuilt framework instead of running
+  `make` (`tools/release_prebuilt.sh`).
 - `arlen new /absolute/path` creates the app at that path. It used to be
   nested under the current directory on every platform.
 - `make` parses faster: module template paths no longer spawn a shell per

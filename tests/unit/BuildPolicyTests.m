@@ -133,7 +133,7 @@
                           content:@"#import <Foundation/Foundation.h>\n"]);
 
     NSString *outputPath = [fixtureRoot stringByAppendingPathComponent:@"arlen-build-output.json"];
-    NSString *arlenPath = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+    NSString *arlenPath = ALNTestExecutablePath([repoRoot stringByAppendingPathComponent:@"build/arlen"]);
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:arlenPath],
                   @"expected test-unit prerequisite to build executable %@", arlenPath);
     NSString *command = [NSString stringWithFormat:
@@ -437,8 +437,9 @@
 - (void)testGNUstepResolverPrintsOnePathSpellingOnWindows {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *resolver = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
-  XCTAssertTrue([resolver containsString:@"if [[ \"$path\" =~ ^[A-Za-z]:[\\\\/] ]] && command -v cygpath >/dev/null 2>&1; then"]);
-  XCTAssertTrue([resolver containsString:@"path=\"$(cygpath -u \"$path\")\""]);
+  XCTAssertTrue([resolver containsString:@"if [[ \"$path\" =~ ^[A-Za-z]:[\\\\/] ]]; then"]);
+  XCTAssertTrue([resolver containsString:@"[[ -z \"$cygpath_bin\" && -x /usr/bin/cygpath ]] && cygpath_bin=/usr/bin/cygpath"]);
+  XCTAssertTrue([resolver containsString:@"path=\"$(\"$cygpath_bin\" -u \"$path\")\""]);
 }
 
 // core.autocrlf=true (Git for Windows' default) must not put CRLF into
@@ -1029,6 +1030,9 @@
 }
 
 - (void)testTSANScriptBootstrapsEOCCUnsanitizedBeforeInstrumentedBuilds {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fakebin"];
@@ -1201,6 +1205,9 @@
 }
 
 - (void)testTSANScriptStopsOnInstrumentedFailureBeforeRuntimeProbe {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-tsan-fail-fakebin"];
@@ -1316,6 +1323,9 @@
 }
 
 - (void)testThreadRaceNightlyPropagatesUnderlyingTSANFailureExitCodeAndPreservesLog {
+#if defined(_WIN32)
+  XCTSkip(@"ThreadSanitizer is not available on Windows (MinGW/CLANG64)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fixture"];
   NSString *fakeBin = [self createTempDirectoryWithPrefix:@"arlen-thread-race-fakebin"];
@@ -1547,6 +1557,9 @@
 }
 
 - (void)testModuleVersionCheckRequiresBumpWhenModuleSourcesChange {
+  int gitCode = 0;
+  (void)ALNTestRunShellCapture(@"command -v git", &gitCode);
+  XCTSkipUnless(gitCode == 0, @"git is not on the shell PATH (MSYS2 CLANG64 does not inherit Git for Windows)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *checker = [repoRoot stringByAppendingPathComponent:@"tools/ci/check_module_versions.py"];
   NSString *work = [self createTempDirectoryWithPrefix:@"module-version-policy"];

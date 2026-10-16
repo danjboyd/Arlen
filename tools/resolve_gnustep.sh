@@ -10,8 +10,14 @@ print_path() {
   # native Windows process (xctest, an app) starts a shell. Print one spelling
   # so callers that hash this path (the framework build-flags sentinel) agree;
   # otherwise each spelling deletes the other's sentinel and rebuilds everything.
-  if [[ "$path" =~ ^[A-Za-z]:[\\/] ]] && command -v cygpath >/dev/null 2>&1; then
-    path="$(cygpath -u "$path")"
+  if [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    # /usr/bin/cygpath too: callers may run this with a PATH that omits it.
+    local cygpath_bin
+    cygpath_bin="$(command -v cygpath 2>/dev/null || true)"
+    [[ -z "$cygpath_bin" && -x /usr/bin/cygpath ]] && cygpath_bin=/usr/bin/cygpath
+    if [[ -n "$cygpath_bin" ]]; then
+      path="$("$cygpath_bin" -u "$path")"
+    fi
   fi
   printf '%s\n' "$path"
 }

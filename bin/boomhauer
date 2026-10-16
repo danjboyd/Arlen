@@ -145,6 +145,18 @@ if [[ $windows_preview -eq 1 ]]; then
   # The make target carries the .exe suffix the linker adds on Windows.
   framework_eocc_target="$framework_root/build/eocc.exe"
 fi
+framework_boomhauer_target="$framework_root/build/boomhauer"
+[[ $windows_preview -eq 1 ]] && framework_boomhauer_target="$framework_root/build/boomhauer.exe"
+
+# Release archives without build/obj (Windows) carry build/.release-prebuilt;
+# while it matches, trust the prebuilt framework instead of `make -q`.
+if [[ -f "$framework_root/tools/release_prebuilt.sh" ]]; then
+  source "$framework_root/tools/release_prebuilt.sh"
+fi
+framework_prebuilt_is_current() {
+  declare -F aln_release_prebuilt_is_current >/dev/null 2>&1 &&
+    aln_release_prebuilt_is_current "$framework_root" "$@"
+}
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
@@ -536,6 +548,9 @@ fi
 state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
+# The linker writes boomhauer-app.exe on Windows; name the make target the same
+# way so it is not permanently missing (relinking the app on every build).
+[[ $windows_preview -eq 1 ]] && app_binary="$app_binary.exe"
 app_makefile="$build_root/AppGNUmakefile"
 framework_lib="$framework_root/build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
@@ -960,7 +975,8 @@ emit_app_makefile() {
 }
 
 framework_artifacts_are_current() {
-  make -q -C "$framework_root" "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
+  framework_prebuilt_is_current "$framework_eocc_target" "$framework_lib" ||
+    make -q -C "$framework_root" "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
 }
 
 framework_archive_contains_sanitizers() {
@@ -1157,10 +1173,14 @@ error_server_ready=0
 next_build_retry_at=0
 
 ensure_error_server_built() {
-  if [[ $error_server_ready -eq 1 && -x "$framework_root/build/boomhauer" ]]; then
+  if [[ $error_server_ready -eq 1 && -x "$framework_boomhauer_target" ]]; then
     return 0
   fi
 
+  if framework_prebuilt_is_current "$framework_boomhauer_target"; then
+    error_server_ready=1
+    return 0
+  fi
   if ! make -C "$framework_root" boomhauer >/dev/null; then
     echo "boomhauer: failed to build fallback dev error server" >&2
     return 1

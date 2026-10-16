@@ -236,7 +236,7 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 - (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-lc", command ?: @"" ];
   NSPipe *stdoutPipe = [NSPipe pipe];
   NSPipe *stderrPipe = [NSPipe pipe];

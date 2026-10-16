@@ -214,9 +214,13 @@
       XCTAssertNotNil(spooledPath);
       XCTAssertTrue([spooledPath hasPrefix:parent]);
       NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:spooledPath error:NULL];
+#if !defined(_WIN32)  // NTFS has no POSIX permission bits
       XCTAssertEqual(0600, [attributes[NSFilePosixPermissions] intValue]);
       XCTAssertEqual(0700, [[[NSFileManager defaultManager] attributesOfItemAtPath:[spooledPath stringByDeletingLastPathComponent]
                                                                              error:NULL][NSFilePosixPermissions] intValue]);
+#else
+      (void)attributes;
+#endif
       XCTAssertEqualObjects(upload.data, self.binary);
       XCTAssertEqual(upload.size, self.binary.length);
       // Small uploads and text fields stay in memory.

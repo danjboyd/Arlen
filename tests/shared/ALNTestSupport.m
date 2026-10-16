@@ -314,7 +314,7 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
 
     NSTask *task = [[NSTask alloc] init];
     task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
-    task.launchPath = @"/bin/bash";
+    task.launchPath = ALNTestBashPath();
     task.arguments = @[ @"-lc", [command isKindOfClass:[NSString class]] ? command : @"" ];
 
     task.standardOutput = captureHandle;
@@ -385,7 +385,15 @@ NSString *ALNTestAppBinaryRelativePath(void) {
 #if defined(__APPLE__)
   return @".boomhauer/apple/boomhauer-app";
 #else
-  return @".boomhauer/build/boomhauer-app";
+  return ALNTestExecutablePath(@".boomhauer/build/boomhauer-app");
+#endif
+}
+
+NSString *ALNTestExecutablePath(NSString *path) {
+#if defined(_WIN32)
+  return [[path pathExtension] length] > 0 ? path : [path stringByAppendingPathExtension:@"exe"];
+#else
+  return path;
 #endif
 }
 
@@ -426,7 +434,7 @@ NSDictionary *ALNTestRunShellCaptureStreams(NSString *command) {
     }
     NSTask *task = [[NSTask alloc] init];
     task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
-    task.launchPath = @"/bin/bash";
+    task.launchPath = ALNTestBashPath();
     task.arguments = @[ @"-lc", command ?: @"" ];
     task.standardOutput = handles[0];
     task.standardError = handles[1];
@@ -454,9 +462,25 @@ BOOL ALNTestStopServerTask(NSTask *task) {
   }
   if ([task isRunning]) {
 #if defined(_WIN32)
-    // No signals on Windows; -terminate is TerminateProcess.
-    [task terminate];
-    (void)ALNTestWaitForTaskExit(task, 5.0);
+    // No signals on Windows, and ending a process does not end its children:
+    // an MSYS2 `exec` leaves bash waiting on the exec'd program, and servers
+    // started through a shell outlive it. Kill the whole tree, as the
+    // phase24 runtime tests do, then fall back to -terminate.
+    NSTask *killer = [[NSTask alloc] init];
+    killer.launchPath = @"C:/Windows/System32/taskkill.exe";
+    killer.arguments = @[ @"/T", @"/F", @"/PID", [NSString stringWithFormat:@"%d", task.processIdentifier] ];
+    killer.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    killer.standardError = [NSFileHandle fileHandleWithNullDevice];
+    @try {
+      [killer launch];
+      [killer waitUntilExit];
+    } @catch (NSException *exception) {
+      (void)exception;
+    }
+    if (!ALNTestWaitForTaskExit(task, 5.0)) {
+      [task terminate];
+      (void)ALNTestWaitForTaskExit(task, 5.0);
+    }
 #else
     kill(task.processIdentifier, SIGTERM);
     if (!ALNTestWaitForTaskExit(task, 5.0)) {
@@ -517,5 +541,46 @@ BOOL ALNTestProcessExists(int pid) {
   return running;
 #else
   return kill(pid, 0) == 0 || errno == EPERM;
+#endif
+}
+
+NSString *ALNTestBashPath(void) {
+  return ALNPlatformBashPath();
+}
+
+NSString *ALNTestToolPath(NSString *tool) {
+  NSString *path = [[NSProcessInfo processInfo] environment][@"PATH"] ?: @"";
+#if defined(_WIN32)
+  NSString *separator = @";";
+  NSString *name = [[tool pathExtension] length] > 0 ? tool : [tool stringByAppendingPathExtension:@"exe"];
+#else
+  NSString *separator = @":";
+  NSString *name = tool;
+#endif
+  for (NSString *directory in [path componentsSeparatedByString:separator]) {
+    if ([directory length] == 0) {
+      continue;
+    }
+    NSString *candidate = [directory stringByAppendingPathComponent:name];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return tool;
+}
+
+NSString *ALNTestPlatformObjCFlags(void) {
+#if defined(_WIN32)
+  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
+#else
+  return @"";
+#endif
+}
+
+NSString *ALNTestPlatformLinkLibraries(void) {
+#if defined(_WIN32)
+  return @"-lws2_32 -lbcrypt";
+#else
+  return @"-ldl";
 #endif
 }
