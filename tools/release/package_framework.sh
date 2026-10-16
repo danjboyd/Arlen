@@ -3,6 +3,7 @@
 #
 #   tools/release/package_framework.sh --version X.Y.Z --kind source [--out DIR]
 #   tools/release/package_framework.sh --version X.Y.Z --kind macos-arm64 [--out DIR]
+#   tools/release/package_framework.sh --version X.Y.Z --kind windows-x64 [--out DIR]
 #
 # Kinds:
 #   source       arlen-X.Y.Z.tar.gz: the tagged tree plus the vendored
@@ -10,10 +11,15 @@
 #                it on Linux (and on Intel Macs) against the user's toolchain.
 #   macos-arm64  arlen-X.Y.Z-macos-arm64.tar.gz: the same tree with prebuilt
 #                Apple framework tools under build/apple.
+#   windows-x64  arlen-X.Y.Z-windows-x64.zip: the same tree with the prebuilt
+#                framework tools and library under build/, built inside the
+#                gnustep-cli managed MSYS2 CLANG64 shell. tools/install.ps1
+#                installs it.
 #
 # Every archive unpacks to a single arlen-X.Y.Z/ directory and carries an
-# .arlen-dist file naming its version, kind, and commit. The script also
-# appends the archive's checksum to DIR/SHA256SUMS.
+# .arlen-dist file naming its version, kind, and commit (windows-x64 also names
+# the gnustep-cli toolchain it was built against). The script also appends the
+# archive's checksum to DIR/SHA256SUMS.
 #
 # Must stay bash 3.2 compatible (macOS /bin/bash).
 set -euo pipefail
@@ -25,7 +31,7 @@ kind=""
 out_dir="$repo_root/build/dist"
 
 usage() {
-  sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -59,14 +65,24 @@ sha256_of() {
 # runners, so it stays out of release archives.
 shipped_submodules="vendor/tools-xctest"
 
+# git, or $ARLEN_GIT. MSYS2's default minimal PATH drops the Windows PATH, so
+# inside the CLANG64 shell fall back to Git for Windows' standard location.
+git_cmd="${ARLEN_GIT:-git}"
+if [[ -z "${ARLEN_GIT:-}" ]] && ! command -v git >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+  git_for_windows="$(cygpath -u "${PROGRAMFILES:-C:/Program Files}")/Git/cmd/git.exe"
+  if [[ -x "$git_for_windows" ]]; then
+    git_cmd="$git_for_windows"
+  fi
+fi
+
 stage_source_tree() {
   local dest="$1"
   local commit
   local sub
 
-  commit="$(git -C "$repo_root" rev-parse HEAD)"
+  commit="$("$git_cmd" -C "$repo_root" rev-parse HEAD)"
   mkdir -p "$dest"
-  git -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$dest"
+  "$git_cmd" -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$dest"
 
   for sub in $shipped_submodules; do
     if [[ ! -e "$repo_root/$sub/.git" ]]; then
@@ -74,7 +90,7 @@ stage_source_tree() {
       return 1
     fi
     mkdir -p "$dest/$sub"
-    git -C "$repo_root/$sub" archive --format=tar HEAD | tar -xf - -C "$dest/$sub"
+    "$git_cmd" -C "$repo_root/$sub" archive --format=tar HEAD | tar -xf - -C "$dest/$sub"
   done
 
   {
@@ -127,10 +143,76 @@ package_macos_arm64() {
   aln_apple_release_write_manifest "$dest" "$openssl_prefix"
 }
 
+# Prebuilt outputs a Windows install needs, relative to build/. Everything else
+# under build/ (objects, depfiles, test bundles) only serves incremental
+# rebuilds, which build/.release-prebuilt makes unnecessary.
+windows_prebuilt_outputs="arlen.exe boomhauer.exe eocc.exe lib/libArlenFramework.a"
+windows_prebuilt_optional_dirs="gen module-gen"
+
+package_windows_x64() {
+  local stage_root="$1"
+  if [[ "${MSYSTEM:-}" != "CLANG64" ]]; then
+    echo "package_framework: windows-x64 archives must be built in the gnustep-cli MSYS2 CLANG64 shell (scripts/run_clang64.ps1)" >&2
+    return 1
+  fi
+  if ! command -v bsdtar >/dev/null 2>&1; then
+    echo "package_framework: windows-x64 archives need bsdtar to write the zip" >&2
+    return 1
+  fi
+  local dest="$stage_root/arlen-$version"
+  stage_source_tree "$dest"
+
+  # shellcheck source=tools/release_prebuilt.sh
+  source "$dest/tools/release_prebuilt.sh"
+  local toolchain toolchain_sha256
+  toolchain="$(aln_release_toolchain_value toolchain_version)"
+  toolchain_sha256="$(aln_release_toolchain_value toolchain_artifact_sha256)"
+  if [[ -z "$toolchain" ]]; then
+    echo "package_framework: no gnustep-cli toolchain_version (looked for $(aln_release_toolchain_state_file || echo "${ARLEN_TOOLCHAIN_STATE_FILE:-/state/cli-state.json}")); build inside the managed toolchain" >&2
+    return 1
+  fi
+  {
+    printf 'toolchain=%s\n' "$toolchain"
+    printf 'toolchain_sha256=%s\n' "$toolchain_sha256"
+  } >>"$dest/.arlen-dist"
+
+  # Build inside the staged tree so the archive matches its own sources.
+  local jobs
+  jobs="$(nproc 2>/dev/null || echo 2)"
+  echo "package_framework: building build/ (make -j$jobs all) against gnustep-cli toolchain $toolchain"
+  make -C "$dest" -j"$jobs" all >"$stage_root/make.log" 2>&1 || {
+    tail -50 "$stage_root/make.log" >&2
+    echo "package_framework: make all failed" >&2
+    return 1
+  }
+
+  local full="$stage_root/build.full"
+  local output
+  mv "$dest/build" "$full"
+  mkdir -p "$dest/build/lib"
+  for output in $windows_prebuilt_outputs; do
+    if [[ ! -f "$full/$output" ]]; then
+      echo "package_framework: make all did not produce build/$output" >&2
+      return 1
+    fi
+    mv "$full/$output" "$dest/build/$output"
+  done
+  for output in $windows_prebuilt_optional_dirs; do
+    if [[ -d "$full/$output" ]]; then
+      mv "$full/$output" "$dest/build/$output"
+    fi
+  done
+  rm -rf "$full"
+
+  # Last: the manifest digests the staged sources, so nothing may change after it.
+  aln_release_write_manifest "$dest"
+}
+
 case "$kind" in
   source) archive_name="arlen-$version.tar.gz" ;;
   macos-arm64) archive_name="arlen-$version-macos-arm64.tar.gz" ;;
-  *) echo "package_framework: unknown --kind '$kind' (source, macos-arm64)" >&2; exit 2 ;;
+  windows-x64) archive_name="arlen-$version-windows-x64.zip" ;;
+  *) echo "package_framework: unknown --kind '$kind' (source, macos-arm64, windows-x64)" >&2; exit 2 ;;
 esac
 
 mkdir -p "$out_dir"
@@ -141,11 +223,15 @@ trap 'rm -rf "$stage_root"' EXIT
 case "$kind" in
   source) package_source "$stage_root" ;;
   macos-arm64) package_macos_arm64 "$stage_root" ;;
+  windows-x64) package_windows_x64 "$stage_root" ;;
 esac
 
 archive_path="$out_dir/$archive_name"
 rm -f "$archive_path"
-tar -C "$stage_root" -czf "$archive_path" "arlen-$version"
+case "$kind" in
+  windows-x64) bsdtar -a -cf "$archive_path" -C "$stage_root" "arlen-$version" ;;
+  *) tar -C "$stage_root" -czf "$archive_path" "arlen-$version" ;;
+esac
 
 sums_path="$out_dir/SHA256SUMS"
 if [[ -f "$sums_path" ]]; then
