@@ -196,18 +196,28 @@ release notes name the gnustep-cli release to use.
 
     New-Item -ItemType Directory -Force -Path $Prefix | Out-Null
     $dest = Join-Path $Prefix $Version
+    # Rename the old version aside before deleting it. Windows refuses to rename
+    # a directory with a running or open file in it, so a busy install fails
+    # here untouched; deleting it in place could stop halfway and break it.
+    $previous = $null
     if (Test-Path -LiteralPath $dest) {
       Say "replacing existing $dest"
+      $previous = "$dest.old-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
       try {
-        Remove-Item -LiteralPath $dest -Recurse -Force
+        Move-Item -LiteralPath $dest -Destination $previous
       } catch {
-        Die "could not remove $($dest): $($_.Exception.Message)`nA file in it is probably in use. Stop any arlen or boomhauer running from this install, then rerun this installer."
+        Die "could not replace $($dest): $($_.Exception.Message)`nA file in it is probably in use. Stop any arlen or boomhauer running from this install, then rerun this installer."
       }
     }
     try {
       Move-Item -LiteralPath $top -Destination $dest
     } catch {
+      if ($previous) { Move-Item -LiteralPath $previous -Destination $dest -ErrorAction SilentlyContinue }
       Die "could not move the release into $($dest): $($_.Exception.Message)"
+    }
+    if ($previous) {
+      Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction SilentlyContinue
+      if (Test-Path -LiteralPath $previous) { Say "warning: could not delete the previous copy at $previous; remove it later" }
     }
   } finally {
     Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
