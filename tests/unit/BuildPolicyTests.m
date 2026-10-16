@@ -379,7 +379,7 @@
   NSString *makefile = [self readFile:makefilePath];
 
   XCTAssertTrue([makefile containsString:@"GNUSTEP_RESOLVER := $(ROOT_DIR)/tools/resolve_gnustep.sh"]);
-  XCTAssertTrue([makefile containsString:@"GNUSTEP_SH ?= $(shell bash \"$(GNUSTEP_RESOLVER)\" 2>/dev/null || true)"]);
+  XCTAssertTrue([makefile containsString:@"GNUSTEP_SH := $(shell bash \"$(GNUSTEP_RESOLVER)\" 2>/dev/null || true)"]);
   XCTAssertTrue([makefile containsString:@"ARLEN_WINDOWS_PREVIEW ?= 0"]);
   XCTAssertTrue([makefile containsString:@"POSTGRESQL_INCLUDE_FLAGS := $(shell pkg-config --cflags-only-I libpq 2>/dev/null)"]);
   XCTAssertTrue([makefile containsString:@"OBJ_DIR := $(BUILD_DIR)/obj"]);
