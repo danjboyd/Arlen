@@ -4107,7 +4107,21 @@ static int CommandNew(NSArray *args) {
   }
 
   // An absolute name (/srv/app, C:/apps/app) is used as is, not appended to the cwd.
-  NSString *root = ResolvePathFromRoot([[NSFileManager defaultManager] currentDirectoryPath], appName);
+  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *root = ResolvePathFromRoot(cwd, appName);
+  // A blank or "." name resolves to the cwd itself; with --force that would
+  // scaffold over whatever is there.
+  if ([[root stringByStandardizingPath] isEqualToString:[cwd stringByStandardizingPath]]) {
+    if (asJSON) {
+      return EmitMachineError(@"new", @"scaffold", @"missing_app_name",
+                              @"arlen new: AppName must name a new directory, not the current one",
+                              @"Provide an app name after `arlen new`.",
+                              @"arlen new DemoApp --full --json", 2);
+    }
+    fprintf(stderr, "arlen new: AppName must name a new directory, not the current one\n");
+    PrintNewUsage();
+    return 2;
+  }
   NSError *error = nil;
   BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
   if (!ok) {
