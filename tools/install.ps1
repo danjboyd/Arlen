@@ -93,6 +93,9 @@ Then rerun this installer. If the toolchain lives somewhere else, pass
 libcurl is missing from $resolvedRoot. Install it inside the toolchain, then rerun this installer:
 
   & '$(Join-Path $resolvedRoot "usr\bin\bash.exe")' -lc 'pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl'
+
+Use plain pacman -S exactly as shown. Never run pacman -Sy or -Syu in the managed toolchain:
+a partial upgrade breaks its python and clang.
 "@
   }
 
