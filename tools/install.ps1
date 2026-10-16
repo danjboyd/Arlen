@@ -234,11 +234,14 @@ if (-not $envExe) {
 }
 # Apps live outside the install, so arlen cannot find the framework by walking
 # up from the app directory. cygpath handles both /c and /cygdrive/c mounts.
+# build\dll holds the DLLs Arlen ships that the toolchain lacks (libpq and its
+# dependencies); it goes first so those copies win.
 $bootstrap = 'export PATH=/clang64/bin:/usr/bin:$PATH CC=clang CXX=clang++ ' +
   'GNUSTEP_CONFIG_FILE=/clang64/etc/GNUstep/GNUstep.conf ' +
   'GNUSTEP_MAKEFILES=/clang64/share/GNUstep/Makefiles GNUSTEP_SYSTEM_ROOT=/clang64; ' +
   'source /clang64/share/GNUstep/Makefiles/GNUstep.sh >/dev/null || exit 1; ' +
   'arlen_home="$(cygpath -u "$ARLEN_HOME_WIN")"; ' +
+  'export PATH="$arlen_home/build/dll:$PATH"; ' +
   'export ARLEN_FRAMEWORK_ROOT="${ARLEN_FRAMEWORK_ROOT:-$arlen_home}"; ' +
   'exec "$arlen_home/bin/arlen" "$@"'
 # bash -l sources /etc/profile, which keeps the current directory only while
