@@ -23,6 +23,18 @@ jobs:
           # Full history so the module version check can find the merge base.
           fetch-depth: 0
 
+      # iep-apt's /tmp is a small shared tmpfs, and GNUstep's NSTemporaryDirectory()
+      # reads TEMP/TMP (not TMPDIR). Give each job its own on-disk temp directory,
+      # which the runner empties between jobs, so leaked test files can't fill /tmp.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
       - name: Verify module versions bump when module sources change
         env:
           ARLEN_MODULE_VERSION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
