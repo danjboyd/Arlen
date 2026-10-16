@@ -39,9 +39,9 @@ the toolchain:
 > breaks the GNUstep headers. Use plain `pacman -S` as shown, and install
 > nothing else into the managed root.
 
-You don't need to install a PostgreSQL client. The Arlen release ships
-`libpq-5.dll` and the DLLs it depends on, and the `arlen` launcher puts them on
-`PATH`.
+You don't need to install a PostgreSQL client. The Arlen release ships libpq
+as `build\dll\libpq.dll`, and Arlen loads it from the install. Its other
+dependencies are already in the toolchain.
 
 ## 2. Install Arlen
 
