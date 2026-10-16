@@ -231,7 +231,8 @@ static void ALNReportSocketError(const char *label) {
   fprintf(stderr, "%s: Winsock error %lu\n", label, (unsigned long)errorCode);
 }
 
-static BOOL WINAPI ALNConsoleControlHandler(DWORD controlType) {
+// WINBOOL, not BOOL: ObjC BOOL is signed char, the Win32 handler returns int.
+static WINBOOL WINAPI ALNConsoleControlHandler(DWORD controlType) {
   switch (controlType) {
   case CTRL_C_EVENT:
   case CTRL_BREAK_EVENT:
@@ -1957,7 +1958,7 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
   @try {
     if ([[NSFileManager defaultManager] createFileAtPath:path contents:nil
                                               attributes:@{NSFilePosixPermissions : @0600}]) {
-      file = fopen([path fileSystemRepresentation], "wb");
+      file = ALNPlatformOpenFile(path, "wb");
     }
     failure = (file == NULL) ? 503 : 0;
     if (failure == 0 && buffered > 0 && fwrite(readState->bytes + headerBytes, 1, buffered, file) != buffered) {

@@ -9,12 +9,18 @@
 
 #if defined(_WIN32)
 #include <bcrypt.h>
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
+#include <sys/stat.h>
 #include <windows.h>
 #else
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/time.h>
 #include <unistd.h>
 #endif
+#include <errno.h>
 
 NSString *ALNPlatformName(void) {
 #if defined(__APPLE__)
@@ -92,6 +98,56 @@ static void ALNAppendPrefixLibraryCandidates(NSMutableArray<NSString *> *candida
   }
 }
 
+NSArray<NSString *> *ALNPlatformWindowsMSYSRoots(void) {
+#if defined(_WIN32)
+  NSDictionary<NSString *, NSString *> *environment = [[NSProcessInfo processInfo] environment];
+  NSMutableArray<NSString *> *roots = [NSMutableArray array];
+  NSString *override = environment[@"ARLEN_MSYS_ROOT"];
+  if ([override length] > 0) {
+    [roots addObject:override];
+  }
+  NSString *localAppData = environment[@"LOCALAPPDATA"];
+  if ([localAppData length] > 0) {
+    [roots addObject:[localAppData stringByAppendingPathComponent:@"gnustep-cli"]];
+  }
+  NSString *programFiles = environment[@"ProgramFiles"];
+  if ([programFiles length] > 0) {
+    [roots addObject:[programFiles stringByAppendingPathComponent:@"gnustep-cli"]];
+  }
+  [roots addObject:@"C:/msys64"];
+  return roots;
+#else
+  return @[];
+#endif
+}
+
+NSString *ALNPlatformBashPath(void) {
+#if defined(_WIN32)
+  NSString *override = [[NSProcessInfo processInfo] environment][@"ARLEN_BASH_PATH"];
+  if ([override length] > 0) {
+    return override;
+  }
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    NSString *candidate = [root stringByAppendingPathComponent:@"usr/bin/bash.exe"];
+    if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidate]) {
+      return candidate;
+    }
+  }
+  return @"bash.exe";
+#else
+  return @"/bin/bash";
+#endif
+}
+
+static void ALNAppendMSYSClang64BinCandidates(NSMutableArray<NSString *> *candidates,
+                                              NSArray<NSString *> *libraryNames) {
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    for (NSString *name in libraryNames) {
+      [candidates addObject:[[root stringByAppendingPathComponent:@"clang64/bin"] stringByAppendingPathComponent:name]];
+    }
+  }
+}
+
 NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   NSMutableArray<NSString *> *candidates = [NSMutableArray array];
   const char *envCandidate = getenv("ARLEN_LIBPQ_LIBRARY");
@@ -118,8 +174,14 @@ NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void) {
   [candidates addObject:@"libpq.5.dylib"];
   [candidates addObject:@"libpq.dylib"];
 #elif defined(_WIN32)
-  [candidates addObject:@"C:/msys64/clang64/bin/libpq-5.dll"];
-  [candidates addObject:@"C:/msys64/clang64/bin/libpq.dll"];
+  // The Windows release bundles libpq and its DLL closure under
+  // <framework>/build/dll, so nothing is installed into the toolchain root.
+  NSString *frameworkRoot = [[NSProcessInfo processInfo] environment][@"ARLEN_FRAMEWORK_ROOT"];
+  if ([frameworkRoot length] > 0) {
+    [candidates addObject:[frameworkRoot stringByAppendingPathComponent:@"build/dll/libpq-5.dll"]];
+    [candidates addObject:[frameworkRoot stringByAppendingPathComponent:@"build/dll/libpq.dll"]];
+  }
+  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libpq-5.dll", @"libpq.dll" ]);
   [candidates addObject:@"libpq-5.dll"];
   [candidates addObject:@"libpq.dll"];
 #else
@@ -160,8 +222,7 @@ NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void) {
   [candidates addObject:@"libiodbc.2.dylib"];
   [candidates addObject:@"libiodbc.dylib"];
 #elif defined(_WIN32)
-  [candidates addObject:@"C:/msys64/clang64/bin/libodbc-2.dll"];
-  [candidates addObject:@"C:/msys64/clang64/bin/libodbc.dll"];
+  ALNAppendMSYSClang64BinCandidates(candidates, @[ @"libodbc-2.dll", @"libodbc.dll" ]);
   [candidates addObject:@"odbc32.dll"];
   [candidates addObject:@"libodbc-2.dll"];
   [candidates addObject:@"libodbc.dll"];
@@ -307,4 +368,89 @@ BOOL ALNPlatformPathIsAbsolute(NSString *path) {
     }
   }
   return NO;
+}
+
+NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
+#if defined(_WIN32) && defined(GNUSTEP_BASE_LIBRARY)
+  NSData *data = [NSData dataWithContentsOfMappedFile:path];
+  if (data == nil && error != NULL) {
+    *error = [NSError errorWithDomain:NSCocoaErrorDomain
+                                 code:NSFileReadUnknownError
+                             userInfo:@{NSFilePathErrorKey : path ?: @""}];
+  }
+  return data;
+#else
+  return [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+#endif
+}
+
+FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
+  if ([path length] == 0 || mode == NULL) {
+    return NULL;
+  }
+#if defined(_WIN32)
+  wchar_t wideMode[8];
+  size_t idx = 0;
+  for (; mode[idx] != '\0' && idx < 7; idx++) {
+    wideMode[idx] = (wchar_t)(unsigned char)mode[idx];
+  }
+  wideMode[idx] = L'\0';
+  return _wfopen((const wchar_t *)[path fileSystemRepresentation], wideMode);
+#else
+  return fopen([path fileSystemRepresentation], mode);
+#endif
+}
+
+int ALNPlatformOpenExclusiveLock(NSString *path) {
+  if ([path length] == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+#if defined(_WIN32)
+  int descriptor = _wopen((const wchar_t *)[path fileSystemRepresentation],
+                          _O_RDWR | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE);
+  if (descriptor < 0) {
+    return -1;
+  }
+  HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
+  OVERLAPPED overlapped;
+  memset(&overlapped, 0, sizeof(overlapped));
+  if (handle == INVALID_HANDLE_VALUE ||
+      !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+    _close(descriptor);
+    errno = EIO;
+    return -1;
+  }
+  return descriptor;
+#else
+  int descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT, 0600);
+  if (descriptor < 0) {
+    return -1;
+  }
+  if (flock(descriptor, LOCK_EX) != 0) {
+    int savedErrno = errno;
+    close(descriptor);
+    errno = savedErrno;
+    return -1;
+  }
+  return descriptor;
+#endif
+}
+
+void ALNPlatformReleaseExclusiveLock(int descriptor) {
+  if (descriptor < 0) {
+    return;
+  }
+#if defined(_WIN32)
+  HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
+  if (handle != INVALID_HANDLE_VALUE) {
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    (void)UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &overlapped);
+  }
+  _close(descriptor);
+#else
+  (void)flock(descriptor, LOCK_UN);
+  close(descriptor);
+#endif
 }
