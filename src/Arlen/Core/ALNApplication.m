@@ -176,6 +176,21 @@ static double ALNWallClockMilliseconds(void) {
 
 @end
 
+// NSFastEnumerationState.extra is unsigned long, which is 32 bits on 64-bit
+// Windows (LLP64); a pointer cast into extra[0] was truncated there. Copy the
+// pointer's bytes into the extra array instead (5 x unsigned long >= 8 bytes).
+static void ALNEnumerationStateStorePointer(NSFastEnumerationState *state, void *pointer) {
+  _Static_assert(sizeof(((NSFastEnumerationState *)0)->extra) >= sizeof(void *),
+                 "NSFastEnumerationState.extra must hold a pointer");
+  memcpy(state->extra, &pointer, sizeof(pointer));
+}
+
+static void *ALNEnumerationStateLoadPointer(NSFastEnumerationState *state) {
+  void *pointer = NULL;
+  memcpy(&pointer, state->extra, sizeof(pointer));
+  return pointer;
+}
+
 @implementation ALNRequestLazyStash {
   NSMutableDictionary *_storage;
   NSMutableSet *_suppressedKeys;
@@ -299,17 +314,18 @@ static double ALNWallClockMilliseconds(void) {
   NSArray *keys = nil;
   if (state->state == 0) {
     keys = [self visibleKeys];
-    state->extra[0] = (unsigned long)(__bridge_retained void *)keys;
+    ALNEnumerationStateStorePointer(state, (__bridge_retained void *)keys);
     state->mutationsPtr = (unsigned long *)&_mutationCount;
   } else {
-    keys = (__bridge NSArray *)(void *)state->extra[0];
+    keys = (__bridge NSArray *)ALNEnumerationStateLoadPointer(state);
   }
 
   NSUInteger total = [keys count];
   if (state->state >= total) {
-    if (state->extra[0] != 0) {
-      (void)(__bridge_transfer id)(void *)state->extra[0];
-      state->extra[0] = 0;
+    void *retainedKeys = ALNEnumerationStateLoadPointer(state);
+    if (retainedKeys != NULL) {
+      (void)(__bridge_transfer id)retainedKeys;
+      ALNEnumerationStateStorePointer(state, NULL);
     }
     return 0;
   }

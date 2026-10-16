@@ -13,6 +13,15 @@ endif
 ifneq (,$(findstring mingw,$(GNUSTEP_HOST_OS)))
 ARLEN_WINDOWS_PREVIEW := 1
 endif
+# The linker writes <name>.exe on Windows. Naming the make targets the same way
+# keeps them from looking permanently missing, which relinked every tool, made
+# eocc look newer than the transpiled templates and rebuilt the framework on
+# every make (and every boomhauer start).
+ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
+TOOL_EXEEXT := .exe
+else
+TOOL_EXEEXT :=
+endif
 BUILD_DIR := $(ROOT_DIR)/build
 OBJ_DIR := $(BUILD_DIR)/obj
 LIB_DIR := $(BUILD_DIR)/lib
@@ -21,27 +30,27 @@ MODULE_GEN_DIR := $(BUILD_DIR)/gen/module_templates
 MODULE_GEN_MANIFEST_DIR := $(MODULE_GEN_DIR)/manifests
 TECH_DEMO_GEN_DIR := $(BUILD_DIR)/gen/tech_demo_templates
 
-EOC_TOOL := $(BUILD_DIR)/eocc
-SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render
-BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer
-TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server
-API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server
-PHASE28_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/phase28-reference-server
-AUTH_PRIMITIVES_SERVER_TOOL := $(BUILD_DIR)/auth-primitives-server
-MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server
-ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example
-ARLEN_TOOL := $(BUILD_DIR)/arlen
-JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench
-DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench
-HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench
-ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench
-BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix
-PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke
-PHASE26_ORM_PERF_TOOL := $(BUILD_DIR)/phase26-orm-perf-smoke
-ARLEN_ORM_REFERENCE_TOOL := $(BUILD_DIR)/arlen-orm-reference
-MCP_EXAMPLE_TOOL := $(BUILD_DIR)/mcp-example
-PHASE27_SEARCH_CHARACTERIZE_TOOL := $(BUILD_DIR)/phase27-search-characterize
-XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner
+EOC_TOOL := $(BUILD_DIR)/eocc$(TOOL_EXEEXT)
+SMOKE_RENDER_TOOL := $(BUILD_DIR)/eoc-smoke-render$(TOOL_EXEEXT)
+BOOMHAUER_TOOL := $(BUILD_DIR)/boomhauer$(TOOL_EXEEXT)
+TECH_DEMO_SERVER_TOOL := $(BUILD_DIR)/tech-demo-server$(TOOL_EXEEXT)
+API_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/api-reference-server$(TOOL_EXEEXT)
+PHASE28_REFERENCE_SERVER_TOOL := $(BUILD_DIR)/phase28-reference-server$(TOOL_EXEEXT)
+AUTH_PRIMITIVES_SERVER_TOOL := $(BUILD_DIR)/auth-primitives-server$(TOOL_EXEEXT)
+MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server$(TOOL_EXEEXT)
+ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example$(TOOL_EXEEXT)
+ARLEN_TOOL := $(BUILD_DIR)/arlen$(TOOL_EXEEXT)
+JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench$(TOOL_EXEEXT)
+DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench$(TOOL_EXEEXT)
+HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench$(TOOL_EXEEXT)
+ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench$(TOOL_EXEEXT)
+BACKEND_CONTRACT_MATRIX_TOOL := $(BUILD_DIR)/backend-contract-matrix$(TOOL_EXEEXT)
+PHASE23_LIVE_SMOKE_TOOL := $(BUILD_DIR)/phase23-dataverse-live-smoke$(TOOL_EXEEXT)
+PHASE26_ORM_PERF_TOOL := $(BUILD_DIR)/phase26-orm-perf-smoke$(TOOL_EXEEXT)
+ARLEN_ORM_REFERENCE_TOOL := $(BUILD_DIR)/arlen-orm-reference$(TOOL_EXEEXT)
+MCP_EXAMPLE_TOOL := $(BUILD_DIR)/mcp-example$(TOOL_EXEEXT)
+PHASE27_SEARCH_CHARACTERIZE_TOOL := $(BUILD_DIR)/phase27-search-characterize$(TOOL_EXEEXT)
+XCTEST_BUNDLE_RUNNER_TOOL := $(BUILD_DIR)/arlen-xctest-runner$(TOOL_EXEEXT)
 ARLEN_FRAMEWORK_LIB := $(LIB_DIR)/libArlenFramework.a
 
 TEMPLATE_ROOT := $(ROOT_DIR)/templates
