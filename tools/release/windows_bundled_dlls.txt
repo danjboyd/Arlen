@@ -1,0 +1,18 @@
+# Third-party DLLs bundled into build/dll/ of the windows-x64 release zip (#200).
+#
+# Only DLLs the pinned gnustep-cli toolchain does not ship. A DLL's own imports
+# must be bundled here, present in that toolchain's clang64/bin, or Windows
+# system DLLs; package_framework.sh checks this and fails otherwise. The list is
+# valid for exactly one toolchain: when the toolchain pin changes, re-derive it
+# (packages from that toolchain's var/lib/pacman/sync/clang64.db) and update
+# the toolchain line.
+#
+# toolchain <toolchain_version> <toolchain_artifact_sha256>
+# dll <package_url> <package_sha256> <member> <member_sha256>
+
+toolchain 0.1.0 a459f954c5796e8fc0c1bdfeed1dafaf95693fed0a66fb8be74981a64a3d9851
+
+# libpq for ALNPg. postgresql 18.2-1 is the clang64 entry in the v0.1.0
+# toolchain's pacman sync database (2026-05-04); it links against that
+# toolchain's openssl 3.6.2-2 libssl/libcrypto and its libintl/libiconv.
+dll https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-postgresql-18.2-1-any.pkg.tar.zst 14a0b83bef36a0fdf7f5562b08b04713b105735aa0487526a9c55d574da821d3 clang64/bin/libpq.dll 5a9500a8bba1edae3017a24a2147c881220db466044e951d595f5ba6eaf2a7f8

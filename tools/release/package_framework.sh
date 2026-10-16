@@ -204,8 +204,77 @@ package_windows_x64() {
   done
   rm -rf "$full"
 
+  bundle_windows_dlls "$stage_root" "$dest/build/dll" "$toolchain" "$toolchain_sha256"
+
   # Last: the manifest digests the staged sources, so nothing may change after it.
   aln_release_write_manifest "$dest"
+}
+
+# bundle_windows_dlls <stage_root> <dll_dir> <toolchain> <toolchain_sha256>
+# Downloads each pinned package from tools/release/windows_bundled_dlls.txt,
+# verifies it and the extracted DLL by sha256, and checks that every import of
+# a bundled DLL is bundled, in the toolchain's clang64/bin, or a system DLL.
+bundle_windows_dlls() {
+  local stage_root="$1"
+  local dll_dir="$2"
+  local toolchain="$3"
+  local toolchain_sha256="$4"
+  local list="$repo_root/tools/release/windows_bundled_dlls.txt"
+  local cache="${ARLEN_WINDOWS_PACKAGE_CACHE:-$stage_root/pkg-cache}"
+  local kind url pkg_sha member member_sha pkg name dll import lower
+  local bundled=""
+
+  mkdir -p "$dll_dir" "$cache"
+  while read -r kind url pkg_sha member member_sha; do
+    case "$kind" in
+      ''|'#'*) continue ;;
+      toolchain)
+        if [[ "$url" != "$toolchain" || "$pkg_sha" != "$toolchain_sha256" ]]; then
+          echo "package_framework: $list is for toolchain $url ($pkg_sha), but this build uses $toolchain ($toolchain_sha256); re-derive the bundled DLLs" >&2
+          return 1
+        fi
+        ;;
+      dll)
+        pkg="$cache/$(basename "$url")"
+        if [[ ! -f "$pkg" || "$(sha256_of "$pkg")" != "$pkg_sha" ]]; then
+          echo "package_framework: downloading $url"
+          curl -fsSL --retry 3 -o "$pkg" "$url"
+        fi
+        if [[ "$(sha256_of "$pkg")" != "$pkg_sha" ]]; then
+          echo "package_framework: $(basename "$pkg") does not match its pinned sha256" >&2
+          return 1
+        fi
+        name="$(basename "$member")"
+        bsdtar -xOf "$pkg" "$member" >"$dll_dir/$name"
+        if [[ "$(sha256_of "$dll_dir/$name")" != "$member_sha" ]]; then
+          echo "package_framework: $member from $(basename "$pkg") does not match its pinned sha256" >&2
+          return 1
+        fi
+        bundled="$bundled $(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+        ;;
+      *)
+        echo "package_framework: unknown line kind '$kind' in $list" >&2
+        return 1
+        ;;
+    esac
+  done <"$list"
+
+  local system_dir
+  system_dir="$(cygpath -u "${SYSTEMROOT:-C:/Windows}")/System32"
+  for dll in "$dll_dir"/*.dll; do
+    [[ -f "$dll" ]] || continue
+    for import in $(llvm-readobj --coff-imports "$dll" | sed -n 's/^ *Name: //p' | tr -d '\r' | sort -u); do
+      lower="$(printf '%s' "$import" | tr '[:upper:]' '[:lower:]')"
+      case " $bundled " in *" $lower "*) continue ;; esac
+      case "$lower" in api-ms-win-*|ext-ms-win-*) continue ;; esac
+      if [[ -n "$(find /clang64/bin "$system_dir" -maxdepth 1 -iname "$import" -print -quit 2>/dev/null)" ]]; then
+        continue
+      fi
+      echo "package_framework: $(basename "$dll") imports $import, which is not bundled, not in the toolchain's clang64/bin, and not a system DLL" >&2
+      return 1
+    done
+  done
+  echo "package_framework: bundled into build/dll:$bundled"
 }
 
 case "$kind" in
