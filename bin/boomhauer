@@ -151,10 +151,28 @@ space_free_path() {
     printf '%s\n' "$real"
     return 0
   fi
-  local alias_parent="/tmp/arlen-boomhauer-aliases"
+  # Per user and private: in a shared /tmp another user could otherwise create
+  # the directory first and swap an alias, so boomhauer built their sources.
+  local tmp_base="${TMPDIR:-/tmp}"
+  [[ "$tmp_base" == *[[:space:]]* ]] && tmp_base="/tmp"
+  local alias_parent="${tmp_base%/}/arlen-boomhauer-aliases-$(id -u)"
+  if [[ ! -d "$alias_parent" ]]; then
+    mkdir -m 700 "$alias_parent" 2>/dev/null || [[ -d "$alias_parent" ]] || {
+      echo "boomhauer: cannot create $alias_parent" >&2
+      return 1
+    }
+  fi
+  # Under MSYS2 /tmp lives inside the user's own gnustep-cli root, and POSIX
+  # ownership/mode bits are emulated, so the check is POSIX-only.
+  if ! aln_platform_is_msys; then
+    if [[ -L "$alias_parent" || ! -O "$alias_parent" ]] ||
+       [[ -n "$(find "$alias_parent" -maxdepth 0 \( -perm -g+w -o -perm -o+w \) 2>/dev/null)" ]]; then
+      echo "boomhauer: refusing $alias_parent: it must be a directory owned by you and writable only by you" >&2
+      return 1
+    fi
+  fi
   local alias_path
   alias_path="$alias_parent/$label-$(printf '%s' "$real" | cksum | awk '{print $1}')"
-  mkdir -p "$alias_parent"
   if [[ ! -L "$alias_path" || "$(cd "$alias_path" 2>/dev/null && pwd -P)" != "$real" ]]; then
     if [[ -e "$alias_path" && ! -L "$alias_path" ]]; then
       echo "boomhauer: $alias_path exists and is not a link; remove it" >&2
