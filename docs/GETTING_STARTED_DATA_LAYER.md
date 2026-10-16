@@ -96,7 +96,8 @@ runtime values:
 - `numeric`: `NSDecimalNumber`
 - `date`, `timestamp`, `timestamp with time zone`: `NSDate`
 - `bytea`: `NSData`
-- `json`, `jsonb`: Foundation objects decoded from JSON
+- `json`, `jsonb`: Foundation objects decoded from JSON, including scalar
+  documents (`'"text"'`, `'42'`, `'true'`, `'null'`)
 - supported one-dimensional scalar arrays: `NSArray`
 - text-like and unmapped types: `NSString`
 

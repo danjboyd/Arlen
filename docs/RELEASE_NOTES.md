@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
+  string, number, boolean or `null`) instead of failing the whole query
+  (#182).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

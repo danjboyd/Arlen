@@ -233,7 +233,8 @@ Result values returned by `ALNPg` for supported PostgreSQL column types:
 - `numeric`: `NSDecimalNumber`
 - `date`, `timestamp`, `timestamp with time zone`: `NSDate`
 - `bytea`: `NSData`
-- `json`, `jsonb`: Foundation collection/object decoded from JSON
+- `json`, `jsonb`: Foundation value decoded from JSON: `NSDictionary`/`NSArray`
+  for objects and arrays; `NSString`, `NSNumber` or `NSNull` for scalar documents
 - supported one-dimensional scalar arrays (`text[]`, `integer[]`, `numeric[]`,
   `uuid[]`, date/timestamp families, JSON arrays): `NSArray`
 - text-like and unmapped runtime types: `NSString`
