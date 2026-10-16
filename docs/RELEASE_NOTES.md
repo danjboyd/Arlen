@@ -5,6 +5,11 @@
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
+- `tools/install.ps1`: a PowerShell installer for Windows that mirrors
+  `install.sh`. It downloads `arlen-X.Y.Z-windows-x64.zip`, checks it against
+  `SHA256SUMS`, and refuses a gnustep-cli managed CLANG64 toolchain whose
+  version differs from the one the zip was built against. It installs to
+  `%LOCALAPPDATA%\Arlen` and adds an `arlen.cmd` launcher (#200).
 
 ## 0.2.1 — 2026-10-15
 
