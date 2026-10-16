@@ -435,6 +435,17 @@ static NSMutableSet<NSString *> *ALNPendingRemovalPaths(void) {
   return paths;
 }
 
+// Guards ALNPendingRemovalPaths. A lock created up front, not @synchronized on
+// the set (BuildPolicyTests bans @synchronized on instance receivers).
+static NSLock *ALNPendingRemovalLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
+}
+
 static NSString *ALNRemovalKey(NSString *path) {
   return [[[path stringByStandardizingPath] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"]
       lowercaseString];
@@ -445,7 +456,8 @@ static void ALNFinishPendingRemoval(NSString *path) {
   NSString *parent = [path stringByDeletingLastPathComponent];
   NSString *parentKey = ALNRemovalKey(parent);
   NSMutableSet<NSString *> *pending = ALNPendingRemovalPaths();
-  @synchronized(pending) {
+  [ALNPendingRemovalLock() lock];
+  @try {
     if (![pending containsObject:key] && ![pending containsObject:parentKey]) {
       return;
     }
@@ -458,6 +470,8 @@ static void ALNFinishPendingRemoval(NSString *path) {
         [[NSFileManager defaultManager] removeItemAtPath:parent error:NULL]) {
       [pending removeObject:parentKey];
     }
+    } @finally {
+    [ALNPendingRemovalLock() unlock];
   }
 }
 
@@ -558,7 +572,8 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
   NSFileManager *fileManager = [NSFileManager defaultManager];
 #if defined(_WIN32)
   NSMutableSet<NSString *> *pending = ALNPendingRemovalPaths();
-  @synchronized(pending) {
+  [ALNPendingRemovalLock() lock];
+  @try {
     if ([fileManager removeItemAtPath:path error:NULL] || ![fileManager fileExistsAtPath:path]) {
       return;
     }
@@ -578,6 +593,8 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
       }
     }
     [pending addObject:ALNRemovalKey(path)];
+    } @finally {
+    [ALNPendingRemovalLock() unlock];
   }
 #else
   // POSIX unlink drops the name; existing mappings stay valid.
