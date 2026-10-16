@@ -296,12 +296,11 @@ define repo_relative_path
 $(patsubst $(ROOT_DIR)/%,%,$(1))
 endef
 
+# modules/<id>/Resources/Templates/<rel> -> $(MODULE_GEN_DIR)/modules/<id>/<rel>.m.
+# Pure make functions: this runs several times per module template on every
+# make, and a $(shell) here cost ~20 s per make invocation on Windows/MSYS2.
 define module_generated_source_for
-$(shell path='$(1)'; \
-  module_id="$${path#modules/}"; \
-  module_id="$${module_id%%/*}"; \
-  relative_path="$${path#modules/$$module_id/Resources/Templates/}"; \
-  printf '%s/modules/%s/%s.m\n' "$(MODULE_GEN_DIR)" "$$module_id" "$$relative_path")
+$(MODULE_GEN_DIR)/modules/$(word 2,$(subst /, ,$(1)))/$(patsubst modules/$(word 2,$(subst /, ,$(1)))/Resources/Templates/%,%,$(1)).m
 endef
 
 define root_generated_source_for
