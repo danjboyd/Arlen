@@ -4,6 +4,7 @@
 #import "ALNAuth.h"
 #import "ALNOAuthResourceServer.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLogger.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRequest.h"
@@ -32,6 +33,18 @@ static BOOL ConfigInteger(id value, NSUInteger fallback, NSUInteger *out) {
 static NSData *JSON(id v) { return [ALNJSONSerialization isValidJSONObject:v] ? [ALNJSONSerialization dataWithJSONObject:v options:0 error:NULL] : nil; }
 static NSDictionary *ToolError(NSString *message) {
   return @{ @"isError": @YES, @"content": @[@{@"type": @"text", @"text": message}] };
+}
+static BOOL LoopbackAddress(NSString *address) {
+  return String(address) && ([address hasPrefix:@"127."] || [address isEqual:@"::1"] || [address hasPrefix:@"::ffff:127."]);
+}
+static BOOL LoopbackHost(NSString *host) {
+  return LoopbackAddress(host) || [host isEqual:@"localhost"] || [host isEqual:@"[::1]"];
+}
+static NSArray *DevelopmentStrings(id value, BOOL *ok) {
+  if (!value) return @[];
+  if (![value isKindOfClass:[NSArray class]]) { *ok = NO; return nil; }
+  for (id item in value) if (!String(item) || ![item length] || [item rangeOfCharacterFromSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]].location != NSNotFound) { *ok = NO; return nil; }
+  return value;
 }
 static NSString *Encode(NSString *value) {
   return [value stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"]];
@@ -66,6 +79,7 @@ static NSString *Encode(NSString *value) {
 @property(nonatomic, assign) NSUInteger maxBytes;
 @property(nonatomic, strong) NSError *registrationError;
 @property(nonatomic, strong) ALNRateLimitMiddleware *limiter;
+@property(nonatomic, copy) NSDictionary *developmentClaims;
 - (void)handle:(ALNContext *)context;
 @end
 @interface ALNMCPController : ALNController
@@ -141,6 +155,7 @@ static NSString *Encode(NSString *value) {
     if (![values isKindOfClass:[NSArray class]]) return ALNMCPFail(error, @"MCP access settings must be string arrays");
     for (id value in values) if (!String(value) || ![value length]) return ALNMCPFail(error, @"MCP access settings require nonempty strings");
   }
+  if (![self configureDevelopmentTrust:config[@"development"] application:application error:error]) return NO;
   NSUInteger maxBytes = 0;
   if (!ConfigInteger(config[@"maxOutputBytes"], 262144, &maxBytes) || maxBytes < 1024 || maxBytes > 16777216)
     return ALNMCPFail(error, @"mcp.maxOutputBytes must be an integer 1024..16777216");
@@ -206,15 +221,56 @@ static NSString *Encode(NSString *value) {
   [application registerLifecycleHook:self];
   return YES;
 }
+// mcp.development.trustLoopback: an explicit, development-only identity for
+// local MCP clients. Installation refuses it outside development/test and on a
+// non-loopback bind host; each request must also come from a loopback peer with
+// no credentials, browser origin or proxy forwarding headers.
+- (BOOL)configureDevelopmentTrust:(id)development application:(ALNApplication *)application error:(NSError **)error {
+  if (!development) return YES;
+  if (!Dict(development)) return ALNMCPFail(error, @"mcp.development must be an object");
+  id trust = development[@"trustLoopback"];
+  if (trust && ![trust isKindOfClass:[NSNumber class]] && !String(trust)) return ALNMCPFail(error, @"mcp.development.trustLoopback must be a boolean");
+  if (![trust boolValue]) return YES;
+  if (self.resourceServer || self.config[@"oauth"])
+    return ALNMCPFail(error, @"mcp.development.trustLoopback cannot be combined with MCP OAuth");
+  if (![@[@"development", @"test"] containsObject:application.environment ?: @""])
+    return ALNMCPFail(error, @"mcp.development.trustLoopback is only allowed in the development and test environments");
+  id host = application.config[@"host"] ?: @"127.0.0.1";
+  if (!String(host) || !LoopbackHost(host)) return ALNMCPFail(error, @"mcp.development.trustLoopback requires a loopback host");
+  id subject = development[@"subject"] ?: @"local";
+  if (!String(subject) || ![subject length]) return ALNMCPFail(error, @"mcp.development.subject must be a nonempty string");
+  BOOL ok = YES;
+  NSArray *scopes = DevelopmentStrings(development[@"scopes"], &ok);
+  NSArray *roles = DevelopmentStrings(development[@"roles"], &ok);
+  if (!ok) return ALNMCPFail(error, @"mcp.development scopes and roles must be arrays of nonempty strings without spaces");
+  self.developmentClaims = @{ @"sub": subject, @"scope": [scopes componentsJoinedByString:@" "], @"roles": roles };
+  [application.logger warn:@"mcp.development.trustLoopback is on: unauthenticated loopback MCP requests act as the configured subject"
+                    fields:@{ @"subject": subject, @"scopes": scopes, @"roles": roles }];
+  return YES;
+}
+- (void)applyDevelopmentTrust:(ALNContext *)context {
+  if (!self.developmentClaims || [context authSubject].length) return;
+  ALNRequest *request = context.request;
+  if (!LoopbackAddress(request.remoteAddress)) return;
+  if (request.effectiveRemoteAddress.length && !LoopbackAddress(request.effectiveRemoteAddress)) return;
+  // A same-host reverse proxy makes remote traffic arrive from loopback.
+  for (NSString *name in @[@"authorization", @"origin", @"forwarded", @"x-forwarded-for", @"x-real-ip"])
+    if ([request headerValueForName:name].length) return;
+  [ALNAuth applyClaims:self.developmentClaims toContext:context];
+}
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   if ([context.request.path isEqual:self.path] || [context.request.path hasPrefix:[self.path stringByAppendingString:@"/"]]) {
     context.stash[ModuleKey] = self;
     context.stash[ALNResponseEnvelopeDisabledStashKey] = @YES;
-    if ([context.request.path isEqual:self.path]) return [self.limiter processContext:context error:error];
+    if ([context.request.path isEqual:self.path]) {
+      [self applyDevelopmentTrust:context];
+      return [self.limiter processContext:context error:error];
+    }
   }
   if ([context.request isKindOfClass:[ALNMCPInvocation class]] && ((ALNMCPInvocation *)context.request).owner == self) {
     // Even a route without scope/role metadata must receive a freshly resolved
     // MCP caller identity. Never reuse the outer context's cached claims.
+    [self applyDevelopmentTrust:context];
     if (![context authSubject].length) [ALNAuth authenticateContext:context authConfig:self.application.config[@"auth"] ?: @{} error:NULL];
     if (![context authSubject].length) {
       context.response.statusCode = 401;

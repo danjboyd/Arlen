@@ -380,4 +380,76 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqualObjects(@YES, [self call:@"identity" arguments:@{} headers:nil][@"result"][@"isError"]);
   XCTAssertEqual(0u, Calls);
 }
+
+// Issue 185: explicit loopback identity for local development.
+- (NSDictionary *)localDevelopment {
+  return @{ @"enabled": @YES, @"development": @{ @"trustLoopback": @YES, @"subject": @"local",
+                                                @"scopes": @[@"catalog:read"], @"roles": @[@"reader"] } };
+}
+- (ALNResponse *)sendLocal:(id)message headers:(NSDictionary *)extra remote:(NSString *)remote effective:(NSString *)effective {
+  NSMutableDictionary *headers = [@{@"content-type": @"application/json", @"accept": @"application/json, text/event-stream", @"mcp-protocol-version": @"2025-11-25"} mutableCopy];
+  [headers addEntriesFromDictionary:extra ?: @{}];
+  ALNRequest *req = [[ALNRequest alloc] initWithMethod:@"POST" path:@"/mcp" queryString:@"" headers:headers
+                                                  body:[NSJSONSerialization dataWithJSONObject:message options:0 error:NULL]];
+  req.remoteAddress = remote; req.effectiveRemoteAddress = effective;
+  return [self.app dispatchRequest:req];
+}
+- (void)testLoopbackDevelopmentTrustActsAsConfiguredSubject {
+  [self configure:@{@"mcp": [self localDevelopment]}]; [self routeTool]; [self install];
+  NSDictionary *call = @{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/call", @"params":@{@"name":@"catalog.get", @"arguments":@{@"id":@"9"}}};
+  for (NSString *remote in @[@"127.0.0.1", @"::1", @"::ffff:127.0.0.1"]) {
+    ALNResponse *r = [self sendLocal:call headers:nil remote:remote effective:remote];
+    XCTAssertEqual(200, r.statusCode, @"%@", remote);
+    NSDictionary *result = [self decode:r][@"result"];
+    XCTAssertEqualObjects(@NO, result[@"isError"], @"%@ %@", remote, result);
+    XCTAssertEqualObjects(@"local", result[@"structuredContent"][@"subject"], @"%@ %@", remote, result);
+  }
+  XCTAssertEqual(3u, Calls);
+}
+- (void)testLoopbackDevelopmentTrustRefusesRemoteProxiedBrowserAndCredentialedRequests {
+  NSMutableDictionary *mcp = [[self localDevelopment] mutableCopy];
+  mcp[@"allowedOrigins"] = @[@"http://localhost:3000"];
+  [self configure:@{@"mcp": mcp}]; [self routeTool]; [self install];
+  NSDictionary *list = @{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"};
+  NSArray *cases = @[
+    @[@{}, @"203.0.113.5", @"203.0.113.5"],
+    @[@{}, @"127.0.0.1", @"203.0.113.5"],
+    @[@{@"x-forwarded-for": @"203.0.113.5"}, @"127.0.0.1", @"127.0.0.1"],
+    @[@{@"forwarded": @"for=203.0.113.5"}, @"127.0.0.1", @"127.0.0.1"],
+    @[@{@"x-real-ip": @"203.0.113.5"}, @"127.0.0.1", @"127.0.0.1"],
+    @[@{@"origin": @"http://localhost:3000"}, @"127.0.0.1", @"127.0.0.1"],
+    @[@{@"authorization": @"Bearer forged"}, @"127.0.0.1", @"127.0.0.1"],
+  ];
+  for (NSArray *item in cases) {
+    XCTAssertEqual(401, [self sendLocal:list headers:item[0] remote:item[1] effective:item[2]].statusCode, @"%@", item);
+  }
+  XCTAssertEqual(200, [self sendLocal:list headers:nil remote:@"127.0.0.1" effective:@"127.0.0.1"].statusCode);
+  XCTAssertEqual(0u, Calls);
+}
+- (void)testLoopbackDevelopmentTrustIsOffByDefault {
+  [self routeTool]; [self install];
+  NSDictionary *list = @{@"jsonrpc":@"2.0", @"id":@1, @"method":@"tools/list"};
+  XCTAssertEqual(401, [self sendLocal:list headers:nil remote:@"127.0.0.1" effective:@"127.0.0.1"].statusCode);
+}
+- (void)testLoopbackDevelopmentTrustRefusesUnsafeConfiguration {
+  NSDictionary *trust = @{ @"trustLoopback": @YES };
+  NSArray *cases = @[
+    @{ @"environment": @"production", @"mcp": @{ @"enabled": @YES, @"development": trust } },
+    @{ @"environment": @"staging", @"mcp": @{ @"enabled": @YES, @"development": trust } },
+    @{ @"host": @"0.0.0.0", @"mcp": @{ @"enabled": @YES, @"development": trust } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": @{ @"trustLoopback": @YES, @"scopes": @"catalog:read" } } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": @{ @"trustLoopback": @YES, @"scopes": @[@"a b"] } } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": @{ @"trustLoopback": @YES, @"subject": @"" } } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": @{ @"trustLoopback": @[] } } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": @"yes" } },
+    @{ @"mcp": @{ @"enabled": @YES, @"development": trust, @"oauth": @{} } },
+  ];
+  for (NSDictionary *extra in cases) {
+    [self configure:extra];
+    NSError *error = nil;
+    XCTAssertFalse([self.module registerWithApplication:self.app error:&error], @"%@", extra);
+    XCTAssertNotNil(error, @"%@", extra);
+  }
+}
+
 @end
