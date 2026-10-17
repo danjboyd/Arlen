@@ -18,6 +18,12 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- A job handler that raises an exception no longer escapes `ALNJobWorker`.
+  Before, a throwing ("poison") job stopped the worker run, skipped the jobs
+  after it, and with the in-memory adapter stayed leased forever. The exception
+  now counts as a failed attempt: the job is retried with the usual delay and
+  dead-lettered after `maxAttempts` (#241).
+
 - Static mounts no longer serve hidden files. Any path component starting with
   `.` returns 404 (`/static/.secret.json`, `/static/.git/config.json`), except
   `.well-known/`. Before, `arlen new` apps served such files from `public/` in
