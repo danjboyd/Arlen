@@ -36,6 +36,18 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           submodules: recursive
 
+      # iep-apt's /tmp is a small shared tmpfs, and GNUstep's NSTemporaryDirectory()
+      # reads TEMP/TMP (not TMPDIR). Give each job its own on-disk temp directory,
+      # which the runner empties between jobs, so leaked test files can't fill /tmp.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
       - name: Check release version
         run: |
           python3 ./tools/ci/check_release_version.py --repo-root . --tag "$RELEASE_TAG"

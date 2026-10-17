@@ -237,7 +237,8 @@
                             attempts:(NSInteger)attempts
                              success:(BOOL *)success {
   NSString *command =
-      [NSString stringWithFormat:@"curl -fsS 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
+      // --max-time: a server that accepts but never answers must fail this check, not hang it.
+      [NSString stringWithFormat:@"curl -fsS --max-time 10 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
   __block NSString *body = @"";
   BOOL answered = ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
     int curlCode = 0;
