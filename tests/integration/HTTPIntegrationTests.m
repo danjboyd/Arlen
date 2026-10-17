@@ -12,6 +12,7 @@
 
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
+#import "ALNRequest.h"
 
 @interface HTTPIntegrationTests : XCTestCase
 @end
@@ -189,8 +190,19 @@
 }
 
 - (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
-  NSString *command = [NSString stringWithFormat:@"python3 - 2>&1 <<'PY'\n%@\nPY", script ?: @""];
-  return [self runShellCapture:command exitCode:exitCode];
+  // Run from a file: passing the script inline through `bash -lc` lost
+  // backslashes on Windows, where NSTask quotes the command line MSVCRT-style.
+  NSString *scriptPath = [self createTempFilePathWithPrefix:@"arlen-http-probe" suffix:@".py"];
+  if (![(script ?: @"") writeToFile:scriptPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
+    if (exitCode != NULL) {
+      *exitCode = -1;
+    }
+    return @"failed to write python probe script";
+  }
+  NSString *command = [NSString stringWithFormat:@"python3 %@ 2>&1", [self shellQuoted:scriptPath]];
+  NSString *output = [self runShellCapture:command exitCode:exitCode];
+  [[NSFileManager defaultManager] removeItemAtPath:scriptPath error:NULL];
+  return output;
 }
 
 - (NSString *)capturedOutputFromPipe:(NSPipe *)pipe {
@@ -4177,6 +4189,7 @@
         @"import socket, time\n"
         @"PORT=%d\n"
         @"BACKEND='%@'\n"
+        @"LLHTTP=%@\n"
         @"def connect():\n"
         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
         @"    sock.settimeout(5)\n"
@@ -4191,8 +4204,8 @@
         @"    return data\n"
         @"def status(head):\n"
         @"    return int(head.split(b' ')[1]) if head else 0\n"
-        @"# Issue 211 (llhttp; the legacy parser rejects Transfer-Encoding): 7000 one-byte chunks are framing, not header bytes.\n"
-        @"if BACKEND == 'llhttp':\n"
+        @"# Issue 211 (llhttp only: the legacy parser rejects Transfer-Encoding, and builds without llhttp fall back to it): 7000 one-byte chunks are framing, not header bytes.\n"
+        @"if BACKEND == 'llhttp' and LLHTTP:\n"
         @"    sock = connect()\n"
         @"    chunks = b'1\\r\\na\\r\\n' * 7000\n"
         @"    sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\nConnection: close\\r\\n\\r\\n' + chunks + b'0\\r\\n\\r\\n')\n"
@@ -4226,7 +4239,7 @@
         @"assert status(rejected) == 400, rejected\n"
         @"assert b'x-content-type-options: nosniff' in rejected.lower(), rejected\n"
         @"print('framing checks passed')\n",
-          port, backend];
+          port, backend, [ALNRequest isLLHTTPAvailable] ? @"True" : @"False"];
       int pyCode = 0;
       NSString *output = [self runPythonScript:script exitCode:&pyCode];
       XCTAssertEqual(0, pyCode, @"%@: %@", backend, output);
