@@ -1772,6 +1772,50 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqualObjects(@(YES), readyQuorumCheck[@"ok"]);
 }
 
+- (void)testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted {
+  ALNApplication *open = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"logFormat" : @"json" }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    XCTAssertEqual((NSInteger)200, [open dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+
+  ALNApplication *tokenApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityToken" : @"scrape-secret" },
+  }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    ALNResponse *missing = [tokenApp dispatchRequest:[self requestForPath:path]];
+    XCTAssertEqual((NSInteger)401, missing.statusCode, @"%@", path);
+    XCTAssertEqualObjects(@"Bearer", [missing headerForName:@"WWW-Authenticate"]);
+    ALNResponse *wrong = [tokenApp dispatchRequest:[self requestForPath:path
+                                                            queryString:@""
+                                                                headers:@{ @"authorization" : @"Bearer nope" }]];
+    XCTAssertEqual((NSInteger)401, wrong.statusCode, @"%@", path);
+    ALNResponse *right = [tokenApp dispatchRequest:[self requestForPath:path
+                                                            queryString:@""
+                                                                headers:@{ @"authorization" : @"Bearer scrape-secret" }]];
+    XCTAssertEqual((NSInteger)200, right.statusCode, @"%@", path);
+  }
+  XCTAssertEqual((NSInteger)200, [tokenApp dispatchRequest:[self requestForPath:@"/healthz"]].statusCode);
+
+  ALNApplication *loopbackApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityLoopbackOnly" : @YES },
+  }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    ALNRequest *remote = [self requestForPath:path];
+    remote.remoteAddress = @"203.0.113.5";
+    XCTAssertEqual((NSInteger)403, [loopbackApp dispatchRequest:remote].statusCode, @"%@", path);
+    ALNRequest *local = [self requestForPath:path];
+    local.remoteAddress = @"127.0.0.1";
+    XCTAssertEqual((NSInteger)200, [loopbackApp dispatchRequest:local].statusCode, @"%@", path);
+    ALNRequest *proxied = [self requestForPath:path queryString:@"" headers:@{ @"x-forwarded-for" : @"203.0.113.5" }];
+    proxied.remoteAddress = @"127.0.0.1";
+    XCTAssertEqual((NSInteger)403, [loopbackApp dispatchRequest:proxied].statusCode, @"%@", path);
+  }
+}
+
 - (void)testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

@@ -186,6 +186,47 @@
   now explain that app identity middleware must be registered from a plugin
   to run before the module (#185). `mcp` moves to `1.0.4`.
 
+- The `search` module bounds the cost of a query. `q` longer than 256
+  characters is rejected with `422` (`ALNSearchModuleErrorValidationFailed`)
+  instead of being processed. "Did you mean" suggestions are skipped for
+  queries over 64 characters, and `autocomplete_limit`/`suggestions_limit`
+  are clamped to 25. The default engine's fuzzy matching builds the query's
+  trigram set once per query, uses a plain C buffer for edit distance, and
+  skips the edit-distance table when word lengths differ by more than two.
+  Results for other queries are unchanged (#226). `search` moves to `1.0.3`.
+
+- The `notifications` module caps its outbox (`outbox.maxEntries`, default
+  1000) and each recipient's inbox (`inbox.maxEntriesPerRecipient`, default
+  200); past the cap the oldest entries are dropped, including when a larger
+  state file is loaded. The inbox (`GET /notifications/api/inbox`,
+  `GET /notifications/inbox`, and the new
+  `-inboxSummaryForRecipient:limit:offset:`) accepts `limit` and `offset` and
+  returns a `pagination` object; without `limit` it still returns the whole
+  (now bounded) inbox. Preference updates for an unregistered notification or
+  an unknown channel are rejected with `422` instead of being stored. How and
+  when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
+
+- Module hardening (#228):
+  - `/metrics` and `/clusterz` can be restricted with
+    `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` (require
+    `Authorization: Bearer <token>`) and
+    `observability.operabilityLoopbackOnly` /
+    `ARLEN_OPERABILITY_LOOPBACK_ONLY` (direct loopback requests only). Both
+    stay anonymous by default; `arlen doctor --env production` now warns
+    while they are.
+  - MCP `tools/list` only lists tools whose required roles and scopes the
+    caller holds. `tools/call` still enforces every route check. `mcp` moves
+    to `1.0.5`.
+  - Local-password login verifies a throwaway Argon2id hash when the email
+    is unknown, so response time no longer shows whether an account exists.
+    `auth` moves to `1.5.2`.
+  - The notifications HTML inbox links an entry's `href`/`path` only when it
+    is an `http`/`https` URL or a same-origin relative path; other values
+    render without a link.
+  - PostgreSQL search autocomplete escapes `%`, `_` and `\` in the query
+    and uses `LIKE ... ESCAPE '\'`, so `q=%` no longer matches every
+    document.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

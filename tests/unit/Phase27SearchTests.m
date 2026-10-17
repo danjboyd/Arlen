@@ -177,6 +177,43 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
 
 @end
 
+@interface NSObject (Phase27SearchEngineDistanceInternals)
+- (NSUInteger)levenshteinDistanceBetween:(NSString *)lhs and:(NSString *)rhs;
+- (NSUInteger)fuzzyEditDistanceBetween:(NSString *)token and:(NSString *)needle;
+@end
+
+// The boxed implementation the default engine used before it moved to a scalar buffer.
+static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
+  NSString *left = [[lhs stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+  NSString *right = [[rhs stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+  if ([left length] == 0) {
+    return [right length];
+  }
+  if ([right length] == 0) {
+    return [left length];
+  }
+  NSMutableArray<NSNumber *> *previous = [NSMutableArray array];
+  NSMutableArray<NSNumber *> *current = [NSMutableArray array];
+  for (NSUInteger column = 0; column <= [right length]; column++) {
+    [previous addObject:@(column)];
+    [current addObject:@0];
+  }
+  for (NSUInteger row = 1; row <= [left length]; row++) {
+    current[0] = @(row);
+    for (NSUInteger column = 1; column <= [right length]; column++) {
+      NSUInteger cost = ([left characterAtIndex:row - 1] == [right characterAtIndex:column - 1]) ? 0U : 1U;
+      NSUInteger deletion = [previous[column] unsignedIntegerValue] + 1U;
+      NSUInteger insertion = [current[column - 1] unsignedIntegerValue] + 1U;
+      NSUInteger substitution = [previous[column - 1] unsignedIntegerValue] + cost;
+      current[column] = @(MIN(MIN(deletion, insertion), substitution));
+    }
+    NSMutableArray *swap = previous;
+    previous = current;
+    current = swap;
+  }
+  return [[previous lastObject] unsignedIntegerValue];
+}
+
 @interface Phase27SearchTests : XCTestCase
 @end
 
@@ -479,6 +516,143 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   XCTAssertEqual(ALNSearchModuleErrorValidationFailed, error.code);
 }
 
+- (void)testOverlongQueryIsRejectedAndMaximumLengthQueryStaysFast {
+  NSMutableDictionary *products = Phase27SearchProductStore();
+  for (NSUInteger index = 0; index < 200; index++) {
+    NSString *sku = [NSString stringWithFormat:@"sku-load-%03lu", (unsigned long)index];
+    products[sku] = [@{
+      @"sku" : sku,
+      @"name" : [NSString stringWithFormat:@"Bulk Item %03lu", (unsigned long)index],
+      @"category" : @"bulk",
+      @"description" : @"Warehouse shelving, staffing notes, inventory counts and routine maintenance schedules.",
+      @"inventory_count" : @1,
+      @"internal_cost" : @"1.00",
+    } mutableCopy];
+  }
+  ALNApplication *app = [self applicationWithConfig:nil database:nil];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSString *overlong = [@"" stringByPaddingToLength:257 withString:@"a" startingAtIndex:0];
+  NSError *error = nil;
+  XCTAssertNil([runtime searchQuery:overlong
+                 resourceIdentifier:@"products"
+                            filters:nil
+                               sort:nil
+                              limit:10
+                             offset:0
+                       queryOptions:@{ @"mode" : @"fuzzy" }
+                              error:&error]);
+  XCTAssertEqual(ALNSearchModuleErrorValidationFailed, error.code);
+  XCTAssertEqualObjects(@256, error.userInfo[@"maxLength"]);
+
+  NSString *maximum = [@"" stringByPaddingToLength:256 withString:@"warehouse " startingAtIndex:0];
+  error = nil;
+  NSDate *started = [NSDate date];
+  NSDictionary *result = [runtime searchQuery:maximum
+                           resourceIdentifier:@"products"
+                                      filters:nil
+                                         sort:nil
+                                        limit:10
+                                       offset:0
+                                 queryOptions:@{ @"mode" : @"fuzzy" }
+                                        error:&error];
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertNotNil(result);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@[], result[@"suggestions"]);
+  XCTAssertLessThan(elapsed, 2.0);
+}
+
+- (void)testSuggestionAndAutocompleteLimitsAreClamped {
+  NSMutableDictionary *products = Phase27SearchProductStore();
+  for (NSUInteger index = 0; index < 40; index++) {
+    NSString *sku = [NSString stringWithFormat:@"sku-variant-%02lu", (unsigned long)index];
+    products[sku] = [@{
+      @"sku" : sku,
+      @"name" : [NSString stringWithFormat:@"Priority%02lu Kit", (unsigned long)index],
+      @"category" : @"priority",
+      @"description" : @"Variant kit.",
+      @"inventory_count" : @1,
+      @"internal_cost" : @"1.00",
+    } mutableCopy];
+  }
+  ALNApplication *app = [self applicationWithConfig:nil database:nil];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSError *error = nil;
+  NSDictionary *autocomplete = [runtime searchQuery:@"priority"
+                                 resourceIdentifier:@"products"
+                                            filters:nil
+                                               sort:nil
+                                              limit:10
+                                             offset:0
+                                       queryOptions:@{ @"mode" : @"autocomplete", @"autocompleteLimit" : @100000 }
+                                              error:&error];
+  XCTAssertNotNil(autocomplete);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)25, [autocomplete[@"autocomplete"] count]);
+
+  NSDictionary *fuzzy = [runtime searchQuery:@"priority"
+                          resourceIdentifier:@"products"
+                                     filters:nil
+                                        sort:nil
+                                       limit:10
+                                      offset:0
+                                queryOptions:@{ @"mode" : @"fuzzy", @"suggestionsLimit" : @100000 }
+                                       error:&error];
+  XCTAssertNotNil(fuzzy);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)25, [fuzzy[@"suggestions"] count]);
+
+  NSDictionary *defaults = [runtime searchQuery:@"priority"
+                             resourceIdentifier:@"products"
+                                        filters:nil
+                                           sort:nil
+                                          limit:10
+                                         offset:0
+                                   queryOptions:@{ @"mode" : @"fuzzy" }
+                                          error:&error];
+  XCTAssertEqual((NSUInteger)3, [defaults[@"suggestions"] count]);
+  XCTAssertEqual((NSUInteger)5, [defaults[@"autocomplete"] count]);
+}
+
+- (void)testLevenshteinDistanceMatchesReferenceImplementation {
+  Class engineClass = NSClassFromString(@"ALNDefaultSearchEngine");
+  XCTAssertNotNil(engineClass);
+  id engine = [[engineClass alloc] init];
+  NSArray<NSArray<NSString *> *> *pairs = @[
+    @[ @"", @"" ],
+    @[ @"", @"abc" ],
+    @[ @"abc", @"" ],
+    @[ @"kitten", @"sitting" ],
+    @[ @"flaw", @"lawn" ],
+    @[ @"pririty", @"priority" ],
+    @[ @"Priority", @"priority" ],
+    @[ @"  rack ", @"rack" ],
+    @[ @"intention", @"execution" ],
+    @[ @"caf\u00e9", @"cafe" ],
+    @[ @"stra\u00dfe", @"strasse" ],
+    @[ @"warehouse", @"wharehouse" ],
+    @[ @"a", @"abcdefghij" ],
+    @[ @"operations", @"operational" ],
+  ];
+  for (NSArray<NSString *> *pair in pairs) {
+    NSUInteger expected = Phase27ReferenceLevenshtein(pair[0], pair[1]);
+    XCTAssertEqual(expected, [engine levenshteinDistanceBetween:pair[0] and:pair[1]], @"%@", pair);
+    NSUInteger fuzzy = [engine fuzzyEditDistanceBetween:pair[0] and:pair[1]];
+    XCTAssertEqual(expected <= 2U, fuzzy <= 2U, @"%@", pair);
+    if (expected <= 2U) {
+      XCTAssertEqual(expected, fuzzy, @"%@", pair);
+    }
+  }
+  XCTAssertEqual((NSUInteger)3, [engine levenshteinDistanceBetween:@"kitten" and:@"sitting"]);
+  XCTAssertEqual((NSUInteger)1, [engine levenshteinDistanceBetween:@"pririty" and:@"priority"]);
+}
+
 - (void)testReindexStreamsBuildBatchesInsteadOfUsingLegacySnapshotContract {
   ALNApplication *app = [self applicationWithConfig:@{
     @"engineClass" : @"Phase27StreamingCaptureSearchEngine",
@@ -654,6 +828,24 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
   NSDictionary *repeated = [runtime searchQuery:@"pririty" resourceIdentifier:@"products"
       filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"fuzzy" } error:&error];
   XCTAssertEqualObjects([results valueForKey:@"recordID"], [repeated[@"results"] valueForKey:@"recordID"]);
+}
+
+- (void)testPostgresAutocompleteTreatsLikeWildcardsLiterally {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
+  NSDictionary *prefix = [runtime searchQuery:@"pri" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"autocomplete" } error:&error];
+  XCTAssertNotNil(prefix);
+  XCTAssertNil(error);
+  XCTAssertTrue([[prefix[@"results"] valueForKey:@"recordID"] containsObject:@"sku-102"]);
+  for (NSString *wildcard in @[ @"%", @"_", @"\\" ]) {
+    NSDictionary *literal = [runtime searchQuery:wildcard resourceIdentifier:@"products"
+        filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"autocomplete" } error:&error];
+    XCTAssertNotNil(literal, @"%@", wildcard);
+    XCTAssertNil(error, @"%@", wildcard);
+    XCTAssertEqual((NSUInteger)0, [literal[@"results"] count], @"%@ matched %@", wildcard, literal[@"results"]);
+  }
 }
 
 - (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {

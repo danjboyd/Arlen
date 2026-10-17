@@ -8397,6 +8397,37 @@ static int CommandDoctor(NSArray *args) {
                                                 (long)port],
                      @"");
       passCount += 1;
+
+      if ([environment isEqualToString:@"production"]) {
+        NSDictionary *observability = [loadedConfig[@"observability"] isKindOfClass:[NSDictionary class]]
+                                          ? loadedConfig[@"observability"]
+                                          : @{};
+        NSString *operabilityToken = [observability[@"operabilityToken"] isKindOfClass:[NSString class]]
+                                         ? [observability[@"operabilityToken"]
+                                               stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                         : @"";
+        BOOL loopbackOnly = [observability[@"operabilityLoopbackOnly"] respondsToSelector:@selector(boolValue)] &&
+                            [observability[@"operabilityLoopbackOnly"] boolValue];
+        if ([operabilityToken length] > 0 || loopbackOnly) {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"pass",
+                         [NSString stringWithFormat:@"/metrics and /clusterz are restricted (%@)",
+                                                    ([operabilityToken length] > 0 && loopbackOnly)
+                                                        ? @"bearer token, loopback only"
+                                                        : (loopbackOnly ? @"loopback only" : @"bearer token")],
+                         @"");
+          passCount += 1;
+        } else {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"warn",
+                         @"/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)",
+                         @"Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, "
+                         "or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy.");
+          warnCount += 1;
+        }
+      }
     }
   }
 
