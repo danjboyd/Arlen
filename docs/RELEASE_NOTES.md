@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Event streams: SSE and websocket stream sessions subscribe before they
+  replay and hold live events until the replay is sent. Events committed while
+  a client connected were lost before, and concurrent appends could arrive out
+  of order; appends now publish in commit order. SSE `id:` is the stream
+  sequence (it was the `event_id`), and `renderSSEStream:` resumes from a
+  `Last-Event-ID` header when given no cursor (#240).
+- `ALNInMemoryEventStreamStore` keeps at most `maxEventsPerStream` events per
+  stream (default 10000) and optionally none older than `maxEventAgeSeconds`;
+  it kept every event before. Replays start at the cursor instead of scanning
+  the stream, and a cursor older than the oldest kept event gets
+  `resync_required` (#242).
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

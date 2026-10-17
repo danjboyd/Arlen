@@ -3674,6 +3674,65 @@
   }
 }
 
+// GitHub issue 240: SSE clients that start while other requests append must
+// see every later event once, in order (the server used to replay, then
+// subscribe, and publish out of order); `id:` is the sequence and a
+// Last-Event-ID reconnect resumes after it.
+- (void)testSSEStreamDeliversEveryEventInOrderUnderConcurrentAppends_Issue240 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-event-stream-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_app.m"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
+                                   // Each SSE client holds a worker; the probe runs 12 plus 3 appenders.
+                                   "runtimeLimits = { maxConcurrentHTTPWorkers = 32; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+                                                     [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                                              envPrefix]
+                                          exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[ @"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+                                       [self shellQuoted:[appRoot stringByAppendingPathComponent:
+                                                                      ALNTestAppBinaryRelativePath()]],
+                                       port] ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = server.standardOutput;
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_probe.py"
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:NULL];
+      script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                                 withString:[NSString stringWithFormat:@"%d", port]];
+      int code = 0;
+      NSString *output = [self runPythonScript:script exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", output);
+      XCTAssertTrue([output containsString:@"event stream checks passed"], @"%@", output);
+    } @finally {
+      (void)ALNTestStopServerTask(server);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 // GitHub issue 87: per-route body limits enforced before the body is read,
 // large uploads spooled with bounded heap, and cleanup on every exit path.
 - (void)testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends {

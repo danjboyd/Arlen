@@ -5,6 +5,13 @@
 
 In-memory adapter implementation useful for development and tests.
 
+## Properties
+
+| Property | Type | Attributes | Purpose |
+| --- | --- | --- | --- |
+| `maxEventsPerStream` | `NSUInteger` | `nonatomic, assign` | Public `maxEventsPerStream` property available on `ALNInMemoryEventStreamStore`. |
+| `maxEventAgeSeconds` | `NSTimeInterval` | `nonatomic, assign` | Public `maxEventAgeSeconds` property available on `ALNInMemoryEventStreamStore`. |
+
 ## Methods
 
 | Selector | Signature | Purpose | How to use |
