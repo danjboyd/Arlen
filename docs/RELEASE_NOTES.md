@@ -6,7 +6,8 @@
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
 - Windows is now documented as a supported development platform, on the
-  gnustep-cli managed MSYS2 `CLANG64` toolchain. The new
+  gnustep-cli `v0.1.1` managed MSYS2 `CLANG64` toolchain, which includes
+  libcurl. The new
   `docs/GETTING_STARTED_WINDOWS.md` covers the toolchain, `install.ps1`, and
   building and running apps. README, the docs index, `WINDOWS_CLANG64.md`,
   `TOOLCHAIN_MATRIX.md` and `CLI_REFERENCE.md` carry the new support

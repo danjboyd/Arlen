@@ -58,8 +58,8 @@ that `GNUSTEP_MAKEFILES` points into, then `%LOCALAPPDATA%\gnustep-cli`, then
 
 - no toolchain root is found (the message gives the gnustep-cli bootstrap
   command);
-- libcurl is missing from the toolchain (the message gives the
-  `pacman -S` command);
+- libcurl is missing from the toolchain, which means the toolchain is older
+  than gnustep-cli `v0.1.1` (the message gives the bootstrap command);
 - the toolchain's `toolchain_version` in `state\cli-state.json` differs from
   the `toolchain=` the zip was built against.
 

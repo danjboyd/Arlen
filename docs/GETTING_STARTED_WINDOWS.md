@@ -19,25 +19,20 @@ tree with clang, GNUstep and libdispatch, and it installs to
 `%LOCALAPPDATA%\gnustep-cli` without administrator rights:
 
 ```powershell
-iwr https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v0.1.0/scripts/bootstrap/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
-powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json
+iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/release-manifest.json
 ```
 
-This command is provisional. A future gnustep-cli release will publish the
-bootstrap script as a release asset with its own download URL.
-
-Arlen links libcurl, which the toolchain does not ship yet. Install it inside
-the toolchain:
-
-```powershell
-& "$env:LOCALAPPDATA\gnustep-cli\usr\bin\bash.exe" -lc 'pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl'
-```
+Arlen 0.3.0 needs gnustep-cli `v0.1.1`. The toolchain includes everything
+Arlen links against, libcurl among them, so there is nothing else to install.
+If you already have the `v0.1.0` toolchain, rerun the command above to move
+to `v0.1.1`; the Arlen installer refuses a toolchain version that differs
+from the one its release was built with.
 
 > **Never run `pacman -Sy` or `pacman -Syu` in the managed toolchain.**
 > Refreshing the package database causes partial upgrades that break it. A
 > newer python breaks `pyexpat` against the shipped expat, and a newer clang
-> breaks the GNUstep headers. Use plain `pacman -S` as shown, and install
-> nothing else into the managed root.
+> breaks the GNUstep headers. Install nothing into the managed root yourself.
 
 You don't need to install a PostgreSQL client. The Arlen release ships libpq
 as `build\dll\libpq.dll`, and Arlen loads it from the install. Its other

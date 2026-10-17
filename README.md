@@ -76,7 +76,7 @@ First install your platform's toolchain:
 |---|---|---|
 | **macOS, Apple Silicon** | macOS 14 or later, the Xcode Command Line Tools (`xcode-select --install`), and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
 | **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
-| **Windows x64** (development) | The [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed MSYS2 `CLANG64` toolchain plus libcurl; see [Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md). Use the PowerShell installer below. | Installs **prebuilt** framework tools; nothing to compile. |
+| **Windows x64** (development) | The [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed MSYS2 `CLANG64` toolchain (`v0.1.1`); see [Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md). Use the PowerShell installer below. | Installs **prebuilt** framework tools; nothing to compile. |
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
 The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
