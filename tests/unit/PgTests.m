@@ -13,6 +13,7 @@
 #import "ALNDatabaseInspector.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNPostgresSQLBuilder.h"
 #import "ALNSchemaCodegen.h"
 #import "ALNSQLBuilder.h"
@@ -1061,7 +1062,8 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   if (!connection) return;
 
   NSMutableData *blob = [NSMutableData dataWithLength:(4 * 1024 * 1024) + 3];
-  arc4random_buf([blob mutableBytes], [blob length]);
+  // arc4random_buf is not in MinGW; this works on every platform.
+  XCTAssertTrue(ALNPlatformFillRandomBytes([blob mutableBytes], [blob length]));
   NSMutableData *allBytes = [NSMutableData dataWithCapacity:256];
   for (int value = 0; value < 256; value++) {
     unsigned char byte = (unsigned char)value;
