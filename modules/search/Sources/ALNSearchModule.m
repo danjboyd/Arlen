@@ -9,6 +9,7 @@
 #import "ALNEOCRuntime.h"
 #import "ALNHTTPCompat.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNJobsModule.h"
 #import "ALNRequest.h"
 
@@ -105,13 +106,14 @@ static NSString *STEscapedLikePattern(NSString *value) {
 }
 
 static NSUInteger STClampedSuggestionLimit(id value, NSUInteger defaultValue) {
-  if (![value respondsToSelector:@selector(unsignedIntegerValue)]) {
+  NSUInteger parsed = 0U;
+  if (!ALNUnsignedIntegerFromValue(value, &parsed)) {
     return defaultValue;
   }
-  if ([value respondsToSelector:@selector(longLongValue)] && [value longLongValue] < 0) {
+  if ([value isKindOfClass:[NSNumber class]] && [value longLongValue] < 0) {
     return 1U;
   }
-  return MIN(ALNSearchMaxSuggestionLimit, MAX((NSUInteger)1U, [value unsignedIntegerValue]));
+  return MIN(ALNSearchMaxSuggestionLimit, MAX((NSUInteger)1U, parsed));
 }
 
 static BOOL STBooleanValue(id value, BOOL defaultValue) {
@@ -1462,9 +1464,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     if ([text length] == 0) {
       continue;
     }
-    NSUInteger weight = [weights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [weights[field] unsignedIntegerValue])
-                            : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(weights[field], 1U));
     NSString *fieldHighlight = @"";
     double fieldScore = [self scoreText:text
                                  weight:weight
@@ -2014,9 +2014,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
     return NO;
   }
-  NSUInteger maxConnections = [postgres[@"maxConnections"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? MAX((NSUInteger)1U, [postgres[@"maxConnections"] unsignedIntegerValue])
-                                  : 2U;
+  NSUInteger maxConnections = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(postgres[@"maxConnections"], 2U));
   NSError *dbError = nil;
   self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:maxConnections error:&dbError];
   if (self.database == nil) {
@@ -2699,11 +2697,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     self.serviceURL = STTrimmedString(self.engineConfig[@"baseURL"]);
   }
   self.apiKey = STTrimmedString(self.engineConfig[@"apiKey"]);
-  self.chunkSize = [self.engineConfig[@"chunkSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                       ? MAX((NSUInteger)1U, [self.engineConfig[@"chunkSize"] unsignedIntegerValue])
-                       : ([self.engineConfig[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                              ? MAX((NSUInteger)1U, [self.engineConfig[@"bulkBatchSize"] unsignedIntegerValue])
-                              : 250U);
+  NSUInteger defaultChunkSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(self.engineConfig[@"bulkBatchSize"], 250U));
+  self.chunkSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(self.engineConfig[@"chunkSize"], defaultChunkSize));
   self.liveRequestsEnabled = ([self.serviceURL length] > 0) && STBooleanValue(self.engineConfig[@"liveRequestsEnabled"], YES);
   NSDictionary *inlineFixtures = STNormalizeDictionary(self.engineConfig[@"fixtures"]);
   NSString *fixturesPath = STTrimmedString(self.engineConfig[@"fixturesPath"]);
@@ -3519,9 +3514,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSDictionary *weights = STNormalizeDictionary(metadata[@"weightedFields"]);
   NSMutableArray<NSString *> *resolved = [NSMutableArray array];
   for (NSString *field in fields) {
-    NSUInteger weight = [weights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [weights[field] unsignedIntegerValue])
-                            : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(weights[field], 1U));
     if (weight > 1U) {
       [resolved addObject:[NSString stringWithFormat:@"%@^%lu", field, (unsigned long)weight]];
     } else {
@@ -3823,9 +3816,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     if ([field length] == 0) {
       continue;
     }
-    NSUInteger facetLimit = [facet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? MAX((NSUInteger)1U, [facet[@"limit"] unsignedIntegerValue])
-                                : 10U;
+    NSUInteger facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(facet[@"limit"], 10U));
     aggregations[field] = @{
       @"terms" : @{
         @"field" : [self openSearchExactFieldNameForField:field metadata:metadata],
@@ -3981,9 +3972,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       continue;
     }
     [indexedFields addObject:name];
-    NSUInteger weight = [field[@"searchWeight"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [field[@"searchWeight"] unsignedIntegerValue])
-                            : ([name isEqualToString:STLowerTrimmedString(self.metadata[@"primaryField"])] ? 4U : 1U);
+    NSUInteger defaultWeight = [name isEqualToString:STLowerTrimmedString(self.metadata[@"primaryField"])] ? 4U : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(field[@"searchWeight"], defaultWeight));
     weights[name] = @(weight);
     if (STBooleanValue(field[@"list"], NO) || STBooleanValue(field[@"detail"], NO)) {
       [resultFields addObject:name];
@@ -4129,9 +4119,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   self.apiPrefix = STConfiguredPath(moduleConfig, @"apiPrefix", @"api");
   self.accessRoles = ([roles count] > 0) ? roles : @[ @"operator", @"admin" ];
   self.minimumAuthAssuranceLevel =
-      [access[@"minimumAuthAssuranceLevel"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [access[@"minimumAuthAssuranceLevel"] unsignedIntegerValue]
-          : 2;
+      ALNUnsignedIntegerValueOrDefault(access[@"minimumAuthAssuranceLevel"], 2);
   if (self.minimumAuthAssuranceLevel == 0) {
     self.minimumAuthAssuranceLevel = 2;
   }
@@ -4453,9 +4441,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSMutableDictionary *weightedFields = [NSMutableDictionary dictionary];
   NSDictionary *rawWeights = STNormalizeDictionary(rawMetadata[@"weightedFields"]);
   for (NSString *field in indexedFields) {
-    NSUInteger weight = [rawWeights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [rawWeights[field] unsignedIntegerValue])
-                            : ([field isEqualToString:primaryField] ? 4U : 1U);
+    NSUInteger defaultWeight = [field isEqualToString:primaryField] ? 4U : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawWeights[field], defaultWeight));
     weightedFields[field] = @(weight);
   }
   NSMutableArray *filters = [NSMutableArray array];
@@ -4528,29 +4515,26 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
   }
   NSDictionary *rawPagination = STNormalizeDictionary(rawMetadata[@"pagination"]);
-  NSUInteger defaultLimit = [rawPagination[@"defaultLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? [rawPagination[@"defaultLimit"] unsignedIntegerValue]
-                                : ([rawMetadata[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                       ? [rawMetadata[@"pageSize"] unsignedIntegerValue]
-                                       : 25U);
+  NSUInteger defaultLimit = ALNUnsignedIntegerValueOrDefault(rawPagination[@"defaultLimit"],
+                                                              ALNUnsignedIntegerValueOrDefault(rawMetadata[@"pageSize"], 25U));
   if (defaultLimit == 0U) {
     defaultLimit = 25U;
   }
-  NSUInteger maxLimit = [rawPagination[@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? [rawPagination[@"maxLimit"] unsignedIntegerValue]
-                            : MAX(defaultLimit, 100U);
+  NSUInteger maxLimit = ALNUnsignedIntegerValueOrDefault(rawPagination[@"maxLimit"], MAX(defaultLimit, 100U));
   if (maxLimit < defaultLimit) {
     maxLimit = defaultLimit;
   }
   NSMutableOrderedSet<NSNumber *> *pageSizes = [NSMutableOrderedSet orderedSet];
   for (id entry in STNormalizeArray(rawPagination[@"pageSizes"])) {
-    if ([entry respondsToSelector:@selector(unsignedIntegerValue)] && [entry unsignedIntegerValue] > 0U) {
-      [pageSizes addObject:@([entry unsignedIntegerValue])];
+    NSUInteger pageSize = ALNUnsignedIntegerValueOrDefault(entry, 0U);
+    if (pageSize > 0U) {
+      [pageSizes addObject:@(pageSize)];
     }
   }
   for (id entry in STNormalizeArray(rawMetadata[@"pageSizes"])) {
-    if ([entry respondsToSelector:@selector(unsignedIntegerValue)] && [entry unsignedIntegerValue] > 0U) {
-      [pageSizes addObject:@([entry unsignedIntegerValue])];
+    NSUInteger pageSize = ALNUnsignedIntegerValueOrDefault(entry, 0U);
+    if (pageSize > 0U) {
+      [pageSizes addObject:@(pageSize)];
     }
   }
   [pageSizes addObject:@(defaultLimit)];
@@ -4571,9 +4555,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       label = STTrimmedString(rawFacet[@"label"]);
       facetType = STLowerTrimmedString(rawFacet[@"type"]);
       choices = STNormalizedChoiceArray(rawFacet[@"choices"]);
-      if ([rawFacet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]) {
-        facetLimit = MAX((NSUInteger)1U, [rawFacet[@"limit"] unsignedIntegerValue]);
-      }
+      facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawFacet[@"limit"], facetLimit));
     } else {
       name = STLowerTrimmedString(rawFacet);
     }
@@ -4685,12 +4667,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }];
   }
   NSDictionary *rawSyncPolicy = STNormalizeDictionary(rawMetadata[@"syncPolicy"]);
-  NSUInteger bulkBatchSize = [rawSyncPolicy[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                 ? MAX((NSUInteger)1U, [rawSyncPolicy[@"bulkBatchSize"] unsignedIntegerValue])
-                                 : 250U;
-  NSUInteger replayLimit = [rawSyncPolicy[@"replayLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? MAX((NSUInteger)1U, [rawSyncPolicy[@"replayLimit"] unsignedIntegerValue])
-                               : 20U;
+  NSUInteger bulkBatchSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawSyncPolicy[@"bulkBatchSize"], 250U));
+  NSUInteger replayLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawSyncPolicy[@"replayLimit"], 20U));
   NSString *softDeleteMode = STLowerTrimmedString(rawSyncPolicy[@"softDeleteMode"]);
   if (![softDeleteMode isEqualToString:@"delete"]) {
     softDeleteMode = ([softDeleteField length] > 0) ? @"filter" : @"ignore";
@@ -4997,9 +4975,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   id<ALNSearchResourceDefinition> definition = nil;
-  NSUInteger batchSize = [syncPolicy[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                             ? MAX((NSUInteger)1U, [syncPolicy[@"bulkBatchSize"] unsignedIntegerValue])
-                             : 250U;
+  NSUInteger batchSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(syncPolicy[@"bulkBatchSize"], 250U));
   NSTimeInterval startedAt = [[NSDate date] timeIntervalSince1970];
   [self.lock lock];
   definition = self.resourceDefinitionsByIdentifier[resourceIdentifier];
@@ -5661,9 +5637,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return;
   }
   NSDictionary *syncPolicy = STNormalizeDictionary(metadata[@"syncPolicy"]);
-  NSUInteger replayLimit = [syncPolicy[@"replayLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? MAX((NSUInteger)1U, [syncPolicy[@"replayLimit"] unsignedIntegerValue])
-                               : 20U;
+  NSUInteger replayLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(syncPolicy[@"replayLimit"], 20U));
   NSMutableArray *queue = [self.pendingReplayOperationsByResource[resourceIdentifier] isKindOfClass:[NSMutableArray class]]
                               ? self.pendingReplayOperationsByResource[resourceIdentifier]
                               : [NSMutableArray array];
@@ -5929,9 +5903,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
         }
         return [STLowerTrimmedString(labels[lhs]) compare:STLowerTrimmedString(labels[rhs])];
       }];
-      NSUInteger facetLimit = [facet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? MAX((NSUInteger)1U, [facet[@"limit"] unsignedIntegerValue])
-                                  : 10U;
+      NSUInteger facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(facet[@"limit"], 10U));
       if ([sortedValues count] > facetLimit) {
         sortedValues = [sortedValues subarrayWithRange:NSMakeRange(0, facetLimit)];
       }
@@ -6075,16 +6047,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
 
   NSDictionary *pagination = ([candidateMetadata count] == 1) ? STNormalizeDictionary(candidateMetadata[0][@"pagination"]) : @{};
-  NSUInteger defaultLimit = [pagination[@"defaultLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? [pagination[@"defaultLimit"] unsignedIntegerValue]
-                                : 25U;
+  NSUInteger defaultLimit = ALNUnsignedIntegerValueOrDefault(pagination[@"defaultLimit"], 25U);
   if (defaultLimit == 0U) {
     defaultLimit = 25U;
   }
   NSUInteger resolvedLimit = (limit > 0U) ? limit : defaultLimit;
-  NSUInteger maxLimit = [pagination[@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? [pagination[@"maxLimit"] unsignedIntegerValue]
-                            : 100U;
+  NSUInteger maxLimit = ALNUnsignedIntegerValueOrDefault(pagination[@"maxLimit"], 100U);
   if (maxLimit == 0U) {
     maxLimit = 100U;
   }
@@ -6822,12 +6790,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if ([mode length] > 0) {
     options[@"mode"] = mode;
   }
-  if ([parameters[@"autocomplete_limit"] respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [parameters[@"autocomplete_limit"] unsignedIntegerValue] > 0U) {
+  if (ALNUnsignedIntegerValueOrDefault(parameters[@"autocomplete_limit"], 0U) > 0U) {
     options[@"autocompleteLimit"] = @(STClampedSuggestionLimit(parameters[@"autocomplete_limit"], 5U));
   }
-  if ([parameters[@"suggestions_limit"] respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [parameters[@"suggestions_limit"] unsignedIntegerValue] > 0U) {
+  if (ALNUnsignedIntegerValueOrDefault(parameters[@"suggestions_limit"], 0U) > 0U) {
     options[@"suggestionsLimit"] = @(STClampedSuggestionLimit(parameters[@"suggestions_limit"], 3U));
   }
   NSString *cursor = STTrimmedString(parameters[@"cursor"]);
@@ -6942,8 +6908,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if (visibleResources == nil) {
     return nil;
   }
-  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)] ? [parameters[@"limit"] unsignedIntegerValue] : 25;
-  NSUInteger offset = [parameters[@"offset"] respondsToSelector:@selector(unsignedIntegerValue)] ? [parameters[@"offset"] unsignedIntegerValue] : 0;
+  NSUInteger limit = ALNUnsignedIntegerValueOrDefault(parameters[@"limit"], 25);
+  NSUInteger offset = ALNUnsignedIntegerValueOrDefault(parameters[@"offset"], 0);
   NSDictionary *explicitFilters = [self searchFiltersFromParameters:parameters] ?: @{};
   NSString *query = STTrimmedString(parameters[@"q"]);
   if ([query length] == 0 && [STLowerTrimmedString(resourceIdentifier) length] == 0 && [explicitFilters count] == 0) {

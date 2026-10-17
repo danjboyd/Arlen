@@ -681,4 +681,60 @@ static void Phase16IntegrationResetOrderStore(void) {
   XCTAssertEqualObjects(@1, legacyAPIListJSON[@"pagination"][@"limit"]);
 }
 
+// Query-string values are NSStrings. Apple's NSString has no
+// -unsignedIntegerValue, so these used to fall back to their defaults there.
+- (void)testQueryStringPagingAndWorkerLimitsAreHonored {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase16IntegrationAuthMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+
+  ALNResponse *firstPage =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/admin/api/resources/orders/items"
+                                       queryString:@"limit=2"
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, firstPage.statusCode);
+  NSDictionary *firstJSON = [self JSONObjectFromResponse:firstPage];
+  NSArray *firstItems = [firstJSON[@"items"] isKindOfClass:[NSArray class]] ? firstJSON[@"items"] : @[];
+  XCTAssertEqual((NSUInteger)2, [firstItems count]);
+  XCTAssertEqualObjects(@2, firstJSON[@"pagination"][@"limit"]);
+  XCTAssertEqualObjects(@1, firstJSON[@"pagination"][@"page"]);
+
+  ALNResponse *secondPage =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/admin/api/resources/orders/items"
+                                       queryString:@"limit=1&page=2"
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, secondPage.statusCode);
+  NSDictionary *secondJSON = [self JSONObjectFromResponse:secondPage];
+  NSArray *secondItems = [secondJSON[@"items"] isKindOfClass:[NSArray class]] ? secondJSON[@"items"] : @[];
+  XCTAssertEqual((NSUInteger)1, [secondItems count]);
+  XCTAssertEqualObjects(@2, secondJSON[@"pagination"][@"page"]);
+  XCTAssertEqualObjects(@1, secondJSON[@"pagination"][@"offset"]);
+  XCTAssertEqualObjects(@YES, secondJSON[@"pagination"][@"hasPrevious"]);
+  XCTAssertEqualObjects(firstItems.lastObject[@"id"], secondItems.firstObject[@"id"]);
+
+  for (NSUInteger index = 0; index < 2; index++) {
+    ALNResponse *queueResponse =
+        [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                path:@"/search/api/resources/orders/reindex"
+                                         queryString:@""
+                                             headers:@{ @"Accept" : @"application/json" }
+                                                body:nil]];
+    XCTAssertEqual((NSInteger)200, queueResponse.statusCode);
+  }
+  ALNResponse *limitedWorker =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/jobs/api/run-worker"
+                                       queryString:@"limit=1"
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, limitedWorker.statusCode);
+  NSDictionary *limitedJSON = [self JSONObjectFromResponse:limitedWorker];
+  XCTAssertEqualObjects(@1, limitedJSON[@"data"][@"leasedCount"]);
+  XCTAssertEqualObjects(@YES, limitedJSON[@"data"][@"reachedRunLimit"]);
+}
+
 @end
