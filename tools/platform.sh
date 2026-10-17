@@ -54,11 +54,11 @@ aln_platform_rename_over() {
 # Points <link> at the directory <target>, replacing an existing link. On POSIX
 # the new link is made under a temporary name and renamed over <link>, so
 # <link> is never missing (`ln -sfn` unlinks first, which left releases/current
-# absent for a moment during activation). Under MSYS2, `ln -s` copies the directory (real symlinks need
-# admin rights or Developer Mode), and a later `ln -sfn` then links inside the
-# copy, so release activation and rollback silently kept the old release. Use
-# an NTFS junction there instead; MSYS2 reports junctions as symlinks, so
-# `readlink -f` and `[[ -L ]]` keep working.
+# absent for a moment during activation). Under MSYS2, `ln -s` copies the
+# directory (real symlinks need admin rights or Developer Mode), and a later
+# `ln -sfn` then links inside the copy, so release activation and rollback
+# silently kept the old release. Use an NTFS junction there instead; MSYS2
+# reports junctions as symlinks, so `readlink -f` and `[[ -L ]]` keep working.
 aln_platform_link_directory() {
   local target="$1"
   local link="$2"
