@@ -41,12 +41,12 @@ function Install-Arlen {
   $ProgressPreference = "SilentlyContinue"
 
   $repoSlug = "danjboyd/Arlen"
-  # gnustep-cli publishes each toolchain version, with its PowerShell bootstrap
-  # as a release asset, under the release tag of the same name. 0.1.1 is the
-  # first toolchain Arlen's Windows support runs on.
+  # gnustep-cli tags each toolchain version; the PowerShell bootstrap is in the
+  # tagged source tree and the release manifest is a release asset. 0.1.1 is
+  # the first toolchain Arlen's Windows support runs on.
   function BootstrapSetup([string]$ToolchainVersion) {
     if (-not $ToolchainVersion) { $ToolchainVersion = "0.1.1" }
-    return "iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
+    return "iwr https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v$ToolchainVersion/scripts/bootstrap/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
       "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/release-manifest.json"
   }
   function Say([string]$Message) { Write-Host "arlen-install: $Message" }
