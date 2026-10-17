@@ -20,6 +20,18 @@
 #endif
 }
 
+// boomhauer links apps against an uninstrumented framework, so run against a
+// sanitizer build it would `make clean` the shared repo build mid-suite.
+- (BOOL)frameworkIsSanitizerInstrumented {
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+  return YES;
+#endif
+#endif
+  const char *extraFlags = getenv("EXTRA_OBJC_FLAGS");
+  return extraFlags != NULL && strstr(extraFlags, "-fsanitize") != NULL;
+}
+
 - (int)runNewWithTarget:(NSString *)target inDirectory:(NSString *)directory output:(NSString **)output {
   int exitCode = -1;
   NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
@@ -91,6 +103,8 @@
 // under a path with a space ("No rule to make target .../My"); it now builds
 // through a space-free alias.
 - (void)testBoomhauerBuildsAnAppWhosePathContainsASpace {
+  XCTSkipIf([self frameworkIsSanitizerInstrumented],
+            @"boomhauer would rebuild the shared repo framework without sanitizers");
   NSString *root = ALNTestTemporaryDirectory(@"arlen-new-space");
   XCTAssertNotNil(root);
   if (root == nil) {
@@ -121,6 +135,8 @@
 #if defined(_WIN32)
   XCTSkip(@"POSIX ownership and mode bits; under MSYS2 tmp is inside the user's own toolchain root");
 #endif
+  XCTSkipIf([self frameworkIsSanitizerInstrumented],
+            @"boomhauer would rebuild the shared repo framework without sanitizers");
   NSString *root = ALNTestTemporaryDirectory(@"arlen-new-alias-perms");
   XCTAssertNotNil(root);
   if (root == nil) {
