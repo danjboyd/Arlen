@@ -857,6 +857,8 @@ through `tools/run_app_tests.sh`:
 - `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`;
   an `--only` that matches no test fails the run (`No tests matched '...'`)
 - exit status is the runner's: non-zero when any test fails
+- Windows (MSYS2 `CLANG64`): the bundle binary is `AppTests.dll`, compiled and
+  linked against the framework's vendored tools-xctest
 - macOS: `tools/build_apple_app.sh --build-tests` builds
   `.boomhauer/apple/tests/AppTests.xctest` the same way, and Xcode's
   `xcrun xctest` runs it. `--only` becomes `-XCTest Class[/method]` (several

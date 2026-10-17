@@ -207,7 +207,8 @@ New apps ship a request test (`tests/HomeControllerTests.m`, or
 ```
 
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
-`ALNTestClient` API.
+`ALNTestClient` API. `arlen test --app` also works on Windows (MSYS2
+`CLANG64`); see [Windows CLANG64](WINDOWS_CLANG64.md).
 
 These commands also work on macOS, where they build with the Apple toolchain
 instead of `make`. `arlen check` runs the Apple verification lane there, and

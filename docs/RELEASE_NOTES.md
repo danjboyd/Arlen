@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
+  stop with "--build-tests currently supports GNUstep on Linux only"; the app
+  test bundle is now `AppTests.dll`, built against the framework's vendored
+  tools-xctest.
 - A spooled request body (`request.body` above `requestLimits.spoolThresholdBytes`)
   reads as empty once the handler returns. On Windows its spool file used to
   stay on disk after a handler exception, because the leaked request kept the
