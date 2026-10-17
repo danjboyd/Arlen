@@ -299,7 +299,9 @@ Named targets:
  - uploads it to the remote target
  - invokes the packaged remote `arlen deploy release` inside that uploaded release
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
-- activates `releases/current` via `tools/deploy/activate_release.sh`
+- activates `releases/current` via `tools/deploy/activate_release.sh`; the new
+ link is created under a temporary name and renamed over `current`, so
+ `releases/current` never goes missing during the switch
 - can reload or restart a systemd unit through `--service <unit>` and
  `--runtime-action <reload|restart|none>` after activation
 - rewrites `metadata/release.env` against the activated release root so
@@ -329,7 +331,7 @@ Named targets:
 `arlen deploy rollback`
 
 - selects the most recent non-active release by default, or uses `--release-id <id>`
-- switches `releases/current` via `tools/deploy/rollback_release.sh`
+- switches `releases/current` via `tools/deploy/rollback_release.sh` (atomic rename; see `deploy release`)
 - can reload or restart a systemd unit through `--service <unit>` and `--runtime-action <reload|restart|none>`
 - can verify operability after rollback with `--base-url <url>`
 - surfaces an explicit warning that packaged migrations do not imply reversibility
@@ -967,12 +969,25 @@ Diagnostics behavior:
  - `<%@ include "partials/_row" with @{ ... } %>`
  - `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ ... } %>`
 
-### `arlen config [--env <name>] [--json]`
+### `arlen config [--env <name>] [--json] [--show-secrets]`
 
 Load and print merged runtime config.
 
 - `--env <name>`: select environment overlay
 - `--json`: deterministic pretty JSON output (sorted keys when runtime supports `NSJSONWritingSortedKeys`)
+- `--show-secrets`: print secret values as loaded instead of redacting them
+
+By default, secret values print as `[redacted]`, in both text and JSON output.
+A string value is redacted when its key contains `secret`, `password`, `token`,
+`apiKey` or `connectionString` (case-insensitive), for example
+`session.secret`, `auth.bearerSecret`, `storageModule.signingSecret` and
+`database.connectionString`. Keys that describe a secret rather than hold one
+keep their values: names ending in `EnvironmentKey`, `Endpoint`, `URL`, `Path`,
+`Seconds`, `TTL`, `Enabled` and similar. Passwords inside other values are
+masked too: `postgres://user:pass@host/db` prints as
+`postgres://user:[redacted]@host/db`, and `password=...` in a keyword DSN
+prints as `password=[redacted]`. Numbers, booleans, empty strings and the JSON
+shape are unchanged. `propane` reads the config with `--json --show-secrets`.
 
 ### `arlen webpush <generate-keys|public-key> [--json]`
 
