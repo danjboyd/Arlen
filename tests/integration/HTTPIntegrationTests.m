@@ -2,13 +2,10 @@
 #import <XCTest/XCTest.h>
 #import "../ALNXCTestCompat.h"
 
-#import <arpa/inet.h>
-#import <netinet/in.h>
 #import <signal.h>
 #import <unistd.h>
 #import <stdlib.h>
 #import <string.h>
-#import <sys/socket.h>
 
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
@@ -20,43 +17,12 @@
 @implementation HTTPIntegrationTests
 
 - (int)randomPort {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd >= 0) {
-    int port = 0;
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
-      socklen_t length = sizeof(address);
-      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
-        port = (int)ntohs(address.sin_port);
-      }
-    }
-
-    close(fd);
-    if (port > 0) {
-      return port;
-    }
-  }
-
-  return 32000 + (int)arc4random_uniform(20000);
+  int port = ALNTestFreeLoopbackPort();
+  return port > 0 ? port : 32000 + (int)ALNTestRandomUniform(20000);
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:
-                             [NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"arlen"]];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (NSString *)createTempFilePathWithPrefix:(NSString *)prefix suffix:(NSString *)suffix {
@@ -168,7 +134,7 @@
 
 - (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-lc", command ];
   NSString *capturePath = [self createTempFilePathWithPrefix:@"arlen-http-shell" suffix:@".log"];
   [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
@@ -228,7 +194,7 @@
   if ([self waitForTaskExit:task timeoutSeconds:timeoutSeconds]) {
     return YES;
   }
-  (void)kill(task.processIdentifier, SIGKILL);
+  (void)ALNTestKill(task.processIdentifier, SIGKILL);
   return [self waitForTaskExit:task timeoutSeconds:2.0];
 }
 
@@ -400,7 +366,7 @@
     NSString *serverCmd = [NSString stringWithFormat:@"%@%@ --port %d --once", prefix, binary, port];
 
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc", serverCmd ];
     NSPipe *stdoutPipe = [NSPipe pipe];
     NSPipe *stderrPipe = [NSPipe pipe];
@@ -622,7 +588,7 @@
                                    [self shellQuoted:preparedBinary],
                                    port];
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc", serverCmd ];
     NSPipe *stdoutPipe = [NSPipe pipe];
     NSPipe *stderrPipe = [NSPipe pipe];
@@ -730,7 +696,7 @@
         doubleValue] < 1.2);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -739,7 +705,7 @@
 - (void)testHTTPSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_HTTP_SESSIONS=1 ./build/boomhauer --port %d", port]
@@ -798,7 +764,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -807,7 +773,7 @@
 - (void)testConcurrentWorkerQueueLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -888,7 +854,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -964,7 +930,7 @@
     XCTAssertTrue([output containsString:@"ok"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1159,7 +1125,7 @@
     XCTAssertTrue([output containsString:@"ok"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1273,7 +1239,7 @@
     XCTAssertEqual((NSUInteger)3, [parts count]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1323,7 +1289,7 @@
         doubleValue] < 0.8);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1373,7 +1339,7 @@
         doubleValue] < 0.8);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1382,7 +1348,7 @@
 - (void)testProductionRequestDispatchModeCanBeOverriddenToSerialized {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -1428,7 +1394,7 @@
         doubleValue] >= 0.9);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1437,7 +1403,7 @@
 - (void)testSerializedDispatchAllowsKeepAliveConnections {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -1533,7 +1499,7 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1543,7 +1509,7 @@
                                          expectKeepAlive:(BOOL)expectKeepAlive {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[ @"-lc", [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port] ];
   server.standardOutput = [NSPipe pipe];
   server.standardError = [NSPipe pipe];
@@ -1749,7 +1715,7 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1857,7 +1823,7 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2124,7 +2090,7 @@
     XCTAssertTrue([viewerBody containsString:@"Arlen OpenAPI Viewer"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2133,7 +2099,7 @@
 - (void)testOpenAPISwaggerDocsStyleAndDedicatedRoute {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_OPENAPI_DOCS_UI_STYLE=swagger ./build/boomhauer --port %d", port]
@@ -2163,7 +2129,7 @@
     XCTAssertTrue([swaggerBody containsString:@"Arlen Swagger UI"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2330,7 +2296,7 @@
     XCTAssertEqualObjects(@"hello-ws", trimmed);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2339,7 +2305,7 @@
 - (void)testWebSocketRejectsInvalidHandshakeAndUnmaskedOrStalledFrames {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2451,7 +2417,7 @@
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2460,7 +2426,7 @@
 - (void)testWebSocketOriginAllowlistRejectsUnexpectedOrigins {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2515,7 +2481,7 @@
     XCTAssertTrue([lines[2] containsString:@" 403 "], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2524,7 +2490,7 @@
 - (void)testWebSocketSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./build/boomhauer --port %d", port]
@@ -2583,7 +2549,7 @@
     XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: websocket_session_limit"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2592,7 +2558,7 @@
 - (void)testRealtimeChannelSubscriberLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2663,7 +2629,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2761,7 +2727,7 @@
     XCTAssertEqualObjects(@"fanout-message", lines[1]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2916,7 +2882,7 @@
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -3007,7 +2973,7 @@
       }
     } @finally {
       if ([server isRunning]) {
-        (void)kill(server.processIdentifier, SIGTERM);
+        (void)ALNTestKill(server.processIdentifier, SIGTERM);
         [server waitUntilExit];
       }
 
@@ -3477,7 +3443,7 @@
     XCTAssertEqualObjects(secondContent, secondBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
@@ -3668,7 +3634,7 @@
     if (prepareCode != 0) return;
     int port = [self randomPort];
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
     server.standardOutput = [NSPipe pipe];
@@ -3697,7 +3663,7 @@
       XCTAssertTrue([output containsString:expected], @"%@ missing from %@", expected, output);
     }
   } @finally {
-    if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
   }
 }
@@ -3733,7 +3699,7 @@
       if (prepareCode != 0) return;
       int port = [self randomPort];
       server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSPipe pipe];
@@ -3758,7 +3724,7 @@
         XCTAssertFalse([output containsString:@"X-Content-Type-Options"], @"%@", output);
       }
     } @finally {
-      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+      if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
       [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
     }
   }
@@ -3786,7 +3752,7 @@
     if (prepareCode != 0) return;
     int port = [self randomPort];
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
     server.standardOutput = [NSPipe pipe];
@@ -3805,7 +3771,7 @@
     XCTAssertEqual(code, 0, @"%@", output);
     XCTAssertTrue([output containsString:@"cookie jar issuance, scope, session, logout and HEAD checks passed"], @"%@", output);
   } @finally {
-    if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
   }
 }
@@ -3814,7 +3780,7 @@
   for (NSString *backend in @[@"llhttp", @"legacy"]) {
     int port = [self randomPort];
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:
         @"ARLEN_MAX_BODY_BYTES=115343360 ARLEN_HTTP_PARSER_BACKEND=%@ ./build/boomhauer --port %d", backend, port]];
     server.standardOutput = [NSPipe pipe];
@@ -3833,7 +3799,7 @@
       XCTAssertEqual(code, 0, @"%@: %@", backend, output);
       XCTAssertTrue([output containsString:@"multipart socket checks passed"], @"%@", output);
     } @finally {
-      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+      if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     }
   }
 }
@@ -3866,7 +3832,7 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
           envPrefix, backend,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
@@ -3984,7 +3950,7 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       // exec: the task's pid is the server's, so the probe can read its memory.
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ exec %@ --port %d",
           envPrefix, backend,
@@ -4063,7 +4029,7 @@
       if (prepareCode != 0) return;
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
@@ -4107,7 +4073,7 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.currentDirectoryPath = appRoot;
       server.arguments = @[@"-lc", [NSString stringWithFormat:
           @"ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
@@ -4157,7 +4123,7 @@
 - (void)testContentLengthEdgeCasesRejectMalformedAndRespectLimit {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_BODY_BYTES=16 ./build/boomhauer --port %d", port]
@@ -4235,7 +4201,7 @@
     XCTAssertTrue([lines[3] containsString:@" 413 "]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -4328,7 +4294,7 @@
 - (void)testLegacyParserRejectsAmbiguousFramingHeaders {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=legacy ./build/boomhauer --port %d", port]
@@ -4397,7 +4363,7 @@
     XCTAssertTrue([lines[2] containsString:@" 400 "], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -4920,7 +4886,7 @@
     XCTAssertTrue([output containsString:@"Delta"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -5086,7 +5052,7 @@
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGHUP));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGHUP));
 
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
@@ -5096,13 +5062,13 @@
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5161,7 +5127,7 @@
     if (killedPID <= 0) {
       return;  // kill(0) would signal this test process's own group.
     }
-    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(killedPID, SIGKILL));
 
     BOOL respawned = [self waitForFile:lifecycleLog
                          containingAll:@[
@@ -5179,7 +5145,7 @@
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -5195,7 +5161,7 @@
     XCTAssertTrue([lifecycle containsString:@"reason=respawn_after_exit"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5277,13 +5243,13 @@
     });
     XCTAssertTrue(headerSeen);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5344,7 +5310,7 @@
       return;  // kill(0) would signal this test process's own group.
     }
 
-    XCTAssertEqual(0, kill(firstAsyncPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(firstAsyncPID, SIGKILL));
 
     pid_t replacementAsyncPID = [self waitForChildPIDForParent:server.processIdentifier
                                                 containingToken:@"sleep 30"
@@ -5361,13 +5327,13 @@
     XCTAssertTrue(secondReady);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5454,7 +5420,7 @@
                             [output stringByTrimmingCharactersInSet:
                                         [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 
-      XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+      XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
       [server waitUntilExit];
       XCTAssertEqual(0, server.terminationStatus);
       XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -5470,7 +5436,7 @@
       XCTAssertTrue([lifecycle containsString:@"reason=signal_term"]);
     } @finally {
       if ([server isRunning]) {
-        (void)kill(server.processIdentifier, SIGTERM);
+        (void)ALNTestKill(server.processIdentifier, SIGTERM);
         [server waitUntilExit];
       }
       [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5612,7 +5578,7 @@
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5672,7 +5638,7 @@
     if (killedPID <= 0) {
       return;  // kill(0) would signal this test process's own group.
     }
-    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(killedPID, SIGKILL));
 
     BOOL respawned = ALNTestWaitUntil(40.0, 0.2, ^BOOL {
       NSArray *workers = [self childPIDsForParent:server.processIdentifier];
@@ -5680,7 +5646,7 @@
     });
     XCTAssertTrue(respawned);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGHUP));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGHUP));
     BOOL reloadLifecycleSeen =
         [self waitForFile:lifecycleLog
             containingAll:@[ @"event=manager_reload_started", @"event=manager_reload_completed" ]
@@ -5695,7 +5661,7 @@
     XCTAssertTrue(healthyAfterReload);
     XCTAssertEqualObjects(@"ok\n", postReload);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -5720,7 +5686,7 @@
     XCTAssertTrue([lifecycle containsString:@"exit_code=0"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5934,7 +5900,7 @@
     XCTAssertFalse([recoveredHeaders containsString:@"unsafe-inline"], @"%@", recoveredHeaders);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [log closeFile];
@@ -6087,7 +6053,7 @@
     XCTAssertFalse([recovered containsString:@"alpha"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [log closeFile];
@@ -6098,7 +6064,7 @@
 - (void)testAuthPrimitivesStubProviderLoginCompletesAndEstablishesSession {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
@@ -6139,7 +6105,7 @@
     XCTAssertTrue([methods containsObject:@"federated"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -6148,7 +6114,7 @@
 - (void)testAuthPrimitivesProviderLoginStillRequiresLocalStepUpForAAL2Routes {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
@@ -6216,7 +6182,7 @@
     XCTAssertEqualObjects(@2, secureAfter[@"session"][@"aal"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }

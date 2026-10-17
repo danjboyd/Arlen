@@ -2,32 +2,41 @@
 #import <XCTest/XCTest.h>
 #import "../ALNXCTestCompat.h"
 
-#import <arpa/inet.h>
-#import <netinet/in.h>
 #import <stdlib.h>
 #import <string.h>
-#import <sys/socket.h>
 
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
 
 #include <limits.h>
+#if !defined(_WIN32)
 #include <sys/utsname.h>
+#endif
 #include <unistd.h>
 
 // `readlink -f` reports physical paths, while temp directories can sit under a
 // symlink (macOS /var -> /private/var). Compare against the physical path.
 static NSString *ALNPhysicalPath(NSString *path) {
+#if defined(_WIN32)
+  return [path stringByResolvingSymlinksInPath];
+#else
   char resolved[PATH_MAX];
   if (realpath([path fileSystemRepresentation], resolved) == NULL) {
     return path;
   }
   return [[NSFileManager defaultManager] stringWithFileSystemRepresentation:resolved length:strlen(resolved)];
+#endif
 }
 
 // This host's deploy profile, as tools/deploy/build_release.sh detects it, for
 // tests of same-profile deploys.
 static NSString *ALNHostDeployProfile(void) {
+#if defined(_WIN32)
+  // MSYS2 `uname -m` reports x86_64 for AMD64.
+  NSString *processor = [[NSProcessInfo processInfo] environment][@"PROCESSOR_ARCHITECTURE"] ?: @"";
+  NSString *arch = [processor isEqualToString:@"ARM64"] ? @"arm64" : @"x86_64";
+  return [NSString stringWithFormat:@"windows-%@-gnustep-clang64", arch];
+#else
   struct utsname host;
   NSString *arch = (uname(&host) == 0) ? @(host.machine) : @"unknown";
   if ([arch isEqualToString:@"aarch64"]) {
@@ -40,6 +49,7 @@ static NSString *ALNHostDeployProfile(void) {
 #else
   return [NSString stringWithFormat:@"linux-%@-gnustep-clang", arch];
 #endif
+#endif
 }
 
 @interface DeploymentIntegrationTests : XCTestCase
@@ -48,42 +58,12 @@ static NSString *ALNHostDeployProfile(void) {
 @implementation DeploymentIntegrationTests
 
 - (int)randomPort {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd >= 0) {
-    int port = 0;
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
-      socklen_t length = sizeof(address);
-      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
-        port = (int)ntohs(address.sin_port);
-      }
-    }
-
-    close(fd);
-    if (port > 0) {
-      return port;
-    }
-  }
-
-  return 34000 + (int)arc4random_uniform(2000);
+  int port = ALNTestFreeLoopbackPort();
+  return port > 0 ? port : 34000 + (int)ALNTestRandomUniform(2000);
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
@@ -1577,7 +1557,7 @@ static NSString *ALNHostDeployProfile(void) {
                       port];
     NSString *serverCommand = [NSString stringWithFormat:@"python3 - <<'PY'\n%@\nPY", serverScript];
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc", serverCommand ];
     server.standardOutput = [NSPipe pipe];
     server.standardError = [NSPipe pipe];

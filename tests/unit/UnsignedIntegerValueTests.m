@@ -38,7 +38,7 @@
   XCTAssertEqual((NSUInteger)25, value);
   XCTAssertTrue(ALNUnsignedIntegerFromValue(@"\t3 ", &value));
   XCTAssertEqual((NSUInteger)3, value);
-  NSString *maximum = [NSString stringWithFormat:@"%lu", (unsigned long)NSUIntegerMax];
+  NSString *maximum = [NSString stringWithFormat:@"%llu", (unsigned long long)NSUIntegerMax];
   XCTAssertTrue(ALNUnsignedIntegerFromValue(maximum, &value));
   XCTAssertEqual(NSUIntegerMax, value);
   XCTAssertEqual((NSUInteger)12, ALNUnsignedIntegerValueOrDefault(@"12", 5));
@@ -77,7 +77,7 @@
 }
 
 - (void)testOverflowBoundaryIsRejectedOneAboveMaximum {
-  NSString *maximum = [NSString stringWithFormat:@"%lu", (unsigned long)NSUIntegerMax];
+  NSString *maximum = [NSString stringWithFormat:@"%llu", (unsigned long long)NSUIntegerMax];
   NSString *lastDigit = [maximum substringFromIndex:[maximum length] - 1];
   NSString *prefix = [maximum substringToIndex:[maximum length] - 1];
   NSString *onePast = [prefix stringByAppendingFormat:@"%d", [lastDigit intValue] + 1];

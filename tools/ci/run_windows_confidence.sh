@@ -7,6 +7,7 @@ output_dir="${ARLEN_PHASE31_OUTPUT_DIR:-$repo_root/build/release_confidence/phas
 mkdir -p "$output_dir"
 
 source "$repo_root/tools/source_gnustep_env.sh"
+source "$repo_root/tools/platform.sh"
 
 make -C "$repo_root" arlen >/dev/null
 make -C "$repo_root" build-tests >/dev/null
@@ -50,23 +51,7 @@ port="${ARLEN_PHASE31_SMOKE_PORT:-3911}"
   --release-b phase31-b \
   --json >"$smoke_json"
 
-python3 - "$smoke_json" "$output_dir/packaged_release_manifest.json" "$output_dir/packaged_release_env.txt" <<'PY'
-import json
-import pathlib
-import shutil
-import sys
-
-smoke_path = pathlib.Path(sys.argv[1])
-manifest_copy = pathlib.Path(sys.argv[2])
-release_env_copy = pathlib.Path(sys.argv[3])
-with smoke_path.open("r", encoding="utf-8") as handle:
-    smoke = json.load(handle)
-current_release = pathlib.Path(smoke["current_release"])
-shutil.copyfile(current_release / "metadata" / "manifest.json", manifest_copy)
-shutil.copyfile(current_release / "metadata" / "release.env", release_env_copy)
-PY
-
-current_release="$(python3 - "$smoke_json" <<'PY'
+current_release="$(python3 - "$smoke_json" <<'PY' | tr -d $'\r'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -74,7 +59,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 print(payload["current_release"])
 PY
 )"
-releases_dir="$(python3 - "$smoke_json" <<'PY'
+releases_dir="$(python3 - "$smoke_json" <<'PY' | tr -d $'\r'
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
@@ -82,6 +67,11 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 print(payload["releases_dir"])
 PY
 )"
+
+# Copy in bash: the smoke JSON holds MSYS paths (/tmp/...), which a native
+# Windows python cannot open.
+cp "$current_release/metadata/manifest.json" "$output_dir/packaged_release_manifest.json"
+cp "$current_release/metadata/release.env" "$output_dir/packaged_release_env.txt"
 
 doctor_port="${ARLEN_PHASE31_DOCTOR_PORT:-3913}"
 
@@ -209,7 +199,7 @@ with open(os.path.join(release_dir, "metadata", "manifest.json"), "w", encoding=
     handle.write("\n")
 PY
 
-ln -sfn "$exe_release_dir" "$exe_releases_dir/current"
+aln_platform_link_directory "$exe_release_dir" "$exe_releases_dir/current"
 ARLEN_FRAMEWORK_ROOT="$repo_root" "$repo_root/build/arlen" deploy doctor \
   --app-root "$exe_app_root" \
   --releases-dir "$exe_releases_dir" \
