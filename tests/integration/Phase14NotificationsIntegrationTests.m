@@ -108,11 +108,15 @@
   (void)runtime;
   (void)error;
   NSString *name = [payload[@"name"] isKindOfClass:[NSString class]] ? payload[@"name"] : @"friend";
+  NSMutableDictionary *metadata = [NSMutableDictionary dictionaryWithDictionary:@{ @"kind" : @"phase14" }];
+  if ([payload[@"href"] isKindOfClass:[NSString class]]) {
+    metadata[@"href"] = payload[@"href"];
+  }
   return @{
     @"recipient" : payload[@"recipient"] ?: @"",
     @"title" : @"Phase14 Inbox",
     @"body" : [NSString stringWithFormat:@"Hello %@.", name],
-    @"metadata" : @{ @"kind" : @"phase14" },
+    @"metadata" : metadata,
   };
 }
 
@@ -281,6 +285,83 @@
   NSArray *inboxAfterReadAll =
       [jsonAfterReadAllPayload[@"data"][@"inbox"] isKindOfClass:[NSArray class]] ? jsonAfterReadAllPayload[@"data"][@"inbox"] : @[];
   XCTAssertEqualObjects(@YES, inboxAfterReadAll[0][@"read"]);
+}
+
+- (void)testInboxRendersOnlySafeDeepLinksAndPaginates {
+  ALNApplication *app = [self application];
+  Phase14NotificationsInjectedAuthMiddleware *middleware =
+      [[Phase14NotificationsInjectedAuthMiddleware alloc] init];
+  middleware.subject = @"user-links";
+  middleware.assuranceLevel = 1;
+  [app addMiddleware:middleware];
+  [self registerModulesForApplication:app];
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithApplication:app];
+
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSArray *hrefs = @[
+    @"https://example.test/allowed-absolute",
+    @"/notifications/allowed-relative",
+    @"javascript:alert(1)",
+    @"//evil.example/protocol-relative",
+    @"data:text/html,blocked-data",
+    @"ftp://files.example/blocked-ftp",
+    @"/\\evil.example/blocked-backslash",
+  ];
+  for (NSString *href in hrefs) {
+    NSError *error = nil;
+    NSDictionary *payload = @{
+      @"recipient" : @"user-links",
+      @"email" : @"user-links@example.test",
+      @"name" : @"Links",
+      @"href" : href,
+    };
+    XCTAssertNotNil([runtime testSendNotificationIdentifier:@"phase14.notifications.preview"
+                                                    payload:payload
+                                                   channels:@[ @"in_app" ]
+                                                      error:&error]);
+    XCTAssertNil(error);
+  }
+
+  ALNResponse *htmlResponse = [harness dispatchMethod:@"GET" path:@"/notifications/inbox"];
+  ALNAssertResponseStatus(htmlResponse, 200);
+  NSString *html = [self stringFromResponse:htmlResponse];
+  XCTAssertTrue([html containsString:@"href=\"https://example.test/allowed-absolute\""], @"%@", html);
+  XCTAssertTrue([html containsString:@"href=\"/notifications/allowed-relative\""], @"%@", html);
+  for (NSString *blocked in @[ @"javascript:", @"evil.example", @"blocked-data", @"blocked-ftp", @"blocked-backslash" ]) {
+    XCTAssertFalse([html containsString:blocked], @"%@ rendered in %@", blocked, html);
+  }
+
+  ALNResponse *pageResponse = [harness dispatchMethod:@"GET"
+                                                 path:@"/notifications/api/inbox"
+                                          queryString:@"limit=2&offset=1"
+                                              headers:@{ @"Accept" : @"application/json" }
+                                                 body:nil];
+  ALNAssertResponseStatus(pageResponse, 200);
+  NSDictionary *page = [self JSONObjectFromResponse:pageResponse][@"data"];
+  XCTAssertEqual((NSUInteger)2, [page[@"inbox"] count]);
+  XCTAssertEqualObjects(@"/notifications/allowed-relative", page[@"inbox"][0][@"metadata"][@"href"]);
+  XCTAssertEqualObjects(@7, page[@"totalCount"]);
+  XCTAssertEqualObjects(@7, page[@"pagination"][@"total"]);
+  XCTAssertEqualObjects(@YES, page[@"pagination"][@"hasMore"]);
+
+  ALNResponse *htmlPage = [harness dispatchMethod:@"GET"
+                                             path:@"/notifications/inbox"
+                                      queryString:@"limit=2&offset=2"
+                                          headers:@{}
+                                             body:nil];
+  ALNAssertResponseStatus(htmlPage, 200);
+  ALNAssertResponseBodyContains(htmlPage, @"/notifications/inbox?limit=2&amp;offset=4");
+  ALNAssertResponseBodyContains(htmlPage, @"/notifications/inbox?limit=2&amp;offset=0");
+
+  NSData *badPreferences = [NSJSONSerialization dataWithJSONObject:@{
+    @"preferences" : @{ @"not.a.notification" : @{ @"email" : @NO } },
+  } options:0 error:NULL];
+  ALNResponse *rejected = [harness dispatchMethod:@"POST"
+                                             path:@"/notifications/api/preferences"
+                                      queryString:@""
+                                          headers:@{ @"Accept" : @"application/json", @"Content-Type" : @"application/json" }
+                                             body:badPreferences];
+  ALNAssertResponseStatus(rejected, 422);
 }
 
 - (void)testAdminCanPreviewAndTestSendNotification {

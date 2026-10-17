@@ -28,6 +28,7 @@ typedef SSIZE_T ssize_t;
 #else
 #import <arpa/inet.h>
 #import <netinet/in.h>
+#import <netinet/tcp.h>
 #import <signal.h>
 #import <poll.h>
 #import <sys/socket.h>
@@ -81,6 +82,7 @@ typedef struct {
   NSUInteger maxConcurrentHTTPWorkers;
   NSUInteger maxQueuedHTTPConnections;
   NSUInteger keepAliveParkAfterMilliseconds;
+  NSUInteger webSocketPingIntervalSeconds;
   NSUInteger maxRealtimeTotalSubscribers;
   NSUInteger maxRealtimeChannelSubscribers;
 } ALNRuntimeLimits;
@@ -576,6 +578,8 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
       ALNConfigUInt(runtimeLimits, @"maxQueuedHTTPConnections", 256);
   out.keepAliveParkAfterMilliseconds =
       ALNConfigUIntAllowZero(runtimeLimits, @"keepAliveParkAfterMilliseconds", 5);
+  out.webSocketPingIntervalSeconds =
+      ALNConfigUIntAllowZero(runtimeLimits, @"webSocketPingIntervalSeconds", 25);
   out.maxRealtimeTotalSubscribers =
       ALNConfigUIntAllowZero(runtimeLimits, @"maxRealtimeTotalSubscribers", 0);
   out.maxRealtimeChannelSubscribers =
@@ -647,6 +651,19 @@ static void ALNApplyClientSocketTimeout(ALNSocketHandle clientFd, NSUInteger tim
 
   (void)setsockopt((int)clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
   (void)setsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+}
+
+// File responses go out as two writes (the header, then the sendfile body).
+// With Nagle on, a keep-alive connection's body waits for the client's delayed
+// ACK of the header, about 40 ms per response (#243).
+static void ALNApplyClientSocketNoDelay(ALNSocketHandle clientFd) {
+  int enabled = 1;
+#if defined(_WIN32)
+  (void)setsockopt(ALNNativeSocketHandle(clientFd), IPPROTO_TCP, TCP_NODELAY, (const char *)&enabled,
+                   sizeof(enabled));
+#else
+  (void)setsockopt((int)clientFd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
 #endif
 }
 
@@ -1826,75 +1843,167 @@ static BOOL ALNWebSocketSendFrame(ALNSocketHandle fd, uint8_t opcode, NSData *pa
   return ALNSendAll(fd, [frame bytes], [frame length]);
 }
 
-static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
-                                  uint8_t *opcode,
-                                  BOOL *fin,
-                                  NSData **payload,
-                                  NSUInteger maxPayloadBytes) {
+// RFC 6455 close codes Arlen sends.
+enum {
+  ALNWebSocketCloseNormal = 1000,
+  ALNWebSocketCloseGoingAway = 1001,
+  ALNWebSocketCloseProtocolError = 1002,
+  ALNWebSocketCloseInvalidPayload = 1007,
+  ALNWebSocketCloseMessageTooBig = 1009,
+};
+
+typedef NS_ENUM(NSInteger, ALNWebSocketReadStatus) {
+  ALNWebSocketReadOK = 0,
+  // EOF, an I/O error, or a timeout mid-frame: no close frame can be sent.
+  ALNWebSocketReadConnectionLost,
+  // The frame breaks RFC 6455; close with *closeCode.
+  ALNWebSocketReadProtocolError,
+};
+
+// Strict UTF-8 (RFC 3629): no overlong forms, surrogates or code points
+// above U+10FFFF. RFC 6455 requires closing with 1007 on invalid text.
+static BOOL ALNWebSocketIsValidUTF8(const unsigned char *bytes, NSUInteger length) {
+  NSUInteger idx = 0;
+  while (idx < length) {
+    unsigned char lead = bytes[idx];
+    if (lead < 0x80) {
+      idx += 1;
+      continue;
+    }
+    NSUInteger extra = 0;
+    uint32_t codePoint = 0;
+    uint32_t minimum = 0;
+    if ((lead & 0xE0) == 0xC0) {
+      extra = 1;
+      codePoint = lead & 0x1F;
+      minimum = 0x80;
+    } else if ((lead & 0xF0) == 0xE0) {
+      extra = 2;
+      codePoint = lead & 0x0F;
+      minimum = 0x800;
+    } else if ((lead & 0xF8) == 0xF0) {
+      extra = 3;
+      codePoint = lead & 0x07;
+      minimum = 0x10000;
+    } else {
+      return NO;
+    }
+    if (idx + extra >= length) {
+      return NO;
+    }
+    for (NSUInteger offset = 1; offset <= extra; offset++) {
+      unsigned char next = bytes[idx + offset];
+      if ((next & 0xC0) != 0x80) {
+        return NO;
+      }
+      codePoint = (codePoint << 6) | (next & 0x3F);
+    }
+    if (codePoint < minimum || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+      return NO;
+    }
+    idx += extra + 1;
+  }
+  return YES;
+}
+
+// 1 when the socket is readable (or hung up) within timeoutMilliseconds, 0 on
+// timeout, -1 on error. poll(), not select(): FD_SET on a POSIX descriptor at
+// or above FD_SETSIZE writes past the fd_set, and a busy server has those.
+static int ALNWebSocketWaitReadable(ALNSocketHandle fd, NSUInteger timeoutMilliseconds) {
+#if defined(_WIN32)
+  WSAPOLLFD entry;
+  entry.fd = ALNNativeSocketHandle(fd);
+  entry.events = POLLRDNORM;
+  entry.revents = 0;
+  int rc = WSAPoll(&entry, 1, (INT)timeoutMilliseconds);
+  if (rc == SOCKET_ERROR) {
+    return -1;
+  }
+#else
+  struct pollfd entry;
+  entry.fd = (int)fd;
+  entry.events = POLLIN;
+  entry.revents = 0;
+  int rc = poll(&entry, 1, (int)timeoutMilliseconds);
+  if (rc < 0) {
+    return (errno == EINTR) ? 0 : -1;
+  }
+#endif
+  return (rc > 0) ? 1 : 0;
+}
+
+// Reads one frame (GitHub issue 214). Rejects, with the RFC 6455 close code:
+// unmasked client frames, nonzero RSV bits (no extension is negotiated),
+// reserved opcodes and control frames that are fragmented or longer than 125
+// bytes (1002), and payloads over maxPayloadBytes (1009). The payload buffer
+// grows as bytes arrive instead of being allocated from the header's length.
+static ALNWebSocketReadStatus ALNWebSocketReadFrame(ALNSocketHandle fd,
+                                                    uint8_t *opcode,
+                                                    BOOL *fin,
+                                                    NSData **payload,
+                                                    NSUInteger maxPayloadBytes,
+                                                    uint16_t *closeCode) {
   NSUInteger readTimeoutMilliseconds = ALNWebSocketReadTimeoutMilliseconds();
   unsigned char header[2];
   if (!ALNRecvAll(fd, header, sizeof(header), readTimeoutMilliseconds)) {
-    return NO;
+    return ALNWebSocketReadConnectionLost;
   }
 
   BOOL final = ((header[0] & 0x80) != 0);
   uint8_t frameOpcode = (uint8_t)(header[0] & 0x0F);
   BOOL masked = ((header[1] & 0x80) != 0);
-  if (!masked) {
-    return NO;
-  }
+  BOOL control = (frameOpcode & 0x08) != 0;
+  BOOL knownOpcode = (frameOpcode <= 0x2) || (frameOpcode >= 0x8 && frameOpcode <= 0xA);
   uint64_t payloadLength = (uint64_t)(header[1] & 0x7F);
+  if (!masked || (header[0] & 0x70) != 0 || !knownOpcode || (control && (!final || payloadLength > 125))) {
+    *closeCode = ALNWebSocketCloseProtocolError;
+    return ALNWebSocketReadProtocolError;
+  }
   if (payloadLength == 126) {
     unsigned char ext[2];
     if (!ALNRecvAll(fd, ext, sizeof(ext), readTimeoutMilliseconds)) {
-      return NO;
+      return ALNWebSocketReadConnectionLost;
     }
     payloadLength = ((uint64_t)ext[0] << 8) | (uint64_t)ext[1];
   } else if (payloadLength == 127) {
     unsigned char ext[8];
     if (!ALNRecvAll(fd, ext, sizeof(ext), readTimeoutMilliseconds)) {
-      return NO;
+      return ALNWebSocketReadConnectionLost;
     }
     payloadLength = 0;
     for (NSUInteger idx = 0; idx < 8; idx++) {
       payloadLength = (payloadLength << 8) | (uint64_t)ext[idx];
     }
   }
-
   if (payloadLength > (uint64_t)maxPayloadBytes) {
-    return NO;
+    *closeCode = ALNWebSocketCloseMessageTooBig;
+    return ALNWebSocketReadProtocolError;
   }
 
   unsigned char mask[4] = {0, 0, 0, 0};
-  if (masked) {
-    if (!ALNRecvAll(fd, mask, sizeof(mask), readTimeoutMilliseconds)) {
-      return NO;
-    }
+  if (!ALNRecvAll(fd, mask, sizeof(mask), readTimeoutMilliseconds)) {
+    return ALNWebSocketReadConnectionLost;
   }
 
-  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)payloadLength];
-  if (payloadLength > 0) {
-    if (!ALNRecvAll(fd, [data mutableBytes], (size_t)payloadLength, readTimeoutMilliseconds)) {
-      return NO;
+  NSMutableData *data = [NSMutableData data];
+  unsigned char chunk[16384];
+  uint64_t received = 0;
+  while (received < payloadLength) {
+    size_t want = (size_t)MIN((uint64_t)sizeof(chunk), payloadLength - received);
+    if (!ALNRecvAll(fd, chunk, want, readTimeoutMilliseconds)) {
+      return ALNWebSocketReadConnectionLost;
     }
-    if (masked) {
-      unsigned char *bytes = (unsigned char *)[data mutableBytes];
-      for (uint64_t idx = 0; idx < payloadLength; idx++) {
-        bytes[idx] ^= mask[idx % 4];
-      }
+    for (size_t idx = 0; idx < want; idx++) {
+      chunk[idx] ^= mask[(received + idx) % 4];
     }
+    [data appendBytes:chunk length:want];
+    received += want;
   }
 
-  if (opcode != NULL) {
-    *opcode = frameOpcode;
-  }
-  if (fin != NULL) {
-    *fin = final;
-  }
-  if (payload != NULL) {
-    *payload = data;
-  }
-  return YES;
+  *opcode = frameOpcode;
+  *fin = final;
+  *payload = data;
+  return ALNWebSocketReadOK;
 }
 
 // Streams a Content-Length body larger than limits.spoolThresholdBytes into a
@@ -2014,6 +2123,87 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
   return request;
 }
 
+typedef NS_ENUM(NSInteger, ALNExpectation) {
+  ALNExpectationNone = 0,
+  ALNExpectationContinue,
+  ALNExpectationUnsupported,
+};
+
+// The request head's Expect header (RFC 9110 §10.1.1). HTTP/1.0 requests and
+// a missing header expect nothing; `100-continue` is the only expectation
+// defined, so anything else is unsupported (417).
+static ALNExpectation ALNRequestHeadExpectation(const uint8_t *bytes, size_t headLength) {
+  size_t lineEnd = SIZE_MAX;
+  for (size_t idx = 0; idx + 1 < headLength; idx++) {
+    if (bytes[idx] == '\r' && bytes[idx + 1] == '\n') {
+      lineEnd = idx;
+      break;
+    }
+  }
+  if (lineEnd == SIZE_MAX || lineEnd < 8 || memcmp(bytes + lineEnd - 8, "HTTP/1.0", 8) == 0) {
+    return ALNExpectationNone;
+  }
+  size_t lineStart = lineEnd + 2;
+  ALNExpectation expectation = ALNExpectationNone;
+  while (lineStart + 1 < headLength) {
+    size_t end = lineStart;
+    while (end + 1 < headLength && !(bytes[end] == '\r' && bytes[end + 1] == '\n')) {
+      end++;
+    }
+    if (end == lineStart) {
+      break;
+    }
+    static const char name[] = "expect:";
+    size_t nameLength = sizeof(name) - 1;
+    if (end - lineStart > nameLength && strncasecmp((const char *)bytes + lineStart, name, nameLength) == 0) {
+      size_t valueStart = lineStart + nameLength;
+      size_t valueEnd = end;
+      while (valueStart < valueEnd && (bytes[valueStart] == ' ' || bytes[valueStart] == '\t')) {
+        valueStart++;
+      }
+      while (valueEnd > valueStart && (bytes[valueEnd - 1] == ' ' || bytes[valueEnd - 1] == '\t')) {
+        valueEnd--;
+      }
+      if (valueEnd - valueStart == 12 && strncasecmp((const char *)bytes + valueStart, "100-continue", 12) == 0) {
+        expectation = ALNExpectationContinue;
+      } else {
+        return ALNExpectationUnsupported;
+      }
+    }
+    lineStart = end + 2;
+  }
+  return expectation;
+}
+
+// Sends `100 Continue` once the head passed the size checks and before the
+// client sends the body, so clients that wait for it (curl, most HTTP
+// libraries) don't stall for their expect timeout (#212). Returns NO with a
+// 417 status for an unsupported expectation.
+static BOOL ALNAnswerRequestExpectation(ALNSocketHandle clientFd,
+                                        const uint8_t *bytes,
+                                        size_t headLength,
+                                        size_t bufferedLength,
+                                        BOOL *continueSent,
+                                        NSInteger *statusCode) {
+  if (*continueSent) {
+    return YES;
+  }
+  ALNExpectation expectation = ALNRequestHeadExpectation(bytes, headLength);
+  if (expectation == ALNExpectationUnsupported) {
+    if (statusCode != NULL) {
+      *statusCode = 417;
+    }
+    return NO;
+  }
+  // Body bytes already buffered mean the client didn't wait.
+  if (expectation == ALNExpectationContinue && bufferedLength <= headLength) {
+    static const char continueLine[] = "HTTP/1.1 100 Continue\r\n\r\n";
+    (void)ALNSendAll(clientFd, continueLine, sizeof(continueLine) - 1);
+  }
+  *continueSent = YES;
+  return YES;
+}
+
 static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
@@ -2029,6 +2219,7 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
     return nil;
   }
 
+  BOOL continueAnswered = NO;
   while (1) {
     if (!readState->metadataReady) {
       if (readState->length > limits.maxHeaderBytes) {
@@ -2068,6 +2259,12 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
       if (statusCode != NULL) {
         *statusCode = 413;
       }
+      return nil;
+    }
+
+    if (readState->metadataReady && readState->metadata.contentLength > 0 &&
+        !ALNAnswerRequestExpectation(clientFd, readState->bytes, readState->metadata.headerBytes,
+                                     readState->length, &continueAnswered, statusCode)) {
       return nil;
     }
 
@@ -2155,6 +2352,7 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
     return nil;
   }
 
+  BOOL continueAnswered = NO;
   while (1) {
     NSUInteger consumedLength = 0;
     BOOL headersComplete = NO;
@@ -2208,6 +2406,10 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
           return nil;
         }
         if (request == nil && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
+          if (!ALNAnswerRequestExpectation(clientFd, readState->bytes, separatorLocation + 4, readState->length,
+                                           &continueAnswered, statusCode)) {
+            return nil;
+          }
           return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
                                        (NSUInteger)head.contentLength, statusCode, readState);
         }
@@ -2247,13 +2449,25 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
         }
         return nil;
       }
+      if (request == nil) {
+        size_t headTerminator = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+        if (headTerminator != SIZE_MAX &&
+            !ALNAnswerRequestExpectation(clientFd, readState->bytes, headTerminator + 4, readState->length,
+                                         &continueAnswered, statusCode)) {
+          return nil;
+        }
+      }
     }
 
     if (request != nil) {
-      NSUInteger parsedBodyBytes = [request.body length];
-      NSUInteger parsedHeaderBytes = 0;
-      if (consumedLength >= parsedBodyBytes) {
-        parsedHeaderBytes = consumedLength - parsedBodyBytes;
+      // Measure the head itself. consumedLength minus the decoded body also
+      // counted chunked framing (size lines and CRLFs) as header bytes, so a
+      // body sent in many small chunks got 431 (#211). The framing stays
+      // bounded by the header + body buffering cap above.
+      NSUInteger parsedHeaderBytes = consumedLength;
+      size_t headTerminator = ALNFindHeaderTerminator(readState->bytes, consumedLength, 0);
+      if (headTerminator != SIZE_MAX) {
+        parsedHeaderBytes = (NSUInteger)(headTerminator + 4);
       }
       if (parsedHeaderBytes > limits.maxHeaderBytes) {
         if (statusCode != NULL) {
@@ -2724,7 +2938,8 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   }
 
   if ([relativePath containsString:@".."] ||
-      [relativePath hasPrefix:@"/"]) {
+      [relativePath hasPrefix:@"/"] ||
+      ALNStaticRelativePathIsHidden(relativePath)) {
     return ALNStaticNotFoundResponse();
   }
 
@@ -2867,7 +3082,7 @@ static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
 
 static double ALNSendResponse(ALNSocketHandle clientFd,
                               ALNResponse *response,
-                              BOOL performanceLogging,
+                              BOOL performanceHeaders,
                               BOOL sendBody) {
   double serializeStart = ALNNowMilliseconds();
   NSString *fileBodyPath = response.fileBodyPath;
@@ -2907,7 +3122,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     return (ALNNowMilliseconds() - writeStart) + serializeMs;
   }
 
-  if (performanceLogging) {
+  if (performanceHeaders) {
     [response setHeader:@"X-Arlen-Response-Write-Ms"
                   value:[NSString stringWithFormat:@"%.3f", serializeMs]];
     double currentTotal = ALNParseHeaderDoubleValue([response headerForName:@"X-Arlen-Total-Ms"]);
@@ -3027,9 +3242,11 @@ static NSString *ALNJSONStringForEventEnvelope(ALNEventEnvelope *event) {
   return [[NSString alloc] initWithData:(data ?: [NSData data]) encoding:NSUTF8StringEncoding] ?: @"{}";
 }
 
+// The SSE id is the stream sequence, so a reconnecting EventSource's
+// Last-Event-ID resumes after it (the event_id is in the data).
 static NSString *ALNSSEFrameForEventEnvelope(ALNEventEnvelope *event) {
   NSMutableString *frame = [NSMutableString string];
-  [frame appendFormat:@"id: %@\n", event.eventID ?: @""];
+  [frame appendFormat:@"id: %lu\n", (unsigned long)event.sequence];
   [frame appendFormat:@"event: %@\n", event.eventType ?: @"event"];
   NSString *data = ALNJSONStringForEventEnvelope(event);
   NSArray *lines = [data componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
@@ -3073,16 +3290,135 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   return ALNSendAll(clientFd, [data bytes], [data length]);
 }
 
+// Event-stream delivery to one client (GitHub issue 240). The session
+// subscribes before it replays. Broker callbacks only enqueue here, under the
+// gate's own lock: no socket I/O runs on the appender's thread or under the
+// stream's publish lock. The session's own thread sends: first the replay,
+// then the queue in sequence order, skipping any sequence at or below the last
+// one sent (an event both replayed and published goes out once). The queue is
+// bounded; on overflow the session ends, and the client resumes from its
+// cursor (Last-Event-ID for SSE) instead of the server buffering without limit.
+@interface ALNEventStreamDeliveryGate : NSObject
+
+- (instancetype)initWithSender:(BOOL (^)(ALNEventEnvelope *event))sender;
+- (void)startAfterSequence:(NSUInteger)sequence;
+- (BOOL)deliverReplayedEvent:(ALNEventEnvelope *)event;
+// Sends what is queued. NO when a send failed or the queue overflowed.
+- (BOOL)drainQueued;
+// Waits up to `seconds` for queued events; YES when there are some.
+- (BOOL)waitForQueuedEvents:(NSTimeInterval)seconds;
+- (BOOL)hasOverflowed;
+- (void)receiveLiveEvent:(ALNEventEnvelope *)event;
+
+@end
+
+static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
+
+@implementation ALNEventStreamDeliveryGate {
+  BOOL (^_sender)(ALNEventEnvelope *event);
+  NSCondition *_condition;
+  NSMutableArray<ALNEventEnvelope *> *_queued;
+  BOOL _overflowed;
+  // Touched only by the session's thread.
+  NSUInteger _lastSequence;
+}
+
+- (instancetype)initWithSender:(BOOL (^)(ALNEventEnvelope *event))sender {
+  self = [super init];
+  if (self) {
+    _sender = [sender copy];
+    _condition = [[NSCondition alloc] init];
+    _queued = [NSMutableArray array];
+  }
+  return self;
+}
+
+- (void)startAfterSequence:(NSUInteger)sequence {
+  _lastSequence = sequence;
+}
+
+- (BOOL)sendIfNew:(ALNEventEnvelope *)event {
+  if (event.sequence <= _lastSequence) {
+    return YES;
+  }
+  if (!_sender(event)) {
+    return NO;
+  }
+  _lastSequence = event.sequence;
+  return YES;
+}
+
+- (BOOL)deliverReplayedEvent:(ALNEventEnvelope *)event {
+  return [self sendIfNew:event];
+}
+
+- (BOOL)drainQueued {
+  [_condition lock];
+  NSArray<ALNEventEnvelope *> *queued =
+      [_queued sortedArrayUsingComparator:^NSComparisonResult(ALNEventEnvelope *a, ALNEventEnvelope *b) {
+        return (a.sequence < b.sequence) ? NSOrderedAscending
+                                         : ((a.sequence > b.sequence) ? NSOrderedDescending : NSOrderedSame);
+      }];
+  [_queued removeAllObjects];
+  BOOL overflowed = _overflowed;
+  [_condition unlock];
+  if (overflowed) {
+    return NO;
+  }
+  for (ALNEventEnvelope *event in queued) {
+    if (![self sendIfNew:event]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)waitForQueuedEvents:(NSTimeInterval)seconds {
+  [_condition lock];
+  if ([_queued count] == 0 && !_overflowed) {
+    [_condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+  }
+  BOOL ready = ([_queued count] > 0) || _overflowed;
+  [_condition unlock];
+  return ready;
+}
+
+- (BOOL)hasOverflowed {
+  [_condition lock];
+  BOOL overflowed = _overflowed;
+  [_condition unlock];
+  return overflowed;
+}
+
+- (void)receiveLiveEvent:(ALNEventEnvelope *)event {
+  [_condition lock];
+  if (!_overflowed) {
+    if ([_queued count] >= ALNEventStreamDeliveryQueueLimit) {
+      _overflowed = YES;
+      [_queued removeAllObjects];
+    } else {
+      [_queued addObject:event];
+    }
+  }
+  [_condition signal];
+  [_condition unlock];
+}
+
+@end
+
 @interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber, ALNEventStreamLiveSubscriber>
 
 @property(nonatomic, assign, readonly) ALNSocketHandle clientFd;
 @property(nonatomic, strong, readonly) NSLock *sendLock;
 @property(nonatomic, assign) BOOL closed;
+@property(nonatomic, strong, readonly) ALNEventStreamDeliveryGate *streamGate;
 
 - (instancetype)initWithClientFd:(ALNSocketHandle)clientFd;
 - (BOOL)sendTextMessage:(NSString *)message;
 - (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode;
 - (void)sendCloseFrame;
+// A close frame carrying an RFC 6455 status code (0 sends none).
+- (void)sendCloseFrameWithCode:(uint16_t)code;
 - (BOOL)isClosedSnapshot;
 
 @end
@@ -3095,6 +3431,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     _clientFd = clientFd;
     _sendLock = [[NSLock alloc] init];
     _closed = NO;
+    __weak ALNWebSocketClientSession *weakSelf = self;
+    _streamGate = [[ALNEventStreamDeliveryGate alloc] initWithSender:^BOOL(ALNEventEnvelope *event) {
+      return [weakSelf sendTextMessage:ALNJSONStringForEventEnvelope(event)];
+    }];
   }
   return self;
 }
@@ -3116,9 +3456,15 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 }
 
 - (void)sendCloseFrame {
+  [self sendCloseFrameWithCode:0];
+}
+
+- (void)sendCloseFrameWithCode:(uint16_t)code {
+  unsigned char body[2] = {(unsigned char)(code >> 8), (unsigned char)(code & 0xFF)};
+  NSData *payload = (code != 0) ? [NSData dataWithBytes:body length:sizeof(body)] : [NSData data];
   [self.sendLock lock];
   if (!self.closed) {
-    (void)ALNWebSocketSendFrame(self.clientFd, 0x8, [NSData data]);
+    (void)ALNWebSocketSendFrame(self.clientFd, 0x8, payload);
     self.closed = YES;
   }
   [self.sendLock unlock];
@@ -3138,7 +3484,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 
 - (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
   (void)streamID;
-  (void)[self sendTextMessage:ALNJSONStringForEventEnvelope(event)];
+  [self.streamGate receiveLiveEvent:event];
 }
 
 @end
@@ -3148,6 +3494,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 @property(nonatomic, assign, readonly) ALNSocketHandle clientFd;
 @property(nonatomic, strong, readonly) NSLock *sendLock;
 @property(nonatomic, assign) BOOL closed;
+@property(nonatomic, strong, readonly) ALNEventStreamDeliveryGate *streamGate;
 
 - (instancetype)initWithClientFd:(ALNSocketHandle)clientFd;
 - (BOOL)sendFrame:(NSString *)frame;
@@ -3164,6 +3511,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     _clientFd = clientFd;
     _sendLock = [[NSLock alloc] init];
     _closed = NO;
+    __weak ALNSSEClientSession *weakSelf = self;
+    _streamGate = [[ALNEventStreamDeliveryGate alloc] initWithSender:^BOOL(ALNEventEnvelope *event) {
+      return [weakSelf sendFrame:ALNSSEFrameForEventEnvelope(event)];
+    }];
   }
   return self;
 }
@@ -3193,7 +3544,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 
 - (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
   (void)streamID;
-  (void)[self sendFrame:ALNSSEFrameForEventEnvelope(event)];
+  [self.streamGate receiveLiveEvent:event];
 }
 
 @end
@@ -3219,6 +3570,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
 @property(nonatomic, strong) NSMutableSet *resumedHTTPClientFDs;
 @property(nonatomic, assign) NSUInteger keepAliveParkAfterMilliseconds;
+@property(nonatomic, assign) NSUInteger webSocketPingIntervalSeconds;
 @property(nonatomic, assign) NSUInteger idleConnectionTimeoutSeconds;
 @property(nonatomic, strong) NSLock *idleConnectionLock;
 @property(nonatomic, strong) NSMutableDictionary *idleConnectionDeadlines;
@@ -3258,6 +3610,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     _httpWorkerPoolStarted = NO;
     _resumedHTTPClientFDs = [NSMutableSet set];
     _keepAliveParkAfterMilliseconds = 5;
+    _webSocketPingIntervalSeconds = 25;
     _idleConnectionTimeoutSeconds = 30;
     _idleConnectionLock = [[NSLock alloc] init];
     _idleConnectionDeadlines = [NSMutableDictionary dictionary];
@@ -3917,20 +4270,63 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     return;
   }
 
+  // A message may span frames (RFC 6455 fragmentation) up to this total.
+  const NSUInteger maxMessageBytes = 1048576;
+  // Idle sessions (GitHub issue 239): with no frame for a ping interval the
+  // server pings; a client that stays silent for another interval is closed
+  // with 1001. A quiet receive-only subscriber is no longer dropped by the
+  // socket read timeout.
+  const double pingIntervalMs = (double)self.webSocketPingIntervalSeconds * 1000.0;
+  double lastFrameMs = ALNNowMilliseconds();
+  double pingSentMs = 0.0;
+  NSMutableData *fragments = nil;
+  uint8_t fragmentOpcode = 0;
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      int readable = ALNWebSocketWaitReadable(clientFd, 1000);
+      if (readable < 0) {
+        break;
+      }
+      if (readable == 0) {
+        double now = ALNNowMilliseconds();
+        if (pingIntervalMs > 0.0) {
+          if (pingSentMs == 0.0 && now - lastFrameMs >= pingIntervalMs) {
+            if (![session sendBinaryPayload:[NSData data] opcode:0x9]) {
+              break;
+            }
+            pingSentMs = now;
+          } else if (pingSentMs > 0.0 && now - pingSentMs >= pingIntervalMs) {
+            [session sendCloseFrameWithCode:ALNWebSocketCloseGoingAway];
+            break;
+          }
+        }
+        continue;
+      }
+
       uint8_t opcode = 0;
       BOOL fin = NO;
       NSData *payload = nil;
-      if (!ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, 1048576)) {
+      uint16_t closeCode = 0;
+      ALNWebSocketReadStatus status =
+          ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, maxMessageBytes, &closeCode);
+      if (status == ALNWebSocketReadConnectionLost) {
         break;
       }
-      if (!fin) {
+      if (status == ALNWebSocketReadProtocolError) {
+        [session sendCloseFrameWithCode:closeCode];
         break;
       }
+      lastFrameMs = ALNNowMilliseconds();
+      pingSentMs = 0.0;
 
       if (opcode == 0x8) {
-        [session sendCloseFrame];
+        // Echo the peer's status code (RFC 6455 5.5.1).
+        uint16_t peerCode = 0;
+        if ([payload length] >= 2) {
+          const unsigned char *bytes = (const unsigned char *)[payload bytes];
+          peerCode = (uint16_t)((bytes[0] << 8) | bytes[1]);
+        }
+        [session sendCloseFrameWithCode:peerCode];
         break;
       }
       if (opcode == 0x9) {
@@ -3940,15 +4336,43 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
       if (opcode == 0xA) {
         continue;
       }
+
+      // Data frames: 0x1 text and 0x2 binary start a message, 0x0 continues one.
+      if (opcode == 0x0) {
+        if (fragments == nil) {
+          [session sendCloseFrameWithCode:ALNWebSocketCloseProtocolError];
+          break;
+        }
+        if ([fragments length] + [payload length] > maxMessageBytes) {
+          [session sendCloseFrameWithCode:ALNWebSocketCloseMessageTooBig];
+          break;
+        }
+        [fragments appendData:payload ?: [NSData data]];
+        if (!fin) {
+          continue;
+        }
+        payload = fragments;
+        opcode = fragmentOpcode;
+        fragments = nil;
+      } else if (fragments != nil) {
+        // A new message may not start inside a fragmented one.
+        [session sendCloseFrameWithCode:ALNWebSocketCloseProtocolError];
+        break;
+      } else if (!fin) {
+        fragments = [NSMutableData dataWithData:payload ?: [NSData data]];
+        fragmentOpcode = opcode;
+        continue;
+      }
       if (opcode != 0x1) {
         continue;
       }
 
-      NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
-                                                encoding:NSUTF8StringEncoding];
-      if (message == nil) {
-        message = @"";
+      if (!ALNWebSocketIsValidUTF8((const unsigned char *)[payload bytes], [payload length])) {
+        [session sendCloseFrameWithCode:ALNWebSocketCloseInvalidPayload];
+        break;
       }
+      NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
+                                                encoding:NSUTF8StringEncoding] ?: @"";
 
       if ([mode isEqualToString:@"channel"]) {
         (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
@@ -3968,21 +4392,43 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   }
 }
 
+// Sends a websocket stream session's live events (see
+// ALNEventStreamDeliveryGate) until the session closes. On a failed send or an
+// overflowed queue it closes the session and shuts the socket down, which also
+// ends the session's blocked read loop; the client resumes from its cursor.
+- (void)runWebSocketStreamSender:(ALNWebSocketClientSession *)session {
+  @autoreleasepool {
+    while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      (void)[session.streamGate waitForQueuedEvents:1.0];
+      if (![session.streamGate drainQueued]) {
+        [session sendCloseFrame];
+        (void)ALNSocketShutdown(session.clientFd);
+        break;
+      }
+    }
+  }
+}
+
 - (void)runSSEStreamSession:(ALNSSEClientSession *)session
                subscription:(ALNEventStreamBrokerSubscription *)subscription {
   if (session == nil) {
     return;
   }
-  NSUInteger keepaliveCounter = 0;
+  double lastKeepaliveMs = ALNNowMilliseconds();
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
-      [NSThread sleepForTimeInterval:1.0];
-      keepaliveCounter += 1;
-      if (keepaliveCounter >= 15) {
+      // Live events go out from this thread (see ALNEventStreamDeliveryGate).
+      // An overflowed queue ends the stream; the client resumes with
+      // Last-Event-ID.
+      (void)[session.streamGate waitForQueuedEvents:1.0];
+      if (![session.streamGate drainQueued]) {
+        break;
+      }
+      if (ALNNowMilliseconds() - lastKeepaliveMs >= 15000.0) {
         if (![session sendKeepalive]) {
           break;
         }
-        keepaliveCounter = 0;
+        lastKeepaliveMs = ALNNowMilliseconds();
       }
     }
   } @finally {
@@ -3999,8 +4445,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 // Returns YES when the connection was parked with the idle-connection watcher;
 // the caller must then leave the socket open and keep its session reservation.
 - (BOOL)serveClient:(ALNSocketHandle)clientFd resumed:(BOOL)resumed allowPark:(BOOL)allowPark {
-  BOOL performanceLogging =
-      ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
+  // The server only adds timing headers; the performance log is the application's.
+  BOOL performanceHeaders =
+      ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES) &&
+      ALNConfigBool(self.application.config ?: @{}, @"performanceHeaders", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
   NSUInteger largestRouteBodyLimit = [self.application largestRouteMaxBodyBytes];
   if (largestRouteBodyLimit > 0) {
@@ -4010,6 +4458,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   }
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
+  if (!resumed) {
+    ALNApplyClientSocketNoDelay(clientFd);
+  }
   NSString *connectionRemoteAddress = ALNRemoteAddressForClient(clientFd) ?: @"";
   ALNConnectionReadState readState;
   ALNConnectionReadStateInit(&readState);
@@ -4044,15 +4495,20 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             errorResponse = ALNErrorResponse(431, @"request headers too large\n");
           } else if (readStatus == 408) {
             errorResponse = ALNErrorResponse(408, @"request timeout\n");
+          } else if (readStatus == 417) {
+            errorResponse = ALNErrorResponse(417, @"expectation failed\n");
           } else {
             errorResponse = ALNErrorResponse(400, @"bad request\n");
           }
           [errorResponse setHeader:@"Connection" value:@"close"];
+          // These responses are written before the application runs, so add
+          // the configured security headers here (#253).
+          [errorResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
           ALNEnsurePerformanceHeaders(errorResponse,
-                                      performanceLogging,
+                                      performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, errorResponse, performanceLogging, YES);
+          (void)ALNSendResponse(clientFd, errorResponse, performanceHeaders, YES);
           return NO;
         }
         request.parseDurationMilliseconds = parseMs;
@@ -4086,13 +4542,13 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
             ALNEnsurePerformanceHeaders(staticResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             request.responseWriteDurationMilliseconds =
                 ALNSendResponse(clientFd,
                                 staticResponse,
-                                performanceLogging,
+                                performanceHeaders,
                                 ![request.method isEqualToString:@"HEAD"]);
             requestsHandled += 1;
             if (!keepAlive) {
@@ -4136,10 +4592,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           ALNResponse *invalidUpgrade = ALNErrorResponse(400, @"invalid websocket upgrade\n");
           [invalidUpgrade setHeader:@"Connection" value:@"close"];
           ALNEnsurePerformanceHeaders(invalidUpgrade,
-                                      performanceLogging,
+                                      performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceLogging, YES);
+          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceHeaders, YES);
           return NO;
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
@@ -4148,10 +4604,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             ALNResponse *originDenied = ALNErrorResponse(403, @"websocket origin not allowed\n");
             [originDenied setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(originDenied,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, originDenied, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, originDenied, performanceHeaders, YES);
             return NO;
           }
           ALNWebSocketClientSession *webSocketSession = nil;
@@ -4169,10 +4625,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                               value:@"websocket_session_limit"];
             [busyResponse setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(busyResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
             return NO;
           }
 
@@ -4193,45 +4649,25 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           rejectionReason)];
               [busyResponse setHeader:@"Connection" value:@"close"];
               ALNEnsurePerformanceHeaders(busyResponse,
-                                          performanceLogging,
+                                          performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+              (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
           } else if ([webSocketMode isEqualToString:@"stream"]) {
             NSError *streamError = nil;
-            streamReplayResult = [self eventStreamReplayResultFromResponse:response error:&streamError];
-            if (streamReplayResult == nil) {
-              ALNResponse *failure =
-                  ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
-                                   @"event stream unavailable\n");
-              [failure setHeader:@"Connection" value:@"close"];
-              ALNEnsurePerformanceHeaders(failure,
-                                          performanceLogging,
-                                          parseMs,
-                                          ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
-              [self releaseWebSocketSessionReservation];
-              return NO;
-            }
-            if (streamReplayResult.resyncRequired) {
-              ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
-                                                                           replayResult:streamReplayResult];
-              [resyncResponse setHeader:@"Connection" value:@"close"];
-              ALNEnsurePerformanceHeaders(resyncResponse,
-                                          performanceLogging,
-                                          parseMs,
-                                          ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
-              [self releaseWebSocketSessionReservation];
-              return NO;
-            }
+            // Subscribe before replaying (GitHub issue 240): the session's gate
+            // holds live events until the 101 and the replay are sent, so none
+            // is lost between the replay and the subscription, or sent ahead of
+            // the handshake.
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
+            [webSocketSession.streamGate
+                startAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
             if (self.application.eventStreamBroker != nil) {
               streamSubscription = [self.application.eventStreamBroker
-                  subscribeToStream:streamReplayResult.streamID
+                  subscribeToStream:[self eventStreamIdentifierFromResponse:response]
                          subscriber:webSocketSession
                               error:&streamError];
               if (streamSubscription == nil) {
@@ -4239,13 +4675,32 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                 [busyResponse setHeader:@"Retry-After" value:@"1"];
                 [busyResponse setHeader:@"Connection" value:@"close"];
                 ALNEnsurePerformanceHeaders(busyResponse,
-                                            performanceLogging,
+                                            performanceHeaders,
                                             parseMs,
                                             ALNNowMilliseconds() - requestStartMs);
-                (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+                (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
                 [self releaseWebSocketSessionReservation];
                 return NO;
               }
+            }
+            streamReplayResult = [self eventStreamReplayResultFromResponse:response error:&streamError];
+            if (streamReplayResult == nil || streamReplayResult.resyncRequired) {
+              if (streamSubscription != nil) {
+                [self.application.eventStreamBroker unsubscribe:streamSubscription];
+              }
+              ALNResponse *failure =
+                  (streamReplayResult != nil)
+                      ? [self eventStreamResyncResponseForResponse:response replayResult:streamReplayResult]
+                      : ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
+                                         @"event stream unavailable\n");
+              [failure setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(failure,
+                                          performanceHeaders,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
+              [self releaseWebSocketSessionReservation];
+              return NO;
             }
           }
 
@@ -4256,10 +4711,15 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
               }
               if ([webSocketMode isEqualToString:@"stream"]) {
                 for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
-                  if (![webSocketSession sendTextMessage:ALNJSONStringForEventEnvelope(event)]) {
+                  if (![webSocketSession.streamGate deliverReplayedEvent:event]) {
                     break;
                   }
                 }
+                // The read loop below blocks on the socket, so live events go
+                // out from a sender thread.
+                [NSThread detachNewThreadSelector:@selector(runWebSocketStreamSender:)
+                                         toTarget:self
+                                       withObject:webSocketSession];
               }
               [self runWebSocketSessionWithMode:webSocketMode
                                         channel:webSocketChannel
@@ -4267,6 +4727,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                    subscription:channelSubscription
                               streamSubscription:streamSubscription
                                        clientFd:clientFd];
+              // Marks the session closed even when the peer vanished without a
+              // close frame, so a stream sender thread ends with it.
+              [webSocketSession sendCloseFrame];
             } else {
               if (channelSubscription != nil) {
                 [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
@@ -4283,69 +4746,83 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 
         if ([sseMode isEqualToString:@"stream"]) {
           NSError *streamError = nil;
-          ALNEventStreamReplayResult *streamReplayResult =
-              [self eventStreamReplayResultFromResponse:response error:&streamError];
-          if (streamReplayResult == nil) {
-            ALNResponse *failure =
-                ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
-                                 @"event stream unavailable\n");
-            [failure setHeader:@"Connection" value:@"close"];
-            ALNEnsurePerformanceHeaders(failure,
-                                        performanceLogging,
-                                        parseMs,
-                                        ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
-            return NO;
-          }
-          if (streamReplayResult.resyncRequired) {
-            ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
-                                                                         replayResult:streamReplayResult];
-            [resyncResponse setHeader:@"Connection" value:@"close"];
-            ALNEnsurePerformanceHeaders(resyncResponse,
-                                        performanceLogging,
-                                        parseMs,
-                                        ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
-            return NO;
-          }
-
-          BOOL reserved = [self reserveHTTPSessionWithLimit:self.maxConcurrentHTTPSessions];
-          if (!reserved) {
-            ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
-            [busyResponse setHeader:@"Retry-After" value:@"1"];
-            [busyResponse setHeader:@"X-Arlen-Backpressure-Reason" value:@"http_session_limit"];
-            [busyResponse setHeader:@"Connection" value:@"close"];
-            ALNEnsurePerformanceHeaders(busyResponse,
-                                        performanceLogging,
-                                        parseMs,
-                                        ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
-            return NO;
-          }
-
+          // Subscribe before replaying (GitHub issue 240): the session's gate
+          // holds live events until the replay is sent, so none committed in
+          // between is lost; it then sends them in order, without repeats.
           ALNSSEClientSession *sseSession = [[ALNSSEClientSession alloc] initWithClientFd:clientFd];
+          [sseSession.streamGate
+              startAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
           ALNEventStreamBrokerSubscription *streamSubscription = nil;
+          if (self.application.eventStreamBroker != nil) {
+            streamSubscription = [self.application.eventStreamBroker
+                subscribeToStream:[self eventStreamIdentifierFromResponse:response]
+                       subscriber:sseSession
+                            error:&streamError];
+          }
+          BOOL subscriptionHandedOff = NO;
           @try {
-            if (!ALNSendSSEHeaders(clientFd, response)) {
+            ALNEventStreamReplayResult *streamReplayResult =
+                (self.application.eventStreamBroker != nil && streamSubscription == nil)
+                    ? nil
+                    : [self eventStreamReplayResultFromResponse:response error:&streamError];
+            if (streamReplayResult == nil) {
+              ALNResponse *failure =
+                  ALNErrorResponse((streamError.code == ALNEventStreamErrorUnauthorized) ? 403 : 500,
+                                   @"event stream unavailable\n");
+              [failure setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(failure,
+                                          performanceHeaders,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
               return NO;
             }
-            for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
-              if (![sseSession sendFrame:ALNSSEFrameForEventEnvelope(event)]) {
+            if (streamReplayResult.resyncRequired) {
+              ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
+                                                                           replayResult:streamReplayResult];
+              [resyncResponse setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(resyncResponse,
+                                          performanceHeaders,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, resyncResponse, performanceHeaders, YES);
+              return NO;
+            }
+
+            BOOL reserved = [self reserveHTTPSessionWithLimit:self.maxConcurrentHTTPSessions];
+            if (!reserved) {
+              ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+              [busyResponse setHeader:@"Retry-After" value:@"1"];
+              [busyResponse setHeader:@"X-Arlen-Backpressure-Reason" value:@"http_session_limit"];
+              [busyResponse setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(busyResponse,
+                                          performanceHeaders,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
+              return NO;
+            }
+            @try {
+              if (!ALNSendSSEHeaders(clientFd, response)) {
                 return NO;
               }
-            }
-            if (self.application.eventStreamBroker != nil) {
-              streamSubscription = [self.application.eventStreamBroker
-                  subscribeToStream:streamReplayResult.streamID
-                         subscriber:sseSession
-                              error:&streamError];
-              if (streamSubscription == nil) {
+              for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
+                if (![sseSession.streamGate deliverReplayedEvent:event]) {
+                  return NO;
+                }
+              }
+              if (![sseSession.streamGate drainQueued]) {
                 return NO;
               }
+              subscriptionHandedOff = YES;  // runSSEStreamSession unsubscribes
+              [self runSSEStreamSession:sseSession subscription:streamSubscription];
+            } @finally {
+              [self releaseHTTPSessionReservation];
             }
-            [self runSSEStreamSession:sseSession subscription:streamSubscription];
           } @finally {
-            [self releaseHTTPSessionReservation];
+            if (!subscriptionHandedOff && streamSubscription != nil) {
+              [self.application.eventStreamBroker unsubscribe:streamSubscription];
+            }
           }
           return NO;
         }
@@ -4354,13 +4831,13 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL keepAlive = ALNShouldKeepAliveForRequest(request, response);
         [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
         ALNEnsurePerformanceHeaders(response,
-                                    performanceLogging,
+                                    performanceHeaders,
                                     parseMs,
                                     ALNNowMilliseconds() - requestStartMs);
         request.responseWriteDurationMilliseconds =
             ALNSendResponse(clientFd,
                             response,
-                            performanceLogging,
+                            performanceHeaders,
                             ![request.method isEqualToString:@"HEAD"]);
         requestsHandled += 1;
         if (!keepAlive) {
@@ -4413,6 +4890,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     self.maxConcurrentHTTPWorkers = runtimeLimits.maxConcurrentHTTPWorkers;
     self.maxQueuedHTTPConnections = runtimeLimits.maxQueuedHTTPConnections;
     self.keepAliveParkAfterMilliseconds = runtimeLimits.keepAliveParkAfterMilliseconds;
+    self.webSocketPingIntervalSeconds = runtimeLimits.webSocketPingIntervalSeconds;
     self.idleConnectionTimeoutSeconds = tuning.connectionTimeoutSeconds;
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers

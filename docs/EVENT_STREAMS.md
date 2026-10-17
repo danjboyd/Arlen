@@ -99,6 +99,11 @@ static void ConfigureRealtime(ALNApplication *app) {
 The in-memory store and broker are useful for local development and focused
 tests. Production durability should come from a real store adapter.
 
+The in-memory store keeps at most `maxEventsPerStream` events per stream
+(default `10000`; `0` keeps every event) and, when `maxEventAgeSeconds` is set,
+drops events older than that. Sequences keep counting across dropped events,
+and a replay from before the oldest kept event returns `resync_required`.
+
 ### PostgreSQL store and broker
 
 For production, and whenever the app runs under several `propane` workers or on
@@ -225,6 +230,22 @@ Cursor semantics are sequence-based in the first shipping slice.
   replay before requiring a full resync
 - when the requested cursor cannot be satisfied, Arlen returns a deterministic
   `resync_required` result instead of silently falling back
+
+SSE and websocket stream sessions subscribe before they replay and hold live
+events until the replay (and, for websockets, the `101`) is sent. A client sees
+every event after its cursor once, in sequence order, including events
+committed while it connected; appends publish in commit order.
+
+Publishing only queues an event for each session (up to 1024 events); the
+session's own thread writes it to the socket, so a slow client never holds up
+an append. A session that falls 1024 events behind is disconnected (SSE ends
+the stream, a websocket gets a close frame), and the client reconnects from
+its cursor.
+
+SSE frames carry the stream sequence as `id:` (the `event_id` is in the data).
+When `renderSSEStream:` gets no `afterSequence`, a numeric `Last-Event-ID`
+request header is used instead, so a reconnecting `EventSource` resumes after
+the last event it saw.
 
 The important operational point is that a failed or missed live delivery does
 not imply data loss if the client still has a valid durable cursor.

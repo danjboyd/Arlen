@@ -271,9 +271,15 @@ The MCP endpoint accepts `requiredScopes`, `requiredRoles`, and named `policies`
 in its config. Custom tools need their own service permissions. Route-backed
 tools retain the original route's permissions and path-based policies. Custom
 tools have private paths, so attach policies by name instead of relying on an
-unrelated HTTP route's path-prefix rules. Catalog visibility is shared among
-authenticated endpoint users: listing a tool never grants permission to call
-it. Use endpoint permissions if catalog metadata itself is sensitive.
+unrelated HTTP route's path-prefix rules. `tools/list` only shows a caller the
+tools whose `requiredRoles` and `requiredScopes` (the route's for route-backed
+tools, the registration's for custom tools) that caller holds. Named
+`policies`, assurance level and authentication age are checked only when the
+tool is called, so a listed tool can still be refused. Listing a tool never
+grants permission to call it, and `tools/call` keeps enforcing every route
+check. A tool with no roles or scopes is listed for, and callable by, every
+authenticated endpoint user. Use endpoint permissions if the catalog itself is
+sensitive.
 
 ### App-supplied identity middleware runs from a plugin
 

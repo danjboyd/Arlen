@@ -1409,7 +1409,16 @@ static id ALNMSSQLFetchTextColumnValue(SQLHSTMT statement,
     }
 
     sawData = YES;
-    NSUInteger chunkLength = strlen(buffer);
+    // Take the length from the driver, like the binary path. strlen() stopped
+    // at an embedded NUL and silently truncated the value (#265). A truncated
+    // chunk fills the buffer except for its terminator.
+    SQLLEN capacity = (SQLLEN)(sizeof(buffer) - 1);
+    NSUInteger chunkLength = 0;
+    if (indicator >= 0 && indicator < capacity) {
+      chunkLength = (NSUInteger)indicator;
+    } else if (indicator == SQL_NO_TOTAL || indicator >= capacity) {
+      chunkLength = (NSUInteger)(capacity - 1);
+    }
     if (chunkLength > 0) {
       [data appendBytes:buffer length:chunkLength];
     }

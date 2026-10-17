@@ -173,8 +173,11 @@ Schema codegen note:
 Routing/liveness note:
 
 - `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors.
-- `ALNPg.connectionLivenessChecksEnabled = YES` enables pre-query checkout
-  liveness checks for recycled pooled connections.
+- `ALNPg.connectionLivenessChecksEnabled = YES` (the default) enables
+  pre-query checkout liveness checks for recycled pooled connections. Only
+  connections idle for at least `ALNPg.connectionLivenessCheckIdleThreshold`
+  seconds (default `30`; `0` probes every reuse) run the `SELECT 1` probe. See
+  [ArlenData](ARLEN_DATA.md#connection-pool-liveness-checks).
 - `ALNMSSQL.connectionLivenessChecksEnabled = YES` enables the same
   checkout-time probe for pooled ODBC connections when transport support is
   present.

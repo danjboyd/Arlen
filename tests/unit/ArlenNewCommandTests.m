@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import "../ALNXCTestCompat.h"
+#import "ALNConfig.h"
 #import "../shared/ALNTestSupport.h"
 
 // `arlen new <name>` scaffolds relative to the current directory, but an
@@ -45,6 +46,40 @@
     *output = captured;
   }
   return exitCode;
+}
+
+// Issue 215: the scaffold used to write `session.secure = NO` and
+// `docsUIEnabled = YES` into the base app.plist, which cancelled the
+// production defaults (Secure cookies, no OpenAPI explorer).
+- (void)testGeneratedAppsKeepProductionSecureDefaults_Issue215 {
+  for (NSString *mode in @[ @"--lite", @"--full" ]) {
+    NSString *root = ALNTestTemporaryDirectory(@"arlen-new-prod-defaults");
+    XCTAssertNotNil(root);
+    if (root == nil) {
+      return;
+    }
+    int exitCode = -1;
+    NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+                                                    "ARLEN_FRAMEWORK_ROOT=%@ %@ new DefaultsApp %@ 2>&1",
+                                                   ALNTestShellQuote(root),
+                                                   ALNTestShellQuote(ALNTestRepoRoot()),
+                                                   ALNTestShellQuote([self arlenPath]), mode];
+    NSString *output = ALNTestRunShellCapture(command, &exitCode);
+    XCTAssertEqual(0, exitCode, @"%@: %@", mode, output);
+    NSString *appRoot = [root stringByAppendingPathComponent:@"DefaultsApp"];
+
+    NSError *error = nil;
+    NSDictionary *production = [ALNConfig loadConfigAtRoot:appRoot environment:@"production" error:&error];
+    XCTAssertNil(error, @"%@", mode);
+    XCTAssertEqualObjects(@YES, production[@"session"][@"secure"], @"%@", mode);
+    XCTAssertEqualObjects(@NO, production[@"openapi"][@"docsUIEnabled"], @"%@", mode);
+
+    NSDictionary *development = [ALNConfig loadConfigAtRoot:appRoot environment:@"development" error:&error];
+    XCTAssertNil(error, @"%@", mode);
+    XCTAssertEqualObjects(@NO, development[@"session"][@"secure"], @"%@", mode);
+    XCTAssertEqualObjects(@YES, development[@"openapi"][@"docsUIEnabled"], @"%@", mode);
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
 }
 
 - (void)testAbsoluteTargetIsNotNestedUnderTheCurrentDirectory {
