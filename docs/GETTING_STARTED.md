@@ -199,6 +199,9 @@ From app root:
 /path/to/Arlen/bin/arlen check
 ```
 
+`arlen config` prints secret values (session secrets, connection-string
+passwords and similar) as `[redacted]`; pass `--show-secrets` to see them.
+
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 

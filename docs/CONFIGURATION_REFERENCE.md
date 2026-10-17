@@ -14,6 +14,9 @@ Use this command to inspect the merged effective config for one environment:
 /path/to/Arlen/bin/arlen config --env development --json
 ```
 
+Secret values print as `[redacted]`; add `--show-secrets` to see them. See
+[CLI Reference](CLI_REFERENCE.md#arlen-config---env-name---json---show-secrets).
+
 ## 1. Minimal Mental Model
 
 Start with `config/app.plist` for defaults that apply everywhere. Override only
