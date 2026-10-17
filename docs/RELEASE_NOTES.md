@@ -18,6 +18,21 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- Event streams: SSE and websocket stream sessions subscribe before they
+  replay and hold live events until the replay is sent. Events committed while
+  a client connected were lost before, and concurrent appends could arrive out
+  of order; appends now publish in commit order. Live events queue per session
+  (up to 1024) and go out from the session's own thread, so a slow client no
+  longer holds up appenders; a client that falls 1024 events behind is
+  disconnected and resumes from its cursor. SSE `id:` is the stream sequence
+  (it was the `event_id`), and `renderSSEStream:` resumes from a
+  `Last-Event-ID` header when given no cursor (#240).
+- `ALNInMemoryEventStreamStore` keeps at most `maxEventsPerStream` events per
+  stream (default 10000) and optionally none older than `maxEventAgeSeconds`;
+  it kept every event before. Replays start at the cursor instead of scanning
+  the stream, and a cursor older than the oldest kept event gets
+  `resync_required` (#242).
+
 - HTTP request handling follows RFC 9110/9112 more closely (#211, #212, #213,
   #253):
   - Chunk-size lines no longer count toward `maxHeaderBytes`. A chunked body
