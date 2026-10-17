@@ -805,18 +805,49 @@ enum {
   ALNPGOIDOID_JSONB_ARRAY = 3807,
 };
 
-static NSString *ALNPgHexStringFromData(NSData *data) {
+// Text codecs for timestamp/date and bytea values. Not static so unit tests
+// can call them without a live database; they are not public API.
+NSString *ALNPgHexStringFromData(NSData *data);
+NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length);
+NSData *ALNPgDataFromByteaString(NSString *value);
+NSString *ALNPgTimestampStringFromDate(NSDate *value);
+NSDate *ALNPgDateFromTimestampString(NSString *value);
+NSDate *ALNPgDateFromDateString(NSString *value);
+
+// bytea hex format (`\x` followed by two lowercase hex digits per byte),
+// encoded through a lookup table into one C buffer (#234).
+NSString *ALNPgHexStringFromData(NSData *data) {
   if (![data isKindOfClass:[NSData class]]) {
     return @"";
   }
+  static const char digits[] = "0123456789abcdef";
   const unsigned char *bytes = [data bytes];
   NSUInteger length = [data length];
-  NSMutableString *hex = [NSMutableString stringWithCapacity:(length * 2) + 2];
-  [hex appendString:@"\\x"];
-  for (NSUInteger idx = 0; idx < length; idx++) {
-    [hex appendFormat:@"%02x", bytes[idx]];
+  if (length > (NSUIntegerMax - 2) / 2) {
+    return @"";
   }
-  return hex;
+  NSUInteger hexLength = (length * 2) + 2;
+  char *hex = malloc(hexLength);
+  if (hex == NULL) {
+    return @"";
+  }
+  hex[0] = '\\';
+  hex[1] = 'x';
+  char *out = hex + 2;
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unsigned char byte = bytes[idx];
+    *out++ = digits[byte >> 4];
+    *out++ = digits[byte & 0x0f];
+  }
+  NSString *encoded = [[NSString alloc] initWithBytesNoCopy:hex
+                                                     length:hexLength
+                                                   encoding:NSASCIIStringEncoding
+                                               freeWhenDone:YES];
+  if (encoded == nil) {
+    free(hex);
+    return @"";
+  }
+  return encoded;
 }
 
 static NSDate *ALNPgDateWithReferenceInterval(NSTimeInterval interval) {
@@ -829,7 +860,51 @@ static NSDate *ALNPgDateWithReferenceInterval(NSTimeInterval interval) {
   return [NSDate dateWithTimeIntervalSinceReferenceDate:interval];
 }
 
-static NSString *ALNPgTimestampStringFromDate(NSDate *value) {
+// Seconds between 1970-01-01 and 2001-01-01 (the NSDate reference date).
+static const int64_t ALNPgUnixSecondsAtReferenceDate = 978307200;
+
+// Days since 1970-01-01 for a proleptic Gregorian civil date, the calendar
+// PostgreSQL uses (H. Hinnant's days_from_civil). Pure integer arithmetic:
+// no calendar object and no allocation per value (#233).
+static int64_t ALNPgDaysFromCivil(int64_t year, int64_t month, int64_t day) {
+  year -= (month <= 2) ? 1 : 0;
+  int64_t era = (year >= 0 ? year : year - 399) / 400;
+  int64_t yearOfEra = year - (era * 400);
+  int64_t dayOfYear = (((153 * (month + (month > 2 ? -3 : 9))) + 2) / 5) + day - 1;
+  int64_t dayOfEra = (yearOfEra * 365) + (yearOfEra / 4) - (yearOfEra / 100) + dayOfYear;
+  return (era * 146097) + dayOfEra - 719468;
+}
+
+// Inverse of ALNPgDaysFromCivil.
+static void ALNPgCivilFromDays(int64_t days, int64_t *yearOut, int *monthOut, int *dayOut) {
+  days += 719468;
+  int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+  int64_t dayOfEra = days - (era * 146097);
+  int64_t yearOfEra =
+      (dayOfEra - (dayOfEra / 1460) + (dayOfEra / 36524) - (dayOfEra / 146096)) / 365;
+  int64_t dayOfYear = dayOfEra - ((365 * yearOfEra) + (yearOfEra / 4) - (yearOfEra / 100));
+  int64_t monthPrime = ((5 * dayOfYear) + 2) / 153;
+  int day = (int)(dayOfYear - (((153 * monthPrime) + 2) / 5) + 1);
+  int month = (int)(monthPrime < 10 ? monthPrime + 3 : monthPrime - 9);
+  *yearOut = (yearOfEra + (era * 400)) + (month <= 2 ? 1 : 0);
+  *monthOut = month;
+  *dayOut = day;
+}
+
+static NSInteger ALNPgDaysInMonth(NSInteger year, NSInteger month) {
+  static const NSInteger days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month == 2) {
+    BOOL leap = ((year % 4) == 0 && (year % 100) != 0) || (year % 400) == 0;
+    return leap ? 29 : 28;
+  }
+  return days[month - 1];
+}
+
+// ISO-8601 UTC text for an NSDate parameter, e.g. `2026-09-17T12:34:56.123456Z`.
+// Formatted with integer arithmetic over the proleptic Gregorian calendar
+// PostgreSQL uses, instead of an NSDateFormatter, NSCalendar and NSLocale per
+// parameter (#233). Dates before year 1 get PostgreSQL's ` BC` suffix.
+NSString *ALNPgTimestampStringFromDate(NSDate *value) {
   if (![value isKindOfClass:[NSDate class]]) {
     return @"";
   }
@@ -842,13 +917,44 @@ static NSString *ALNPgTimestampStringFromDate(NSDate *value) {
     seconds += 1;
     microseconds = 0;
   }
-  NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-  formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-  formatter.calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
-  formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-  formatter.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss";
-  NSString *whole = [formatter stringFromDate:ALNPgDateWithReferenceInterval(seconds)];
-  return whole ? [NSString stringWithFormat:@"%@.%06ldZ", whole, microseconds] : @"";
+  // Far outside anything PostgreSQL stores (it stops at year 294276); the
+  // bound keeps the integer arithmetic below from overflowing.
+  if (!isfinite(seconds) || fabs(seconds) > 1.0e15) {
+    return @"";
+  }
+  int64_t unixSeconds = (int64_t)seconds + ALNPgUnixSecondsAtReferenceDate;
+  int64_t days = unixSeconds / 86400;
+  int64_t secondOfDay = unixSeconds % 86400;
+  if (secondOfDay < 0) {
+    secondOfDay += 86400;
+    days -= 1;
+  }
+  int64_t year = 0;
+  int month = 0;
+  int day = 0;
+  ALNPgCivilFromDays(days, &year, &month, &day);
+  // Astronomical year 0 is 1 BC in PostgreSQL's notation.
+  BOOL beforeCommonEra = (year <= 0);
+  long long displayYear = beforeCommonEra ? (long long)(1 - year) : (long long)year;
+  char buffer[64];
+  int written = snprintf(buffer,
+                         sizeof(buffer),
+                         "%04lld-%02d-%02dT%02d:%02d:%02d.%06ldZ%s",
+                         displayYear,
+                         month,
+                         day,
+                         (int)(secondOfDay / 3600),
+                         (int)((secondOfDay / 60) % 60),
+                         (int)(secondOfDay % 60),
+                         microseconds,
+                         beforeCommonEra ? " BC" : "");
+  if (written <= 0 || (size_t)written >= sizeof(buffer)) {
+    return @"";
+  }
+  return [[NSString alloc] initWithBytes:buffer
+                                  length:(NSUInteger)written
+                                encoding:NSASCIIStringEncoding]
+             ?: @"";
 }
 
 static NSString *ALNPgJSONStringFromObject(id value, NSError **error) {
@@ -1028,19 +1134,19 @@ static NSNumber *ALNPgBoolNumberFromString(NSString *value) {
 static BOOL ALNPgParseFixedWidthNumber(const char *cursor,
                                        NSUInteger digitCount,
                                        NSInteger *valueOut);
-static NSDate *ALNPgUTCDate(NSInteger year,
-                            NSInteger month,
-                            NSInteger day,
-                            NSInteger hour,
-                            NSInteger minute,
-                            NSInteger second,
-                            double fractionalSeconds);
+static BOOL ALNPgUTCReferenceSeconds(NSInteger year,
+                                     NSInteger month,
+                                     NSInteger day,
+                                     NSInteger hour,
+                                     NSInteger minute,
+                                     NSInteger second,
+                                     NSTimeInterval *secondsOut);
 static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
                                         NSString *columnName,
                                         NSString *stringValue,
                                         NSError **error);
 
-static NSDate *ALNPgDateFromDateString(NSString *value) {
+NSDate *ALNPgDateFromDateString(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return nil;
   }
@@ -1061,7 +1167,11 @@ static NSDate *ALNPgDateFromDateString(NSString *value) {
     return nil;
   }
 
-  return ALNPgUTCDate(year, month, day, 0, 0, 0, 0.0);
+  NSTimeInterval seconds = 0;
+  if (!ALNPgUTCReferenceSeconds(year, month, day, 0, 0, 0, &seconds)) {
+    return nil;
+  }
+  return ALNPgDateWithReferenceInterval(seconds);
 }
 
 static BOOL ALNPgParseFixedWidthNumber(const char *cursor,
@@ -1085,44 +1195,28 @@ static BOOL ALNPgParseFixedWidthNumber(const char *cursor,
   return YES;
 }
 
-static NSDate *ALNPgUTCDate(NSInteger year,
-                            NSInteger month,
-                            NSInteger day,
-                            NSInteger hour,
-                            NSInteger minute,
-                            NSInteger second,
-                            double fractionalSeconds) {
-  NSCalendar *calendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
-  calendar.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
-
-  NSDateComponents *components = [[NSDateComponents alloc] init];
-  components.year = year;
-  components.month = month;
-  components.day = day;
-  components.hour = hour;
-  components.minute = minute;
-  components.second = second;
-
-  NSDate *date = (year == 2001 && month == 1 && day == 1 && hour == 0 && minute == 0 && second == 0)
-      ? ALNPgDateWithReferenceInterval(0) : [calendar dateFromComponents:components];
-  if (date == nil) {
-    return nil;
+// Seconds since the NSDate reference date for a UTC civil date-time, or NO
+// when the fields do not name a real proleptic Gregorian instant (month 13,
+// February 30, hour 24, second 60, year 0). Replaces a per-value NSCalendar
+// (#233); the parser that feeds it is fixed-width, so this is all arithmetic.
+static BOOL ALNPgUTCReferenceSeconds(NSInteger year,
+                                     NSInteger month,
+                                     NSInteger day,
+                                     NSInteger hour,
+                                     NSInteger minute,
+                                     NSInteger second,
+                                     NSTimeInterval *secondsOut) {
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > ALNPgDaysInMonth(year, month) ||
+      hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return NO;
   }
-
-  NSDateComponents *normalized =
-      [calendar components:ALNPlatformCalendarDateTimeUnitMask() fromDate:date];
-  if (normalized.year != year || normalized.month != month || normalized.day != day ||
-      normalized.hour != hour || normalized.minute != minute || normalized.second != second) {
-    return nil;
-  }
-
-  if (fractionalSeconds != 0.0) {
-    return ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate + fractionalSeconds);
-  }
-  return date;
+  int64_t days = ALNPgDaysFromCivil(year, month, day);
+  int64_t unixSeconds = (days * 86400) + (hour * 3600) + (minute * 60) + second;
+  *secondsOut = (NSTimeInterval)(unixSeconds - ALNPgUnixSecondsAtReferenceDate);
+  return YES;
 }
 
-static NSDate *ALNPgDateFromTimestampString(NSString *value) {
+NSDate *ALNPgDateFromTimestampString(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return nil;
   }
@@ -1212,39 +1306,80 @@ static NSDate *ALNPgDateFromTimestampString(NSString *value) {
     return nil;
   }
 
-  NSDate *date =
-      ALNPgUTCDate(year, month, day, hour, minute, second, fractionalSeconds);
-  if (date == nil) {
+  NSTimeInterval interval = 0;
+  if (!ALNPgUTCReferenceSeconds(year, month, day, hour, minute, second, &interval)) {
     return nil;
   }
-
+  // Same order of floating-point operations as before: whole seconds, plus
+  // the fraction, minus the zone offset.
+  if (fractionalSeconds != 0.0) {
+    interval = interval + fractionalSeconds;
+  }
   if (hasOffset) {
     NSInteger offset = ((offsetHours * 60 * 60) + (offsetMinutes * 60) + offsetSeconds) * sign;
-    date = ALNPgDateWithReferenceInterval(date.timeIntervalSinceReferenceDate - (NSTimeInterval)offset);
+    interval = interval - (NSTimeInterval)offset;
   }
-  return date;
+  return ALNPgDateWithReferenceInterval(interval);
 }
 
-static NSData *ALNPgDataFromByteaString(NSString *value) {
+// Value of one hex digit, or -1. Built once; used by the bytea decoder.
+static const int8_t *ALNPgHexDigitTable(void) {
+  static int8_t table[256];
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    memset(table, -1, sizeof(table));
+    for (int idx = 0; idx < 10; idx++) {
+      table['0' + idx] = (int8_t)idx;
+    }
+    for (int idx = 0; idx < 6; idx++) {
+      table['a' + idx] = (int8_t)(10 + idx);
+      table['A' + idx] = (int8_t)(10 + idx);
+    }
+  });
+  return table;
+}
+
+// Decode bytea hex text (`\x` prefix optional) straight from a C buffer with
+// a lookup table (#234). nil for an odd digit count or any non-hex byte.
+NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length) {
+  if (text == NULL) {
+    return nil;
+  }
+  if (length >= 2 && text[0] == '\\' && text[1] == 'x') {
+    text += 2;
+    length -= 2;
+  }
+  if ((length % 2) != 0) {
+    return nil;
+  }
+  const int8_t *table = ALNPgHexDigitTable();
+  NSUInteger byteCount = length / 2;
+  NSMutableData *data = [NSMutableData dataWithLength:byteCount];
+  if (data == nil) {
+    return nil;
+  }
+  unsigned char *out = [data mutableBytes];
+  const unsigned char *in = (const unsigned char *)text;
+  for (NSUInteger idx = 0; idx < byteCount; idx++) {
+    int high = table[in[idx * 2]];
+    int low = table[in[(idx * 2) + 1]];
+    if (high < 0 || low < 0) {
+      return nil;
+    }
+    out[idx] = (unsigned char)((high << 4) | low);
+  }
+  return data;
+}
+
+NSData *ALNPgDataFromByteaString(NSString *value) {
   if (![value isKindOfClass:[NSString class]]) {
     return nil;
   }
-  NSString *normalized = [value hasPrefix:@"\\x"] ? [value substringFromIndex:2] : value;
-  if (([normalized length] % 2) != 0) {
+  const char *text = [value UTF8String];
+  if (text == NULL) {
     return nil;
   }
-  NSMutableData *data = [NSMutableData dataWithCapacity:([normalized length] / 2)];
-  for (NSUInteger idx = 0; idx < [normalized length]; idx += 2) {
-    NSString *pair = [normalized substringWithRange:NSMakeRange(idx, 2)];
-    NSScanner *scanner = [NSScanner scannerWithString:pair];
-    unsigned int byte = 0;
-    if (![scanner scanHexInt:&byte] || ![scanner isAtEnd]) {
-      return nil;
-    }
-    unsigned char valueByte = (unsigned char)byte;
-    [data appendBytes:&valueByte length:1];
-  }
-  return data;
+  return ALNPgDataFromByteaBytes(text, (NSUInteger)strlen(text));
 }
 
 static ALNOid ALNPgElementFieldTypeForArrayFieldType(ALNOid fieldType) {
@@ -1752,8 +1887,18 @@ static id ALNPgDecodedFieldValue(PGresult *result,
     return [NSNull null];
   }
 
-  NSString *stringValue = [NSString stringWithUTF8String:value];
   ALNOid fieldType = (ALNPQftype != NULL) ? ALNPQftype(result, field) : 0;
+  if (fieldType == ALNPGOIDOID_BYTEA) {
+    // Decode bytea from libpq's buffer without first copying it into an
+    // NSString (#234). Malformed text falls through to the generic path,
+    // which reports the usual decode error.
+    NSData *bytes = ALNPgDataFromByteaBytes(value, (NSUInteger)strlen(value));
+    if (bytes != nil) {
+      return bytes;
+    }
+  }
+
+  NSString *stringValue = [NSString stringWithUTF8String:value];
   NSError *decodeError = nil;
   id decoded = ALNPgDecodedValueForFieldType(fieldType, key, stringValue ?: @"", &decodeError);
   if (decoded == nil && decodeError != nil) {
@@ -1800,6 +1945,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *preparedStatementNamesByKey;
 @property(nonatomic, strong) NSMutableArray<NSString *> *preparedStatementCacheOrder;
 @property(nonatomic, assign) NSUInteger preparedStatementSequence;
+// Pool bookkeeping: wall-clock time (seconds since the NSDate reference date)
+// when the connection last went back to the idle list (0 = never), and how
+// many SELECT 1 liveness probes it has run. Read by the pool and by tests.
+@property(nonatomic, assign) NSTimeInterval poolIdleSince;
+@property(nonatomic, assign) NSUInteger livenessCheckCount;
 
 - (BOOL)hasActiveTransaction;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
@@ -1986,6 +2136,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NO;
   }
 
+  self.livenessCheckCount += 1;
   PGresult *result = ALNPQexec(_conn, "SELECT 1");
   if (result == NULL) {
     if (error != NULL) {
@@ -3235,6 +3386,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   NSMutableDictionary<NSString *, id> *metadata =
       [NSMutableDictionary dictionaryWithDictionary:[[self class] capabilityMetadata]];
   metadata[@"connection_liveness_checks_enabled"] = @(self.connectionLivenessChecksEnabled);
+  metadata[@"connection_liveness_check_idle_threshold_seconds"] =
+      @(self.connectionLivenessCheckIdleThreshold);
   return [NSDictionary dictionaryWithDictionary:metadata];
 }
 
@@ -3327,6 +3480,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   // before a request fails. Previously NO, which let a single weekend
   // network blip silently poison the whole pool until a manual restart.
   _connectionLivenessChecksEnabled = YES;
+  // Only connections idle at least this long get the SELECT 1 probe. One
+  // that was returned moments ago is almost certainly still alive, and the
+  // probe would add a round trip to every pooled statement (#236).
+  // PQstatus still screens every reused connection for free.
+  _connectionLivenessCheckIdleThreshold = 30.0;
   _includeSQLInDiagnosticsEvents = NO;
   _emitDiagnosticsEventsToStderr = NO;
   _queryDiagnosticsListener = nil;
@@ -3352,6 +3510,24 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   connection.includeSQLInDiagnosticsEvents = self.includeSQLInDiagnosticsEvents;
   connection.emitDiagnosticsEventsToStderr = self.emitDiagnosticsEventsToStderr;
   connection.queryDiagnosticsListener = self.queryDiagnosticsListener;
+}
+
+// YES when a reused idle connection should get the SELECT 1 probe: checks
+// are on and it has sat idle for at least the threshold (or the threshold
+// is 0 or less, which probes every reuse).
+- (BOOL)shouldProbeIdleConnection:(ALNPgConnection *)connection {
+  if (!self.connectionLivenessChecksEnabled) {
+    return NO;
+  }
+  NSTimeInterval threshold = self.connectionLivenessCheckIdleThreshold;
+  NSTimeInterval idleSince = connection.poolIdleSince;
+  if (!(threshold > 0) || idleSince <= 0) {
+    return YES;
+  }
+  // Wall clock rather than an uptime clock, so time the host spent asleep
+  // counts as idle time. If the clock stepped backwards, probe to be safe.
+  NSTimeInterval idleFor = [NSDate timeIntervalSinceReferenceDate] - idleSince;
+  return idleFor < 0 || idleFor >= threshold;
 }
 
 // Give back a slot reserved by acquireConnection: whose connection could not
@@ -3453,7 +3629,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
       if ([candidate isConnectionUsable]) {
         [self configurePooledConnection:candidate];
         NSError *livenessError = nil;
-        if (!self.connectionLivenessChecksEnabled ||
+        if (![self shouldProbeIdleConnection:candidate] ||
             [candidate checkConnectionLiveness:&livenessError]) {
           handedOut = YES;
           return candidate;
@@ -3496,6 +3672,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
       self.inUseConnections -= 1;
     }
     if (reusable) {
+      connection.poolIdleSince = [NSDate timeIntervalSinceReferenceDate];
       [self.idleConnections addObject:connection];
     }
     [self.poolCondition broadcast];

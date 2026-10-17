@@ -138,6 +138,11 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 @property(nonatomic, assign) NSUInteger preparedStatementCacheLimit;
 @property(nonatomic, assign) NSUInteger builderCompilationCacheLimit;
 @property(nonatomic, assign) BOOL connectionLivenessChecksEnabled;
+/// With `connectionLivenessChecksEnabled`, only a pooled connection that has
+/// been idle for at least this many seconds runs the `SELECT 1` probe before
+/// it is reused. Default `30`. `0` or less probes on every reuse. Every reused
+/// connection still gets the free libpq status check.
+@property(nonatomic, assign) NSTimeInterval connectionLivenessCheckIdleThreshold;
 @property(nonatomic, assign) BOOL includeSQLInDiagnosticsEvents;
 @property(nonatomic, assign) BOOL emitDiagnosticsEventsToStderr;
 @property(nonatomic, copy, nullable) ALNPgQueryDiagnosticsListener queryDiagnosticsListener;

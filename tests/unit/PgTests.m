@@ -24,7 +24,20 @@
 - (BOOL)isConnectionUsable;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)hasActiveTransaction;
+- (NSTimeInterval)poolIdleSince;
+- (void)setPoolIdleSince:(NSTimeInterval)poolIdleSince;
+- (NSUInteger)livenessCheckCount;
+- (void)setLivenessCheckCount:(NSUInteger)livenessCheckCount;
 @end
+
+// ALNPg's text codecs are file-private C functions, kept non-static so these
+// tests can drive them without a live database.
+extern NSString *ALNPgHexStringFromData(NSData *data);
+extern NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length);
+extern NSData *ALNPgDataFromByteaString(NSString *value);
+extern NSString *ALNPgTimestampStringFromDate(NSDate *value);
+extern NSDate *ALNPgDateFromTimestampString(NSString *value);
+extern NSDate *ALNPgDateFromDateString(NSString *value);
 
 // A connection stand-in that never touches libpq, so the pool-poisoning
 // regression runs in the Linux quality gate without a live PostgreSQL.
@@ -50,6 +63,7 @@
   if (error != NULL) {
     *error = nil;
   }
+  self.livenessCheckCount += 1;
   return self.simulatedUsable;
 }
 
@@ -151,6 +165,194 @@
   XCTAssertNotNil(pool);
   XCTAssertTrue(pool.connectionLivenessChecksEnabled,
                 @"liveness checks must default ON after the pool-poisoning fix");
+}
+
+// Issue #236: the SELECT 1 probe runs only for connections idle past the
+// threshold, so back-to-back pooled statements skip the extra round trip.
+- (void)testConnectionLivenessCheckIdleThresholdDefaultsToThirtySeconds {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:1
+                         error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualWithAccuracy(30.0, pool.connectionLivenessCheckIdleThreshold, 0.0001);
+  XCTAssertEqualObjects(@30.0,
+                        [pool capabilityMetadata][@"connection_liveness_check_idle_threshold_seconds"]);
+}
+
+- (void)testPoolLivenessProbeRunsOnlyForConnectionsIdlePastThreshold {
+  ALNFakePgConnection *connection = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ connection ]];
+  pool.connectionLivenessChecksEnabled = YES;
+  XCTAssertGreaterThan(connection.poolIdleSince, 0.0, @"release must stamp the idle time");
+
+  // Just released: reused without a probe.
+  NSError *error = nil;
+  ALNPgConnection *reused = [pool acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual(reused, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)0, connection.livenessCheckCount);
+  [pool releaseConnection:connection];
+
+  // Idle longer than the threshold: probed once, then reused.
+  connection.poolIdleSince = [NSDate timeIntervalSinceReferenceDate] - 31.0;
+  reused = [pool acquireConnection:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual(reused, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)1, connection.livenessCheckCount);
+  [pool releaseConnection:connection];
+
+  // A threshold of 0 restores probe-on-every-reuse.
+  pool.connectionLivenessCheckIdleThreshold = 0;
+  reused = [pool acquireConnection:&error];
+  XCTAssertEqual(reused, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)2, connection.livenessCheckCount);
+  [pool releaseConnection:connection];
+
+  // A wall clock that stepped backwards counts as stale and is probed.
+  pool.connectionLivenessCheckIdleThreshold = 30;
+  connection.poolIdleSince = [NSDate timeIntervalSinceReferenceDate] + 3600.0;
+  reused = [pool acquireConnection:&error];
+  XCTAssertEqual(reused, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)3, connection.livenessCheckCount);
+  [pool releaseConnection:connection];
+
+  // Checks disabled: never probed, however long it sat idle.
+  pool.connectionLivenessChecksEnabled = NO;
+  connection.poolIdleSince = [NSDate timeIntervalSinceReferenceDate] - 3600.0;
+  reused = [pool acquireConnection:&error];
+  XCTAssertEqual(reused, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)3, connection.livenessCheckCount);
+  [pool releaseConnection:connection];
+}
+
+- (void)testPoolDropsDeadIdleConnectionWithoutLivenessProbe {
+  ALNFakePgConnection *connection = [self usableFakeConnection];
+  ALNPg *pool = [self fakePoolWithConnections:@[ connection ]];
+  pool.connectionLivenessChecksEnabled = YES;
+
+  // Recently idle but dead per libpq status: dropped without any probe.
+  connection.simulatedUsable = NO;
+  connection.simulatedOpen = YES;
+  NSError *error = nil;
+  ALNPgConnection *next = [pool acquireConnection:&error];
+  XCTAssertNotEqual(next, (ALNPgConnection *)connection);
+  XCTAssertEqual((NSUInteger)0, connection.livenessCheckCount);
+  XCTAssertEqual((NSInteger)1, connection.closeCount);
+}
+
+#pragma mark - Text codecs (issues #233 and #234, no live DB required)
+
+- (void)testTimestampDecoderMatchesPostgresProlepticGregorianCalendar {
+  // Expected seconds since 2001-01-01 UTC, computed independently.
+  NSDictionary<NSString *, NSNumber *> *cases = @{
+    @"2026-09-17 12:34:56+00" : @811341296.0,
+    @"2026-09-17T12:34:56Z" : @811341296.0,
+    @"2026-09-17 12:34:56" : @811341296.0,
+    @"1969-12-31 23:59:59+00" : @(-978307201.0),
+    @"0001-01-01 00:00:00+00" : @(-63113904000.0),
+    @"1000-01-01 00:00:00+00" : @(-31588531200.0),
+    @"1582-10-10 00:00:00+00" : @(-13198032000.0),
+    @"2024-02-29 23:00:00+00" : @730940400.0,
+    @"2000-02-29 12:00:00+05:30" : @(-26501400.0),
+    @"2000-02-29 12:00:00+0530" : @(-26501400.0),
+    @"1900-02-28 23:00:00-03:30" : @(-3182189400.0),
+    @"2026-01-01 00:00:00+05:30:15" : @788898585.0,
+    @"9999-12-31 23:59:59+00" : @252423993599.0,
+    @"2001-01-01 00:00:00+00" : @0.0,
+  };
+  for (NSString *text in cases) {
+    NSDate *date = ALNPgDateFromTimestampString(text);
+    XCTAssertNotNil(date, @"%@", text);
+    XCTAssertEqual([cases[text] doubleValue], date.timeIntervalSinceReferenceDate, @"%@", text);
+  }
+
+  NSDate *date = ALNPgDateFromDateString(@"1582-10-10");
+  XCTAssertEqual(-13198032000.0, date.timeIntervalSinceReferenceDate);
+  date = ALNPgDateFromDateString(@"2024-02-29");
+  XCTAssertEqual(730857600.0, date.timeIntervalSinceReferenceDate);
+
+  // Fractional seconds keep microsecond precision, before and after the epoch.
+  date = ALNPgDateFromTimestampString(@"2026-09-17 12:34:56.123456+00");
+  XCTAssertEqualWithAccuracy(811341296.123456, date.timeIntervalSinceReferenceDate, 0.0000005);
+  date = ALNPgDateFromTimestampString(@"1969-12-31 23:59:59.999999+00");
+  XCTAssertEqualWithAccuracy(-978307200.000001, date.timeIntervalSinceReferenceDate, 0.0000005);
+  date = ALNPgDateFromTimestampString(@"2001-01-01 00:00:00.000001");
+  XCTAssertEqualWithAccuracy(0.000001, date.timeIntervalSinceReferenceDate, 0.00000001);
+
+  // Values the decoder has always rejected still fail to decode.
+  for (NSString *text in @[ @"infinity", @"-infinity", @"0044-03-15 00:00:00 BC", @"0000-01-01 00:00:00",
+                            @"10000-01-01 00:00:00", @"2023-02-29 00:00:00", @"1900-02-29 00:00:00",
+                            @"2026-04-31 00:00:00", @"2026-13-01 00:00:00", @"2026-01-01 24:00:00",
+                            @"2026-01-01 00:60:00", @"2026-01-01 00:00:60", @"2026-01-01 00:00:00.",
+                            @"2026-01-01 00:00:00+5", @"2026-01-01", @"" ]) {
+    XCTAssertNil(ALNPgDateFromTimestampString(text), @"%@", text);
+  }
+  for (NSString *text in @[ @"infinity", @"2023-02-29", @"0000-01-01", @"0044-03-15 BC", @"2026-01-01 00:00:00" ]) {
+    XCTAssertNil(ALNPgDateFromDateString(text), @"%@", text);
+  }
+}
+
+- (void)testTimestampEncoderFormatsUTCMicrosecondsAndRoundTrips {
+  NSDictionary<NSNumber *, NSString *> *cases = @{
+    @0.0 : @"2001-01-01T00:00:00.000000Z",
+    @(-0.0000004) : @"2001-01-01T00:00:00.000000Z",
+    @0.9999996 : @"2001-01-01T00:00:01.000000Z",
+    @(-978307200.5) : @"1969-12-31T23:59:59.500000Z",
+    @730940400.25 : @"2024-02-29T23:00:00.250000Z",
+    @(-13198032000.0) : @"1582-10-10T00:00:00.000000Z",
+    @(-63113904000.0) : @"0001-01-01T00:00:00.000000Z",
+    @(-63113904000.0 - 86400.0) : @"0001-12-31T00:00:00.000000Z BC",
+    @(252423993600.0) : @"10000-01-01T00:00:00.000000Z",
+  };
+  for (NSNumber *interval in cases) {
+    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    XCTAssertEqualObjects(cases[interval], ALNPgTimestampStringFromDate(date), @"%@", interval);
+  }
+
+  // Encode then decode returns the same instant to the microsecond.
+  for (NSNumber *interval in @[ @811341296.123456, @(-978307200.000001), @(-31588531200.5), @1.0 ]) {
+    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSDate *decoded = ALNPgDateFromTimestampString(ALNPgTimestampStringFromDate(date));
+    XCTAssertNotNil(decoded);
+    XCTAssertEqualWithAccuracy(interval.doubleValue, decoded.timeIntervalSinceReferenceDate, 0.0000005);
+  }
+  XCTAssertEqualObjects(@"", ALNPgTimestampStringFromDate((NSDate *)@"not a date"));
+}
+
+- (void)testByteaHexCodecRoundTripsAllByteValuesAndRejectsInvalidHex {
+  NSMutableData *allBytes = [NSMutableData dataWithCapacity:256];
+  NSMutableString *expectedHex = [NSMutableString stringWithString:@"\\x"];
+  for (int value = 0; value < 256; value++) {
+    unsigned char byte = (unsigned char)value;
+    [allBytes appendBytes:&byte length:1];
+    [expectedHex appendFormat:@"%02x", value];
+  }
+  NSString *hex = ALNPgHexStringFromData(allBytes);
+  XCTAssertEqualObjects(expectedHex, hex);
+  XCTAssertEqualObjects(allBytes, ALNPgDataFromByteaString(hex));
+  XCTAssertEqualObjects(allBytes, ALNPgDataFromByteaString([hex substringFromIndex:2]));
+  XCTAssertEqualObjects(allBytes, ALNPgDataFromByteaString([@"\\x" stringByAppendingString:
+                                                            [[hex substringFromIndex:2] uppercaseString]]));
+  const char *raw = [hex UTF8String];
+  XCTAssertEqualObjects(allBytes, ALNPgDataFromByteaBytes(raw, strlen(raw)));
+
+  XCTAssertEqualObjects(@"\\x", ALNPgHexStringFromData([NSData data]));
+  XCTAssertEqualObjects([NSData data], ALNPgDataFromByteaString(@"\\x"));
+  XCTAssertEqualObjects(@"", ALNPgHexStringFromData((NSData *)@"not data"));
+
+  for (NSString *bad in @[ @"\\x0", @"\\xzz", @"\\x0g", @"\\xg0", @"\\x 1", @"\\x0x", @"\\x+1", @"xx",
+                           @"\\x\u00e9\u00e9" ]) {
+    XCTAssertNil(ALNPgDataFromByteaString(bad), @"%@", bad);
+  }
+  XCTAssertNil(ALNPgDataFromByteaBytes(NULL, 0));
+
+  NSMutableData *blob = [NSMutableData dataWithLength:(1024 * 1024) + 7];
+  for (NSUInteger idx = 0; idx < [blob length]; idx++) {
+    ((unsigned char *)[blob mutableBytes])[idx] = (unsigned char)((idx * 131) ^ (idx >> 8));
+  }
+  XCTAssertEqualObjects(blob, ALNPgDataFromByteaString(ALNPgHexStringFromData(blob)));
 }
 
 #pragma mark - Pool acquire timeout (issue #52, no live DB required)
@@ -692,6 +894,158 @@
     }
   }
   [connection close];
+}
+
+// Issue #233: arithmetic decode/encode agrees with PostgreSQL's own epoch for
+// timestamp, timestamptz and date, including pre-epoch, leap-day,
+// pre-Gregorian-reform and non-UTC-offset values.
+- (void)testPostgresTemporalValuesMatchServerEpochAcrossCalendarEdges {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPgConnection *connection = [[ALNPgConnection alloc] initWithConnectionString:dsn error:&error];
+  XCTAssertNotNil(connection);
+  XCTAssertNil(error, @"%@", error);
+  if (!connection) return;
+  [connection executeCommand:@"SET TIME ZONE 'Asia/Kolkata'" parameters:@[] error:&error];
+  XCTAssertNil(error, @"%@", error);
+
+  NSArray<NSArray<NSString *> *> *cases = @[
+    @[ @"timestamptz", @"2026-09-17 12:34:56.123456+00" ], @[ @"timestamptz", @"1969-12-31 23:59:59.999999+00" ],
+    @[ @"timestamptz", @"1900-02-28 23:00:00-03:30" ], @[ @"timestamptz", @"2000-02-29 12:00:00+05:30" ],
+    @[ @"timestamptz", @"1582-10-10 00:00:00+00" ], @[ @"timestamptz", @"1000-01-01 12:00:00.5+00" ],
+    @[ @"timestamptz", @"0001-01-01 00:00:00+00" ], @[ @"timestamp", @"2024-02-29 23:59:59.000001" ],
+    @[ @"timestamp", @"1850-06-30 06:07:08.9" ], @[ @"timestamp", @"1582-10-04 00:00:00" ],
+    @[ @"date", @"2024-02-29" ], @[ @"date", @"1969-12-31" ], @[ @"date", @"1582-10-10" ], @[ @"date", @"0001-01-01" ],
+  ];
+  for (NSArray<NSString *> *item in cases) {
+    NSString *type = item[0];
+    NSString *value = item[1];
+    // `timestamp` and `date` have no zone; read their epoch as if UTC.
+    NSString *epochExpression = [type isEqualToString:@"timestamptz"]
+                                    ? [NSString stringWithFormat:@"extract(epoch FROM $1::%@)", type]
+                                    : [NSString stringWithFormat:@"extract(epoch FROM $1::%@::timestamp AT TIME ZONE 'UTC')", type];
+    NSString *sql = [NSString stringWithFormat:@"SELECT $1::%@ AS value, (%@)::float8 AS epoch", type, epochExpression];
+    NSDictionary *row = [connection executeQueryOne:sql parameters:@[ value ] error:&error];
+    XCTAssertNil(error, @"%@ %@ %@", type, value, error);
+    NSDate *date = row[@"value"];
+    XCTAssertTrue([date isKindOfClass:[NSDate class]], @"%@ %@", type, value);
+    if (![date isKindOfClass:[NSDate class]]) continue;
+    XCTAssertEqualWithAccuracy([row[@"epoch"] doubleValue], date.timeIntervalSince1970, 0.0000005,
+                               @"%@ %@", type, value);
+
+    NSString *equalSQL = [NSString stringWithFormat:@"SELECT $1::timestamptz = (%@ AS equal",
+                          [type isEqualToString:@"timestamptz"] ? @"$2::timestamptz)"
+                                                                : [NSString stringWithFormat:@"$2::%@::timestamp AT TIME ZONE 'UTC')", type]];
+    row = [connection executeQueryOne:equalSQL parameters:@[ date, value ] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@YES, row[@"equal"], @"%@ %@ row=%@", type, value, row);
+  }
+
+  // An NSDate before year 1 encodes with PostgreSQL's BC suffix.
+  NSDate *beforeCommonEra = [NSDate dateWithTimeIntervalSinceReferenceDate:-63113904000.0 - 86400.0];
+  NSDictionary *row = [connection executeQueryOne:@"SELECT $1::timestamptz = '0001-12-31 00:00:00+00 BC'::timestamptz AS equal"
+                                       parameters:@[ beforeCommonEra ]
+                                            error:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqualObjects(@YES, row[@"equal"], @"%@", row);
+
+  // Special values still fail to decode instead of turning into a date.
+  for (NSString *special in @[ @"infinity", @"-infinity" ]) {
+    error = nil;
+    row = [connection executeQueryOne:@"SELECT $1::timestamptz AS value" parameters:@[ special ] error:&error];
+    XCTAssertNil(row);
+    XCTAssertNotNil(error, @"%@", special);
+  }
+  [connection close];
+}
+
+// Issue #234: multi-MiB bytea values survive a parameter round trip and decode
+// through the lookup-table codec, as do bytea[] elements.
+- (void)testPostgresByteaRoundTripsMultiMebibytePayloadAndArrays {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPgConnection *connection = [[ALNPgConnection alloc] initWithConnectionString:dsn error:&error];
+  XCTAssertNotNil(connection);
+  XCTAssertNil(error, @"%@", error);
+  if (!connection) return;
+
+  NSMutableData *blob = [NSMutableData dataWithLength:(4 * 1024 * 1024) + 3];
+  arc4random_buf([blob mutableBytes], [blob length]);
+  NSMutableData *allBytes = [NSMutableData dataWithCapacity:256];
+  for (int value = 0; value < 256; value++) {
+    unsigned char byte = (unsigned char)value;
+    [allBytes appendBytes:&byte length:1];
+  }
+
+  XCTAssertTrue([connection executeCommand:@"CREATE TEMP TABLE arlen_bytea_roundtrip (id int, payload bytea)"
+                                parameters:@[]
+                                     error:&error] >= 0);
+  XCTAssertNil(error, @"%@", error);
+  NSInteger inserted = [connection executeCommand:@"INSERT INTO arlen_bytea_roundtrip VALUES (1, $1), (2, $2), (3, $3)"
+                                       parameters:@[ blob, allBytes, [NSData data] ]
+                                            error:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqual((NSInteger)3, inserted);
+
+  NSArray *rows = [connection executeQuery:@"SELECT id, payload, length(payload) AS size, "
+                                            "md5(payload) AS digest FROM arlen_bytea_roundtrip ORDER BY id"
+                                parameters:@[]
+                                     error:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqual((NSUInteger)3, [rows count]);
+  if ([rows count] == 3) {
+    XCTAssertEqualObjects(@([blob length]), rows[0][@"size"]);
+    XCTAssertEqualObjects(blob, rows[0][@"payload"]);
+    XCTAssertEqualObjects(allBytes, rows[1][@"payload"]);
+    XCTAssertEqualObjects([NSData data], rows[2][@"payload"]);
+  }
+
+  NSDictionary *row = [connection executeQueryOne:@"SELECT $1::bytea[] AS value"
+                                       parameters:@[ ALNDatabaseArrayParameter(@[ allBytes, [NSData data] ]) ]
+                                            error:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqualObjects((@[ allBytes, [NSData data] ]), row[@"value"]);
+  [connection close];
+}
+
+// Issue #236: a pooled connection reused moments after release skips the
+// SELECT 1 probe; one idle past the threshold runs it and is still reused.
+- (void)testPoolLivenessProbeSkipsRecentlyIdleLiveConnection {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) return;
+  XCTAssertTrue(database.connectionLivenessChecksEnabled);
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertNotNil(connection);
+  if (connection == nil) return;
+  [database releaseConnection:connection];
+
+  for (NSInteger idx = 0; idx < 20; idx++) {
+    NSArray *rows = [database executeQuery:@"SELECT $1::int AS value" parameters:@[ @(idx) ] error:&error];
+    XCTAssertNil(error, @"%@", error);
+    XCTAssertEqualObjects(@(idx), [rows firstObject][@"value"]);
+  }
+  XCTAssertEqual((NSUInteger)0, connection.livenessCheckCount,
+                 @"recently idle connections must not be probed");
+
+  connection.poolIdleSince = [NSDate timeIntervalSinceReferenceDate] - 120.0;
+  ALNPgConnection *reused = [database acquireConnection:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqual(reused, connection);
+  XCTAssertEqual((NSUInteger)1, connection.livenessCheckCount,
+                 @"a connection idle past the threshold must be probed");
+  [database releaseConnection:reused];
+
+  database.connectionLivenessCheckIdleThreshold = 0;
+  [database executeQuery:@"SELECT 1" parameters:@[] error:&error];
+  XCTAssertNil(error, @"%@", error);
+  XCTAssertEqual((NSUInteger)2, connection.livenessCheckCount);
 }
 
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {

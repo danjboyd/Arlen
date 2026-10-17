@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- `ALNPg` decodes `date`, `timestamp` and `timestamptz` values, and encodes
+  `NSDate` parameters, with integer date arithmetic. It no longer creates an
+  `NSCalendar` for each value it decodes or an `NSDateFormatter`, `NSCalendar`
+  and `NSLocale` for each `NSDate` parameter. Decoding 300k timestamps is
+  about 7x faster, and an `NSDate` parameter now costs close to what a
+  string parameter does. Results for years 1583 through 9999 are unchanged. Earlier dates now
+  use the proleptic Gregorian calendar, as PostgreSQL does. Before, they were
+  decoded on the Julian calendar, which shifted them by up to 10 days from the
+  stored value, and dates from 1582-10-05 through 1582-10-14 failed to decode.
+  An `NSDate` before year 1 is now sent with PostgreSQL's ` BC` suffix
+  instead of as the matching AD year. `infinity`, `-infinity` and BC values
+  still fail to decode, as before (#233).
+
+- `ALNPg` encodes and decodes `bytea` hex text through a lookup table over C
+  buffers, and decodes `bytea` columns straight from libpq's result buffer.
+  A 4 MiB value now takes about 0.03 s to insert and 0.01 s to select, down
+  from about 0.5 s and 0.75 s. The hex text format is unchanged. Hex text
+  with whitespace between digits is now rejected like any other non-hex
+  character (#234).
+
+- The `ALNPg` pool runs its `SELECT 1` liveness probe only on connections
+  that have been idle for at least `connectionLivenessCheckIdleThreshold`
+  seconds (default `30`). Before, it ran on every reuse, which added a round
+  trip to every pooled statement. Every reused connection still gets libpq's
+  free connection status check. Set the threshold to `0` to probe on every
+  reuse as before (#236).
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
