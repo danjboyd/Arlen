@@ -29,6 +29,19 @@
   return updated;
 }
 
+// The resolver prints the MSYS2 (cygpath -u) form of a Windows drive path so
+// the build-flags sentinel has one spelling; compare against that form.
+- (NSString *)resolverSpellingOfPath:(NSString *)path {
+#if defined(_WIN32)
+  int exitCode = 0;
+  NSString *converted = ALNTestRunShellCapture([NSString stringWithFormat:@"cygpath -u %@", ALNTestShellQuote(path)], &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", converted);
+  return [converted stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+#else
+  return path;
+#endif
+}
+
 - (NSString *)runResolverWithEnvironment:(NSDictionary<NSString *, NSString *> *)environment
                                 exitCode:(int *)exitCode {
   NSMutableString *command = [NSMutableString stringWithString:@"env -i"];
@@ -37,6 +50,12 @@
   NSArray<NSString *> *keys = [[environment allKeys] sortedArrayUsingSelector:@selector(compare:)];
   for (NSString *key in keys) {
     NSString *value = environment[key];
+#if defined(_WIN32)
+    // MSYS2 splits PATH on ':', so a C:/... entry must be in its /c/... form.
+    if ([key isEqualToString:@"PATH"] && [value rangeOfString:@":/"].location == 1) {
+      value = [self resolverSpellingOfPath:value];
+    }
+#endif
     [command appendFormat:@" %@=%@", key, [self shellQuoted:value ?: @""]];
   }
 
@@ -91,7 +110,8 @@
   }
                                            exitCode:&exitCode];
   XCTAssertEqual(0, exitCode);
-  XCTAssertEqualObjects([preferredMakefiles stringByAppendingPathComponent:@"GNUstep.sh"], [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  XCTAssertEqualObjects([self resolverSpellingOfPath:[preferredMakefiles stringByAppendingPathComponent:@"GNUstep.sh"]],
+                        [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
 - (void)testResolverFallsBackToGNUSTEP_MAKEFILES {
@@ -110,7 +130,8 @@
   }
                                            exitCode:&exitCode];
   XCTAssertEqual(0, exitCode);
-  XCTAssertEqualObjects([makefiles stringByAppendingPathComponent:@"GNUstep.sh"], [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  XCTAssertEqualObjects([self resolverSpellingOfPath:[makefiles stringByAppendingPathComponent:@"GNUstep.sh"]],
+                        [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
 - (void)testResolverFallsBackToGnustepConfig {
@@ -136,7 +157,8 @@
   }
                                            exitCode:&exitCode];
   XCTAssertEqual(0, exitCode);
-  XCTAssertEqualObjects([makefiles stringByAppendingPathComponent:@"GNUstep.sh"], [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+  XCTAssertEqualObjects([self resolverSpellingOfPath:[makefiles stringByAppendingPathComponent:@"GNUstep.sh"]],
+                        [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 }
 
 - (void)testCIScriptsUsePortableBootstrap {

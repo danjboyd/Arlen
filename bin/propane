@@ -423,6 +423,8 @@ PY
 }
 
 while IFS='=' read -r key value; do
+  # Windows (CLANG64) python3 prints CRLF; keep "\r" out of every value.
+  value="${value%$'\r'}"
   case "$key" in
     config_host) config_host="$value" ;;
     config_port) config_port="$value" ;;

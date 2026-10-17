@@ -53,6 +53,8 @@ mkdir -p "$releases_dir"
 releases_dir="$(cd "$releases_dir" && pwd)"
 release_dir="$releases_dir/$release_id"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# aln_platform_link_directory: junctions instead of copies under MSYS2.
+source "$script_dir/../platform.sh"
 
 if [[ ! -d "$release_dir" ]]; then
   echo "activate_release.sh: release not found: $release_dir" >&2
@@ -92,10 +94,10 @@ if [[ -f "$shared_paths_file" ]]; then
       fi
     fi
     [[ -e "$shared_target" ]] || mkdir -p "$shared_target"
-    ln -sfn "$shared_target" "$release_link"
+    aln_platform_link_directory "$shared_target" "$release_link"
   done <"$shared_paths_file"
 fi
 
 "$script_dir/write_release_env.py" "$release_dir"
-ln -sfn "$release_dir" "$releases_dir/current"
+aln_platform_link_directory "$release_dir" "$releases_dir/current"
 echo "release activated: $release_dir"
