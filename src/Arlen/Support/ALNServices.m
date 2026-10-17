@@ -810,6 +810,17 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
           [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
         result = [runtime jobWorker:self resultForJob:job];
       }
+    } @catch (NSException *exception) {
+      // A throwing ("poison") job is a failed attempt: retried with backoff,
+      // then dead-lettered. Letting it escape stopped the worker and left an
+      // in-memory job leased forever (GitHub issue 241).
+      disposition = ALNJobWorkerDispositionRetry;
+      result = nil;
+      handlerError = ALNServiceError(
+          506,
+          [NSString stringWithFormat:@"job handler raised %@: %@", exception.name ?: @"an exception",
+                                     exception.reason ?: @""],
+          nil);
     } @finally {
       heartbeatError = [heartbeat stop];
     }

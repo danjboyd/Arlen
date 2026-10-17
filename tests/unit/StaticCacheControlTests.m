@@ -94,4 +94,18 @@
                                   options:@{ @"cacheControl" : @"private, max-age=60" }]);
 }
 
+
+// GitHub issue 219: static mounts served dotfiles and dot-directories.
+- (void)testHiddenPathComponentsAreRecognized_Issue219 {
+  for (NSString *path in @[ @".secret.json", @".git/config.json", @"sub/.env.json", @"a/b/.hidden/c.css",
+                            @"sub\\.env.json", @".well-known/../.env" ]) {
+    XCTAssertTrue(ALNStaticRelativePathIsHidden(path), @"%@", path);
+  }
+  for (NSString *path in @[ @"", @"app.js", @"assets/app.min.js", @"a.b/c.css", @"file.", @".well-known/security.txt",
+                            @"x/.well-known/acme.txt" ]) {
+    XCTAssertFalse(ALNStaticRelativePathIsHidden(path), @"%@", path);
+  }
+  XCTAssertFalse(ALNStaticRelativePathIsHidden(nil));
+}
+
 @end

@@ -157,6 +157,8 @@ NS_ASSUME_NONNULL_BEGIN
                           limit:(NSUInteger)limit
                    replayWindow:(NSUInteger)replayWindow
                           error:(NSError *_Nullable *_Nullable)error;
+// SSE frames carry the stream sequence as `id:`. With a nil `sequence`, a
+// numeric Last-Event-ID request header resumes after that sequence.
 - (BOOL)renderSSEStream:(NSString *)streamID
           afterSequence:(nullable NSNumber *)sequence
                   limit:(NSUInteger)limit

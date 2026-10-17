@@ -94,6 +94,11 @@ error's `userInfo`. The retry waits for the longer of that delay and the
 honour an upstream service's HTTP `Retry-After`; the notifications module's Web
 Push channel does.
 
+A job whose handler raises an exception fails that attempt like any other
+error: the worker catches it, records `job handler raised <name>: <reason>` as
+the failure, and retries the job until `maxAttempts`, then dead-letters it. The
+jobs after it in the same run still run.
+
 ## Surfaces
 
 HTML:

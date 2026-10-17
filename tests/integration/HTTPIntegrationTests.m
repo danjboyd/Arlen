@@ -1668,6 +1668,38 @@
   }
 }
 
+// GitHub issues 239 and 214: idle websocket subscribers are pinged instead of
+// dropped by the read timeout, a client that never answers is closed with
+// 1001, and frames that break RFC 6455 close with the right status code.
+- (void)testWebSocketIdlePingsAndRFC6455Conformance_Issues239_214 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:
+      @"ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS=1 ARLEN_CONNECTION_TIMEOUT_SECONDS=2 exec ./build/boomhauer --port %d",
+      port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/websocket_conformance_probe.py"
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+    script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                               withString:[NSString stringWithFormat:@"%d", port]];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"websocket checks passed"], @"%@", output);
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testConcurrentModeMixedLifecycleStressRemainsStable {
   [self runMixedRequestLifecycleStressWithServerCommand:@"./build/boomhauer --port %d"
                                         expectKeepAlive:YES];
@@ -2054,6 +2086,52 @@
   NSString *body = [self simpleRequestPath:@"/api/echo/hank"];
   XCTAssertTrue([body containsString:@"\"name\""]);
   XCTAssertTrue([body containsString:@"hank"]);
+}
+
+// Issue 270: the demo server's JSON string helper fell back to raw bytes for
+// any value with a quote, backslash or non-ASCII character, so a route
+// parameter could break out of the string and inject keys.
+- (void)testEchoEndpointEscapesRouteParametersInJSON_Issue270 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import json, socket\n"
+        @"PORT=%d\n"
+        @"def echo(raw):\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.sendall(b'GET /api/echo/' + raw + b' HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"    data = b''\n"
+        @"    while True:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    sock.close()\n"
+        @"    head, _, body = data.partition(b'\\r\\n\\r\\n')\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    return json.loads(body)\n"
+        @"injected = echo(b'a\",\"injected\":true,\"x\":\"b')\n"
+        @"assert 'injected' not in injected, injected\n"
+        @"assert injected['name'] == 'a\",\"injected\":true,\"x\":\"b', injected\n"
+        @"backslash = echo(b'a\\\\')\n"
+        @"assert backslash['name'] == 'a\\\\', backslash\n"
+        @"print('echo escaping passed')\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
 }
 
 - (void)testPhase3EServiceRoutesCacheAndI18n {
@@ -3111,6 +3189,64 @@
   [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_STATIC_FILE_FD_CACHE_CAPACITY": @"0" }];
 }
 
+// Issue 243: a file response is a header write plus a sendfile body. Without
+// TCP_NODELAY, each response after the first on a keep-alive connection waited
+// about 40 ms for the client's delayed ACK (20 requests: ~800 ms, now ~10 ms).
+- (void)testKeepAliveFileResponsesAreNotDelayedByNagle_Issue243 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"request = b'GET /static/sample.txt HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n'\n"
+        @"def read_response():\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk, data\n"
+        @"        data += chunk\n"
+        @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    length = 0\n"
+        @"    for line in head.split(b'\\r\\n')[1:]:\n"
+        @"        name, _, value = line.partition(b':')\n"
+        @"        if name.strip().lower() == b'content-length':\n"
+        @"            length = int(value.strip())\n"
+        @"    while len(body) < length:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk\n"
+        @"        body += chunk\n"
+        @"sock.sendall(request)\n"
+        @"read_response()\n"
+        @"started = time.monotonic()\n"
+        @"for _ in range(20):\n"
+        @"    sock.sendall(request)\n"
+        @"    read_response()\n"
+        @"elapsed_ms = (time.monotonic() - started) * 1000.0\n"
+        @"sock.close()\n"
+        @"print('keep-alive file responses: 20 in %%.1f ms' %% elapsed_ms)\n"
+        @"assert elapsed_ms < 400, elapsed_ms\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testStaticAssetEndpointInDevelopment {
   NSString *body = [self simpleRequestPath:@"/static/sample.txt"];
   XCTAssertEqualObjects(@"static ok\n", body);
@@ -3674,6 +3810,65 @@
   }
 }
 
+// GitHub issue 240: SSE clients that start while other requests append must
+// see every later event once, in order (the server used to replay, then
+// subscribe, and publish out of order); `id:` is the sequence and a
+// Last-Event-ID reconnect resumes after it.
+- (void)testSSEStreamDeliversEveryEventInOrderUnderConcurrentAppends_Issue240 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-event-stream-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_app.m"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
+                                   // Each SSE client holds a worker; the probe runs 12 plus 3 appenders.
+                                   "runtimeLimits = { maxConcurrentHTTPWorkers = 32; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+                                                     [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                                              envPrefix]
+                                          exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[ @"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+                                       [self shellQuoted:[appRoot stringByAppendingPathComponent:
+                                                                      ALNTestAppBinaryRelativePath()]],
+                                       port] ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = server.standardOutput;
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_probe.py"
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:NULL];
+      script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                                 withString:[NSString stringWithFormat:@"%d", port]];
+      int code = 0;
+      NSString *output = [self runPythonScript:script exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", output);
+      XCTAssertTrue([output containsString:@"event stream checks passed"], @"%@", output);
+    } @finally {
+      (void)ALNTestStopServerTask(server);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 // GitHub issue 87: per-route body limits enforced before the body is read,
 // large uploads spooled with bounded heap, and cleanup on every exit path.
 - (void)testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends {
@@ -3959,6 +4154,89 @@
   }
 }
 
+// Issues 211, 212 and 253: chunk framing is not counted as header bytes,
+// Expect: 100-continue gets an interim response (other expectations get 417),
+// and parser-level rejections carry the configured security headers.
+- (void)testChunkFramingExpectContinueAndEarlyErrorHeaders_Issues211_212_253 {
+  for (NSString *backend in @[ @"llhttp", @"legacy" ]) {
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[
+      @"-lc", [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=%@ exec ./build/boomhauer --port %d", backend, port]
+    ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
+    [server launch];
+
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready, @"%@", backend);
+      NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"BACKEND='%@'\n"
+        @"def connect():\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.settimeout(5)\n"
+        @"    return sock\n"
+        @"def read_head(sock):\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    return data\n"
+        @"def status(head):\n"
+        @"    return int(head.split(b' ')[1]) if head else 0\n"
+        @"# Issue 211 (llhttp; the legacy parser rejects Transfer-Encoding): 7000 one-byte chunks are framing, not header bytes.\n"
+        @"if BACKEND == 'llhttp':\n"
+        @"    sock = connect()\n"
+        @"    chunks = b'1\\r\\na\\r\\n' * 7000\n"
+        @"    sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\nConnection: close\\r\\n\\r\\n' + chunks + b'0\\r\\n\\r\\n')\n"
+        @"    small_chunks = status(read_head(sock))\n"
+        @"    sock.close()\n"
+        @"    assert small_chunks not in (400, 413, 431), small_chunks\n"
+        @"# Issue 212: Expect: 100-continue gets an interim 100 before the body is sent.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: 100-continue\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"sock.settimeout(0.5)\n"
+        @"interim = read_head(sock)\n"
+        @"assert interim.startswith(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'), interim\n"
+        @"sock.settimeout(5)\n"
+        @"sock.sendall(b'ping')\n"
+        @"final = interim[len(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'):]\n"
+        @"if b'\\r\\n\\r\\n' not in final:\n"
+        @"    final += read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(final) not in (0, 100, 400, 417), final\n"
+        @"# An expectation other than 100-continue is answered with 417.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: something-else\\r\\n\\r\\n')\n"
+        @"unsupported = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(unsupported) == 417, unsupported\n"
+        @"# Issue 253: responses written before the app runs carry the security headers.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: abc\\r\\n\\r\\n')\n"
+        @"rejected = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(rejected) == 400, rejected\n"
+        @"assert b'x-content-type-options: nosniff' in rejected.lower(), rejected\n"
+        @"print('framing checks passed')\n",
+          port, backend];
+      int pyCode = 0;
+      NSString *output = [self runPythonScript:script exitCode:&pyCode];
+      XCTAssertEqual(0, pyCode, @"%@: %@", backend, output);
+      XCTAssertTrue([output containsString:@"framing checks passed"], @"%@: %@", backend, output);
+    } @finally {
+      ALNTestStopServerTask(server);
+    }
+  }
+}
+
 - (void)testLegacyParserRejectsAmbiguousFramingHeaders {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -4088,6 +4366,76 @@
   XCTAssertFalse([body containsString:@"203.0.113.9"]);
   XCTAssertTrue([body containsString:@"127.0.0.1"]);
   XCTAssertTrue([body containsString:@"http"]);
+}
+
+// GitHub issue 219: static mounts served dotfiles and dot-directories whose
+// extension was allowed. Any "."-prefixed path component is now 404, except
+// the public ".well-known" directory (RFC 8615).
+- (void)testStaticMountRefusesHiddenPaths_Issue219 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-hidden"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "  serveStatic = YES;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+    NSDictionary *files = @{
+      @"public/visible.json" : @"{\"visible\":true}\n",
+      @"public/.secret.json" : @"{\"secret\":1}\n",
+      @"public/.git/config.json" : @"{\"secret\":2}\n",
+      @"public/sub/.env.json" : @"{\"secret\":3}\n",
+      @"public/.well-known/security.txt" : @"Contact: mailto:security@example.com\n",
+    };
+    for (NSString *relativePath in files) {
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:relativePath] content:files[relativePath]]);
+    }
+
+    NSString *envPrefix =
+        [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
+    int prepareCode = 0;
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix]
+                     exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    NSString *preparedBinary = [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
+
+    NSDictionary *expectedStatus = @{
+      @"visible.json" : @"200",
+      @".secret.json" : @"404",
+      @".git/config.json" : @"404",
+      @"sub/.env.json" : @"404",
+      @"%%2esecret.json" : @"404",
+      @".well-known/security.txt" : @"200",
+    };
+    for (NSString *path in expectedStatus) {
+      int curlCode = 0;
+      int serverCode = 0;
+      NSString *curl = [NSString
+          stringWithFormat:@"curl -sS -o /dev/null -w '%%%%{http_code}' http://127.0.0.1:%%d/static/%@", path];
+      NSString *status = [self requestWithServerEnv:envPrefix
+                                       serverBinary:preparedBinary
+                                           curlBody:curl
+                                           curlCode:&curlCode
+                                         serverCode:&serverCode];
+      XCTAssertEqual(0, curlCode, @"%@: %@", path, status);
+      XCTAssertEqualObjects(expectedStatus[path],
+                            [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]],
+                            @"%@", path);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
 }
 
 - (void)testStaticMountRejectsSymlinkEscape {

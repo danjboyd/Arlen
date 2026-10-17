@@ -163,20 +163,43 @@
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {
+  return [self applicationWithStatePath:statePath extraModuleConfig:nil];
+}
+
+- (ALNApplication *)applicationWithStatePath:(NSString *)statePath extraModuleConfig:(NSDictionary *)extra {
+  NSMutableDictionary *moduleConfig = [NSMutableDictionary dictionaryWithDictionary:@{
+    @"sender" : @"phase16b@example.test",
+    @"providers" : @{ @"classes" : @[ @"Phase16BNotificationProvider" ] },
+    @"persistence" : @{
+      @"enabled" : @YES,
+      @"path" : statePath ?: @"",
+    },
+  }];
+  [moduleConfig addEntriesFromDictionary:extra ?: @{}];
   return [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
     @"logFormat" : @"json",
     @"csrf" : @{ @"enabled" : @NO },
     @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
-    @"notificationsModule" : @{
-      @"sender" : @"phase16b@example.test",
-      @"providers" : @{ @"classes" : @[ @"Phase16BNotificationProvider" ] },
-      @"persistence" : @{
-        @"enabled" : @YES,
-        @"path" : statePath ?: @"",
-      },
-    },
+    @"notificationsModule" : moduleConfig,
   }];
+}
+
+- (void)sendInAppDigestsToRecipient:(NSString *)recipient count:(NSUInteger)count {
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  for (NSUInteger index = 0; index < count; index++) {
+    NSError *error = nil;
+    NSDictionary *result = [runtime testSendNotificationIdentifier:@"phase16b.digest"
+                                                           payload:@{
+                                                             @"recipient" : recipient,
+                                                             @"email" : @"reader@example.test",
+                                                             @"name" : [NSString stringWithFormat:@"Reader %lu", (unsigned long)index],
+                                                           }
+                                                          channels:@[ @"in_app" ]
+                                                             error:&error];
+    XCTAssertNotNil(result);
+    XCTAssertNil(error);
+  }
 }
 
 - (void)registerModulesForApplication:(ALNApplication *)app {
@@ -276,6 +299,106 @@
   NSArray *recentFanout = [summary[@"recentFanout"] isKindOfClass:[NSArray class]] ? summary[@"recentFanout"] : @[];
   XCTAssertEqual((NSUInteger)1, [recentFanout count]);
   XCTAssertEqualObjects(@"realtime-user", recentFanout[0][@"recipient"]);
+}
+
+- (void)testOutboxAndInboxCapsDropOldestEntries {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:statePath
+                                     extraModuleConfig:@{
+                                       @"outbox" : @{ @"maxEntries" : @4 },
+                                       @"inbox" : @{ @"maxEntriesPerRecipient" : @"3" },
+                                     }];
+  [self registerModulesForApplication:app];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  XCTAssertEqualObjects(@4, [runtime resolvedConfigSummary][@"maxOutboxEntries"]);
+  XCTAssertEqualObjects(@3, [runtime resolvedConfigSummary][@"maxInboxEntriesPerRecipient"]);
+
+  [self sendInAppDigestsToRecipient:@"capped-user" count:6];
+  [self sendInAppDigestsToRecipient:@"other-user" count:1];
+
+  NSArray *inbox = [runtime inboxSnapshotForRecipient:@"capped-user"];
+  XCTAssertEqual((NSUInteger)3, [inbox count]);
+  NSArray *bodies = [inbox valueForKey:@"body"];
+  XCTAssertEqualObjects((@[ @"Hello Reader 3.", @"Hello Reader 4.", @"Hello Reader 5." ]), bodies);
+  XCTAssertEqual((NSUInteger)1, [[runtime inboxSnapshotForRecipient:@"other-user"] count]);
+  NSArray *outbox = [runtime outboxSnapshot];
+  XCTAssertEqual((NSUInteger)4, [outbox count]);
+  XCTAssertEqualObjects(@"other-user", [outbox lastObject][@"recipient"]);
+
+  // Reloading a state file written under larger limits applies the current caps.
+  ALNApplication *tighter = [self applicationWithStatePath:statePath
+                                         extraModuleConfig:@{
+                                           @"outbox" : @{ @"maxEntries" : @2 },
+                                           @"inbox" : @{ @"maxEntriesPerRecipient" : @1 },
+                                         }];
+  [self registerModulesForApplication:tighter];
+  XCTAssertEqual((NSUInteger)2, [[runtime outboxSnapshot] count]);
+  NSArray *reloaded = [runtime inboxSnapshotForRecipient:@"capped-user"];
+  XCTAssertEqual((NSUInteger)1, [reloaded count]);
+  XCTAssertEqualObjects(@"Hello Reader 5.", [reloaded firstObject][@"body"]);
+
+  ALNApplication *defaults = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"defaults.plist"]
+                                          extraModuleConfig:@{ @"outbox" : @{ @"maxEntries" : @0 } }];
+  [self registerModulesForApplication:defaults];
+  XCTAssertEqualObjects(@1000, [runtime resolvedConfigSummary][@"maxOutboxEntries"]);
+  XCTAssertEqualObjects(@200, [runtime resolvedConfigSummary][@"maxInboxEntriesPerRecipient"]);
+}
+
+- (void)testInboxPaginationReturnsRequestedSlice {
+  ALNApplication *app = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-state.plist"]];
+  [self registerModulesForApplication:app];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  [self sendInAppDigestsToRecipient:@"paged-user" count:5];
+
+  NSDictionary *page = [runtime inboxSummaryForRecipient:@"paged-user" limit:2 offset:1];
+  XCTAssertEqualObjects((@[ @"Hello Reader 1.", @"Hello Reader 2." ]), [page[@"entries"] valueForKey:@"body"]);
+  XCTAssertEqualObjects(@5, page[@"totalCount"]);
+  XCTAssertEqualObjects(@5, page[@"unreadCount"]);
+  XCTAssertEqualObjects((@{ @"limit" : @2, @"offset" : @1, @"returned" : @2, @"total" : @5, @"hasMore" : @YES }),
+                        page[@"pagination"]);
+
+  NSDictionary *last = [runtime inboxSummaryForRecipient:@"paged-user" limit:2 offset:4];
+  XCTAssertEqual((NSUInteger)1, [last[@"entries"] count]);
+  XCTAssertEqualObjects(@NO, last[@"pagination"][@"hasMore"]);
+
+  NSDictionary *past = [runtime inboxSummaryForRecipient:@"paged-user" limit:2 offset:50];
+  XCTAssertEqual((NSUInteger)0, [past[@"entries"] count]);
+  XCTAssertEqualObjects(@5, past[@"pagination"][@"offset"]);
+
+  NSDictionary *all = [runtime inboxSummaryForRecipient:@"paged-user" limit:0 offset:0];
+  XCTAssertEqual((NSUInteger)5, [all[@"entries"] count]);
+  XCTAssertEqualObjects(@5, all[@"pagination"][@"limit"]);
+
+  NSDictionary *clamped = [runtime inboxSummaryForRecipient:@"paged-user" limit:100000 offset:0];
+  XCTAssertEqualObjects(@200, clamped[@"pagination"][@"limit"]);
+}
+
+- (void)testUnknownPreferenceIdentifiersAreRejected {
+  ALNApplication *app = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-state.plist"]];
+  [self registerModulesForApplication:app];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+
+  NSError *error = nil;
+  XCTAssertNotNil([runtime updateNotificationPreferences:@{ @"phase16b.digest" : @{ @"email" : @NO } }
+                                            forRecipient:@"prefs-user"
+                                                   error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertNil([runtime updateNotificationPreferences:@{ @"phase16b.unknown" : @{ @"email" : @NO } }
+                                         forRecipient:@"prefs-user"
+                                                error:&error]);
+  XCTAssertEqual(ALNNotificationsModuleErrorValidationFailed, error.code);
+  XCTAssertEqualObjects(@"phase16b.unknown", error.userInfo[@"notification"]);
+
+  error = nil;
+  XCTAssertNil([runtime updateNotificationPreferences:@{ @"phase16b.digest" : @{ @"carrier_pigeon" : @YES } }
+                                         forRecipient:@"prefs-user"
+                                                error:&error]);
+  XCTAssertEqual(ALNNotificationsModuleErrorValidationFailed, error.code);
+  XCTAssertEqualObjects(@"carrier_pigeon", error.userInfo[@"channel"]);
+
+  XCTAssertEqualObjects((@{ @"phase16b.digest" : @{ @"email" : @NO } }),
+                        [runtime notificationPreferencesForRecipient:@"prefs-user"]);
 }
 
 - (void)testInboxReadUnreadStateAndMarkAllRoundTrip {

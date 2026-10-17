@@ -519,7 +519,13 @@ static NSString *Encode(NSString *value) {
     if (params[@"cursor"]) { [self reply:nil code:-32602 message:@"Unknown cursor; catalog fits one page" identifier:identifier context:context]; return; }
     NSArray *sorted = [self.entries sortedArrayUsingComparator:^NSComparisonResult(ALNMCPEntry *a, ALNMCPEntry *b) { return [a.listing[@"name"] compare:b.listing[@"name"]]; }];
     NSMutableArray *list = [NSMutableArray array];
-    for (ALNMCPEntry *entry in sorted) [list addObject:entry.listing];
+    // List only tools whose route roles and scopes the caller holds. tools/call
+    // still runs the full route policy (roles, scopes, policies, assurance).
+    for (ALNMCPEntry *entry in sorted) {
+      if (![ALNAuth context:context hasRequiredRoles:entry.route.requiredRoles ?: @[]]) continue;
+      if (![ALNAuth context:context hasRequiredScopes:entry.route.requiredScopes ?: @[]]) continue;
+      [list addObject:entry.listing];
+    }
     [self reply:@{@"tools":list} code:0 message:nil identifier:identifier context:context]; return;
   }
   if ([method isEqual:@"tools/call"]) {
