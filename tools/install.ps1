@@ -43,11 +43,18 @@ function Install-Arlen {
   $repoSlug = "danjboyd/Arlen"
   # gnustep-cli publishes each toolchain version, with its PowerShell bootstrap
   # as a release asset, under the release tag of the same name. 0.1.1 is the
-  # first toolchain Arlen's Windows support runs on.
-  function BootstrapSetup([string]$ToolchainVersion) {
+  # first toolchain Arlen's Windows support runs on. When the toolchain lives
+  # outside the default root, the command names that root with --root, so
+  # following it updates the toolchain this installer found.
+  function BootstrapSetup([string]$ToolchainVersion, [string]$Root) {
     if (-not $ToolchainVersion) { $ToolchainVersion = "0.1.1" }
+    $rootArgument = ""
+    $defaultRoot = if ($env:LOCALAPPDATA) { [IO.Path]::Combine($env:LOCALAPPDATA, "gnustep-cli") } else { "" }
+    if ($Root -and -not [string]::Equals($Root.TrimEnd('\'), $defaultRoot.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+      $rootArgument = " --root `"$($Root.TrimEnd('\'))`""
+    }
     return "iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
-      "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/release-manifest.json"
+      "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user$rootArgument --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/release-manifest.json"
   }
   function Say([string]$Message) { Write-Host "arlen-install: $Message" }
   function Die([string]$Message) { throw "arlen-install: error: $Message" }
@@ -101,7 +108,7 @@ libcurl is missing from $resolvedRoot, so this toolchain is older than
 gnustep-cli 0.1.1. Update it with the gnustep-cli PowerShell bootstrap, then
 rerun this installer:
 
-  $(BootstrapSetup "")
+  $(BootstrapSetup "" $resolvedRoot)
 
 Don't install libcurl with pacman, and never run pacman -Sy or -Syu in the
 managed toolchain: a partial upgrade breaks its python and clang.
@@ -189,7 +196,7 @@ managed toolchain: a partial upgrade breaks its python and clang.
 Arlen $Version was built against gnustep-cli toolchain $wantToolchain, but $resolvedRoot has $($state.Version).
 Rerun the gnustep-cli bootstrap setup to install toolchain $($wantToolchain):
 
-  $(BootstrapSetup $wantToolchain)
+  $(BootstrapSetup $wantToolchain $resolvedRoot)
 
 Then rerun this installer. If that release isn't found, the Arlen $Version
 release notes name the gnustep-cli release to use.
