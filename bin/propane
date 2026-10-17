@@ -739,7 +739,13 @@ worker_fd_count() {
         echo "-1"
         return
       fi
-      find "/proc/$pid/fd" -maxdepth 1 -type l 2>/dev/null | wc -l | tr -d ' '
+      # A glob forks nothing; the manager loop is single-threaded (#222).
+      local fds=("/proc/$pid/fd"/*)
+      if [[ -e "${fds[0]}" || -L "${fds[0]}" ]]; then
+        echo "${#fds[@]}"
+      else
+        echo "0"
+      fi
       ;;
     lsof)
       lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null | awk '/^f/ {n++} END {print n + 0}'
@@ -773,10 +779,14 @@ worker_fd_targets() {
   local pid="$1"
   case "$fd_probe" in
     proc)
-      local fd
-      for fd in "/proc/$pid/fd"/*; do
-        readlink "$fd" 2>/dev/null || true
-      done
+      # One process for every target instead of one readlink per descriptor
+      # (#222); fall back to readlink where find lacks -printf.
+      if ! find "/proc/$pid/fd" -mindepth 1 -maxdepth 1 -type l -printf '%l\n' 2>/dev/null; then
+        local fd
+        for fd in "/proc/$pid/fd"/*; do
+          readlink "$fd" 2>/dev/null || true
+        done
+      fi
       ;;
     lsof)
       lsof -nP -a -p "$pid" -d 0-999999 -F n 2>/dev/null | sed -n 's/^n//p'
@@ -842,12 +852,26 @@ check_worker_fd_pressure() {
       usage_percent="$((fd_count * 100 / soft_limit))"
       remaining="$((soft_limit - fd_count))"
     fi
-    top_targets="$(worker_fd_top_targets "$pid")"
+    top_targets=""
     severity=""
     if (( worker_fd_critical_percent > 0 && usage_percent >= worker_fd_critical_percent )); then
       severity="critical"
     elif (( worker_fd_warn_percent > 0 && usage_percent >= worker_fd_warn_percent )); then
       severity="warning"
+    fi
+    should_retire=0
+    reason=""
+    if (( worker_fd_retire_count > 0 && fd_count >= worker_fd_retire_count )); then
+      should_retire=1
+      reason="fd_count_threshold"
+    elif (( worker_fd_retire_percent > 0 && usage_percent >= worker_fd_retire_percent )); then
+      should_retire=1
+      reason="fd_percent_threshold"
+    fi
+    # The target breakdown is only for the events below, and it scales with
+    # the worker's descriptor count, so skip it for healthy workers (#222).
+    if [[ -n "$severity" ]] || (( should_retire == 1 )); then
+      top_targets="$(worker_fd_top_targets "$pid")"
     fi
     if [[ -n "$severity" ]]; then
       emit_lifecycle_event "worker_fd_pressure_${severity}" \
@@ -860,15 +884,6 @@ check_worker_fd_pressure() {
         "top_fd_targets=$top_targets"
     fi
 
-    should_retire=0
-    reason=""
-    if (( worker_fd_retire_count > 0 && fd_count >= worker_fd_retire_count )); then
-      should_retire=1
-      reason="fd_count_threshold"
-    elif (( worker_fd_retire_percent > 0 && usage_percent >= worker_fd_retire_percent )); then
-      should_retire=1
-      reason="fd_percent_threshold"
-    fi
     if (( should_retire == 1 )); then
       emit_lifecycle_event "worker_fd_pressure_retire_requested" \
         "role=http" \

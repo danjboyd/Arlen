@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- propane's file-descriptor pressure check no longer stalls the manager
+  loop (#222). It counts a worker's descriptors with a shell glob, and it
+  builds the per-target breakdown only when it is about to log a warning or
+  retire the worker, using one `find` instead of one `readlink` per
+  descriptor. That breakdown went from about 1.5 s to under 10 ms for a
+  worker with 2000 descriptors. Before, the check ran for every worker every
+  15 s whether or not anything was logged, and the manager couldn't reap,
+  respawn or handle signals while it ran.
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
