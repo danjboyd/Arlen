@@ -26,7 +26,7 @@ source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
 if ! clang_tidy="$(aln_static_resolve_llvm_tool clang-tidy "${ARLEN_STATIC_CLANG_TIDY:-}")"; then
-  echo "ci: clang-tidy not found; install it with: pip install clang-tidy==22.1.8" >&2
+  echo "ci: clang-tidy not found; fetch it with: python3 tools/ci/fetch_clang_tidy.py <dir>, then set ARLEN_STATIC_CLANG_TIDY" >&2
   exit 2
 fi
 if ! intercept_build="$(aln_static_resolve_llvm_tool intercept-build "${ARLEN_STATIC_INTERCEPT_BUILD:-}")"; then

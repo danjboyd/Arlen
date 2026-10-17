@@ -102,13 +102,14 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y "clang-tools-$major"
           fi
-          python3 -m venv "$RUNNER_TEMP/clang-tidy-venv"
-          "$RUNNER_TEMP/clang-tidy-venv/bin/pip" install --disable-pip-version-check clang-tidy==22.1.8
+          # The runner has no python3-venv, so fetch the pinned wheel directly
+          # (sha256-checked against PyPI) instead of pip-installing it.
+          clang_tidy="$(python3 -I ./tools/ci/fetch_clang_tidy.py "$RUNNER_TEMP/clang-tidy" 22.1.8)"
           {
             echo "ARLEN_STATIC_INTERCEPT_BUILD=intercept-build-$major"
-            echo "ARLEN_STATIC_CLANG_TIDY=$RUNNER_TEMP/clang-tidy-venv/bin/clang-tidy"
+            echo "ARLEN_STATIC_CLANG_TIDY=$clang_tidy"
           } >>"$GITHUB_ENV"
-          "$RUNNER_TEMP/clang-tidy-venv/bin/clang-tidy" --version
+          "$clang_tidy" --version
 
       - name: Run clang-tidy gate
         env:

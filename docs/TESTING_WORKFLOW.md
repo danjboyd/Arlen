@@ -197,9 +197,11 @@ make ci-static-clang-tidy    # clang-tidy, warnings are errors
 
 Tools: scan-build and intercept-build come from the `clang-tools-<major>`
 package that matches your `clang` (`scan-build-19` and `intercept-build-19`
-on Debian 13). CI pins clang-tidy with `pip install clang-tidy==22.1.8`; use
-the same version locally (for example in a virtualenv) and point the lane at it
-with `ARLEN_STATIC_CLANG_TIDY=/path/to/clang-tidy` if it is not first on `PATH`.
+on Debian 13). CI pins clang-tidy 22.1.8: `python3 tools/ci/fetch_clang_tidy.py <dir>`
+downloads that release's PyPI wheel, checks its sha256 and prints the path of the
+extracted binary (no pip or virtualenv needed). Use the same version locally and
+point the lane at it with `ARLEN_STATIC_CLANG_TIDY=/path/to/clang-tidy` if it is
+not first on `PATH`.
 `ARLEN_STATIC_SCAN_BUILD`, `ARLEN_STATIC_INTERCEPT_BUILD` and
 `ARLEN_STATIC_JOBS` (default 4) override the other tools and the parallelism.
 
