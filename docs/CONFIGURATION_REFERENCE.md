@@ -70,7 +70,9 @@ apps need first.
     thread and the worker moves on, so idle browser connections don't hold
     workers. The watcher hands the connection back to a worker when the next
     request arrives, and closes it after `connectionTimeoutSeconds`. Pipelined
-    requests are served without parking. Windows builds and the serialized
+    requests are served without parking. When other connections are waiting
+    for a worker, a keep-alive connection is parked after every response,
+    even a busy one, so connections take turns instead of holding workers. Windows builds and the serialized
     `requestDispatchMode` keep each connection on one worker.
   - `webSocketPingIntervalSeconds` (default `25`, `0` disables): after this long
     without a frame from the client, the server pings an open WebSocket; a
