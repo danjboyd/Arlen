@@ -266,6 +266,13 @@ static BOOL ALNTestShellHasGNUTimeout(void) {
   static BOOL available = NO;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
+#if defined(_WIN32)
+    // Commands run in MSYS2 bash, which resolves its own coreutils timeout.exe
+    // (not System32's). This process's PATH is ';'-separated Windows paths.
+    NSString *bin = [ALNTestBashPath() stringByDeletingLastPathComponent];
+    available = [[NSFileManager defaultManager]
+        isExecutableFileAtPath:[bin stringByAppendingPathComponent:@"timeout.exe"]];
+#else
     NSString *path = [[[NSProcessInfo processInfo] environment] objectForKey:@"PATH"] ?: @"/usr/bin:/bin";
     for (NSString *directory in [path componentsSeparatedByString:@":"]) {
       if ([directory length] > 0 &&
@@ -275,6 +282,7 @@ static BOOL ALNTestShellHasGNUTimeout(void) {
         break;
       }
     }
+#endif
   });
   return available;
 }

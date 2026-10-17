@@ -3,6 +3,17 @@
 
 #import "ALNMSSQL.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
+
+static NSArray<NSString *> *Phase24MSYSClang64BinPaths(NSArray<NSString *> *names) {
+  NSMutableArray<NSString *> *paths = [NSMutableArray array];
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    for (NSString *name in names) {
+      [paths addObject:[[root stringByAppendingPathComponent:@"clang64/bin"] stringByAppendingPathComponent:name]];
+    }
+  }
+  return paths;
+}
 
 @interface Phase24WindowsTransportSmokeTests : XCTestCase
 @end
@@ -92,7 +103,7 @@ static BOOL Phase24LibraryExpectedOnWindowsHost(NSString *environmentVariable,
       [connectionError.userInfo[@"detail"] isKindOfClass:[NSString class]] ? connectionError.userInfo[@"detail"] : @"";
   BOOL hostHasLibpq = Phase24LibraryExpectedOnWindowsHost(
       @"ARLEN_LIBPQ_LIBRARY",
-      @[ @"C:/msys64/clang64/bin/libpq-5.dll", @"C:/msys64/clang64/bin/libpq.dll" ],
+      Phase24MSYSClang64BinPaths(@[ @"libpq-5.dll", @"libpq.dll" ]),
       @[ @"libpq-5.dll", @"libpq.dll" ]);
   if (hostHasLibpq) {
     XCTAssertFalse([detail containsString:@"libpq shared library not found"]);

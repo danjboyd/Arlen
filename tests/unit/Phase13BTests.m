@@ -6,6 +6,7 @@
 
 #import "ALNEOCTranspiler.h"
 #import "ALNModuleSystem.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase13BTests : XCTestCase
 @end
@@ -13,15 +14,7 @@
 @implementation Phase13BTests
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {

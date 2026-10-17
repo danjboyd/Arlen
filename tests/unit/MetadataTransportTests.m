@@ -2,14 +2,15 @@
 #import <XCTest/XCTest.h>
 #import "ALNHTTPCompat.h"
 #import "ALNOAuthResourceServer.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface MetadataTransportTests : XCTestCase
 @end
 @implementation MetadataTransportTests
 - (void)exerciseSocketTransport:(BOOL)tls {
   NSTask *peer = [NSTask new];
-  peer.launchPath = @"/usr/bin/env";
-  peer.arguments = @[@"python3", @"tests/fixtures/http/metadata_server.py"];
+  peer.launchPath = ALNTestToolPath(@"python3");
+  peer.arguments = @[ @"tests/fixtures/http/metadata_server.py"];
   if (tls) peer.arguments = [peer.arguments arrayByAddingObject:@"--tls"];
   NSPipe *output = [NSPipe pipe]; peer.standardOutput = output;
   [peer launch];
@@ -93,7 +94,7 @@
       XCTAssertFalse([server refreshSigningKeysWithError:&error]);
       XCTAssertEqualObjects(@"OAuth key refresh in cooldown", error.localizedDescription);
     }
-  } @finally { [peer terminate]; [peer waitUntilExit]; }
+  } @finally { (void)ALNTestStopServerTask(peer); }
 }
 - (void)testUntrustedTLSCertificateRejected { [self exerciseSocketTransport:YES]; }
 - (void)testRealSocketOnCallingThread { [self exerciseSocketTransport:NO]; }

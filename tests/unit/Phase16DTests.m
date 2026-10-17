@@ -6,6 +6,7 @@
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNSearchModule.h"
+#import "../shared/ALNTestSupport.h"
 
 static BOOL gPhase16DSearchBuildShouldFail = NO;
 
@@ -116,17 +117,9 @@ static void Phase16DResetOrderStore(void) {
 }
 
 - (NSString *)temporaryDirectory {
-  NSString *template =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-phase16d-XXXXXX"];
-  const char *templateCString = [template fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  XCTAssertNotEqual(buffer, NULL);
-  char *created = mkdtemp(buffer);
-  XCTAssertNotEqual(created, NULL);
-  NSString *result = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:buffer
-                                                                                  length:strlen(buffer)];
-  free(buffer);
-  return result;
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16d");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {
@@ -313,7 +306,10 @@ static void Phase16DResetOrderStore(void) {
   XCTAssertNotNil(queued);
   XCTAssertNil(error);
 
-  NSDictionary *workerSummary = [[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error];
+  // One job: the failed rebuild is retried with retryDelaySeconds = 0, and on
+  // a ~1 ms clock (Windows) that retry can be due in the same worker pass,
+  // which would record a second failure.
+  NSDictionary *workerSummary = [[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:1 error:&error];
   XCTAssertNotNil(workerSummary);
   XCTAssertNil(error);
 
