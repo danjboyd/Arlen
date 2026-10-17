@@ -10,10 +10,11 @@ NS_ASSUME_NONNULL_BEGIN
 // without slowing the passing case. Each wait records no failure itself:
 // callers assert on the result, with whatever context explains the failure.
 //
-// The checks run on the calling thread's run loop through XCTestExpectation
-// and XCTWaiter, which Apple XCTest and Arlen's tools-xctest fork both provide.
-// Toolchains whose XCTest lacks XCTWaiter (the Windows preview lane) fall back
-// to a sleep-and-check loop.
+// The condition runs on the calling thread; between checks the wait pauses in
+// XCTWaiter (Apple XCTest and Arlen's tools-xctest fork both provide it), which
+// keeps the run loop turning. A slow condition only delays the next check.
+// Toolchains whose XCTest lacks XCTWaiter (the Windows preview lane) pause
+// with a sleep instead.
 
 typedef BOOL (^ALNTestWaitCondition)(void);
 

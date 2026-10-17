@@ -124,6 +124,16 @@ BOOL ALNEOCRenderCollection(NSMutableString *out,
 // ALNMarkdown.m (framework library), not in the template runtime.
 NSString *ALNEOCMarkdownHTML(id _Nullable value);
 
+// JSON that is safe to place inside an inline <script> element, for raw output:
+// <script>var data = <%== ALNEOCJSONForScript($payload) %>;</script>.
+// Serializes with sorted keys, then writes <, >, &, U+2028 and U+2029 as
+// \u003c, \u003e, \u0026, \u2028 and \u2029 so string values cannot close the
+// script element or break a JavaScript string literal. Scalars are allowed;
+// nil and NSNull render as null, and so does a value that cannot be
+// serialized. Defined in ALNJSONSerialization.m (framework library), not in
+// the template runtime.
+NSString *ALNEOCJSONForScript(id _Nullable value);
+
 NS_ASSUME_NONNULL_END
 
 #endif

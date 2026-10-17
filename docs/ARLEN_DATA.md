@@ -441,7 +441,8 @@ New internal seams and defaults:
 - `ALNDatabaseRouter` now defaults read fallback to connectivity-only errors
   through `readFallbackPolicy`
 - `ALNPg` now supports:
-  - checkout liveness checks via `connectionLivenessChecksEnabled`
+  - checkout liveness checks via `connectionLivenessChecksEnabled`, limited
+    to connections idle for `connectionLivenessCheckIdleThreshold` seconds
   - stale idle connection recycle behavior
   - prepared-statement cache eviction instead of permanent saturation
 - `ALNMSSQL` now supports:
@@ -524,6 +525,12 @@ and encoder preserve PostgreSQL microseconds for dates from 1900-01-01 through
 This is a database round-trip guarantee; binary floating-point does not represent
 every decimal fraction exactly. Negative epochs and offsets are supported.
 
+Dates use the proleptic Gregorian calendar, as PostgreSQL does, for every year
+from 1 through 9999. Decoded `date`, `timestamp` and `timestamptz` values give
+the same instant as PostgreSQL's `extract(epoch ...)`, including dates before
+the 1582 Gregorian reform. An `NSDate` parameter before year 1 is sent with
+PostgreSQL's ` BC` suffix.
+
 `timestamptz` becomes an instant: received offsets are normalized and parameters
 are emitted in UTC. The original offset/zone name is not retained. PostgreSQL
 `timestamp without time zone` is interpreted as UTC wall-clock components, and
@@ -600,3 +607,30 @@ Apps that build adapters from configuration can read
 `database.poolAcquireTimeoutSeconds` (default `0`, env override
 `ARLEN_DB_POOL_ACQUIRE_TIMEOUT_SECONDS`) alongside `database.poolSize`. See
 the [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+## Connection pool liveness checks
+
+`ALNPg` checks a pooled connection before handing it out again:
+
+- Every reused connection gets libpq's connection status check, which costs
+  no round trip. A connection libpq already knows is dead is closed, and the
+  pool opens a replacement.
+- With `connectionLivenessChecksEnabled` (default `YES`), a connection that
+  has sat idle for at least `connectionLivenessCheckIdleThreshold` seconds
+  (default `30`) also runs `SELECT 1` first. This catches a connection the
+  server or a firewall dropped during a quiet period.
+- A connection returned less than the threshold ago skips the `SELECT 1`, so
+  back-to-back pooled statements don't pay an extra round trip each.
+
+```objc
+database.connectionLivenessCheckIdleThreshold = 10.0;  // probe after 10 s idle
+database.connectionLivenessCheckIdleThreshold = 0;     // probe on every reuse
+database.connectionLivenessChecksEnabled = NO;         // never probe
+```
+
+Before the threshold existed, every reuse ran `SELECT 1`. Set the threshold to
+`0` to get that back. If the server ends a session that was used within the
+threshold (for example a restart in the middle of traffic), the next statement
+on that connection fails. The failure closes the connection, so the pool does
+not reuse it. The instance `capabilityMetadata` reports the setting as
+`connection_liveness_check_idle_threshold_seconds`.

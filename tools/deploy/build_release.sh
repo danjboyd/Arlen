@@ -120,6 +120,17 @@ print(status)
 PY
 }
 
+# Same app-root test as bin/propane and bin/jobs-worker. If this were narrower,
+# an app with sources other than src/main.m would ship without its binary and
+# propane would try to rebuild it from the release, which it can't (issue 181).
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
+}
+
 copy_path_if_exists() {
   local src="$1"
   local dest="$2"
@@ -782,12 +793,18 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   framework_binary_dir="$framework_root/build/apple"
   app_binary_dir="$app_root/.boomhauer/apple"
 else
+  # make runs the freshly built eocc, and boomhauer --prepare-only runs it
+  # again; both need the GNUstep runtime libraries on the loader path. Source
+  # the env like tools/ci/* do instead of assuming the caller did (issue 181).
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    source "$framework_root/tools/source_gnustep_env.sh"
+  fi
   make -C "$framework_root" arlen boomhauer >/dev/null
   framework_binary_dir="$framework_root/build"
   app_binary_dir="$app_root/.boomhauer/build"
 fi
 
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
   ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
     "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
 fi

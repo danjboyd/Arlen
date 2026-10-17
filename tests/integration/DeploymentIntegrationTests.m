@@ -506,7 +506,8 @@ static NSString *ALNHostDeployProfile(void) {
     XCTAssertEqual(0, code, @"%@", newOutput);
 
     NSString *appRoot = [appParent stringByAppendingPathComponent:@"SmokeApp"];
-    int port = [self randomPort];
+    // --port 0 lets smoke_release.sh pick each probe port just before starting
+    // propane. A port picked here could be taken while the releases build.
     // ARLEN-BUG-019: packaged smoke validation must resolve the manifest's
     // release-relative operability helper against the selected release root,
     // not against the caller's current working directory.
@@ -515,11 +516,11 @@ static NSString *ALNHostDeployProfile(void) {
                                                         "--app-root %s "
                                                         "--framework-root %s "
                                                         "--work-dir %s "
-                                                        "--port %d "
+                                                        "--port 0 "
                                                         "--release-a smoke-1 "
                                                         "--release-b smoke-2",
                                                        [appParent UTF8String], [repoRoot UTF8String], [appRoot UTF8String],
-                                                       [repoRoot UTF8String], [workRoot UTF8String], port]
+                                                       [repoRoot UTF8String], [workRoot UTF8String]]
                                          exitCode:&code];
     XCTAssertEqual(0, code, @"%@", smokeOutput);
     XCTAssertTrue([smokeOutput containsString:@"release smoke passed"]);
@@ -5750,6 +5751,90 @@ static NSString *ALNHostDeployProfile(void) {
     XCTAssertEqualObjects(@"127.0.0.1", payload[@"host"]);
     XCTAssertEqual((NSInteger)3010, [payload[@"port"] integerValue]);
     XCTAssertEqualObjects(@"serialized", payload[@"requestDispatchMode"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenConfigRedactsSecretsUnlessShowSecretsIsGiven {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-config-redaction"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *appRoot = [workRoot stringByAppendingPathComponent:@"ConfigRedactionApp"];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  port = 3011;\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  session = { enabled = YES; secret = \"session-secret-value-0123456789abcdef\"; };\n"
+                                  "  auth = { bearerSecret = \"bearer-secret-value\"; };\n"
+                                  "  database = { connectionString = \"postgres://app:db-password@db.internal/app\"; };\n"
+                                  "  storageModule = { downloadTokenTTLSeconds = 300; signingSecret = \"signing-secret-value\"; };\n"
+                                  "  authModule = { localPassword = { enabled = YES; }; };\n"
+                                  "  propaneAccessories = {\n"
+                                  "    workerCount = 2;\n"
+                                  "    jobWorkerCommand = \"worker --dsn postgres://jobs:job-password@db.internal/app\";\n"
+                                  "  };\n"
+                                  "  publicURL = \"https://example.test/app\";\n"
+                                  "  searchModule = { engine = { postgres = { dsn = \"host=db user=app password=dsn-password dbname=app\"; }; }; };\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[NSString stringWithFormat:@"cd %@ && %@", repoRoot, ALNTestFrameworkBuildCommand(@"arlen")]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *base = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen config --env development",
+                                                appRoot, repoRoot, repoRoot];
+    NSArray<NSString *> *secrets = @[
+      @"session-secret-value-0123456789abcdef", @"bearer-secret-value", @"db-password", @"job-password",
+      @"dsn-password", @"signing-secret-value"
+    ];
+
+    NSString *redactedJSON = [self runShellCapture:[base stringByAppendingString:@" --json"] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", redactedJSON);
+    NSString *redactedText = [self runShellCapture:base exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", redactedText);
+    for (NSString *secret in secrets) {
+      XCTAssertFalse([redactedJSON containsString:secret], @"%@ leaked in %@", secret, redactedJSON);
+      XCTAssertFalse([redactedText containsString:secret], @"%@ leaked in %@", secret, redactedText);
+    }
+
+    NSDictionary *redacted = [self parseJSONDictionaryFromOutput:redactedJSON context:@"arlen config --json"];
+    XCTAssertEqualObjects(@"[redacted]", redacted[@"session"][@"secret"]);
+    XCTAssertEqualObjects(@YES, redacted[@"session"][@"enabled"]);
+    XCTAssertEqualObjects(@"[redacted]", redacted[@"auth"][@"bearerSecret"]);
+    XCTAssertEqualObjects(@"[redacted]", redacted[@"database"][@"connectionString"]);
+    XCTAssertEqualObjects(@"[redacted]", redacted[@"storageModule"][@"signingSecret"]);
+    XCTAssertEqual((NSInteger)300, [redacted[@"storageModule"][@"downloadTokenTTLSeconds"] integerValue]);
+    XCTAssertEqualObjects(@"YES", [redacted[@"authModule"][@"localPassword"][@"enabled"] description]);
+    XCTAssertEqualObjects(@"worker --dsn postgres://jobs:[redacted]@db.internal/app",
+                          redacted[@"propaneAccessories"][@"jobWorkerCommand"]);
+    XCTAssertEqualObjects(@"host=db user=app password=[redacted] dbname=app",
+                          redacted[@"searchModule"][@"engine"][@"postgres"][@"dsn"]);
+    XCTAssertEqualObjects(@"https://example.test/app", redacted[@"publicURL"]);
+    XCTAssertEqualObjects(@"127.0.0.1", redacted[@"host"]);
+    XCTAssertEqual((NSInteger)3011, [redacted[@"port"] integerValue]);
+
+    NSString *shownJSON = [self runShellCapture:[base stringByAppendingString:@" --json --show-secrets"] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", shownJSON);
+    NSString *shownText = [self runShellCapture:[base stringByAppendingString:@" --show-secrets"] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", shownText);
+    for (NSString *secret in secrets) {
+      XCTAssertTrue([shownJSON containsString:secret], @"%@ missing from %@", secret, shownJSON);
+      XCTAssertTrue([shownText containsString:secret], @"%@ missing from %@", secret, shownText);
+    }
+    NSDictionary *shown = [self parseJSONDictionaryFromOutput:shownJSON context:@"arlen config --json --show-secrets"];
+    XCTAssertEqualObjects(@"postgres://app:db-password@db.internal/app", shown[@"database"][@"connectionString"]);
+    // Redaction only replaces values; the JSON shape is unchanged.
+    XCTAssertEqualObjects([[shown allKeys] sortedArrayUsingSelector:@selector(compare:)],
+                          [[redacted allKeys] sortedArrayUsingSelector:@selector(compare:)]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }

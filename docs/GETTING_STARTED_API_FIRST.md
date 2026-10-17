@@ -64,6 +64,24 @@ If your OpenAPI export carries top-level `x-arlen.resources`,
 explicit resource/admin/query/module registries instead of making the frontend
 infer them from route names.
 
+### Without the ORM
+
+Apps that use raw SQL instead of the ORM can still generate the typed client
+and React hooks from the OpenAPI export alone. Leave out `--orm-input` and
+select only `client` and/or `react`:
+
+```bash
+/path/to/Arlen/bin/arlen typescript-codegen \
+  --openapi-input build/openapi.json \
+  --output-dir frontend/generated/arlen \
+  --target client,react \
+  --force
+```
+
+`models.ts` is still written, but it holds only the shared types the client
+imports, such as `ArlenErrorEnvelope`. The `models`, `validators`, `query` and
+`all` targets need ORM descriptors and fail without them.
+
 See `examples/react_typescript_reference/README.md` for a checked-in React
 workspace that consumes the generated package shape.
 

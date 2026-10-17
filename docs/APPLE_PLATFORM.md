@@ -104,6 +104,12 @@ These areas are still Linux-only or narrower on macOS:
 - Detect NSNumber booleans with `ALNNumberIsBoolean()` (`ALNPlatform.h`), never
   by comparing `objCType` with `@encode(BOOL)`. Apple arm64 encodes `BOOL` as
   `"B"` while `@YES` reports `"c"`, and GNUstep encodes `BOOL` as `"C"`.
+- Read unsigned numbers from requests and config with
+  `ALNUnsignedIntegerFromValue()` or `ALNUnsignedIntegerValueOrDefault()`
+  (`ALNPlatform.h`), never behind
+  `respondsToSelector:@selector(unsignedIntegerValue)`. Apple's `NSString` has
+  no `-unsignedIntegerValue`, so query parameters and old-style plist numbers
+  would silently fall back to the default.
 - Hold dispatch objects strongly under ARC on Apple (`OS_OBJECT_USE_OBJC`);
   an `assign` queue property is freed right after creation.
 - Don't put `%{...}` in a format string unless it is meant for os_log: Apple
