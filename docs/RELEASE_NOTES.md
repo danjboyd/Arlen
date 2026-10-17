@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- WebSocket sessions no longer drop an idle receive-only client after
+  `connectionTimeoutSeconds` (about 30 s) without a close frame. After
+  `runtimeLimits.webSocketPingIntervalSeconds` (default 25) without a frame the
+  server pings, and closes with 1001 a client that stays silent for another
+  interval (#239).
+- WebSocket frames follow RFC 6455 more closely (#214): control frames must be
+  unfragmented and at most 125 bytes, nonzero RSV bits and reserved opcodes are
+  rejected (all close with 1002), fragmented messages are reassembled up to the
+  1 MiB message limit (1009 above it) instead of dropping the connection,
+  invalid UTF-8 text closes with 1007 instead of becoming an empty message, the
+  peer's close code is echoed, and payload buffers grow as bytes arrive
+  instead of being allocated from the frame header.
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

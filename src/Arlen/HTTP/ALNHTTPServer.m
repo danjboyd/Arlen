@@ -30,6 +30,7 @@ typedef SSIZE_T ssize_t;
 #import <netinet/in.h>
 #import <signal.h>
 #import <poll.h>
+#import <sys/select.h>
 #import <sys/socket.h>
 #import <sys/uio.h>
 #import <unistd.h>
@@ -81,6 +82,7 @@ typedef struct {
   NSUInteger maxConcurrentHTTPWorkers;
   NSUInteger maxQueuedHTTPConnections;
   NSUInteger keepAliveParkAfterMilliseconds;
+  NSUInteger webSocketPingIntervalSeconds;
   NSUInteger maxRealtimeTotalSubscribers;
   NSUInteger maxRealtimeChannelSubscribers;
 } ALNRuntimeLimits;
@@ -576,6 +578,8 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
       ALNConfigUInt(runtimeLimits, @"maxQueuedHTTPConnections", 256);
   out.keepAliveParkAfterMilliseconds =
       ALNConfigUIntAllowZero(runtimeLimits, @"keepAliveParkAfterMilliseconds", 5);
+  out.webSocketPingIntervalSeconds =
+      ALNConfigUIntAllowZero(runtimeLimits, @"webSocketPingIntervalSeconds", 25);
   out.maxRealtimeTotalSubscribers =
       ALNConfigUIntAllowZero(runtimeLimits, @"maxRealtimeTotalSubscribers", 0);
   out.maxRealtimeChannelSubscribers =
@@ -1826,75 +1830,161 @@ static BOOL ALNWebSocketSendFrame(ALNSocketHandle fd, uint8_t opcode, NSData *pa
   return ALNSendAll(fd, [frame bytes], [frame length]);
 }
 
-static BOOL ALNWebSocketReadFrame(ALNSocketHandle fd,
-                                  uint8_t *opcode,
-                                  BOOL *fin,
-                                  NSData **payload,
-                                  NSUInteger maxPayloadBytes) {
+// RFC 6455 close codes Arlen sends.
+enum {
+  ALNWebSocketCloseNormal = 1000,
+  ALNWebSocketCloseGoingAway = 1001,
+  ALNWebSocketCloseProtocolError = 1002,
+  ALNWebSocketCloseInvalidPayload = 1007,
+  ALNWebSocketCloseMessageTooBig = 1009,
+};
+
+typedef NS_ENUM(NSInteger, ALNWebSocketReadStatus) {
+  ALNWebSocketReadOK = 0,
+  // EOF, an I/O error, or a timeout mid-frame: no close frame can be sent.
+  ALNWebSocketReadConnectionLost,
+  // The frame breaks RFC 6455; close with *closeCode.
+  ALNWebSocketReadProtocolError,
+};
+
+// Strict UTF-8 (RFC 3629): no overlong forms, surrogates or code points
+// above U+10FFFF. RFC 6455 requires closing with 1007 on invalid text.
+static BOOL ALNWebSocketIsValidUTF8(const unsigned char *bytes, NSUInteger length) {
+  NSUInteger idx = 0;
+  while (idx < length) {
+    unsigned char lead = bytes[idx];
+    if (lead < 0x80) {
+      idx += 1;
+      continue;
+    }
+    NSUInteger extra = 0;
+    uint32_t codePoint = 0;
+    uint32_t minimum = 0;
+    if ((lead & 0xE0) == 0xC0) {
+      extra = 1;
+      codePoint = lead & 0x1F;
+      minimum = 0x80;
+    } else if ((lead & 0xF0) == 0xE0) {
+      extra = 2;
+      codePoint = lead & 0x0F;
+      minimum = 0x800;
+    } else if ((lead & 0xF8) == 0xF0) {
+      extra = 3;
+      codePoint = lead & 0x07;
+      minimum = 0x10000;
+    } else {
+      return NO;
+    }
+    if (idx + extra >= length) {
+      return NO;
+    }
+    for (NSUInteger offset = 1; offset <= extra; offset++) {
+      unsigned char next = bytes[idx + offset];
+      if ((next & 0xC0) != 0x80) {
+        return NO;
+      }
+      codePoint = (codePoint << 6) | (next & 0x3F);
+    }
+    if (codePoint < minimum || codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+      return NO;
+    }
+    idx += extra + 1;
+  }
+  return YES;
+}
+
+// 1 when the socket is readable within timeoutMilliseconds, 0 on timeout, -1
+// on error. select() takes a socket on both POSIX and Winsock.
+static int ALNWebSocketWaitReadable(ALNSocketHandle fd, NSUInteger timeoutMilliseconds) {
+  fd_set readSet;
+  FD_ZERO(&readSet);
+#if defined(_WIN32)
+  FD_SET((SOCKET)fd, &readSet);
+#else
+  FD_SET((int)fd, &readSet);
+#endif
+  struct timeval timeout;
+  timeout.tv_sec = (long)(timeoutMilliseconds / 1000);
+  timeout.tv_usec = (long)((timeoutMilliseconds % 1000) * 1000);
+  int rc = select((int)fd + 1, &readSet, NULL, NULL, &timeout);
+  if (rc < 0) {
+    return (errno == EINTR) ? 0 : -1;
+  }
+  return (rc > 0) ? 1 : 0;
+}
+
+// Reads one frame (GitHub issue 214). Rejects, with the RFC 6455 close code:
+// unmasked client frames, nonzero RSV bits (no extension is negotiated),
+// reserved opcodes and control frames that are fragmented or longer than 125
+// bytes (1002), and payloads over maxPayloadBytes (1009). The payload buffer
+// grows as bytes arrive instead of being allocated from the header's length.
+static ALNWebSocketReadStatus ALNWebSocketReadFrame(ALNSocketHandle fd,
+                                                    uint8_t *opcode,
+                                                    BOOL *fin,
+                                                    NSData **payload,
+                                                    NSUInteger maxPayloadBytes,
+                                                    uint16_t *closeCode) {
   NSUInteger readTimeoutMilliseconds = ALNWebSocketReadTimeoutMilliseconds();
   unsigned char header[2];
   if (!ALNRecvAll(fd, header, sizeof(header), readTimeoutMilliseconds)) {
-    return NO;
+    return ALNWebSocketReadConnectionLost;
   }
 
   BOOL final = ((header[0] & 0x80) != 0);
   uint8_t frameOpcode = (uint8_t)(header[0] & 0x0F);
   BOOL masked = ((header[1] & 0x80) != 0);
-  if (!masked) {
-    return NO;
-  }
+  BOOL control = (frameOpcode & 0x08) != 0;
+  BOOL knownOpcode = (frameOpcode <= 0x2) || (frameOpcode >= 0x8 && frameOpcode <= 0xA);
   uint64_t payloadLength = (uint64_t)(header[1] & 0x7F);
+  if (!masked || (header[0] & 0x70) != 0 || !knownOpcode || (control && (!final || payloadLength > 125))) {
+    *closeCode = ALNWebSocketCloseProtocolError;
+    return ALNWebSocketReadProtocolError;
+  }
   if (payloadLength == 126) {
     unsigned char ext[2];
     if (!ALNRecvAll(fd, ext, sizeof(ext), readTimeoutMilliseconds)) {
-      return NO;
+      return ALNWebSocketReadConnectionLost;
     }
     payloadLength = ((uint64_t)ext[0] << 8) | (uint64_t)ext[1];
   } else if (payloadLength == 127) {
     unsigned char ext[8];
     if (!ALNRecvAll(fd, ext, sizeof(ext), readTimeoutMilliseconds)) {
-      return NO;
+      return ALNWebSocketReadConnectionLost;
     }
     payloadLength = 0;
     for (NSUInteger idx = 0; idx < 8; idx++) {
       payloadLength = (payloadLength << 8) | (uint64_t)ext[idx];
     }
   }
-
   if (payloadLength > (uint64_t)maxPayloadBytes) {
-    return NO;
+    *closeCode = ALNWebSocketCloseMessageTooBig;
+    return ALNWebSocketReadProtocolError;
   }
 
   unsigned char mask[4] = {0, 0, 0, 0};
-  if (masked) {
-    if (!ALNRecvAll(fd, mask, sizeof(mask), readTimeoutMilliseconds)) {
-      return NO;
-    }
+  if (!ALNRecvAll(fd, mask, sizeof(mask), readTimeoutMilliseconds)) {
+    return ALNWebSocketReadConnectionLost;
   }
 
-  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)payloadLength];
-  if (payloadLength > 0) {
-    if (!ALNRecvAll(fd, [data mutableBytes], (size_t)payloadLength, readTimeoutMilliseconds)) {
-      return NO;
+  NSMutableData *data = [NSMutableData data];
+  unsigned char chunk[16384];
+  uint64_t received = 0;
+  while (received < payloadLength) {
+    size_t want = (size_t)MIN((uint64_t)sizeof(chunk), payloadLength - received);
+    if (!ALNRecvAll(fd, chunk, want, readTimeoutMilliseconds)) {
+      return ALNWebSocketReadConnectionLost;
     }
-    if (masked) {
-      unsigned char *bytes = (unsigned char *)[data mutableBytes];
-      for (uint64_t idx = 0; idx < payloadLength; idx++) {
-        bytes[idx] ^= mask[idx % 4];
-      }
+    for (size_t idx = 0; idx < want; idx++) {
+      chunk[idx] ^= mask[(received + idx) % 4];
     }
+    [data appendBytes:chunk length:want];
+    received += want;
   }
 
-  if (opcode != NULL) {
-    *opcode = frameOpcode;
-  }
-  if (fin != NULL) {
-    *fin = final;
-  }
-  if (payload != NULL) {
-    *payload = data;
-  }
-  return YES;
+  *opcode = frameOpcode;
+  *fin = final;
+  *payload = data;
+  return ALNWebSocketReadOK;
 }
 
 // Streams a Content-Length body larger than limits.spoolThresholdBytes into a
@@ -3083,6 +3173,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 - (BOOL)sendTextMessage:(NSString *)message;
 - (BOOL)sendBinaryPayload:(NSData *)payload opcode:(uint8_t)opcode;
 - (void)sendCloseFrame;
+// A close frame carrying an RFC 6455 status code (0 sends none).
+- (void)sendCloseFrameWithCode:(uint16_t)code;
 - (BOOL)isClosedSnapshot;
 
 @end
@@ -3116,9 +3208,15 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 }
 
 - (void)sendCloseFrame {
+  [self sendCloseFrameWithCode:0];
+}
+
+- (void)sendCloseFrameWithCode:(uint16_t)code {
+  unsigned char body[2] = {(unsigned char)(code >> 8), (unsigned char)(code & 0xFF)};
+  NSData *payload = (code != 0) ? [NSData dataWithBytes:body length:sizeof(body)] : [NSData data];
   [self.sendLock lock];
   if (!self.closed) {
-    (void)ALNWebSocketSendFrame(self.clientFd, 0x8, [NSData data]);
+    (void)ALNWebSocketSendFrame(self.clientFd, 0x8, payload);
     self.closed = YES;
   }
   [self.sendLock unlock];
@@ -3219,6 +3317,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
 @property(nonatomic, strong) NSMutableSet *resumedHTTPClientFDs;
 @property(nonatomic, assign) NSUInteger keepAliveParkAfterMilliseconds;
+@property(nonatomic, assign) NSUInteger webSocketPingIntervalSeconds;
 @property(nonatomic, assign) NSUInteger idleConnectionTimeoutSeconds;
 @property(nonatomic, strong) NSLock *idleConnectionLock;
 @property(nonatomic, strong) NSMutableDictionary *idleConnectionDeadlines;
@@ -3258,6 +3357,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     _httpWorkerPoolStarted = NO;
     _resumedHTTPClientFDs = [NSMutableSet set];
     _keepAliveParkAfterMilliseconds = 5;
+    _webSocketPingIntervalSeconds = 25;
     _idleConnectionTimeoutSeconds = 30;
     _idleConnectionLock = [[NSLock alloc] init];
     _idleConnectionDeadlines = [NSMutableDictionary dictionary];
@@ -3917,20 +4017,63 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     return;
   }
 
+  // A message may span frames (RFC 6455 fragmentation) up to this total.
+  const NSUInteger maxMessageBytes = 1048576;
+  // Idle sessions (GitHub issue 239): with no frame for a ping interval the
+  // server pings; a client that stays silent for another interval is closed
+  // with 1001. A quiet receive-only subscriber is no longer dropped by the
+  // socket read timeout.
+  const double pingIntervalMs = (double)self.webSocketPingIntervalSeconds * 1000.0;
+  double lastFrameMs = ALNNowMilliseconds();
+  double pingSentMs = 0.0;
+  NSMutableData *fragments = nil;
+  uint8_t fragmentOpcode = 0;
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      int readable = ALNWebSocketWaitReadable(clientFd, 1000);
+      if (readable < 0) {
+        break;
+      }
+      if (readable == 0) {
+        double now = ALNNowMilliseconds();
+        if (pingIntervalMs > 0.0) {
+          if (pingSentMs == 0.0 && now - lastFrameMs >= pingIntervalMs) {
+            if (![session sendBinaryPayload:[NSData data] opcode:0x9]) {
+              break;
+            }
+            pingSentMs = now;
+          } else if (pingSentMs > 0.0 && now - pingSentMs >= pingIntervalMs) {
+            [session sendCloseFrameWithCode:ALNWebSocketCloseGoingAway];
+            break;
+          }
+        }
+        continue;
+      }
+
       uint8_t opcode = 0;
       BOOL fin = NO;
       NSData *payload = nil;
-      if (!ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, 1048576)) {
+      uint16_t closeCode = 0;
+      ALNWebSocketReadStatus status =
+          ALNWebSocketReadFrame(clientFd, &opcode, &fin, &payload, maxMessageBytes, &closeCode);
+      if (status == ALNWebSocketReadConnectionLost) {
         break;
       }
-      if (!fin) {
+      if (status == ALNWebSocketReadProtocolError) {
+        [session sendCloseFrameWithCode:closeCode];
         break;
       }
+      lastFrameMs = ALNNowMilliseconds();
+      pingSentMs = 0.0;
 
       if (opcode == 0x8) {
-        [session sendCloseFrame];
+        // Echo the peer's status code (RFC 6455 5.5.1).
+        uint16_t peerCode = 0;
+        if ([payload length] >= 2) {
+          const unsigned char *bytes = (const unsigned char *)[payload bytes];
+          peerCode = (uint16_t)((bytes[0] << 8) | bytes[1]);
+        }
+        [session sendCloseFrameWithCode:peerCode];
         break;
       }
       if (opcode == 0x9) {
@@ -3940,15 +4083,43 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
       if (opcode == 0xA) {
         continue;
       }
+
+      // Data frames: 0x1 text and 0x2 binary start a message, 0x0 continues one.
+      if (opcode == 0x0) {
+        if (fragments == nil) {
+          [session sendCloseFrameWithCode:ALNWebSocketCloseProtocolError];
+          break;
+        }
+        if ([fragments length] + [payload length] > maxMessageBytes) {
+          [session sendCloseFrameWithCode:ALNWebSocketCloseMessageTooBig];
+          break;
+        }
+        [fragments appendData:payload ?: [NSData data]];
+        if (!fin) {
+          continue;
+        }
+        payload = fragments;
+        opcode = fragmentOpcode;
+        fragments = nil;
+      } else if (fragments != nil) {
+        // A new message may not start inside a fragmented one.
+        [session sendCloseFrameWithCode:ALNWebSocketCloseProtocolError];
+        break;
+      } else if (!fin) {
+        fragments = [NSMutableData dataWithData:payload ?: [NSData data]];
+        fragmentOpcode = opcode;
+        continue;
+      }
       if (opcode != 0x1) {
         continue;
       }
 
-      NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
-                                                encoding:NSUTF8StringEncoding];
-      if (message == nil) {
-        message = @"";
+      if (!ALNWebSocketIsValidUTF8((const unsigned char *)[payload bytes], [payload length])) {
+        [session sendCloseFrameWithCode:ALNWebSocketCloseInvalidPayload];
+        break;
       }
+      NSString *message = [[NSString alloc] initWithData:(payload ?: [NSData data])
+                                                encoding:NSUTF8StringEncoding] ?: @"";
 
       if ([mode isEqualToString:@"channel"]) {
         (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
@@ -4413,6 +4584,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     self.maxConcurrentHTTPWorkers = runtimeLimits.maxConcurrentHTTPWorkers;
     self.maxQueuedHTTPConnections = runtimeLimits.maxQueuedHTTPConnections;
     self.keepAliveParkAfterMilliseconds = runtimeLimits.keepAliveParkAfterMilliseconds;
+    self.webSocketPingIntervalSeconds = runtimeLimits.webSocketPingIntervalSeconds;
     self.idleConnectionTimeoutSeconds = tuning.connectionTimeoutSeconds;
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers

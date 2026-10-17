@@ -1134,6 +1134,7 @@ Environment:
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
+- `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS` (`runtimeLimits.webSocketPingIntervalSeconds`; idle WebSocket ping interval, `0` disables)
 - `ARLEN_MAX_QUEUED_HTTP_CONNECTIONS` (runtime HTTP worker queue depth; legacy `MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)

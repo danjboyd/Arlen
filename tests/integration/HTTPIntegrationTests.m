@@ -1668,6 +1668,38 @@
   }
 }
 
+// GitHub issues 239 and 214: idle websocket subscribers are pinged instead of
+// dropped by the read timeout, a client that never answers is closed with
+// 1001, and frames that break RFC 6455 close with the right status code.
+- (void)testWebSocketIdlePingsAndRFC6455Conformance_Issues239_214 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:
+      @"ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS=1 ARLEN_CONNECTION_TIMEOUT_SECONDS=2 exec ./build/boomhauer --port %d",
+      port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/websocket_conformance_probe.py"
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+    script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                               withString:[NSString stringWithFormat:@"%d", port]];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"websocket checks passed"], @"%@", output);
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testConcurrentModeMixedLifecycleStressRemainsStable {
   [self runMixedRequestLifecycleStressWithServerCommand:@"./build/boomhauer --port %d"
                                         expectKeepAlive:YES];

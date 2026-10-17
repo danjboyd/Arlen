@@ -59,6 +59,11 @@ apps need first.
     request arrives, and closes it after `connectionTimeoutSeconds`. Pipelined
     requests are served without parking. Windows builds and the serialized
     `requestDispatchMode` keep each connection on one worker.
+  - `webSocketPingIntervalSeconds` (default `25`, `0` disables): after this long
+    without a frame from the client, the server pings an open WebSocket; a
+    client that sends nothing for another interval is closed with `1001`. A
+    receive-only subscriber that answers pings stays connected however long it
+    is idle. Environment override: `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS`.
   - Server-sent event streams and WebSocket sessions hold a worker for as long
     as they stay open. Size `maxConcurrentHTTPWorkers` above the number of
     streams you expect to be open at once, plus headroom for ordinary
