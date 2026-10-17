@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- `ALNRedisCacheAdapter` keeps up to four idle connections per adapter and
+  reuses them across commands and worker threads. `AUTH` and `SELECT` run once
+  per connection. Before, every cache command opened a new TCP connection, ran
+  `AUTH` and `SELECT`, and closed it, so each cache access paid a TCP handshake
+  and up to three round trips and left a socket in `TIME_WAIT`. A connection
+  that fails is closed rather than reused, and a command that fails on a
+  pooled connection the server has dropped is retried once on a new
+  connection (#223).
+
+- `ALNRedisCacheAdapter` now stores cache entries without a TTL on macOS.
+  Their record held `NSNull`, which Apple's property-list writer rejects, so
+  `setObject:forKey:ttlSeconds:0` failed there (#223).
+
+- The Redis reply parser bounds what it accepts: replies may nest at most 8
+  arrays deep, bulk replies may be at most 512 MiB, and arrays at most 16Mi
+  elements. Bulk replies are read in 64 KiB chunks and arrays grow as elements
+  arrive, so a declared size no longer allocates memory up front. A reply
+  outside these bounds fails the command with an `NSError`. Before, a deeply
+  nested reply overflowed the stack and a huge declared bulk length
+  allocated it in full (#224).
+
+- The WebAuthn CBOR parser rejects array, map, byte-string and text-string
+  lengths that exceed the remaining input, and no longer uses a declared
+  count as a capacity hint. Before, a short `attestationObject` declaring a
+  huge count or length raised an exception in
+  `verifyRegistrationResponse:expectedOptions:error:` instead of returning
+  `ALNWebAuthnErrorMalformedCBOR` (#229).
+
+- The vendored cmark-gfm `autolink.c` picks up upstream commit `4682993`,
+  which computes the offset of the character before a `mailto:` or `xmpp:`
+  autolink with signed arithmetic. The old expression wrapped the pointer, which
+  is undefined behaviour (UBSan reported it for input such as `<xmpp:@`), even
+  though the byte read was correct (#254).
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
