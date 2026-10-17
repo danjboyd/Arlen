@@ -32,6 +32,16 @@
   `--openapi-input` alone. `models`, `validators`, `query` and `all` still
   require descriptors, and an explicit `--orm-input` path must exist (#183).
 
+- Idle keep-alive connections no longer hold HTTP workers. Before, each open
+  keep-alive connection held one of the 8 default workers until its next
+  request or the 30-second `connectionTimeoutSeconds`. A browser holds about
+  six connections per site, so a page reload could wait up to 30 seconds.
+  Now a worker hands an idle connection to a watcher thread after
+  `runtimeLimits.keepAliveParkAfterMilliseconds` (default 5), and picks it up
+  again when the next request arrives. `docs/CONFIGURATION_REFERENCE.md` now
+  documents `runtimeLimits` and notes that server-sent event and WebSocket
+  sessions still hold a worker while open (#187).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

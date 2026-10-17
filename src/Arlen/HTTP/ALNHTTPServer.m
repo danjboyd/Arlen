@@ -29,6 +29,7 @@ typedef SSIZE_T ssize_t;
 #import <arpa/inet.h>
 #import <netinet/in.h>
 #import <signal.h>
+#import <poll.h>
 #import <sys/socket.h>
 #import <sys/uio.h>
 #import <unistd.h>
@@ -79,6 +80,7 @@ typedef struct {
   NSUInteger maxConcurrentHTTPSessions;
   NSUInteger maxConcurrentHTTPWorkers;
   NSUInteger maxQueuedHTTPConnections;
+  NSUInteger keepAliveParkAfterMilliseconds;
   NSUInteger maxRealtimeTotalSubscribers;
   NSUInteger maxRealtimeChannelSubscribers;
 } ALNRuntimeLimits;
@@ -572,6 +574,8 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
       ALNConfigUInt(runtimeLimits, @"maxConcurrentHTTPWorkers", 8);
   out.maxQueuedHTTPConnections =
       ALNConfigUInt(runtimeLimits, @"maxQueuedHTTPConnections", 256);
+  out.keepAliveParkAfterMilliseconds =
+      ALNConfigUIntAllowZero(runtimeLimits, @"keepAliveParkAfterMilliseconds", 5);
   out.maxRealtimeTotalSubscribers =
       ALNConfigUIntAllowZero(runtimeLimits, @"maxRealtimeTotalSubscribers", 0);
   out.maxRealtimeChannelSubscribers =
@@ -3213,6 +3217,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 @property(nonatomic, strong) NSMutableArray *pendingHTTPClientFDs;
 @property(nonatomic, assign) NSUInteger pendingHTTPClientFDHeadIndex;
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
+@property(nonatomic, strong) NSMutableSet *resumedHTTPClientFDs;
+@property(nonatomic, assign) NSUInteger keepAliveParkAfterMilliseconds;
+@property(nonatomic, assign) NSUInteger idleConnectionTimeoutSeconds;
+@property(nonatomic, strong) NSLock *idleConnectionLock;
+@property(nonatomic, strong) NSMutableDictionary *idleConnectionDeadlines;
+@property(atomic, assign) BOOL idleConnectionWatcherRunning;
+@property(nonatomic, assign) int idleConnectionWakeReadFD;
+@property(nonatomic, assign) int idleConnectionWakeWriteFD;
 @property(atomic, assign) ALNSocketHandle serverSocketFD;
 @property(nonatomic, strong) NSLock *staticMountCacheLock;
 @property(nonatomic, copy) NSArray *cachedStaticMounts;
@@ -3244,6 +3256,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     _pendingHTTPClientFDs = [NSMutableArray array];
     _pendingHTTPClientFDHeadIndex = 0;
     _httpWorkerPoolStarted = NO;
+    _resumedHTTPClientFDs = [NSMutableSet set];
+    _keepAliveParkAfterMilliseconds = 5;
+    _idleConnectionTimeoutSeconds = 30;
+    _idleConnectionLock = [[NSLock alloc] init];
+    _idleConnectionDeadlines = [NSMutableDictionary dictionary];
+    _idleConnectionWatcherRunning = NO;
+    _idleConnectionWakeReadFD = -1;
+    _idleConnectionWakeWriteFD = -1;
     _serverSocketFD = ALNInvalidSocketHandle;
     _staticMountCacheLock = [[NSLock alloc] init];
     _cachedStaticMounts = nil;
@@ -3396,7 +3416,23 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   return accepted;
 }
 
-- (ALNSocketHandle)dequeueHTTPClientForWorker {
+- (BOOL)enqueueResumedHTTPClientForWorker:(ALNSocketHandle)clientFd {
+  [self.httpWorkerQueueCondition lock];
+  BOOL accepted = ([self queuedHTTPClientCountLocked] < self.maxQueuedHTTPConnections);
+  if (accepted) {
+    NSNumber *boxed = ALNBoxSocketHandle(clientFd);
+    [self.pendingHTTPClientFDs addObject:boxed];
+    [self.resumedHTTPClientFDs addObject:boxed];
+    [self.httpWorkerQueueCondition signal];
+  }
+  [self.httpWorkerQueueCondition unlock];
+  return accepted;
+}
+
+- (ALNSocketHandle)dequeueHTTPClientForWorker:(BOOL *)resumed {
+  if (resumed != NULL) {
+    *resumed = NO;
+  }
   [self.httpWorkerQueueCondition lock];
   while ([self queuedHTTPClientCountLocked] == 0 && [self shouldContinueRunning]) {
     [self.httpWorkerQueueCondition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
@@ -3408,6 +3444,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     NSNumber *next = self.pendingHTTPClientFDs[self.pendingHTTPClientFDHeadIndex];
     self.pendingHTTPClientFDHeadIndex += 1;
     clientFd = ALNSocketHandleFromNumber(next);
+    if ([self.resumedHTTPClientFDs containsObject:next]) {
+      [self.resumedHTTPClientFDs removeObject:next];
+      if (resumed != NULL) {
+        *resumed = YES;
+      }
+    }
 
     NSUInteger totalCount = [self.pendingHTTPClientFDs count];
     if (self.pendingHTTPClientFDHeadIndex >= totalCount) {
@@ -3428,17 +3470,22 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   (void)workerIndexObject;
   @autoreleasepool {
     while ([self shouldContinueRunning] || [self hasQueuedHTTPClients]) {
-      ALNSocketHandle clientFd = [self dequeueHTTPClientForWorker];
+      BOOL resumed = NO;
+      ALNSocketHandle clientFd = [self dequeueHTTPClientForWorker:&resumed];
       if (clientFd == ALNInvalidSocketHandle) {
         continue;
       }
 
       @autoreleasepool {
+        BOOL parked = NO;
         @try {
-          [self handleClient:clientFd];
+          parked = [self serveClient:clientFd resumed:resumed allowPark:YES];
         } @finally {
-          [self releaseHTTPSessionReservation];
-          ALNSocketClose(clientFd);
+          // A parked connection now belongs to the idle-connection watcher.
+          if (!parked) {
+            [self releaseHTTPSessionReservation];
+            ALNSocketClose(clientFd);
+          }
         }
       }
     }
@@ -3464,12 +3511,210 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
       return NO;
     }
   }
+  if (workerCount > 0) {
+    [self startIdleConnectionWatcher];
+  }
   return YES;
+}
+
+// Idle keep-alive connections (GitHub issue 187). A worker that has finished a
+// keep-alive response and sees no next request within
+// keepAliveParkAfterMilliseconds hands the connection to a single watcher
+// thread, which polls all parked connections and re-queues each one for a
+// worker once it becomes readable. Idle browser connections therefore no
+// longer pin the fixed worker pool. Parked connections keep their HTTP session
+// reservation and are closed after connectionTimeoutSeconds, as before.
+- (void)startIdleConnectionWatcher {
+#if !defined(_WIN32)
+  if (self.idleConnectionWatcherRunning) {
+    return;
+  }
+  int fds[2];
+  if (pipe(fds) != 0) {
+    return;
+  }
+  for (int idx = 0; idx < 2; idx++) {
+    int flags = fcntl(fds[idx], F_GETFL, 0);
+    (void)fcntl(fds[idx], F_SETFL, flags | O_NONBLOCK);
+    (void)fcntl(fds[idx], F_SETFD, FD_CLOEXEC);
+  }
+  self.idleConnectionWakeReadFD = fds[0];
+  self.idleConnectionWakeWriteFD = fds[1];
+  self.idleConnectionWatcherRunning = YES;
+  @try {
+    [NSThread detachNewThreadSelector:@selector(runIdleConnectionWatcher:) toTarget:self withObject:nil];
+  } @catch (NSException *exception) {
+    (void)exception;
+    self.idleConnectionWatcherRunning = NO;
+    close(fds[0]);
+    close(fds[1]);
+    self.idleConnectionWakeReadFD = -1;
+    self.idleConnectionWakeWriteFD = -1;
+  }
+#endif
+}
+
+- (void)wakeIdleConnectionWatcher {
+#if !defined(_WIN32)
+  int wakeFD = self.idleConnectionWakeWriteFD;
+  if (wakeFD >= 0) {
+    uint8_t byte = 1;
+    (void)write(wakeFD, &byte, 1);
+  }
+#endif
+}
+
+- (BOOL)parkIdleConnection:(ALNSocketHandle)clientFd {
+  if (!self.idleConnectionWatcherRunning || ![self shouldContinueRunning]) {
+    return NO;
+  }
+  NSUInteger timeoutSeconds = self.idleConnectionTimeoutSeconds;
+  double deadline = (timeoutSeconds > 0) ? ALNNowMilliseconds() + (double)timeoutSeconds * 1000.0 : 0.0;
+  [self.idleConnectionLock lock];
+  self.idleConnectionDeadlines[ALNBoxSocketHandle(clientFd)] = @(deadline);
+  [self.idleConnectionLock unlock];
+  [self wakeIdleConnectionWatcher];
+  return YES;
+}
+
+// Called after a keep-alive response. Returns YES when the connection was
+// handed to the watcher and the worker should move on.
+- (BOOL)parkIfIdleConnection:(ALNSocketHandle)clientFd
+                   readState:(ALNConnectionReadState *)readState
+                   allowPark:(BOOL)allowPark {
+#if defined(_WIN32)
+  (void)clientFd;
+  (void)readState;
+  (void)allowPark;
+  return NO;
+#else
+  if (!allowPark || !self.idleConnectionWatcherRunning || readState == NULL || readState->length > 0) {
+    // Pipelined bytes are already buffered: serve them on this worker.
+    return NO;
+  }
+  struct pollfd pfd;
+  pfd.fd = (int)clientFd;
+  pfd.events = POLLIN;
+  pfd.revents = 0;
+  int graceMilliseconds = (int)MIN(self.keepAliveParkAfterMilliseconds, (NSUInteger)1000);
+  int rc = 0;
+  do {
+    rc = poll(&pfd, 1, graceMilliseconds);
+  } while (rc < 0 && errno == EINTR);
+  if (rc != 0) {
+    // The next request (or EOF) is already here, or poll failed: keep reading here.
+    return NO;
+  }
+  return [self parkIdleConnection:clientFd];
+#endif
+}
+
+- (void)runIdleConnectionWatcher:(id)unused {
+  (void)unused;
+#if !defined(_WIN32)
+  @autoreleasepool {
+    size_t pollCapacity = 64;
+    struct pollfd *pollFDs = calloc(pollCapacity, sizeof(struct pollfd));
+    int wakeFD = self.idleConnectionWakeReadFD;
+    while (pollFDs != NULL && [self shouldContinueRunning]) {
+      @autoreleasepool {
+        [self.idleConnectionLock lock];
+        NSDictionary *deadlines = [self.idleConnectionDeadlines copy];
+        [self.idleConnectionLock unlock];
+
+        NSArray *parkedFDs = [deadlines allKeys];
+        size_t count = [parkedFDs count] + 1;
+        if (count > pollCapacity) {
+          size_t grownCapacity = MAX(count, pollCapacity * 2);
+          struct pollfd *grown = realloc(pollFDs, grownCapacity * sizeof(struct pollfd));
+          if (grown == NULL) {
+            break;
+          }
+          pollFDs = grown;
+          pollCapacity = grownCapacity;
+        }
+        pollFDs[0].fd = wakeFD;
+        pollFDs[0].events = POLLIN;
+        pollFDs[0].revents = 0;
+        double now = ALNNowMilliseconds();
+        double timeoutMilliseconds = 250.0;
+        for (NSUInteger idx = 0; idx < [parkedFDs count]; idx++) {
+          pollFDs[idx + 1].fd = (int)ALNSocketHandleFromNumber(parkedFDs[idx]);
+          pollFDs[idx + 1].events = POLLIN;
+          pollFDs[idx + 1].revents = 0;
+          double deadline = [deadlines[parkedFDs[idx]] doubleValue];
+          if (deadline > 0.0) {
+            timeoutMilliseconds = MIN(timeoutMilliseconds, MAX(0.0, deadline - now));
+          }
+        }
+
+        int rc = poll(pollFDs, (nfds_t)count, (int)ceil(timeoutMilliseconds));
+        if (rc < 0 && errno != EINTR) {
+          break;
+        }
+        if (pollFDs[0].revents & POLLIN) {
+          uint8_t drain[64];
+          while (read(wakeFD, drain, sizeof(drain)) > 0) {
+          }
+        }
+
+        now = ALNNowMilliseconds();
+        NSMutableArray *ready = [NSMutableArray array];
+        NSMutableArray *expired = [NSMutableArray array];
+        [self.idleConnectionLock lock];
+        for (NSUInteger idx = 0; idx < [parkedFDs count]; idx++) {
+          NSNumber *boxed = parkedFDs[idx];
+          if (self.idleConnectionDeadlines[boxed] == nil) {
+            continue;
+          }
+          short revents = (rc > 0) ? pollFDs[idx + 1].revents : 0;
+          double deadline = [deadlines[boxed] doubleValue];
+          if (revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)) {
+            [ready addObject:boxed];
+            [self.idleConnectionDeadlines removeObjectForKey:boxed];
+          } else if (deadline > 0.0 && now >= deadline) {
+            [expired addObject:boxed];
+            [self.idleConnectionDeadlines removeObjectForKey:boxed];
+          }
+        }
+        [self.idleConnectionLock unlock];
+
+        for (NSNumber *boxed in ready) {
+          ALNSocketHandle clientFd = ALNSocketHandleFromNumber(boxed);
+          if (![self enqueueResumedHTTPClientForWorker:clientFd]) {
+            [self releaseHTTPSessionReservation];
+            ALNSocketClose(clientFd);
+          }
+        }
+        for (NSNumber *boxed in expired) {
+          [self releaseHTTPSessionReservation];
+          ALNSocketClose(ALNSocketHandleFromNumber(boxed));
+        }
+      }
+    }
+
+    [self.idleConnectionLock lock];
+    NSArray *remaining = [self.idleConnectionDeadlines allKeys];
+    [self.idleConnectionDeadlines removeAllObjects];
+    [self.idleConnectionLock unlock];
+    for (NSNumber *boxed in remaining) {
+      [self releaseHTTPSessionReservation];
+      ALNSocketClose(ALNSocketHandleFromNumber(boxed));
+    }
+    free(pollFDs);
+    self.idleConnectionWatcherRunning = NO;
+    close(self.idleConnectionWakeReadFD);
+    close(self.idleConnectionWakeWriteFD);
+    self.idleConnectionWakeReadFD = -1;
+    self.idleConnectionWakeWriteFD = -1;
+  }
+#endif
 }
 
 - (void)resetHTTPWorkerPoolState {
   [self.httpWorkerQueueCondition lock];
   [self.pendingHTTPClientFDs removeAllObjects];
+  [self.resumedHTTPClientFDs removeAllObjects];
   self.pendingHTTPClientFDHeadIndex = 0;
   self.httpWorkerPoolStarted = NO;
   [self.httpWorkerQueueCondition unlock];
@@ -3748,6 +3993,12 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 }
 
 - (void)handleClient:(ALNSocketHandle)clientFd {
+  (void)[self serveClient:clientFd resumed:NO allowPark:NO];
+}
+
+// Returns YES when the connection was parked with the idle-connection watcher;
+// the caller must then leave the socket open and keep its session reservation.
+- (BOOL)serveClient:(ALNSocketHandle)clientFd resumed:(BOOL)resumed allowPark:(BOOL)allowPark {
   BOOL performanceLogging =
       ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
@@ -3764,7 +4015,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   ALNConnectionReadStateInit(&readState);
 
   @try {
-    NSUInteger requestsHandled = 0;
+    // A resumed connection has already served requests, so a timeout closes it quietly.
+    NSUInteger requestsHandled = resumed ? 1 : 0;
     while ([self shouldContinueRunning]) {
       @autoreleasepool {
         double requestStartMs = ALNNowMilliseconds();
@@ -3779,10 +4031,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         double parseMs = ALNNowMilliseconds() - parseStartMs;
         if (request == nil) {
           if (readStatus == 0) {
-            return;
+            return NO;
           }
           if (requestsHandled > 0 && readStatus == 408) {
-            return;
+            return NO;
           }
 
           ALNResponse *errorResponse = nil;
@@ -3801,7 +4053,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
           (void)ALNSendResponse(clientFd, errorResponse, performanceLogging, YES);
-          return;
+          return NO;
         }
         request.parseDurationMilliseconds = parseMs;
 
@@ -3844,7 +4096,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                 ![request.method isEqualToString:@"HEAD"]);
             requestsHandled += 1;
             if (!keepAlive) {
-              return;
+              return NO;
+            }
+            if ([self parkIfIdleConnection:clientFd readState:&readState allowPark:allowPark]) {
+              return YES;
             }
             handledStatic = YES;
             break;
@@ -3885,7 +4140,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
           (void)ALNSendResponse(clientFd, invalidUpgrade, performanceLogging, YES);
-          return;
+          return NO;
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
         if (webSocketUpgrade) {
@@ -3897,7 +4152,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             (void)ALNSendResponse(clientFd, originDenied, performanceLogging, YES);
-            return;
+            return NO;
           }
           ALNWebSocketClientSession *webSocketSession = nil;
           ALNRealtimeSubscription *channelSubscription = nil;
@@ -3918,7 +4173,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
-            return;
+            return NO;
           }
 
           if ([webSocketMode isEqualToString:@"channel"]) {
@@ -3943,7 +4198,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           ALNNowMilliseconds() - requestStartMs);
               (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
-              return;
+              return NO;
             }
           } else if ([webSocketMode isEqualToString:@"stream"]) {
             NSError *streamError = nil;
@@ -3959,7 +4214,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           ALNNowMilliseconds() - requestStartMs);
               (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
-              return;
+              return NO;
             }
             if (streamReplayResult.resyncRequired) {
               ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
@@ -3971,7 +4226,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           ALNNowMilliseconds() - requestStartMs);
               (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
               [self releaseWebSocketSessionReservation];
-              return;
+              return NO;
             }
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
             if (self.application.eventStreamBroker != nil) {
@@ -3989,7 +4244,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                             ALNNowMilliseconds() - requestStartMs);
                 (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
                 [self releaseWebSocketSessionReservation];
-                return;
+                return NO;
               }
             }
           }
@@ -4023,7 +4278,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           } @finally {
             [self releaseWebSocketSessionReservation];
           }
-          return;
+          return NO;
         }
 
         if ([sseMode isEqualToString:@"stream"]) {
@@ -4040,7 +4295,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
-            return;
+            return NO;
           }
           if (streamReplayResult.resyncRequired) {
             ALNResponse *resyncResponse = [self eventStreamResyncResponseForResponse:response
@@ -4051,7 +4306,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
-            return;
+            return NO;
           }
 
           BOOL reserved = [self reserveHTTPSessionWithLimit:self.maxConcurrentHTTPSessions];
@@ -4065,18 +4320,18 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
-            return;
+            return NO;
           }
 
           ALNSSEClientSession *sseSession = [[ALNSSEClientSession alloc] initWithClientFd:clientFd];
           ALNEventStreamBrokerSubscription *streamSubscription = nil;
           @try {
             if (!ALNSendSSEHeaders(clientFd, response)) {
-              return;
+              return NO;
             }
             for (ALNEventEnvelope *event in streamReplayResult.events ?: @[]) {
               if (![sseSession sendFrame:ALNSSEFrameForEventEnvelope(event)]) {
-                return;
+                return NO;
               }
             }
             if (self.application.eventStreamBroker != nil) {
@@ -4085,14 +4340,14 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                          subscriber:sseSession
                               error:&streamError];
               if (streamSubscription == nil) {
-                return;
+                return NO;
               }
             }
             [self runSSEStreamSession:sseSession subscription:streamSubscription];
           } @finally {
             [self releaseHTTPSessionReservation];
           }
-          return;
+          return NO;
         }
 
         // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
@@ -4109,13 +4364,17 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                             ![request.method isEqualToString:@"HEAD"]);
         requestsHandled += 1;
         if (!keepAlive) {
-          return;
+          return NO;
+        }
+        if ([self parkIfIdleConnection:clientFd readState:&readState allowPark:allowPark]) {
+          return YES;
         }
       }
     }
   } @finally {
     ALNConnectionReadStateDestroy(&readState);
   }
+  return NO;
 }
 
 - (int)runWithHost:(NSString *)host
@@ -4153,6 +4412,8 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
     self.maxConcurrentHTTPWorkers = runtimeLimits.maxConcurrentHTTPWorkers;
     self.maxQueuedHTTPConnections = runtimeLimits.maxQueuedHTTPConnections;
+    self.keepAliveParkAfterMilliseconds = runtimeLimits.keepAliveParkAfterMilliseconds;
+    self.idleConnectionTimeoutSeconds = tuning.connectionTimeoutSeconds;
     [[ALNRealtimeHub sharedHub]
         configureLimitsWithMaxTotalSubscribers:runtimeLimits.maxRealtimeTotalSubscribers
                       maxSubscribersPerChannel:runtimeLimits.maxRealtimeChannelSubscribers];
