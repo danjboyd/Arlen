@@ -184,9 +184,24 @@ static NSString *ALNHostDeployProfile(void) {
   return [self runShellCapture:command exitCode:exitCode];
 }
 
+// make prints paths the way its shell spells them: /c/... under MSYS2 on
+// Windows, where this process sees C:/....
+- (NSString *)makePathSpelling:(NSString *)path {
+#if defined(_WIN32)
+  int code = 0;
+  NSString *converted = [[self runShellCapture:[NSString stringWithFormat:@"cygpath -u %@", [self shellQuoted:path]]
+                                      exitCode:&code]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return (code == 0 && [converted length] > 0) ? converted : path;
+#else
+  return path;
+#endif
+}
+
 - (void)testFrameworkSourceTouchRebuildsOneObjectArchiveAndDependentLinks {
   ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *makeRoot = [self makePathSpelling:repoRoot];
   NSString *frameworkSource = [repoRoot stringByAppendingPathComponent:@"src/Arlen/MVC/View/ALNView.m"];
   int code = 0;
   NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
@@ -198,16 +213,16 @@ static NSString *ALNHostDeployProfile(void) {
                         touchingPath:frameworkSource
                             exitCode:&code];
   NSString *archiveCommand =
-      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", makeRoot];
   NSString *frameworkCompileCommand = [NSString
       stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
-                       repoRoot];
+                       makeRoot];
   NSString *generatedIndexCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
-                       repoRoot];
+                       makeRoot];
   NSString *unitCompileCommand = [NSString
       stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
-                       repoRoot];
+                       makeRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:frameworkCompileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:archiveCommand], @"%@", dryRun);
@@ -222,6 +237,12 @@ static NSString *ALNHostDeployProfile(void) {
   ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *templatePath = [repoRoot stringByAppendingPathComponent:@"templates/index.html.eoc"];
+  NSString *makeRoot = [self makePathSpelling:repoRoot];
+#if defined(_WIN32)
+  NSString *executableSuffix = @".exe";
+#else
+  NSString *executableSuffix = @"";
+#endif
   int code = 0;
   NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
@@ -232,19 +253,19 @@ static NSString *ALNHostDeployProfile(void) {
                         touchingPath:templatePath
                             exitCode:&code];
   NSString *transpileCommand = [NSString stringWithFormat:
-      @"%@/build/eocc --template-root %@/templates "
+      @"%@/build/eocc%@ --template-root %@/templates "
        "--output-dir %@/build/gen/templates "
       "--manifest %@/build/gen/templates/manifest.json",
-      repoRoot, repoRoot, repoRoot, repoRoot];
+      makeRoot, executableSuffix, makeRoot, makeRoot, makeRoot];
   NSString *generatedIndexCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/index.html.eoc.m -o %@/build/obj/build/gen/templates/index.html.eoc.o",
-                       repoRoot];
+                       makeRoot];
   NSString *generatedLayoutCompileCommand = [NSString
       stringWithFormat:@"-c build/gen/templates/layouts/main.html.eoc.m -o %@/build/obj/build/gen/templates/layouts/main.html.eoc.o",
-                       repoRoot];
+                       makeRoot];
   NSString *frameworkCompileCommand = [NSString
       stringWithFormat:@"-c src/Arlen/MVC/View/ALNView.m -o %@/build/obj/src/Arlen/MVC/View/ALNView.o",
-                       repoRoot];
+                       makeRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:transpileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:generatedIndexCompileCommand], @"%@", dryRun);
@@ -260,6 +281,7 @@ static NSString *ALNHostDeployProfile(void) {
   ALNSkipOnApple(@"GNU make build graph (Apple incremental builds: AppleBuildCacheTests)");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *unitTestPath = [repoRoot stringByAppendingPathComponent:@"tests/unit/BuildPolicyTests.m"];
+  NSString *makeRoot = [self makePathSpelling:repoRoot];
   int code = 0;
   NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"build-tests" exitCode:&code];
   XCTAssertEqual(0, code, @"%@", buildOutput);
@@ -270,10 +292,10 @@ static NSString *ALNHostDeployProfile(void) {
                         touchingPath:unitTestPath
                             exitCode:&code];
   NSString *frameworkArchiveCommand =
-      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", repoRoot];
+      [NSString stringWithFormat:@"ar rcs %@/build/lib/libArlenFramework.a", makeRoot];
   NSString *unitCompileCommand = [NSString
       stringWithFormat:@"-c tests/unit/BuildPolicyTests.m -o %@/build/obj/tests/unit/BuildPolicyTests.o",
-                       repoRoot];
+                       makeRoot];
   XCTAssertEqual(0, code, @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:unitCompileCommand], @"%@", dryRun);
   XCTAssertTrue([dryRun containsString:@"build/tests/ArlenUnitTests.xctest/ArlenUnitTests"], @"%@", dryRun);
