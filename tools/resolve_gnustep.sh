@@ -5,7 +5,21 @@ default_gnustep_sh="/usr/GNUstep/System/Library/Makefiles/GNUstep.sh"
 clang64_gnustep_sh="/clang64/share/GNUstep/Makefiles/GNUstep.sh"
 
 print_path() {
-  printf '%s\n' "$1"
+  local path="$1"
+  # MSYS2 rewrites path-like variables (GNUSTEP_MAKEFILES) to C:/... when a
+  # native Windows process (xctest, an app) starts a shell. Print one spelling
+  # so callers that hash this path (the framework build-flags sentinel) agree;
+  # otherwise each spelling deletes the other's sentinel and rebuilds everything.
+  if [[ "$path" =~ ^[A-Za-z]:[\\/] ]]; then
+    # /usr/bin/cygpath too: callers may run this with a PATH that omits it.
+    local cygpath_bin
+    cygpath_bin="$(command -v cygpath 2>/dev/null || true)"
+    [[ -z "$cygpath_bin" && -x /usr/bin/cygpath ]] && cygpath_bin=/usr/bin/cygpath
+    if [[ -n "$cygpath_bin" ]]; then
+      path="$("$cygpath_bin" -u "$path")"
+    fi
+  fi
+  printf '%s\n' "$path"
 }
 
 candidate_from_makefiles() {
