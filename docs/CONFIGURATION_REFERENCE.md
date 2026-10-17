@@ -549,6 +549,16 @@ For most new apps:
 - `docs/MODULES.md`
 - `docs/LITE_MODE_GUIDE.md`
 
+## Optional notifications and search module limits
+
+- `notificationsModule.outbox.maxEntries` (default `1000`) and
+  `notificationsModule.inbox.maxEntriesPerRecipient` (default `200`) cap the
+  notifications outbox and each inbox; the oldest entries are dropped. See
+  [Notifications Module](NOTIFICATIONS_MODULE.md#retention-limits).
+- The search module rejects `q` longer than 256 characters (`422`) and clamps
+  `autocomplete_limit`/`suggestions_limit` to 25. See
+  [Search Module](SEARCH_MODULE.md#query-limits).
+
 ## Optional MCP module configuration
 
 `mcp.enabled` defaults to `NO`. Explicit registration is required for every tool.

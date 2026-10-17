@@ -231,6 +231,8 @@ on Apple arm64 (GitHub issue 132).
 for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
 (GitHub issue 173).
 `search` moved to `1.0.3` to bound query cost (GitHub issue 226).
+`notifications` moved to `1.1.2` for outbox/inbox caps, inbox pagination and
+preference validation (GitHub issue 227).
 
 ## MCP tools
 

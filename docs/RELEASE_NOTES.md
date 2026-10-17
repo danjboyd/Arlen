@@ -73,6 +73,17 @@
   skips the edit-distance table when word lengths differ by more than two.
   Results for other queries are unchanged (#226). `search` moves to `1.0.3`.
 
+- The `notifications` module caps its outbox (`outbox.maxEntries`, default
+  1000) and each recipient's inbox (`inbox.maxEntriesPerRecipient`, default
+  200); past the cap the oldest entries are dropped, including when a larger
+  state file is loaded. The inbox (`GET /notifications/api/inbox`,
+  `GET /notifications/inbox`, and the new
+  `-inboxSummaryForRecipient:limit:offset:`) accepts `limit` and `offset` and
+  returns a `pagination` object; without `limit` it still returns the whole
+  (now bounded) inbox. Preference updates for an unregistered notification or
+  an unknown channel are rejected with `422` instead of being stored. How and
+  when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.
