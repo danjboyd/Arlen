@@ -18,6 +18,23 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- HTTP request handling follows RFC 9110/9112 more closely (#211, #212, #213,
+  #253):
+  - Chunk-size lines no longer count toward `maxHeaderBytes`. A chunked body
+    sent as many small chunks used to get `431`.
+  - `Expect: 100-continue` gets an interim `100 Continue`. Clients such as curl
+    used to wait about a second before sending the body. Other expectations
+    get `417`.
+  - An HTTP/1.1 request with two `Host` headers, or none, gets `400`. Before,
+    the last `Host` won and a missing one was accepted. Clients that send
+    HTTP/1.1 without `Host` must add it.
+  - An absolute-form target (`GET http://host/path`) is routed by its path,
+    and its authority becomes the `Host`. It used to return `404`.
+  - `400`, `408`, `413`, `417` and `431` responses written before the
+    application runs now carry the configured security headers.
+  - The configuration reference now says that the default parser accepts
+    chunked request bodies; it used to say they were rejected.
+
 - Production defaults are tighter (#215, #244):
   - `performanceLogging` now defaults to off in `production`. A new
     `performanceHeaders` setting (`ARLEN_PERFORMANCE_HEADERS`), also off in

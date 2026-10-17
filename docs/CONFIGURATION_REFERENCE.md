@@ -108,9 +108,28 @@ which can also be lower than the default. No middleware or controller runs
 before this check or before the body is read; route matching is the only input.
 On a route with an override, multipart parsing uses that limit for the whole body
 and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
-stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)). Request bodies
-with `Transfer-Encoding: chunked` are not supported and are rejected with `400`
-without reading the body; clients must send `Content-Length`.
+stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)).
+
+Chunked request bodies (`Transfer-Encoding: chunked`) are accepted by the
+default `llhttp` parser. They are buffered in memory, never spooled, and their
+decoded size is held to `requestLimits.maxBodyBytes`; a per-route override
+can't be checked before the body arrives, because there is no
+`Content-Length`. Only the request head (request line and headers) counts
+toward `maxHeaderBytes`, not the chunk-size lines. The legacy parser
+(`ARLEN_HTTP_PARSER_BACKEND=legacy`) rejects chunked bodies with `400`.
+
+Other request-head rules:
+
+- `Expect: 100-continue` gets an interim `100 Continue` once the head has
+  passed the size checks, before the client sends the body. A request rejected
+  at that point (for example `413`) gets the final status instead. Any other
+  expectation gets `417`.
+- An HTTP/1.1 request must carry exactly one `Host` header; a duplicate or a
+  missing one gets `400` (RFC 9112 §3.2). HTTP/1.0 requests may omit it.
+- An absolute-form target (`GET http://example.com/path HTTP/1.1`) is routed by
+  its path, and its authority replaces the `Host` header.
+- Responses written before the application runs (`400`, `408`, `413`, `417`,
+  `431`) carry the configured `securityHeaders`.
 
 ## 4. Database
 
