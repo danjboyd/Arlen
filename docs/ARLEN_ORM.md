@@ -173,6 +173,14 @@ must use known exact SQL column keys and valid, unambiguous aliases. Primary and
 foreign keys reflected from physical metadata resolve to the resulting logical
 fields. Explicit relation overrides should use those logical field names.
 
+Inferred relation names never reuse a field name on the same model, because
+relations and fields share the generated Objective-C property and TypeScript
+interface namespaces. A relation that would shadow a column gets a cardinality
+suffix: a `section` foreign-key column referencing `sections` yields the
+`sectionRecord` relation, and an `items.notes` column alongside a `notes` child
+table yields `notesList`. TypeScript codegen rejects explicit relation overrides
+that reuse a field name, naming the entity and relation in the error.
+
 The ORM encodes each physical component before passing it to the SQL builder.
 The builder parses qualified identifier paths into components and quotes each
 component for the selected dialect, doubling embedded delimiters. A literal dot
@@ -209,6 +217,9 @@ and emits a generated TypeScript package with:
 - optional `react.ts` TanStack Query-oriented helpers
 - `meta.ts` module/resource/admin metadata registries plus workspace hints
 - a versioned manifest (`format: arlen-typescript-contract-v1`)
+
+The generated package type-checks under `strict`, `noUnusedLocals`, and
+`noUnusedParameters`.
 
 The recommended CLI path is:
 

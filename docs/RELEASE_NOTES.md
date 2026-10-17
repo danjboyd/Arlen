@@ -42,6 +42,14 @@
   documents `runtimeLimits` and notes that server-sent event and WebSocket
   sessions still hold a worker while open (#187).
 
+- `arlen typescript-codegen` output compiles in two more cases (#184):
+  - Inferred ORM relations no longer reuse a column name on the same model. A
+    relation that would shadow a column gets a `Record` or `List` suffix, for
+    example `sectionRecord` or `notesList`. Explicit relation overrides that
+    collide fail with a clear error.
+  - `react.ts` query keys for operations without parameters name their
+    argument `_request`, so the package compiles under `noUnusedParameters`.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

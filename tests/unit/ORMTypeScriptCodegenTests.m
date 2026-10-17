@@ -439,6 +439,103 @@
   XCTAssertTrue([models containsString:@"export interface PublicUser"]);
 }
 
+// Issue 184: the sections/items/notes schema from the report.
+- (NSDictionary *)columnCollisionMetadata {
+  NSDictionary *(^column)(NSString *, NSString *, NSInteger, NSString *, BOOL) =
+      ^NSDictionary *(NSString *table, NSString *name, NSInteger ordinal, NSString *type, BOOL nullable) {
+        return @{ @"schema" : @"public", @"table" : table, @"column" : name, @"ordinal" : @(ordinal),
+                  @"data_type" : type, @"nullable" : @(nullable) };
+      };
+  return @{
+    @"relations" : @[
+      @{ @"schema" : @"public", @"table" : @"sections", @"relation_kind" : @"table" },
+      @{ @"schema" : @"public", @"table" : @"items", @"relation_kind" : @"table" },
+      @{ @"schema" : @"public", @"table" : @"notes", @"relation_kind" : @"table" },
+    ],
+    @"columns" : @[
+      column(@"sections", @"key", 1, @"text", NO), column(@"sections", @"title", 2, @"text", NO),
+      column(@"items", @"id", 1, @"text", NO), column(@"items", @"section", 2, @"text", NO),
+      column(@"items", @"notes", 3, @"text", YES),
+      column(@"notes", @"id", 1, @"bigint", NO), column(@"notes", @"item_id", 2, @"text", NO),
+      column(@"notes", @"body", 3, @"text", NO),
+    ],
+    @"primary_keys" : @[
+      @{ @"schema" : @"public", @"table" : @"sections", @"columns" : @[ @"key" ] },
+      @{ @"schema" : @"public", @"table" : @"items", @"columns" : @[ @"id" ] },
+      @{ @"schema" : @"public", @"table" : @"notes", @"columns" : @[ @"id" ] },
+    ],
+    @"foreign_keys" : @[
+      @{ @"schema" : @"public", @"table" : @"items", @"constraint_name" : @"items_section_fkey",
+         @"columns" : @[ @"section" ], @"referenced_schema" : @"public", @"referenced_table" : @"sections",
+         @"referenced_columns" : @[ @"key" ] },
+      @{ @"schema" : @"public", @"table" : @"notes", @"constraint_name" : @"notes_item_id_fkey",
+         @"columns" : @[ @"item_id" ], @"referenced_schema" : @"public", @"referenced_table" : @"items",
+         @"referenced_columns" : @[ @"id" ] },
+    ],
+  };
+}
+
+- (void)testInferredRelationNamesDoNotCollideWithColumnNames {
+  NSError *error = nil;
+  NSArray<ALNORMModelDescriptor *> *descriptors =
+      [ALNORMCodegen modelDescriptorsFromSchemaMetadata:[self columnCollisionMetadata] classPrefix:@"ALNORMX" error:&error];
+  XCTAssertNil(error);
+  NSMutableDictionary<NSString *, ALNORMModelDescriptor *> *byEntity = [NSMutableDictionary dictionary];
+  for (ALNORMModelDescriptor *descriptor in descriptors) {
+    byEntity[descriptor.entityName] = descriptor;
+  }
+  ALNORMModelDescriptor *items = byEntity[@"public.items"];
+  XCTAssertEqualObjects(@"section", [items fieldForColumnName:@"section"].name);
+  XCTAssertNotNil([items relationNamed:@"sectionRecord"]);
+  XCTAssertNotNil([items relationNamed:@"notesList"]);
+  XCTAssertNotNil([byEntity[@"public.sections"] relationNamed:@"items"]);
+  XCTAssertNotNil([byEntity[@"public.notes"] relationNamed:@"item"]);
+
+  NSDictionary *artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:[self columnCollisionMetadata]
+                                                                           classPrefix:@"ALNORMX"
+                                                                        databaseTarget:nil
+                                                                    descriptorOverrides:nil
+                                                                   openAPISpecification:nil
+                                                                           packageName:@"collision-client"
+                                                                               targets:@[ @"validators" ]
+                                                                                 error:&error];
+  XCTAssertNil(error);
+  NSString *models = [artifacts[@"files"][@"src/models.ts"] isKindOfClass:[NSString class]]
+                         ? artifacts[@"files"][@"src/models.ts"]
+                         : @"";
+  XCTAssertTrue([models containsString:@"  readonly section: string;\n"], @"%@", models);
+  XCTAssertTrue([models containsString:@"  readonly sectionRecord?: "], @"%@", models);
+  XCTAssertTrue([models containsString:@"  readonly notesList?: "], @"%@", models);
+}
+
+- (void)testExplicitRelationNamedLikeAFieldFailsWithEntityAndRelationName {
+  NSDictionary *overrides = @{
+    @"public.items" : @{
+      @"relations" : @[ @{
+        @"kind" : @"belongs_to",
+        @"name" : @"section",
+        @"target_entity_name" : @"public.sections",
+        @"source_field_names" : @[ @"section" ],
+        @"target_field_names" : @[ @"key" ],
+        @"read_only" : @NO,
+      } ],
+    },
+  };
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:[self columnCollisionMetadata]
+                                                                           classPrefix:@"ALNORMX"
+                                                                        databaseTarget:nil
+                                                                    descriptorOverrides:overrides
+                                                                   openAPISpecification:nil
+                                                                           packageName:@"collision-client"
+                                                                               targets:@[ @"validators" ]
+                                                                                 error:&error];
+  XCTAssertNil(artifacts);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(@"public.items", error.userInfo[@"entity_name"]);
+  XCTAssertEqualObjects(@"section", error.userInfo[@"relation_name"]);
+}
+
 - (void)testTypeScriptCodegenCLIGeneratesClientWithoutORMManifest {
   // Issue 183: no db/schema/arlen_orm_manifest.json and no --orm-input.
   NSString *appRoot = ALNTestTemporaryDirectory(@"orm_typescript_codegen_openapi_only");
