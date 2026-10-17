@@ -249,10 +249,12 @@ $candidates += '__MSYS_ROOT__'
 if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA "gnustep-cli") }
 if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "gnustep-cli") }
 $envExe = $null
+$msysRoot = $null
 foreach ($candidate in $candidates) {
   $probe = Join-Path $candidate "usr\bin\env.exe"
   if ((Test-Path $probe) -and (Test-Path (Join-Path $candidate "clang64\share\GNUstep\Makefiles\GNUstep.sh"))) {
     $envExe = $probe
+    $msysRoot = $candidate
     break
   }
 }
@@ -324,7 +326,11 @@ public static class ArlenLauncherJob1 {
 } catch {
 }
 $nativeArgs = @($args | ForEach-Object { ([string]$_).Replace('"', '\"') })
-& $envExe 'MSYSTEM=CLANG64' 'CHERE_INVOKING=1' "ARLEN_HOME_WIN=$arlenHome" '/usr/bin/bash' '-lc' $bootstrap.Replace('"', '\"') 'arlen' @nativeArgs
+# ARLEN_MSYS_ROOT tells the Arlen runtime (boomhauer's helper bash, the app)
+# which toolchain this launcher chose; without it a non-default root would
+# fall back to %LOCALAPPDATA%\gnustep-cli. Passed through env.exe so it is
+# scoped to this run and never set in the caller's shell.
+& $envExe 'MSYSTEM=CLANG64' 'CHERE_INVOKING=1' "ARLEN_HOME_WIN=$arlenHome" "ARLEN_MSYS_ROOT=$msysRoot" '/usr/bin/bash' '-lc' $bootstrap.Replace('"', '\"') 'arlen' @nativeArgs
 exit $LASTEXITCODE
 '@
   $launcherBody = $launcherBody.Replace('__CURRENT__', $current.Replace("'", "''")).Replace('__MSYS_ROOT__', $resolvedRoot.Replace("'", "''"))
