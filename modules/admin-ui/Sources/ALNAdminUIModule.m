@@ -8,6 +8,7 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
@@ -362,9 +363,7 @@ static NSArray<NSDictionary *> *AUNormalizedFieldArray(id rawFields) {
       @"choices" : AUNormalizedChoiceArray(entry[@"choices"]),
       @"autocomplete" : @{
         @"enabled" : @(AUBoolValue(autocomplete[@"enabled"], [autocomplete count] > 0)),
-        @"minQueryLength" : @([autocomplete[@"minQueryLength"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? [autocomplete[@"minQueryLength"] unsignedIntegerValue]
-                                  : 1U),
+        @"minQueryLength" : @(ALNUnsignedIntegerValueOrDefault(autocomplete[@"minQueryLength"], 1U)),
       },
     }];
   }
@@ -1250,13 +1249,11 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     field[@"autocomplete"] = autocomplete;
     fields[index] = field;
   }
-  NSUInteger pageSize = [rawMetadata[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [rawMetadata[@"pageSize"] unsignedIntegerValue] : 50U;
+  NSUInteger pageSize = ALNUnsignedIntegerValueOrDefault(rawMetadata[@"pageSize"], 50U);
   if (pageSize == 0U) {
     pageSize = 50U;
   }
-  NSUInteger maxPageSize = [rawMetadata[@"maxPageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? [rawMetadata[@"maxPageSize"] unsignedIntegerValue]
-                               : MAX(pageSize, 200U);
+  NSUInteger maxPageSize = ALNUnsignedIntegerValueOrDefault(rawMetadata[@"maxPageSize"], MAX(pageSize, 200U));
   if (maxPageSize < pageSize) {
     maxPageSize = pageSize;
   }
@@ -1730,9 +1727,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   NSUInteger maxLimit = [resource[@"pagination"][@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
                             ? [resource[@"pagination"][@"maxLimit"] unsignedIntegerValue]
                             : 200U;
-  NSUInteger exportLimit = [parameters[@"exportLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? [parameters[@"exportLimit"] unsignedIntegerValue]
-                               : MIN((NSUInteger)1000U, MAX((NSUInteger)1U, maxLimit));
+  NSUInteger exportLimit = ALNUnsignedIntegerValueOrDefault(parameters[@"exportLimit"], MIN((NSUInteger)1000U, MAX((NSUInteger)1U, maxLimit)));
   exportLimit = MIN(exportLimit, MAX((NSUInteger)1U, maxLimit));
   NSArray *records = [self listRecordsForResourceIdentifier:identifier parameters:(parameters ?: @{}) limit:exportLimit offset:0 error:error];
   if (records == nil) {
@@ -2059,16 +2054,12 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   if (maxLimit < defaultLimit) {
     maxLimit = defaultLimit;
   }
-  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                         ? [parameters[@"limit"] unsignedIntegerValue]
-                         : defaultLimit;
+  NSUInteger limit = ALNUnsignedIntegerValueOrDefault(parameters[@"limit"], defaultLimit);
   if (limit == 0U) {
     limit = defaultLimit;
   }
   limit = MIN(MAX((NSUInteger)1U, limit), maxLimit);
-  NSUInteger page = [parameters[@"page"] respondsToSelector:@selector(unsignedIntegerValue)]
-                        ? [parameters[@"page"] unsignedIntegerValue]
-                        : 1U;
+  NSUInteger page = ALNUnsignedIntegerValueOrDefault(parameters[@"page"], 1U);
   if (page == 0U) {
     page = 1U;
   }
@@ -2857,9 +2848,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     };
   }
   NSDictionary *parameters = [self requestParameters];
-  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                         ? [parameters[@"limit"] unsignedIntegerValue]
-                         : 10U;
+  NSUInteger limit = ALNUnsignedIntegerValueOrDefault(parameters[@"limit"], 10U);
   NSError *error = nil;
   NSArray *suggestions = [self.runtime autocompleteSuggestionsForResourceIdentifier:resourceID
                                                                           fieldName:fieldName

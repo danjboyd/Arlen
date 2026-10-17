@@ -4,7 +4,9 @@
 #import <stdlib.h>
 #import <string.h>
 
+#import "ALNApplication.h"
 #import "ALNConfig.h"
+#import "ALNDataverseClient.h"
 #import "ALNMultipart.h"
 
 @interface ConfigTests : XCTestCase
@@ -312,6 +314,37 @@
   XCTAssertEqualObjects(@(NO), overriddenState[@"durable"]);
   XCTAssertEqualObjects(@"file", overriddenState[@"mode"]);
   XCTAssertEqualObjects(@"pilot", overriddenState[@"target"]);
+}
+
+// Old-style (text) plists hold bare integers as NSStrings, and ALNConfig passes
+// the dataverse section through. Apple's NSString has no -unsignedIntegerValue,
+// so these used to fall back to their defaults there.
+- (void)testOldStylePlistDataverseNumbersReachTarget {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+  NSString *testPlist = [root stringByAppendingPathComponent:@"config/environments/test.plist"];
+  XCTAssertTrue([self writeFile:testPlist
+                        content:@"{\n"
+                                 "  dataverse = {\n"
+                                 "    serviceRootURL = \"https://example.crm.dynamics.com/api/data/v9.2\";\n"
+                                 "    tenantID = \"tenant-id\";\n"
+                                 "    clientID = \"client-id\";\n"
+                                 "    clientSecret = \"client-secret\";\n"
+                                 "    maxRetries = 5;\n"
+                                 "    pageSize = 250;\n"
+                                 "  };\n"
+                                 "}\n"]);
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(config);
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:config ?: @{}];
+  ALNDataverseTarget *target = [app dataverseTargetNamed:nil error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(target);
+  XCTAssertEqual((NSUInteger)5, target.maxRetries);
+  XCTAssertEqual((NSUInteger)250, target.pageSize);
 }
 
 - (void)testProductionDefaultsToConcurrentRequestDispatchMode {

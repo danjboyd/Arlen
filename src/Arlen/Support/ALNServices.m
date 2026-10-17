@@ -1,6 +1,7 @@
 #import "ALNServices.h"
 #import "ALNDataCompat.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 
 #include <fcntl.h>
 #include <errno.h>
@@ -981,9 +982,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *normalizedOptions = ALNNormalizeDictionary(options);
   NSUInteger maxAttempts = 3;
   id configuredAttempts = normalizedOptions[@"maxAttempts"];
-  if ([configuredAttempts respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [configuredAttempts unsignedIntegerValue] > 0) {
-    maxAttempts = [configuredAttempts unsignedIntegerValue];
+  NSUInteger parsedAttempts = ALNUnsignedIntegerValueOrDefault(configuredAttempts, 0);
+  if (parsedAttempts > 0) {
+    maxAttempts = parsedAttempts;
   }
 
   NSDate *notBefore = [NSDate date];
@@ -1488,9 +1489,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *normalizedOptions = ALNNormalizeDictionary(options);
   NSUInteger maxAttempts = 3;
   id configuredAttempts = normalizedOptions[@"maxAttempts"];
-  if ([configuredAttempts respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [configuredAttempts unsignedIntegerValue] > 0) {
-    maxAttempts = [configuredAttempts unsignedIntegerValue];
+  NSUInteger parsedAttempts = ALNUnsignedIntegerValueOrDefault(configuredAttempts, 0);
+  if (parsedAttempts > 0) {
+    maxAttempts = parsedAttempts;
   }
 
   NSDate *notBefore = [NSDate date];

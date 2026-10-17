@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Numbers that arrive as strings are now read on Apple Foundation. Query
+  parameters such as admin-ui `?page=` and `?limit=`, jobs `?limit=`, and
+  search `?limit=` and `?autocomplete_limit=`, and numeric settings in
+  old-style (text) plists such as dataverse `maxRetries`, module `maxAttempts`
+  and pagination limits, were silently replaced by their defaults on macOS:
+  Apple's `NSString` has no `-unsignedIntegerValue`. The new
+  `ALNUnsignedIntegerFromValue` and `ALNUnsignedIntegerValueOrDefault`
+  (`ALNPlatform.h`) accept an `NSNumber` or a string of decimal digits
+  (surrounding whitespace allowed; no sign, fraction, exponent or overflow).
+  On GNUstep, a string that is not plain digits (such as `limit=abc` or
+  `-1`) now gets the default; before, GNUstep read its leading number, or
+  `0`. `admin-ui` and `ops` are now `1.0.3`, `auth` `1.5.3`, `jobs`
+  `1.1.1`, `notifications` `1.1.3`, `search` `1.0.4` and `storage` `1.1.2`
+  (#264).
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
