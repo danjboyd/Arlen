@@ -8,6 +8,8 @@
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNOIDCClientErrorDomain = @"Arlen.OIDCClient.Error";
+// How far in the future an authorization callback's issuedAt may be.
+static const NSTimeInterval ALNOIDCCallbackFutureSkewSeconds = 1.0;
 
 static NSError *ALNOIDCClientError(ALNOIDCClientErrorCode code, NSString *message) {
   return [NSError errorWithDomain:ALNOIDCClientErrorDomain
@@ -599,7 +601,12 @@ static NSString *ALNOIDCURLWithQueryParameters(NSString *baseURL, NSArray *order
 
   if (maxAgeSeconds > 0 && issuedAtDate != nil) {
     NSTimeInterval age = [[NSDate date] timeIntervalSinceDate:issuedAtDate];
-    if (age < 0.0 || age > (NSTimeInterval)maxAgeSeconds) {
+    // A state checked within the clock tick it was issued in can come out a
+    // hair in the future: issuedAt is stored since 1970 and rebuilt into an
+    // NSDate, and the rounding leaves age around -1e-7 s. With a ~1 ms clock
+    // (GNUstep on Windows) that was about 30% of immediate callbacks. Allow
+    // one second of skew; anything further in the future is still rejected.
+    if (age < -ALNOIDCCallbackFutureSkewSeconds || age > (NSTimeInterval)maxAgeSeconds) {
       if (error != NULL) {
         *error = ALNOIDCClientError(ALNOIDCClientErrorCallbackExpired,
                                     @"Authorization callback exceeded the configured age window");

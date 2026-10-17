@@ -237,7 +237,8 @@
                             attempts:(NSInteger)attempts
                              success:(BOOL *)success {
   NSString *command =
-      [NSString stringWithFormat:@"curl -fsS 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
+      // --max-time: a server that accepts but never answers must fail this check, not hang it.
+      [NSString stringWithFormat:@"curl -fsS --max-time 10 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
   __block NSString *body = @"";
   BOOL answered = ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
     int curlCode = 0;
@@ -3706,7 +3707,11 @@
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ exec %@ --port %d",
           envPrefix, backend,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      // Keep the server log: a 500 from an escaped exception is only explained there.
+      NSString *serverLog = [appRoot stringByAppendingPathComponent:
+          [NSString stringWithFormat:@"server-%@.log", backend]];
+      [[NSFileManager defaultManager] createFileAtPath:serverLog contents:nil attributes:nil];
+      server.standardOutput = [NSFileHandle fileHandleForWritingAtPath:serverLog];
       server.standardError = server.standardOutput;
       [server launch];
       @try {
@@ -3725,6 +3730,11 @@
         NSString *output = [self runPythonScript:script exitCode:&code];
         XCTAssertEqual(code, 0, @"%@: %@", backend, output);
         XCTAssertTrue([output containsString:@"body limit checks passed"], @"%@: %@", backend, output);
+        if (code != 0) {
+          NSString *log = [NSString stringWithContentsOfFile:serverLog encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+          XCTFail(@"%@ server log tail:\n%@", backend,
+                  [log substringFromIndex:[log length] - MIN([log length], (NSUInteger)4000)]);
+        }
       } @finally {
         XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
       }
