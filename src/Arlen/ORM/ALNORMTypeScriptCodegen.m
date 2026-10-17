@@ -1916,7 +1916,21 @@ static NSString *ALNORMTSRenderModelsModule(NSArray<ALNORMModelDescriptor *> *de
           [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES]
         ]];
     NSMutableArray<NSString *> *relationNames = [NSMutableArray array];
+    NSSet<NSString *> *readFieldNames = [NSSet setWithArray:[readModelRows valueForKey:@"name"]];
     for (ALNORMRelationDescriptor *relation in sortedRelations) {
+      // Relations render as properties next to the fields; a shared name would
+      // emit a duplicate identifier that tsc rejects.
+      if ([readFieldNames containsObject:relation.name ?: @""]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"ORM relation name collides with a field name on the same model",
+                                   @{
+                                     @"entity_name" : descriptor.entityName ?: @"",
+                                     @"relation_name" : relation.name ?: @"",
+                                   });
+        }
+        return nil;
+      }
       [relationNames addObject:relation.name ?: @""];
       [readModelRows addObject:@{
         @"name" : relation.name ?: @"",
@@ -2710,10 +2724,15 @@ static NSString *ALNORMTSRenderReactModule(NSArray<NSDictionary<NSString *, id> 
     }
     NSString *methodName = operation[@"methodName"] ?: @"operation";
     NSString *typeName = operation[@"typeName"] ?: @"Operation";
-    [output appendFormat:@"  %@: (request: %@Request) => %@,\n",
+    NSString *keyExpression = ALNORMTSReactQueryKeyExpression(operation);
+    // Keys for operations without path or query params ignore the request;
+    // name it `_request` so the output compiles under noUnusedParameters.
+    NSString *parameterName = [keyExpression containsString:@"request."] ? @"request" : @"_request";
+    [output appendFormat:@"  %@: (%@: %@Request) => %@,\n",
                          ALNORMTSQuotedPropertyName(methodName),
+                         parameterName,
                          typeName,
-                         ALNORMTSReactQueryKeyExpression(operation)];
+                         keyExpression];
   }
   [output appendString:@"} as const;\n\n"];
 
@@ -3031,6 +3050,25 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
 
 @implementation ALNORMTypeScriptCodegen
 
++ (BOOL)targetsRequireModelDescriptors:(NSArray<NSString *> *)targets {
+  // `react` and `meta` pull in `models` for the shared types in models.ts,
+  // but only an explicit models/validators/query/all request needs entities.
+  if ([targets count] == 0) {
+    return YES;
+  }
+  for (NSString *rawTarget in targets) {
+    NSArray<NSString *> *tokens = [[ALNORMTSStringValue(rawTarget) lowercaseString] componentsSeparatedByString:@","];
+    for (NSString *rawToken in tokens) {
+      NSString *token = ALNORMTSStringValue(rawToken);
+      if ([token isEqualToString:@"all"] || [token isEqualToString:@"models"] ||
+          [token isEqualToString:@"validators"] || [token isEqualToString:@"query"]) {
+        return YES;
+      }
+    }
+  }
+  return NO;
+}
+
 + (NSDictionary<NSString *,id> *)renderArtifactsFromSchemaMetadata:(NSDictionary<NSString *,id> *)metadata
                                                        classPrefix:(NSString *)classPrefix
                                                     databaseTarget:(NSString *)databaseTarget
@@ -3085,7 +3123,7 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     return nil;
   }
 
-  if ([normalizedTargets containsObject:@"models"] && [descriptors count] == 0) {
+  if ([descriptors count] == 0 && [self targetsRequireModelDescriptors:targets]) {
     if (error != NULL) {
       *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
                                @"TypeScript model generation requires at least one ORM descriptor",
@@ -3121,6 +3159,12 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     if (operations == nil) {
       return nil;
     }
+  }
+  // Resource metadata maps `x-arlen` resources onto ORM entities and only feeds
+  // query.ts and meta.ts, so OpenAPI-only client/react generation skips it.
+  BOOL needsResourceMetadata = [descriptors count] > 0 || [normalizedTargets containsObject:@"query"] ||
+                               [normalizedTargets containsObject:@"meta"];
+  if (hasOpenAPI && needsResourceMetadata) {
     resources = ALNORMTSNormalizedResourceMetadata(openAPISpecification,
                                                    operations,
                                                    descriptors ?: @[],
@@ -3133,14 +3177,14 @@ static NSArray<NSString *> *ALNORMTSNormalizedTargets(NSArray<NSString *> *rawTa
     if (modules == nil) {
       return nil;
     }
-    if (requiresOpenAPI && [operations count] == 0) {
-      if (error != NULL) {
-        *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
-                                 @"OpenAPI specification did not contain any operations",
-                                 nil);
-      }
-      return nil;
+  }
+  if (hasOpenAPI && requiresOpenAPI && [operations count] == 0) {
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                               @"OpenAPI specification did not contain any operations",
+                               nil);
     }
+    return nil;
   }
 
   NSMutableDictionary<NSString *, NSString *> *files = [NSMutableDictionary dictionary];

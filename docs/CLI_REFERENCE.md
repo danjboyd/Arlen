@@ -706,8 +706,12 @@ route/OpenAPI contracts.
  - React/TanStack output is optional and layered on top of the plain client
  - top-level OpenAPI `x-arlen` metadata can add resource/module/workspace
  contracts without changing route schemas
+- OpenAPI-only mode: without an ORM input, `client` / `react` / `meta`
+ render from the OpenAPI document, and `models.ts` holds only the shared
+ envelope types
 - missing or vague inputs fail closed:
  - `client` / `react` targets require `--openapi-input`
+ - `models` / `validators` / `query` / `all` require at least one ORM descriptor
  - OpenAPI operations must carry stable `operationId` values
  - request bodies must expose `application/json` schemas
  - descriptor or operation naming collisions abort generation
@@ -716,7 +720,7 @@ route/OpenAPI contracts.
  - resource query metadata cannot expose fields or relations the ORM
  descriptors do not actually define
 
-- `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`)
+- `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`). Only `models`, `validators`, `query` and `all` need ORM descriptors. For `client`, `react` and `meta`, a missing default manifest is skipped and the package is generated from `--openapi-input` alone, so apps that don't use the ORM can generate a client. An explicit `--orm-input` path must exist. `meta` still needs descriptors when `x-arlen.resources` names ORM entities.
 - `--openapi-input <path>`: exported OpenAPI JSON input; required for `client` and `react`
 - `--output-dir <path>` / `--out-dir <path>`: generated package root (default: `frontend/generated/arlen`)
 - `--manifest <path>`: TypeScript manifest output (default: `db/schema/arlen_typescript.json`)
@@ -1021,6 +1025,7 @@ Behavior:
 - watch mode retries failed builds automatically (`ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, default `2`) even when no additional watched-file fingerprint change is observed
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- requests run on `runtimeLimits.maxConcurrentHTTPWorkers` worker threads (default `8`). An idle keep-alive connection releases its worker after `runtimeLimits.keepAliveParkAfterMilliseconds` (default `5`) and is picked up again when its next request arrives (see `docs/CONFIGURATION_REFERENCE.md`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:
