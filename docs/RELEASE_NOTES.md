@@ -18,6 +18,11 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- Static mounts no longer serve hidden files. Any path component starting with
+  `.` returns 404 (`/static/.secret.json`, `/static/.git/config.json`), except
+  `.well-known/`. Before, `arlen new` apps served such files from `public/` in
+  every environment whenever their extension was allowed (#219).
+
 - `ALNPg` decodes `date`, `timestamp` and `timestamptz` values, and encodes
   `NSDate` parameters, with integer date arithmetic. It no longer creates an
   `NSCalendar` for each value it decodes or an `NSDateFormatter`, `NSCalendar`
@@ -96,7 +101,6 @@
   the partial and builds the shared locals overlay once per collection
   instead of once per item, so long lists no longer take the global template
   registry lock for every row. Output and errors are unchanged (#246).
-
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
