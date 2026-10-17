@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Releases now include `arlen-X.Y.Z-windows-x64.zip`, a prebuilt Windows
+  archive for the gnustep-cli managed MSYS2 `CLANG64` toolchain. It bundles
+  `libpq.dll`, which the toolchain does not ship, and records the toolchain
+  version it was built against. `SHA256SUMS` covers it and `install.ps1`. A
+  new `release-certification / windows` job installs the zip with
+  `install.ps1` and checks `arlen new`, the app build and `boomhauer` through
+  the installed launcher (#200).
+
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).

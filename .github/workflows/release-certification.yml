@@ -56,3 +56,45 @@ jobs:
             tests/performance/baselines
             tests/performance/policies
           if-no-files-found: warn
+
+  # Windows is a development platform (#200): certify that the prebuilt
+  # windows-x64 zip installs with install.ps1 and that arlen new, the app
+  # build and boomhauer work through the installed launcher.
+  windows-release-certification:
+    name: release-certification / windows
+    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Package the Windows archive
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $version = (Select-String -Path src\Arlen\Core\ALNModuleSystem.m -Pattern 'ALNModuleSystemFrameworkVersion = @"([^"]+)"').Matches[0].Groups[1].Value
+          # The Linux job runs the full check_release_version.py.
+          if ($env:RELEASE_TAG -and ($env:RELEASE_TAG -replace '^v', '') -ne $version) {
+            throw "release tag $env:RELEASE_TAG does not match ALNModuleSystemFrameworkVersion $version"
+          }
+          # Windows PowerShell 5.1 writes a BOM with -Encoding utf8.
+          "ARLEN_CERT_VERSION=$version" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/release/package_framework.sh --version $version --kind windows-x64 --out build/release-assets"
+
+      - name: Install and certify the Windows archive
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File tools\ci\run_windows_release_certification.ps1 -Archive "build\release-assets\arlen-$env:ARLEN_CERT_VERSION-windows-x64.zip"
+
+      - name: Upload Windows release certification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-certification-windows-${{ github.run_id }}
+          path: |
+            build/release_confidence/windows
+            build/release-assets
+          if-no-files-found: warn

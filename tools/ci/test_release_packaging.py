@@ -2,6 +2,7 @@
 """Regression checks for release packaging and managed-toolchain env setup."""
 
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -100,6 +101,70 @@ class ManagedToolchainEnvTests(unittest.TestCase):
             root = self._fake_root(base, managed=False)
             ld = self._ld_path_after_source(root / "System/Library/Makefiles/GNUstep.sh")
             self.assertEqual(ld, "/existing")
+
+
+class WindowsBundledDllListTests(unittest.TestCase):
+    LIST = REPO_ROOT / "tools/release/windows_bundled_dlls.txt"
+    SHA256 = r"^[0-9a-f]{64}$"
+
+    def _lines(self, list_path, toolchain, sha256):
+        script = (REPO_ROOT / "tools/release/package_framework.sh").read_text()
+        match = re.search(r"^windows_bundled_dll_lines\(\) \{\n.*?^\}\n", script, re.S | re.M)
+        self.assertIsNotNone(match, "windows_bundled_dll_lines() not found")
+        return subprocess.run(["bash", "-c", match.group(0) + 'windows_bundled_dll_lines "$1" "$2" "$3"\n',
+                               "test", str(list_path), toolchain, sha256],
+                              capture_output=True, text=True)
+
+    def test_list_is_well_formed(self):
+        sections = {}
+        current = None
+        for raw in self.LIST.read_text().splitlines():
+            fields = raw.split()
+            if not fields or fields[0].startswith("#"):
+                continue
+            if fields[0] == "toolchain":
+                self.assertEqual(3, len(fields), raw)
+                self.assertRegex(fields[2], self.SHA256, raw)
+                self.assertNotIn((fields[1], fields[2]), sections, f"duplicate section: {raw}")
+                current = (fields[1], fields[2])
+                sections[current] = 0
+                continue
+            self.assertEqual("dll", fields[0], raw)
+            self.assertIsNotNone(current, f"dll line before any toolchain line: {raw}")
+            self.assertEqual(5, len(fields), raw)
+            self.assertTrue(fields[1].startswith("https://"), raw)
+            self.assertRegex(fields[2], self.SHA256, raw)
+            self.assertRegex(fields[4], self.SHA256, raw)
+            sections[current] += 1
+        self.assertTrue(sections)
+        for section, count in sections.items():
+            self.assertGreater(count, 0, f"toolchain section without DLLs: {section}")
+
+    def test_selects_only_the_matching_toolchain_section(self):
+        with tempfile.TemporaryDirectory() as base:
+            path = Path(base) / "dlls.txt"
+            two = f"dll https://x/two.zst {'3' * 64} bin/two.dll {'4' * 64}"
+            path.write_text("# comment\n"
+                            f"toolchain 1.0 {'a' * 64}\n"
+                            f"dll https://x/one.zst {'1' * 64} bin/one.dll {'2' * 64}\n"
+                            "\n"
+                            f"toolchain 1.0 {'b' * 64}\n"
+                            f"{two}\n")
+            result = self._lines(path, "1.0", "b" * 64)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([two], result.stdout.splitlines())
+            # A rebuilt toolchain republished under the same version has no section yet.
+            result = self._lines(path, "1.0", "c" * 64)
+            self.assertEqual(1, result.returncode)
+            self.assertIn("no section for toolchain 1.0", result.stderr)
+
+    def test_unknown_line_kind_fails(self):
+        with tempfile.TemporaryDirectory() as base:
+            path = Path(base) / "dlls.txt"
+            path.write_text(f"toolchain 1.0 {'a' * 64}\nlib whatever\n")
+            result = self._lines(path, "1.0", "a" * 64)
+            self.assertEqual(2, result.returncode)
+            self.assertIn("unknown line kind lib", result.stderr)
 
 
 if __name__ == "__main__":
