@@ -149,6 +149,19 @@ visible but non-required:
 Platform lanes should upload artifacts on failure so they remain useful for
 diagnosis even while non-blocking.
 
+Release lanes run only on a published release (or `workflow_dispatch`) and are
+never merge gates:
+
+- `release-certification / release-certification`: the Linux certification
+ pack (`tools/ci/run_release_certification.sh`).
+- `release-certification / windows`: builds the windows-x64 zip on the Windows
+ runner and certifies the user install path with
+ `tools/ci/run_windows_release_certification.ps1` (`install.ps1`, `arlen
+ new`, `arlen boomhauer --prepare-only`, and a `boomhauer` `/healthz` and `/`
+ smoke through the installed `arlen.cmd`).
+- `release-assets / *`: the source, macOS arm64 and Windows x64 archives, the
+ installers and `SHA256SUMS`.
+
 ## Platform Runner Provisioning Direction
 
 The current runner contract standardizes the intended platform-runner path:
