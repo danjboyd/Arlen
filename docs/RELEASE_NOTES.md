@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- EOC `<%= %>` escaping is much faster. `ALNEOCEscapeHTMLString` used to
+  append each ordinary character with a format call; it now copies runs of
+  characters, returns the input unchanged when there is nothing to escape, and
+  `<%= %>` output is escaped straight into the page buffer. Output is
+  unchanged: `& < > " '` are escaped exactly as before. On a 90,000-character
+  string it is about 50 times faster (#216).
+
+- New `ALNEOCJSONForScript(value)` helper for putting JSON inside an inline
+  `<script>` element with `<%== %>`. It writes `<`, `>`, `&`, U+2028 and
+  U+2029 as `\u` escapes, so a string value such as `</script>` cannot end
+  the script element. See EOC Guide section 5.4 (#217).
+
+- EOC collection rendering
+  (`<%@ render "partials/_row" collection:$rows as:"row" %>`) now looks up
+  the partial and builds the shared locals overlay once per collection
+  instead of once per item, so long lists no longer take the global template
+  registry lock for every row. Output and errors are unchanged (#246).
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
