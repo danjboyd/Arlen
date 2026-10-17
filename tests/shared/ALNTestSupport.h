@@ -3,6 +3,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ALNTestPOSIXCompat.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *ALNTestRepoRoot(void);
@@ -38,6 +40,8 @@ FOUNDATION_EXPORT NSString *ALNTestFrameworkBuildCommand(NSString *targets);
 // root: .boomhauer/build/ (GNUstep) or .boomhauer/apple/ (Apple). Packaged
 // releases keep the .boomhauer/build/ layout on every platform.
 FOUNDATION_EXPORT NSString *ALNTestAppBinaryRelativePath(void);
+// path with the .exe suffix the linker adds on Windows; unchanged elsewhere.
+FOUNDATION_EXPORT NSString *ALNTestExecutablePath(NSString *path);
 FOUNDATION_EXPORT NSString *ALNTestClientCompileCommand(NSArray<NSString *> *sources,
                                                         NSString *includeDirectory,
                                                         NSString *output);
@@ -53,6 +57,34 @@ FOUNDATION_EXPORT NSString *ALNTestShellTimeoutPrefix(NSUInteger seconds);
 FOUNDATION_EXPORT BOOL ALNTestShellTimeoutExitedByTimeout(int exitCode);
 FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     NSDictionary<NSString *, NSString *> *environment);
+// pipe() for log/stderr capture: _pipe with a 1 MiB binary buffer on Windows,
+// which has no pipe(). nonBlockingRead sets O_NONBLOCK on the read end where
+// the platform has it (POSIX); Windows anonymous pipes have no such mode.
+FOUNDATION_EXPORT BOOL ALNTestCreatePipe(int fds[_Nonnull 2], BOOL nonBlockingRead);
+// A uniform random value in [0, upperBound), for ports and unique names.
+// arc4random_uniform is not available on Windows (MinGW).
+FOUNDATION_EXPORT uint32_t ALNTestRandomUniform(uint32_t upperBound);
+// bash for NSTask launches: /bin/bash on POSIX, MSYS2 usr/bin/bash.exe on
+// Windows (ALNPlatformBashPath). Use for /bin/sh launches too.
+FOUNDATION_EXPORT NSString *ALNTestBashPath(void);
+// Absolute path of a tool on PATH (tool.exe on Windows), for NSTask launches
+// that would otherwise go through /usr/bin/env. Launch tools directly: on
+// Windows MSYS2 env.exe spawns the tool as a child instead of exec-ing it, so
+// -terminate on the env task would orphan the tool. Returns the bare name when
+// it is not found.
+FOUNDATION_EXPORT NSString *ALNTestToolPath(NSString *tool);
+// Extra compile flags and link libraries for test-built probes, matching the
+// GNUmakefile (FEATURE_FLAGS, ARLEN_PLATFORM_LINK_LIBS): on Windows CLANG64
+// the toolchain needs HAVE_MODE_T and static GNUstep linkage, and there is no
+// libdl but Winsock and BCrypt. Empty / -ldl elsewhere.
+FOUNDATION_EXPORT NSString *ALNTestPlatformObjCFlags(void);
+FOUNDATION_EXPORT NSString *ALNTestPlatformLinkLibraries(void);
+// kill() for tests. On Windows SIGTERM and SIGKILL end the process tree
+// (taskkill /T /F: Windows has no signals, and ending a process leaves its
+// children running); other signals fail with ENOSYS.
+FOUNDATION_EXPORT int ALNTestKill(int pid, int signal);
+// YES while a process with this pid exists (kill(pid, 0) on POSIX).
+FOUNDATION_EXPORT BOOL ALNTestProcessExists(int pid);
 
 NS_ASSUME_NONNULL_END
 

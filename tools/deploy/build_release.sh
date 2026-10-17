@@ -65,6 +65,8 @@ json_escape() {
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# aln_platform_link_directory: junctions instead of copies under MSYS2.
+source "$script_dir/../platform.sh"
 default_framework_root="$(cd "$script_dir/../.." && pwd)"
 
 path_looks_like_windows_absolute() {
@@ -1093,7 +1095,7 @@ Run propane from this release:
     "$packaged_propane" --env production
 EOF
 
-ln -sfn "$release_dir" "$releases_dir/latest-built"
+aln_platform_link_directory "$release_dir" "$releases_dir/latest-built"
 if [[ "$output_json" == "1" ]]; then
   emit_success_json "ok" "$release_dir" "$releases_dir/latest-built" "$manifest_path"
 else
