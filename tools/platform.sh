@@ -6,6 +6,7 @@ aln_platform_realpath() {
     python3 - "$target" <<'PY'
 import os
 import sys
+sys.stdout.reconfigure(newline="\n")  # Windows CLANG64 python would print CRLF
 print(os.path.realpath(sys.argv[1]))
 PY
     return $?
@@ -21,6 +22,37 @@ PY
 
 aln_platform_is_macos() {
   [[ "$(uname -s)" == "Darwin" ]]
+}
+
+aln_platform_is_msys() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+  esac
+  return 1
+}
+
+# aln_platform_link_directory <target> <link>
+# Points <link> at the directory <target>, replacing an existing link: `ln -sfn`
+# on POSIX. Under MSYS2, `ln -s` copies the directory (real symlinks need
+# admin rights or Developer Mode), and a later `ln -sfn` then links inside the
+# copy, so release activation and rollback silently kept the old release. Use
+# an NTFS junction there instead; MSYS2 reports junctions as symlinks, so
+# `readlink -f` and `[[ -L ]]` keep working.
+aln_platform_link_directory() {
+  local target="$1"
+  local link="$2"
+  if ! aln_platform_is_msys; then
+    ln -sfn "$target" "$link"
+    return
+  fi
+  if [[ -L "$link" ]]; then
+    # rmdir on a junction removes the link, never the target.
+    MSYS2_ARG_CONV_EXCL="*" cmd /c rmdir "$(cygpath -w "$link")" >/dev/null 2>&1 || rm -f "$link"
+  elif [[ -d "$link" ]]; then
+    echo "aln_platform_link_directory: $link is a real directory, not a link" >&2
+    return 1
+  fi
+  MSYS2_ARG_CONV_EXCL="*" cmd /c mklink /J "$(cygpath -w "$link")" "$(cygpath -w "$target")" >/dev/null
 }
 
 aln_platform_sha256() {
