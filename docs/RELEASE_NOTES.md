@@ -18,6 +18,19 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- WebSocket sessions no longer drop an idle receive-only client after
+  `connectionTimeoutSeconds` (about 30 s) without a close frame. After
+  `runtimeLimits.webSocketPingIntervalSeconds` (default 25) without a frame the
+  server pings, and closes with 1001 a client that stays silent for another
+  interval (#239).
+- WebSocket frames follow RFC 6455 more closely (#214): control frames must be
+  unfragmented and at most 125 bytes, nonzero RSV bits and reserved opcodes are
+  rejected (all close with 1002), fragmented messages are reassembled up to the
+  1 MiB message limit (1009 above it) instead of dropping the connection,
+  invalid UTF-8 text closes with 1007 instead of becoming an empty message, the
+  peer's close code is echoed, and payload buffers grow as bytes arrive
+  instead of being allocated from the frame header.
+
 - Request-path performance and robustness (#218, #247, #265, #270):
   - Multipart parsing is about 20x faster. Header-name and boundary checks use
     precomputed tables instead of rebuilding a GNUstep `NSCharacterSet` and

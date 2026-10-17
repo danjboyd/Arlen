@@ -472,6 +472,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_MAX_WEBSOCKET_SESSIONS", "MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
   NSString *maxHTTPWorkers =
       ALNEnvValueCompat("ARLEN_MAX_HTTP_WORKERS", "MOJOOBJC_MAX_HTTP_WORKERS");
+  NSString *webSocketPingIntervalSeconds = ALNEnvValueCompat("ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS", NULL);
   NSString *maxQueuedHTTPConnections =
       ALNEnvValueCompat("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS",
                         "MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS");
@@ -690,6 +691,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   ALNApplyIntegerOverride(runtimeLimits,
                           maxRealtimeChannelSubscribers,
                           @"maxRealtimeChannelSubscribers",
+                          0);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          webSocketPingIntervalSeconds,
+                          @"webSocketPingIntervalSeconds",
                           0);
   config[@"runtimeLimits"] = runtimeLimits;
 
