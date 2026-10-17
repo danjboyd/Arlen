@@ -579,7 +579,14 @@ NSString *ALNTestToolPath(NSString *tool) {
 
 NSString *ALNTestPlatformObjCFlags(void) {
 #if defined(_WIN32)
+#if defined(ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS) && ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS
+  // The GNUmakefile's shim for gnustep-base 1.31.1, which does not declare
+  // NSJSONWritingSortedKeys; direct clang compiles of Arlen sources need it too.
+  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 "
+         "-DNSJSONWritingSortedKeys=2UL -DARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS=1";
+#else
   return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
+#endif
 #else
   return @"";
 #endif
