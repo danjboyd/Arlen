@@ -692,6 +692,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, assign) BOOL responseIdentityHeadersEnabled;
 @property(nonatomic, assign) BOOL apiOnly;
 @property(nonatomic, assign) BOOL performanceLoggingEnabled;
+@property(nonatomic, assign) BOOL performanceHeadersEnabled;
 @property(nonatomic, assign) BOOL eocStrictLocalsEnabled;
 @property(nonatomic, assign) BOOL eocStrictStringifyEnabled;
 @property(nonatomic, assign) BOOL pageStateEnabled;
@@ -1169,6 +1170,10 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     id performanceLoggingValue = _config[@"performanceLogging"];
     _performanceLoggingEnabled = [performanceLoggingValue respondsToSelector:@selector(boolValue)]
                                      ? [performanceLoggingValue boolValue]
+                                     : YES;
+    id performanceHeadersValue = _config[@"performanceHeaders"];
+    _performanceHeadersEnabled = [performanceHeadersValue respondsToSelector:@selector(boolValue)]
+                                     ? [performanceHeadersValue boolValue]
                                      : YES;
     NSDictionary *eoc = [_config[@"eoc"] isKindOfClass:[NSDictionary class]]
                             ? _config[@"eoc"]
@@ -3922,7 +3927,11 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
                                           NSString *publicMessage,
                                           NSString *developerMessage,
                                           NSDictionary *details) {
-  BOOL production = [application.environment isEqualToString:@"production"];
+  // Only development and test get the detailed page (reason, stack, paths);
+  // staging, preview and other environments are treated like production (#215).
+  NSString *environment = application.environment ?: @"";
+  BOOL production = !([environment isEqualToString:@"development"] ||
+                      [environment isEqualToString:@"test"]);
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
@@ -4351,14 +4360,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
     NSNumber *parse = [trace durationMillisecondsForStage:@"parse"] ?: @(0);
     NSNumber *responseWrite = [trace durationMillisecondsForStage:@"response_write"] ?: @(0);
 
-    [response setHeader:@"X-Arlen-Total-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
-    [response setHeader:@"X-Mojo-Total-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
-    [response setHeader:@"X-Arlen-Parse-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [parse doubleValue]]];
-    [response setHeader:@"X-Arlen-Response-Write-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
+    if (application.performanceHeadersEnabled) {
+      [response setHeader:@"X-Arlen-Total-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+      [response setHeader:@"X-Mojo-Total-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+      [response setHeader:@"X-Arlen-Parse-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [parse doubleValue]]];
+      [response setHeader:@"X-Arlen-Response-Write-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
+    }
   }
 
   if (application.responseIdentityHeadersEnabled) {

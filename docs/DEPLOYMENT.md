@@ -710,7 +710,10 @@ tools/deploy/activate_release.sh \
   --release-id <release-id>
 ```
 
-This switches `releases/current` symlink.
+This switches `releases/current` symlink. The new link is created under a
+temporary name and renamed over `current`, so a service restart during the
+switch always finds `releases/current` (on Windows/MSYS2 the junction is still
+removed and recreated).
 
 Activation also rewrites `metadata/release.env` so:
 

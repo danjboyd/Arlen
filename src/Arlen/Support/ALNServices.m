@@ -13,6 +13,7 @@
 #include <ws2tcpip.h>
 #else
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
 #endif
 #include <unistd.h>
@@ -810,6 +811,17 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
           [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
         result = [runtime jobWorker:self resultForJob:job];
       }
+    } @catch (NSException *exception) {
+      // A throwing ("poison") job is a failed attempt: retried with backoff,
+      // then dead-lettered. Letting it escape stopped the worker and left an
+      // in-memory job leased forever (GitHub issue 241).
+      disposition = ALNJobWorkerDispositionRetry;
+      result = nil;
+      handlerError = ALNServiceError(
+          506,
+          [NSString stringWithFormat:@"job handler raised %@: %@", exception.name ?: @"an exception",
+                                     exception.reason ?: @""],
+          nil);
     } @finally {
       heartbeatError = [heartbeat stop];
     }
@@ -1950,8 +1962,20 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 @property(nonatomic, copy) NSString *password;
 @property(nonatomic, copy) NSString *namespacePrefix;
 @property(nonatomic, assign) NSTimeInterval ioTimeoutSeconds;
+@property(nonatomic, strong) NSLock *connectionLock;
+@property(nonatomic, strong) NSMutableArray *idleConnections;
+@property(nonatomic, assign) NSUInteger maxIdleConnections;
 
 @end
+
+// Reply limits. The cache adapter only issues commands with flat replies, so a
+// reply that nests deeper, or declares a bulk/array size beyond these bounds, is
+// treated as a protocol error instead of being trusted.
+static const NSUInteger ALNRedisMaxReplyDepth = 8;
+static const long long ALNRedisMaxBulkLength = 512LL * 1024LL * 1024LL;
+static const long long ALNRedisMaxArrayCount = 16LL * 1024LL * 1024LL;
+static const size_t ALNRedisBulkReadChunkSize = 64 * 1024;
+static const NSUInteger ALNRedisDefaultMaxIdleConnections = 4;
 
 static BOOL ALNParseSignedInteger(NSString *text, long long *outValue) {
   if (![text isKindOfClass:[NSString class]] || [text length] == 0) {
@@ -1980,7 +2004,11 @@ static NSError *ALNRedisClientError(NSInteger code, NSString *message, NSError *
 static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length, NSError **error) {
   size_t written = 0;
   while (written < length) {
+#if defined(MSG_NOSIGNAL)
+    ssize_t count = send(socketFD, bytes + written, length - written, MSG_NOSIGNAL);
+#else
     ssize_t count = send(socketFD, bytes + written, length - written, 0);
+#endif
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -2014,6 +2042,12 @@ static BOOL ALNRedisReadExact(int socketFD, uint8_t *buffer, size_t length, NSEr
     if (count < 0) {
       if (errno == EINTR) {
         continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (error != NULL) {
+          *error = ALNRedisClientError(2234, @"redis read timed out", nil);
+        }
+        return NO;
       }
       if (error != NULL) {
         *error = ALNRedisClientError(2202,
@@ -2072,9 +2106,9 @@ static NSString *ALNRedisReadLine(int socketFD, NSError **error) {
   return line;
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error);
+static id ALNRedisReadReply(int socketFD, NSUInteger depth, NSError **error);
 
-static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **error) {
+static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSUInteger depth, NSError **error) {
   long long count = 0;
   if (!ALNParseSignedInteger(countText, &count) || count < -1) {
     if (error != NULL) {
@@ -2085,10 +2119,24 @@ static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **er
   if (count == -1) {
     return [NSNull null];
   }
-  NSMutableArray *out = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+  if (count > ALNRedisMaxArrayCount) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2233, @"redis protocol error: array reply is too large", nil);
+    }
+    return nil;
+  }
+  if (depth >= ALNRedisMaxReplyDepth) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2231, @"redis protocol error: reply nesting is too deep", nil);
+    }
+    return nil;
+  }
+  // Grow with the elements actually received; the declared count is not a
+  // trustworthy capacity hint.
+  NSMutableArray *out = [NSMutableArray array];
   for (long long index = 0; index < count; index++) {
     NSError *stepError = nil;
-    id item = ALNRedisReadReply(socketFD, &stepError);
+    id item = ALNRedisReadReply(socketFD, depth + 1, &stepError);
     if (stepError != nil) {
       if (error != NULL) {
         *error = stepError;
@@ -2111,10 +2159,25 @@ static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **er
   if (length == -1) {
     return [NSNull null];
   }
-
-  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)length];
-  if (length > 0 && !ALNRedisReadExact(socketFD, [data mutableBytes], (size_t)length, error)) {
+  if (length > ALNRedisMaxBulkLength) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2232, @"redis protocol error: bulk reply is too large", nil);
+    }
     return nil;
+  }
+
+  // Read in bounded chunks so memory tracks bytes actually received rather than
+  // the declared length.
+  NSMutableData *data = [NSMutableData data];
+  size_t remaining = (size_t)length;
+  while (remaining > 0) {
+    size_t step = remaining < ALNRedisBulkReadChunkSize ? remaining : ALNRedisBulkReadChunkSize;
+    size_t offset = [data length];
+    [data increaseLengthBy:step];
+    if (!ALNRedisReadExact(socketFD, (uint8_t *)[data mutableBytes] + offset, step, error)) {
+      return nil;
+    }
+    remaining -= step;
   }
   uint8_t tail[2] = { 0, 0 };
   if (!ALNRedisReadExact(socketFD, tail, 2, error)) {
@@ -2129,7 +2192,7 @@ static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **er
   return [NSData dataWithData:data];
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error) {
+static id ALNRedisReadReply(int socketFD, NSUInteger depth, NSError **error) {
   uint8_t prefix = 0;
   if (!ALNRedisReadExact(socketFD, &prefix, 1, error)) {
     return nil;
@@ -2163,7 +2226,7 @@ static id ALNRedisReadReply(int socketFD, NSError **error) {
     return ALNRedisReadBulkReply(socketFD, line, error);
   }
   if (prefix == '*') {
-    return ALNRedisReadArrayReply(socketFD, line, error);
+    return ALNRedisReadArrayReply(socketFD, line, depth, error);
   }
 
   if (error != NULL) {
@@ -2264,6 +2327,10 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
     (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
 #endif
+#if defined(SO_NOSIGPIPE)
+    int noSigPipe = 1;
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof(noSigPipe));
+#endif
 
     if (connect(socketFD, candidate->ai_addr, candidate->ai_addrlen) == 0) {
       break;
@@ -2282,6 +2349,37 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     return -1;
   }
   return socketFD;
+}
+
+// An idle pooled connection should have nothing to read. Readability here means
+// the server closed it (EOF), reset it, or sent unsolicited bytes, so it must
+// not be reused.
+static BOOL ALNRedisIdleConnectionIsReusable(int socketFD) {
+#if defined(_WIN32)
+  (void)socketFD;
+  return YES;
+#else
+  struct pollfd descriptor;
+  memset(&descriptor, 0, sizeof(descriptor));
+  descriptor.fd = socketFD;
+  descriptor.events = POLLIN;
+  int ready = 0;
+  do {
+    ready = poll(&descriptor, 1, 0);
+  } while (ready < 0 && errno == EINTR);
+  if (ready < 0) {
+    return NO;
+  }
+  return ready == 0;
+#endif
+}
+
+static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
+  if (![[error domain] isEqualToString:ALNServiceErrorDomain]) {
+    return NO;
+  }
+  NSInteger code = [error code];
+  return code == 2200 || code == 2201 || code == 2202 || code == 2203;
 }
 
 @implementation ALNRedisCacheAdapter
@@ -2343,7 +2441,17 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       [ALNNonEmptyString(adapterName,
                          [NSString stringWithFormat:@"redis_cache@%@:%lu", host, (unsigned long)port]) copy];
   _ioTimeoutSeconds = 2.5;
+  _connectionLock = [[NSLock alloc] init];
+  _idleConnections = [NSMutableArray array];
+  _maxIdleConnections = ALNRedisDefaultMaxIdleConnections;
   return self;
+}
+
+- (void)dealloc {
+  for (NSNumber *descriptor in _idleConnections) {
+    close([descriptor intValue]);
+  }
+  [_idleConnections removeAllObjects];
 }
 
 - (NSString *)adapterName {
@@ -2373,7 +2481,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       }
       return -1;
     }
-    id authReply = ALNRedisReadReply(fd, &authError);
+    id authReply = ALNRedisReadReply(fd, 0, &authError);
     if (authReply == nil || ![[authReply description] isEqualToString:@"OK"]) {
       close(fd);
       if (error != NULL) {
@@ -2393,7 +2501,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       }
       return -1;
     }
-    id selectReply = ALNRedisReadReply(fd, &selectError);
+    id selectReply = ALNRedisReadReply(fd, 0, &selectError);
     if (selectReply == nil || ![[selectReply description] isEqualToString:@"OK"]) {
       close(fd);
       if (error != NULL) {
@@ -2406,36 +2514,90 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   return fd;
 }
 
+// Hands out an authenticated, SELECTed connection: an idle pooled one when
+// available, otherwise a freshly opened one. Each connection is used by one
+// thread at a time; the lock only guards the idle list.
+- (int)checkoutConnectionReused:(BOOL *)reused error:(NSError **)error {
+  while (YES) {
+    int fd = -1;
+    [self.connectionLock lock];
+    NSNumber *descriptor = [self.idleConnections lastObject];
+    if (descriptor != nil) {
+      fd = [descriptor intValue];
+      [self.idleConnections removeLastObject];
+    }
+    [self.connectionLock unlock];
+    if (fd < 0) {
+      break;
+    }
+    if (ALNRedisIdleConnectionIsReusable(fd)) {
+      *reused = YES;
+      return fd;
+    }
+    close(fd);
+  }
+  *reused = NO;
+  return [self openConnectionWithError:error];
+}
+
+- (void)checkinConnection:(int)fd {
+  BOOL pooled = NO;
+  [self.connectionLock lock];
+  if ([self.idleConnections count] < self.maxIdleConnections) {
+    [self.idleConnections addObject:@(fd)];
+    pooled = YES;
+  }
+  [self.connectionLock unlock];
+  if (!pooled) {
+    close(fd);
+  }
+}
+
 - (id)runCommand:(NSArray *)parts error:(NSError **)error {
-  int fd = [self openConnectionWithError:error];
-  if (fd < 0) {
-    return nil;
-  }
+  for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+    BOOL reused = NO;
+    int fd = [self checkoutConnectionReused:&reused error:error];
+    if (fd < 0) {
+      return nil;
+    }
 
-  NSError *commandError = nil;
-  BOOL wrote = ALNRedisWriteCommand(fd, parts, &commandError);
-  id reply = nil;
-  if (wrote) {
-    reply = ALNRedisReadReply(fd, &commandError);
-  }
-  close(fd);
+    NSError *commandError = nil;
+    BOOL wrote = ALNRedisWriteCommand(fd, parts, &commandError);
+    id reply = nil;
+    if (wrote) {
+      reply = ALNRedisReadReply(fd, 0, &commandError);
+    }
 
-  if (!wrote || commandError != nil) {
+    if (wrote && commandError == nil) {
+      [self checkinConnection:fd];
+      return reply;
+    }
+
+    // Any failure may leave unread reply bytes behind, so the connection is
+    // never returned to the pool. A pooled connection the server dropped while
+    // idle is retried once on a fresh connection.
+    close(fd);
+    if (reused && attempt == 0 && ALNRedisErrorIsRetryableIO(commandError)) {
+      continue;
+    }
     if (error != NULL) {
       *error = commandError ?: ALNRedisClientError(2223, @"redis command failed", nil);
     }
     return nil;
   }
-  return reply;
+  return nil;
 }
 
 - (NSData *)serializedRecordForObject:(id)object
                            expiresAt:(NSDate *)expiresAt
                                error:(NSError **)error {
-  NSDictionary *record = @{
-    @"value" : object ?: [NSNull null],
-    @"expiresAt" : expiresAt != nil ? @([expiresAt timeIntervalSince1970]) : [NSNull null]
-  };
+  // Property lists cannot hold NSNull (Apple Foundation rejects it), so a
+  // record without a TTL simply omits expiresAt.
+  NSMutableDictionary *record = [NSMutableDictionary dictionary];
+  record[@"value"] = object;
+  if (expiresAt != nil) {
+    record[@"expiresAt"] = @([expiresAt timeIntervalSince1970]);
+  }
   NSError *serializeError = nil;
   NSData *payload = [NSPropertyListSerialization dataWithPropertyList:record
                                                                format:NSPropertyListBinaryFormat_v1_0

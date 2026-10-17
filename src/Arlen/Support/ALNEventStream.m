@@ -1,5 +1,7 @@
 #import "ALNEventStream.h"
 
+#import <dispatch/dispatch.h>
+
 #import "ALNContext.h"
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
@@ -89,6 +91,20 @@ static NSDictionary *ALNNormalizedEventMaterial(NSDictionary *event, NSError **e
     normalized[@"metadata"] = metadata;
   }
   return [normalized copy];
+}
+
+// Striped locks that order a stream's append-then-publish: bounded memory, and
+// appends to different streams rarely contend.
+static NSLock *ALNEventStreamPublishLock(NSString *streamID) {
+  enum { ALNEventStreamPublishLockCount = 64 };
+  static NSLock *locks[ALNEventStreamPublishLockCount];
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    for (NSUInteger idx = 0; idx < ALNEventStreamPublishLockCount; idx++) {
+      locks[idx] = [[NSLock alloc] init];
+    }
+  });
+  return locks[[streamID ?: @"" hash] % ALNEventStreamPublishLockCount];
 }
 
 static NSString *ALNGeneratedEventID(void) {
@@ -389,6 +405,9 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
 @property(nonatomic, strong) NSLock *lock;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<ALNEventEnvelope *> *> *eventsByStream;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, ALNEventEnvelope *> *> *idempotencyIndexByStream;
+// Append times (ALNPlatformNowMilliseconds) parallel to eventsByStream, for age retention.
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *appendTimesByStream;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *lastSequenceByStream;
 
 @end
 
@@ -402,8 +421,47 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
     _lock = [[NSLock alloc] init];
     _eventsByStream = [NSMutableDictionary dictionary];
     _idempotencyIndexByStream = [NSMutableDictionary dictionary];
+    _appendTimesByStream = [NSMutableDictionary dictionary];
+    _lastSequenceByStream = [NSMutableDictionary dictionary];
+    _maxEventsPerStream = 10000;
+    _maxEventAgeSeconds = 0;
   }
   return self;
+}
+
+// Drops the stream's oldest events beyond the retention limits. The caller
+// holds the lock.
+- (void)applyRetentionToStreamLocked:(NSString *)streamID {
+  NSMutableArray<ALNEventEnvelope *> *events = self.eventsByStream[streamID];
+  NSMutableArray<NSNumber *> *appendTimes = self.appendTimesByStream[streamID];
+  NSUInteger count = [events count];
+  if (count == 0) {
+    return;
+  }
+  NSUInteger drop = 0;
+  if (self.maxEventsPerStream > 0 && count > self.maxEventsPerStream) {
+    drop = count - self.maxEventsPerStream;
+  }
+  if (self.maxEventAgeSeconds > 0) {
+    double cutoff = ALNPlatformNowMilliseconds() - self.maxEventAgeSeconds * 1000.0;
+    while (drop < count && drop < [appendTimes count] && [appendTimes[drop] doubleValue] < cutoff) {
+      drop += 1;
+    }
+  }
+  if (drop == 0) {
+    return;
+  }
+  NSMutableDictionary<NSString *, ALNEventEnvelope *> *idempotencyIndex = self.idempotencyIndexByStream[streamID];
+  if ([idempotencyIndex count] > 0) {
+    for (NSUInteger idx = 0; idx < drop; idx++) {
+      NSString *key = events[idx].idempotencyKey;
+      if ([key length] > 0 && idempotencyIndex[key] == events[idx]) {
+        [idempotencyIndex removeObjectForKey:key];
+      }
+    }
+  }
+  [events removeObjectsInRange:NSMakeRange(0, drop)];
+  [appendTimes removeObjectsInRange:NSMakeRange(0, MIN(drop, [appendTimes count]))];
 }
 
 - (NSString *)adapterName {
@@ -478,9 +536,11 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
   if (events == nil) {
     events = [NSMutableArray array];
     self.eventsByStream[normalizedStreamID] = events;
+    self.appendTimesByStream[normalizedStreamID] = [NSMutableArray array];
   }
 
-  NSUInteger nextSequence = [events count] + 1;
+  // Sequences keep counting across events dropped by retention.
+  NSUInteger nextSequence = [self.lastSequenceByStream[normalizedStreamID] unsignedIntegerValue] + 1;
   ALNEventEnvelope *committed = [[ALNEventEnvelope alloc] initWithStreamID:normalizedStreamID
                                                                   sequence:nextSequence
                                                                    eventID:ALNGeneratedEventID()
@@ -491,6 +551,8 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
                                                                      actor:material[@"actor"]
                                                                   metadata:material[@"metadata"]];
   [events addObject:committed];
+  [self.appendTimesByStream[normalizedStreamID] addObject:@(ALNPlatformNowMilliseconds())];
+  self.lastSequenceByStream[normalizedStreamID] = @(nextSequence);
   if ([idempotencyKey length] > 0) {
     if (idempotencyIndex == nil) {
       idempotencyIndex = [NSMutableDictionary dictionary];
@@ -498,6 +560,7 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
     }
     idempotencyIndex[idempotencyKey] = committed;
   }
+  [self applyRetentionToStreamLocked:normalizedStreamID];
 
   ALNEventEnvelope *copy = [committed copy];
   [self.lock unlock];
@@ -526,21 +589,41 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
                                    : 0;
   NSUInteger effectiveLimit = (limit > 0) ? limit : 100;
 
-  [self.lock lock];
-  NSArray<ALNEventEnvelope *> *events = [NSArray arrayWithArray:self.eventsByStream[normalizedStreamID] ?: @[]];
-  [self.lock unlock];
-
+  // Kept events hold consecutive sequences, so the replay starts at an offset
+  // instead of copying and scanning the whole stream.
   NSMutableArray<ALNEventEnvelope *> *results = [NSMutableArray array];
-  for (ALNEventEnvelope *eventEnvelope in events) {
-    if (eventEnvelope.sequence <= minimumSequence) {
-      continue;
-    }
-    [results addObject:[eventEnvelope copy]];
-    if ([results count] >= effectiveLimit) {
-      break;
+  [self.lock lock];
+  [self applyRetentionToStreamLocked:normalizedStreamID];
+  NSArray<ALNEventEnvelope *> *events = self.eventsByStream[normalizedStreamID];
+  NSUInteger count = [events count];
+  if (count > 0) {
+    NSUInteger firstSequence = events[0].sequence;
+    NSUInteger start = (minimumSequence >= firstSequence) ? (minimumSequence - firstSequence + 1) : 0;
+    for (NSUInteger idx = start; idx < count && [results count] < effectiveLimit; idx++) {
+      [results addObject:[events[idx] copy]];
     }
   }
+  [self.lock unlock];
   return [results copy];
+}
+
+- (ALNEventStreamCursor *)oldestCursorForStream:(NSString *)streamID error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  NSString *normalizedStreamID = ALNNormalizedEventStreamIdentifier(streamID);
+  [self.lock lock];
+  [self applyRetentionToStreamLocked:normalizedStreamID];
+  ALNEventEnvelope *oldest = [self.eventsByStream[normalizedStreamID] firstObject];
+  NSUInteger lastSequence = [self.lastSequenceByStream[normalizedStreamID] unsignedIntegerValue];
+  [self.lock unlock];
+  if (oldest != nil) {
+    return [[ALNEventStreamCursor alloc] initWithStreamID:normalizedStreamID sequence:oldest.sequence];
+  }
+  // Every event aged out: the oldest a replay could still return is the next one.
+  return (lastSequence > 0) ? [[ALNEventStreamCursor alloc] initWithStreamID:normalizedStreamID
+                                                                     sequence:lastSequence + 1]
+                            : nil;
 }
 
 - (ALNEventStreamCursor *)latestCursorForStream:(NSString *)streamID
@@ -559,19 +642,20 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
   }
 
   [self.lock lock];
-  NSArray<ALNEventEnvelope *> *events = self.eventsByStream[normalizedStreamID];
-  ALNEventEnvelope *latest = [events lastObject];
+  NSUInteger lastSequence = [self.lastSequenceByStream[normalizedStreamID] unsignedIntegerValue];
   [self.lock unlock];
-  if (latest == nil) {
+  if (lastSequence == 0) {
     return nil;
   }
-  return [[ALNEventStreamCursor alloc] initWithStreamID:normalizedStreamID sequence:latest.sequence];
+  return [[ALNEventStreamCursor alloc] initWithStreamID:normalizedStreamID sequence:lastSequence];
 }
 
 - (void)reset {
   [self.lock lock];
   [self.eventsByStream removeAllObjects];
   [self.idempotencyIndexByStream removeAllObjects];
+  [self.appendTimesByStream removeAllObjects];
+  [self.lastSequenceByStream removeAllObjects];
   [self.lock unlock];
 }
 
@@ -723,17 +807,26 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
     return nil;
   }
 
-  ALNEventEnvelope *committed = [self.store appendEvent:event toStream:streamID error:error];
-  if (committed == nil) {
-    return nil;
-  }
-
+  // Append and publish under the stream's lock, so live subscribers receive a
+  // stream's events in commit (sequence) order even when several requests
+  // append concurrently (GitHub issue 240).
+  NSLock *streamLock = ALNEventStreamPublishLock(ALNNormalizedEventStreamIdentifier(streamID));
+  [streamLock lock];
+  ALNEventEnvelope *committed = nil;
   BOOL livePublishAttempted = (self.broker != nil);
   BOOL livePublishSucceeded = NO;
   NSError *livePublishError = nil;
-  if (self.broker != nil) {
-    livePublishSucceeded =
-        [self.broker publishCommittedEvent:committed onStream:committed.streamID error:&livePublishError];
+  @try {
+    committed = [self.store appendEvent:event toStream:streamID error:error];
+    if (committed != nil && self.broker != nil) {
+      livePublishSucceeded =
+          [self.broker publishCommittedEvent:committed onStream:committed.streamID error:&livePublishError];
+    }
+  } @finally {
+    [streamLock unlock];
+  }
+  if (committed == nil) {
+    return nil;
   }
 
   return [[ALNEventStreamAppendResult alloc] initWithCommittedEvent:committed
@@ -781,6 +874,15 @@ NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code, NSString *message
   } else {
     NSUInteger backlog = latestSequence - requestedAfterSequence;
     if (backlog > effectiveWindow || backlog > effectiveLimit) {
+      resyncRequired = YES;
+    }
+  }
+  // A store with retention may no longer hold the events right after the
+  // cursor; replaying from the oldest kept event would be a silent gap.
+  if (!resyncRequired && latestSequence > requestedAfterSequence &&
+      [self.store respondsToSelector:@selector(oldestCursorForStream:error:)]) {
+    ALNEventStreamCursor *oldestCursor = [self.store oldestCursorForStream:normalizedStreamID error:NULL];
+    if (oldestCursor != nil && requestedAfterSequence + 1 < oldestCursor.sequence) {
       resyncRequired = YES;
     }
   }

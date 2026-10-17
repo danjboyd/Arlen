@@ -1,8 +1,10 @@
 #import "ALNMultipart.h"
 #import "../Support/ALNPlatform.h"
 #import "ALNPositiveInteger.h"
+#include <dispatch/dispatch.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #if defined(_WIN32)
 #include <windows.h>
@@ -100,6 +102,38 @@ static NSString *Trim(NSString *s) {
   return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
 }
 // Explicit parameter scanner: quoted semicolons and quoted-pair escapes are data.
+// ASCII membership tables, built once. GNUstep rebuilt an NSCharacterSet and
+// its -invertedSet (~0.15 ms) for every multipart header line (#218).
+static const BOOL *TableForCharacters(BOOL *table, const char *characters) {
+  for (const char *cursor = characters; *cursor != '\0'; cursor++) table[(unsigned char)*cursor] = YES;
+  return table;
+}
+
+static const BOOL *TokenCharacterTable(void) {
+  static BOOL table[128];
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ TableForCharacters(table, "abcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~"); });
+  return table;
+}
+
+static const BOOL *BoundaryCharacterTable(void) {
+  static BOOL table[128];
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    TableForCharacters(table, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'()+_,-./:=? ");
+  });
+  return table;
+}
+
+static BOOL CharactersAllowed(NSString *string, const BOOL *table) {
+  NSUInteger length = [string length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar c = [string characterAtIndex:idx];
+    if (c >= 128 || !table[c]) return NO;
+  }
+  return YES;
+}
+
 static NSDictionary *Parameters(NSString *s, NSString **kind) {
   NSUInteger n = s.length, i = 0;
   while (i < n && [s characterAtIndex:i] != ';') i++;
@@ -119,13 +153,20 @@ static NSDictionary *Parameters(NSString *s, NSString **kind) {
     if (i < n && [s characterAtIndex:i] == '"') {
       i++;
       BOOL closed = NO;
+      // Collect into a buffer; appendFormat: per character dominated parse
+      // time on GNUstep (#218).
+      unichar *buffer = malloc(sizeof(unichar) * (n - i + 1));
+      if (buffer == NULL) return nil;
+      NSUInteger used = 0;
       while (i < n) {
         unichar c = [s characterAtIndex:i++];
         if (c == '"') { closed = YES; break; }
-        if (c == '\\') { if (i == n) return nil; c = [s characterAtIndex:i++]; }
-        if (c < 32 || c == 127) return nil;
-        [value appendFormat:@"%C", c];
+        if (c == '\\') { if (i == n) { free(buffer); return nil; } c = [s characterAtIndex:i++]; }
+        if (c < 32 || c == 127) { free(buffer); return nil; }
+        buffer[used++] = c;
       }
+      [value appendString:[NSString stringWithCharacters:buffer length:used]];
+      free(buffer);
       if (!closed) return nil;
       while (i < n && ([s characterAtIndex:i] == ' ' || [s characterAtIndex:i] == '\t')) i++;
       if (i < n && [s characterAtIndex:i] != ';') return nil;
@@ -208,10 +249,8 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
   NSString *kind = nil;
   NSDictionary *params = Parameters(contentType, &kind);
   NSString *boundary = params[@"boundary"];
-  NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
-      @"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'()+_,-./:=? "];
   if (!params || ![kind isEqual:@"multipart/form-data"] || !boundary.length || boundary.length > 70 ||
-      [boundary hasSuffix:@" "] || [boundary rangeOfCharacterFromSet:[allowed invertedSet]].location != NSNotFound)
+      [boundary hasSuffix:@" "] || !CharactersAllowed(boundary, BoundaryCharacterTable()))
     return Failure(error, ALNMultipartErrorMalformed, @"Invalid multipart boundary");
   NSData *marker = [[@"--" stringByAppendingString:boundary] dataUsingEncoding:NSASCIIStringEncoding];
   NSData *delimiter = [[@"\r\n--" stringByAppendingString:boundary] dataUsingEncoding:NSASCIIStringEncoding];
@@ -246,9 +285,8 @@ static BOOL Match(NSData *body, NSUInteger offset, NSData *needle) {
       if (colon.location == NSNotFound || colon.location == 0)
         return Failure(error, ALNMultipartErrorMalformed, @"Invalid multipart header");
       NSString *name = [[line substringToIndex:colon.location] lowercaseString];
-      NSCharacterSet *tokens = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~"];
       NSString *value = Trim([line substringFromIndex:colon.location+1]);
-      if ([name rangeOfCharacterFromSet:tokens.invertedSet].location != NSNotFound || values[name] ||
+      if (!CharactersAllowed(name, TokenCharacterTable()) || values[name] ||
           [value rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound)
         return Failure(error, ALNMultipartErrorMalformed, @"Invalid or duplicate multipart header");
       values[name] = value;

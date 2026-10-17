@@ -8,6 +8,12 @@ they do carry the app's security headers (`securityHeaders`, including the
 CSP), as described in
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers).
 
+Mounts never serve hidden files: a request whose path below the mount has any
+component starting with `.` (`.env.json`, `.git/config.json`,
+`assets/.cache/x.js`) gets `404`, whatever its extension. The one exception is
+`.well-known/` (RFC 8615), so files such as `.well-known/security.txt` are
+served when their extension is allowed.
+
 ## Content types
 
 `Content-Type` comes from the shared `ALNMIMETypes` extension table, which
