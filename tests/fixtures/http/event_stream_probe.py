@@ -96,5 +96,6 @@ for _ in range(30):
     get(f"/append?stream={STREAM}&n=100")
 elapsed = time.time() - started
 stalled.close()
-assert elapsed < 20, f"3000 appends took {elapsed:.1f}s with a stalled subscriber"
+# 0.18 s measured on Linux; a send blocking until SO_SNDTIMEO would take 10 s+.
+assert elapsed < 5, f"3000 appends took {elapsed:.1f}s with a stalled subscriber"
 print("event stream checks passed")
