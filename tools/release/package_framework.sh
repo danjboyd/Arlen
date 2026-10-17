@@ -210,10 +210,27 @@ package_windows_x64() {
   aln_release_write_manifest "$dest"
 }
 
+# windows_bundled_dll_lines <list> <toolchain> <toolchain_sha256>
+# Prints the `dll ...` lines of the list's section for exactly this toolchain
+# (a `toolchain <version> <sha256>` line starts a section). Fails, naming the
+# sections it has, when there is none.
+windows_bundled_dll_lines() {
+  local list="$1" toolchain="$2" toolchain_sha256="$3"
+  awk -v want="$toolchain $toolchain_sha256" '
+    $1 == "toolchain" { section = $2 " " $3; known = known "\n  " $2 " (" $3 ")"; if (section == want) found = 1; next }
+    $1 == "dll" && section == want { print }
+    $1 != "" && $1 !~ /^#/ && $1 != "toolchain" && $1 != "dll" { printf "package_framework: unknown line kind %s in the bundled DLL list\n", $1 > "/dev/stderr"; bad = 1 }
+    END {
+      if (bad) exit 2
+      if (!found) { printf "package_framework: the bundled DLL list has no section for toolchain %s; it has:%s\nre-derive the DLLs for this toolchain\n", want, known > "/dev/stderr"; exit 1 }
+    }' "$list"
+}
+
 # bundle_windows_dlls <stage_root> <dll_dir> <toolchain> <toolchain_sha256>
-# Downloads each pinned package from tools/release/windows_bundled_dlls.txt,
-# verifies it and the extracted DLL by sha256, and checks that every import of
-# a bundled DLL is bundled, in the toolchain's clang64/bin, or a system DLL.
+# Downloads each package pinned for this toolchain in
+# tools/release/windows_bundled_dlls.txt, verifies it and the extracted DLL by
+# sha256, and checks that every import of a bundled DLL is bundled, in the
+# toolchain's clang64/bin, or a system DLL.
 bundle_windows_dlls() {
   local stage_root="$1"
   local dll_dir="$2"
@@ -224,16 +241,11 @@ bundle_windows_dlls() {
   local kind url pkg_sha member member_sha pkg name dll import lower
   local bundled=""
 
+  local lines
+  lines="$(windows_bundled_dll_lines "$list" "$toolchain" "$toolchain_sha256")" || return 1
   mkdir -p "$dll_dir" "$cache"
   while read -r kind url pkg_sha member member_sha; do
     case "$kind" in
-      ''|'#'*) continue ;;
-      toolchain)
-        if [[ "$url" != "$toolchain" || "$pkg_sha" != "$toolchain_sha256" ]]; then
-          echo "package_framework: $list is for toolchain $url ($pkg_sha), but this build uses $toolchain ($toolchain_sha256); re-derive the bundled DLLs" >&2
-          return 1
-        fi
-        ;;
       dll)
         pkg="$cache/$(basename "$url")"
         if [[ ! -f "$pkg" || "$(sha256_of "$pkg")" != "$pkg_sha" ]]; then
@@ -252,12 +264,8 @@ bundle_windows_dlls() {
         fi
         bundled="$bundled $(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
         ;;
-      *)
-        echo "package_framework: unknown line kind '$kind' in $list" >&2
-        return 1
-        ;;
     esac
-  done <"$list"
+  done <<<"$lines"
 
   local system_dir
   system_dir="$(cygpath -u "${SYSTEMROOT:-C:/Windows}")/System32"
