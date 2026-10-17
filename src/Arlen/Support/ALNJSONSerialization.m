@@ -1,5 +1,4 @@
 #import "ALNJSONSerialization.h"
-#import "ALNEOCRuntime.h"
 #import "ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
@@ -627,6 +626,9 @@ static const unichar *ALNEOCJSONScriptEscapeForCharacter(unichar ch) {
   }
 }
 
+// Declared in ALNEOCRuntime.h and defined here, like ALNEOCMarkdownHTML in
+// ALNMarkdown.m: eocc links the template runtime without the JSON code, and
+// Support does not include MVC/Template headers.
 NSString *ALNEOCJSONForScript(id value) {
   // Wrap in an array so scalars (strings, numbers, booleans, null) serialize
   // too, then strip the brackets. Compact output never pads them.
