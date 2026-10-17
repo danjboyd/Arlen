@@ -8,6 +8,7 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNLogger.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNSecurityPrimitives.h"
 
@@ -892,9 +893,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return nil;
   }
   NSDictionary *rawMetadata = SMNormalizeDictionary([definition storageModuleCollectionMetadata]);
-  NSUInteger maxBytes = [rawMetadata[@"maxBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? [rawMetadata[@"maxBytes"] unsignedIntegerValue]
-                            : (5U * 1024U * 1024U);
+  NSUInteger maxBytes = ALNUnsignedIntegerValueOrDefault(rawMetadata[@"maxBytes"], (5U * 1024U * 1024U));
   if (maxBytes == 0) {
     maxBytes = 5U * 1024U * 1024U;
   }
@@ -1999,7 +1998,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSDictionary *session = [self.runtime createUploadSessionForCollection:SMTrimmedString(parameters[@"collection"])
                                                                     name:SMTrimmedString(parameters[@"name"])
                                                              contentType:SMLowerTrimmedString(parameters[@"contentType"])
-                                                               sizeBytes:[parameters[@"sizeBytes"] respondsToSelector:@selector(unsignedIntegerValue)] ? [parameters[@"sizeBytes"] unsignedIntegerValue] : 0
+                                                               sizeBytes:ALNUnsignedIntegerValueOrDefault(parameters[@"sizeBytes"], 0)
                                                                 metadata:SMNormalizeDictionary(parameters[@"metadata"])
                                                                expiresIn:[parameters[@"expiresIn"] respondsToSelector:@selector(doubleValue)] ? [parameters[@"expiresIn"] doubleValue] : 0.0
                                                                    error:&error];

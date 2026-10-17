@@ -1008,13 +1008,9 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
   NSTimeInterval resolvedTimeout =
       [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
   NSUInteger resolvedMaxRetries =
-      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [merged[@"maxRetries"] unsignedIntegerValue]
-          : 2;
+      ALNUnsignedIntegerValueOrDefault(merged[@"maxRetries"], 2);
   NSUInteger resolvedPageSize =
-      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [merged[@"pageSize"] unsignedIntegerValue]
-          : 500;
+      ALNUnsignedIntegerValueOrDefault(merged[@"pageSize"], 500);
 
   return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
                                                          tenantID:resolvedTenantID
@@ -1140,15 +1136,11 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _clusterNodeID = [clusterNodeIDValue copy];
     id expectedNodesValue = cluster[@"expectedNodes"];
     NSUInteger expectedNodes =
-        [expectedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [expectedNodesValue unsignedIntegerValue]
-            : (NSUInteger)1;
+        ALNUnsignedIntegerValueOrDefault(expectedNodesValue, (NSUInteger)1);
     _clusterExpectedNodes = (expectedNodes < 1) ? 1 : expectedNodes;
     id observedNodesValue = cluster[@"observedNodes"];
     NSUInteger observedNodes =
-        [observedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [observedNodesValue unsignedIntegerValue]
-            : _clusterExpectedNodes;
+        ALNUnsignedIntegerValueOrDefault(observedNodesValue, _clusterExpectedNodes);
     _clusterObservedNodes = observedNodes;
     id emitHeadersValue = cluster[@"emitHeaders"];
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
@@ -1699,11 +1691,9 @@ static BOOL ALNBoolConfigValue(id value, BOOL defaultValue) {
 }
 
 static NSUInteger ALNUIntConfigValue(id value, NSUInteger defaultValue, NSUInteger minimum) {
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed >= minimum) {
-      return parsed;
-    }
+  NSUInteger parsed = 0;
+  if (ALNUnsignedIntegerFromValue(value, &parsed) && parsed >= minimum) {
+    return parsed;
   }
   return defaultValue;
 }
@@ -4641,9 +4631,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
                              ? self.config[@"requestLimits"]
                              : @{};
   id value = limits[@"maxBodyBytes"];
-  return [value respondsToSelector:@selector(unsignedIntegerValue)] && [value unsignedIntegerValue] > 0
-             ? [value unsignedIntegerValue]
-             : 1048576;
+  NSUInteger maxBodyBytes = ALNUnsignedIntegerValueOrDefault(value, 0);
+  return (maxBodyBytes > 0) ? maxBodyBytes : 1048576;
 }
 
 - (NSUInteger)largestRouteMaxBodyBytes {
@@ -4683,9 +4672,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   // body cap and lets one file part use all of it.
   NSMutableDictionary *limits = [base mutableCopy];
   limits[@"maxBodyBytes"] = @(routeLimit);
-  NSUInteger fileLimit = [limits[@"maxMultipartFileBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
-                             ? [limits[@"maxMultipartFileBytes"] unsignedIntegerValue]
-                             : 1048576;
+  NSUInteger fileLimit = ALNUnsignedIntegerValueOrDefault(limits[@"maxMultipartFileBytes"], 1048576);
   limits[@"maxMultipartFileBytes"] = @(MAX(fileLimit, routeLimit));
   return limits;
 }
@@ -5372,9 +5359,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     ALNPgEventStreamStore *store =
         [[ALNPgEventStreamStore alloc] initWithConnectionString:connectionString(storeConfig)
                                                       tableName:ALNStringConfigValue(storeConfig[@"tableName"], @"")
-                                                 maxConnections:[poolSize respondsToSelector:@selector(unsignedIntegerValue)]
-                                                                    ? [poolSize unsignedIntegerValue]
-                                                                    : 4
+                                                 maxConnections:ALNUnsignedIntegerValueOrDefault(poolSize, 4)
                                                           error:&error];
     if (store != nil) {
       self.eventStreamStore = store;

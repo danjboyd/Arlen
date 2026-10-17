@@ -12,6 +12,7 @@
 #import "ALNRequest.h"
 #import "ALNJSONSerialization.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
 #import "ALNRecoveryCodes.h"
 #import "ALNSecurityPrimitives.h"
@@ -346,11 +347,8 @@ static BOOL AMConfigBool(id value, BOOL fallbackValue) {
 }
 
 static NSUInteger AMConfigUnsignedInteger(id value, NSUInteger fallbackValue) {
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger converted = [value unsignedIntegerValue];
-    return (converted > 0U) ? converted : fallbackValue;
-  }
-  return fallbackValue;
+  NSUInteger converted = ALNUnsignedIntegerValueOrDefault(value, 0U);
+  return (converted > 0U) ? converted : fallbackValue;
 }
 
 static NSString *AMNormalizePhoneNumber(id value) {
