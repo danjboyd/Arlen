@@ -227,6 +227,23 @@ They also expose:
 - `resourceMetadata.visibility` and `resourceMetadata.syncPolicy` so apps and
   operators can see tenant/soft-delete/sync boundaries explicitly
 
+### Query limits
+
+Query routes are public by default, so the module bounds how much work one
+query can cost:
+
+- `q` may be at most 256 characters (after trimming). Longer queries are
+  rejected, not truncated: the JSON routes answer `422` and
+  `-[ALNSearchModuleRuntime searchQuery:...]` returns
+  `ALNSearchModuleErrorValidationFailed` with `maxLength = 256`. This matches
+  how the module treats other invalid input (unsupported modes, sorts and
+  filters fail closed).
+- "Did you mean" `suggestions` are skipped for queries longer than 64
+  characters; they compare the whole query with single indexed words, so a
+  longer query cannot match one.
+- The `autocomplete_limit` and `suggestions_limit` options are clamped to
+  1-25 (defaults 5 and 3).
+
 ## Protection
 
 - query routes are public by default
@@ -355,6 +372,8 @@ Manifest defaults:
   than dedicated search services, even though it now supports typed filters,
   autocomplete, suggestions, facets, promotions, and fuzzy/phrase modes
 - PostgreSQL is still the strongest no-extra-service path for search quality
+- queries are capped at 256 characters and suggestion/autocomplete lists at 25
+  entries (see [Query limits](#query-limits))
 - the Meilisearch and OpenSearch adapters now execute authoritative live
   query/sync flows through the shared Arlen contract, but cluster-native
   analyzer/relevance/ops depth remains lighter than dedicated engine-specific

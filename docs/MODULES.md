@@ -230,6 +230,7 @@ on Apple arm64 (GitHub issue 132).
 `notifications` moved to `1.1.0` for the Web Push channel, and `jobs` to `1.1.0`
 for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
 (GitHub issue 173).
+`search` moved to `1.0.3` to bound query cost (GitHub issue 226).
 
 ## MCP tools
 

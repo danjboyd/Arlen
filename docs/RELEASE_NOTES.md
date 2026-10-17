@@ -64,6 +64,15 @@
   now explain that app identity middleware must be registered from a plugin
   to run before the module (#185). `mcp` moves to `1.0.4`.
 
+- The `search` module bounds the cost of a query. `q` longer than 256
+  characters is rejected with `422` (`ALNSearchModuleErrorValidationFailed`)
+  instead of being processed. "Did you mean" suggestions are skipped for
+  queries over 64 characters, and `autocomplete_limit`/`suggestions_limit`
+  are clamped to 25. The default engine's fuzzy matching builds the query's
+  trigram set once per query, uses a plain C buffer for edit distance, and
+  skips the edit-distance table when word lengths differ by more than two.
+  Results for other queries are unchanged (#226). `search` moves to `1.0.3`.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.
