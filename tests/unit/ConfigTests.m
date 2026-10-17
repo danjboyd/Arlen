@@ -6,8 +6,8 @@
 
 #import "ALNApplication.h"
 #import "ALNConfig.h"
-#import "../shared/ALNTestSupport.h"
 #import "ALNDataverseClient.h"
+#import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
 
 @interface ConfigTests : XCTestCase

@@ -99,7 +99,7 @@
     checks += 1;
     if (checks == 2) {
       NSTask *task = [[NSTask alloc] init];
-      task.launchPath = @"/bin/sh";
+      task.launchPath = ALNTestBashPath();  // no /bin/sh for a native Windows process
       task.arguments = @[ @"-c", @"exec sleep ${ALN_TEST_BLOCKED_CONDITION_SECONDS:-1}" ];
       [task launch];
       [task waitUntilExit];
