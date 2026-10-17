@@ -21,42 +21,42 @@ runners; it is not a new required merge-gate lane by itself.
 ## Windows Test Runner
 
 The Windows preview lanes (`make phase24-windows-db-smoke` and
-`make phase24-windows-runtime-tests`) don't use the vendored fork. They build
-against the toolchain's XCTest and run bundles through
-`tools/arlen_xctest_runner.m`, so they get no filters, time limits, JUnit
-reports, skips or attachments. GitHub issue #116 tracks moving them to the fork.
+`make phase24-windows-runtime-tests`) build and run the vendored tools-xctest
+fork, the same runner as Linux and macOS (issue #116), so they get filters,
+per-test time limits, JUnit reports, skips and attachments. The make wiring
+for Windows:
 
-As of 2026-10-08 the move hasn't been verified on Windows: `windows-preview` is
-disabled and no Windows runner is registered.
+- the vendored runner is `obj/xctest.exe` and is built with
+  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1` (the gnustep-cli Windows toolchain's
+  libdispatch header otherwise clashes with MinGW's `mode_t`);
+- `xctest_runtime_env` puts the vendored `XCTest-0.dll` directory on `PATH`
+  instead of `LD_LIBRARY_PATH`;
+- test bundle binaries are named `<bundle>.dll`, because MinGW appends `.exe`
+  to an extensionless `-o` path and GNUstep's `NSBundle` loads `<name>.dll`.
 
-The fork itself is no longer a blocker. Since `v0.5.0` (pinned here) it builds
-and passes `make check` on MSYS2 `CLANG64` in its own CI
-(danjboyd/tools-xctest#28). On Windows it leaves out `-host` and
-`libXCTestHost`, which need `LD_PRELOAD` and which Arlen doesn't use; its
-metrics use the Windows process APIs, and parallel workers find `xctest`
-without `/proc`.
+Verified on 2026-10-16 on the `arlen-windows-agent` VM (Windows Server 2022,
+gnustep-cli `v0.1.0` managed toolchain): `phase24-windows-db-smoke` passes
+(2/2) and `phase24-windows-runtime-tests` passes (3/3, about 160 s) through
+the vendored runner. The old `arlen-xctest-runner` bundle loader is gone.
 
-What remains is Arlen's make wiring, which assumes Linux:
+The runtime lane used to exceed its 300 s allowance because boomhauer rebuilt
+the whole framework inside the test: a shell started by `xctest.exe` saw
+`GNUSTEP_MAKEFILES` as `C:/...`, so `GNUSTEP_SH`, and the build-flags sentinel
+hash, had a second spelling. `tools/resolve_gnustep.sh` now prints the
+`cygpath -u` form. `tools/ci/run_windows_preview.sh` also stops any process
+still running from `build/phase24-temp` on exit, because a test stopped by its
+time allowance never reaches its cleanup and Windows does not end children
+with their parent.
 
-- `VENDORED_XCTEST` names `obj/xctest`, but gnustep-make builds
-  `obj/xctest.exe` on Windows. The prerequisite never exists, so every run
-  would rebuild the runner from clean.
-- `xctest_runtime_env` points `LD_LIBRARY_PATH` at the vendored
-  `libXCTest`. Windows finds DLLs through `PATH`.
-- Windows builds compile with `-DGNUSTEP_WITHOUT_DLL=1`. Whether bundles
-  built that way link correctly against a DLL `libXCTest` is unknown until
-  a Windows build tries it.
-
-To finish the move once a Windows runner is back:
-
-1. In `GNUmakefile`, use `$(EXEEXT)`/`.exe` for `VENDORED_XCTEST` on Windows,
-   prepend the vendored library directory to `PATH` in `xctest_runtime_env`,
-   and remove the `ARLEN_USE_VENDORED_XCTEST := 0` override.
-2. Point the phase24 targets at `$(call xctest_run,...)`, then delete
-   `tools/arlen_xctest_runner.m`, `XCTEST_BUNDLE_RUNNER_*` and its object from
-   `ALL_OBJECTS`.
-3. Run `make phase24-windows-confidence` on the runner, and update this
-   section, `docs/WINDOWS_CLANG64.md` and `docs/TESTING_WORKFLOW.md`.
+`windows-preview` runs on the self-hosted runner `arlen-windows-agent`
+(labels `self-hosted`, `Windows`, `X64`, `arlen`, `msys2-clang64`). That
+runner is a persistent VM, so the job is skipped for pull requests from forks.
+It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`)
+and the unit suite (`make test-unit`). `make windows-confidence` (packaged
+release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
+development-only Windows scope; it returns with Windows production in 0.4.0
+(#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
+paths that the native `arlen.exe` cannot open.
 
 ## Goal
 
@@ -141,7 +141,8 @@ visible but non-required:
  - promotion rule: only promote if the platform support statement becomes
  authoritative and the lane stays stably green
 - `windows-preview`
- - purpose: validate Windows preview runtime and packaged release parity
+ - purpose: validate Windows runtime parity and the unit suite (packaged
+ release parity returns with Windows production in 0.4.0)
  - status: preview confidence, not a required merge gate
  - promotion rule: only promote if Windows leaves preview and the lane is
  operationally stable enough to protect real shipped behavior
@@ -153,6 +154,9 @@ diagnosis even while non-blocking.
 
 The current runner contract standardizes the intended platform-runner path:
 
+- Windows preview currently runs on the persistent `arlen-windows-agent` VM
+ (see "Windows Test Runner"); the longer-term direction is still an
+ OracleTestVMs-provisioned LAN Windows VM:
 - Windows preview should run on an OracleTestVMs-provisioned LAN Windows VM
  with the MSYS2 `CLANG64` GNUstep toolchain installed through
  the pinned `vendor/gnustep-cli-new` revision, then registered as a GitHub
@@ -169,6 +173,21 @@ The current runner contract standardizes the intended platform-runner path:
  platform-runner contract.
 
 This provisioning work does not change branch protection by itself.
+
+### Per-job temp directory on self-hosted Linux runners
+
+Every job on the self-hosted `iep-apt` runner (linux-quality, both
+linux-sanitizers jobs, docs-quality, release-certification and
+`release-assets / source-archive`) starts with a "Use a per-job temp
+directory" step. It points `TMPDIR`, `TMP` and `TEMP` at `$RUNNER_TEMP/tmp`.
+On Linux, GNUstep's `NSTemporaryDirectory()` reads `TEMP`/`TMP`, not
+`TMPDIR`, so all three are set. The runner's `/tmp` is a 2 GB tmpfs shared
+by every job. Test temp directories that leaked there over several weeks
+(about 22k entries, 1.4 GB by 2026-10-16) left too little room for the eight
+concurrent 20 MiB uploads in
+`testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends`, which failed with
+500s. `$RUNNER_TEMP` is on disk, and the runner empties it between jobs. New
+self-hosted Linux jobs should include the same step.
 
 ## Public-Release Confidence
 
@@ -206,8 +225,13 @@ never runs on pull requests, so it is not a merge-gate lane.
 `linux-quality` runs `tools/ci/test_release_packaging.py`. It checks the
 source archive's layout (one top directory, `.arlen-dist`, vendored
 `tools-xctest`, no `.git` and no `gnustep-cli-new`) and the managed-toolchain
-`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. This is a step
-inside the existing job, so no required check names change.
+`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. It also runs
+`tools/deploy/build_release.sh` against a stub framework from a shell that
+never sourced GNUstep.sh. It checks that the script sources the env before
+`make` and packages the binary of an app that has no `src/main.m` (#181). No
+PR lane runs the real `smoke_release.sh` on Linux, so this check is the PR-time
+guard for the path `release-certification` uses. This is a step inside the
+existing job, so no required check names change.
 
 Linux has no prebuilt archive. The framework's build-flags sentinel hashes
 absolute toolchain paths, and gnustep-cli managed toolchains live under each

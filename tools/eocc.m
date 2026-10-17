@@ -5,10 +5,6 @@
 #import "ALNEOCRuntime.h"
 #import "ALNEOCTranspiler.h"
 
-#ifndef NSJSONWritingSortedKeys
-#define NSJSONWritingSortedKeys 0
-#endif
-
 static NSString *const ALNEOCInternalDependencySitesKey = @"_dependency_sites";
 static NSString *const ALNEOCInternalFilledSlotSitesKey = @"_filled_slot_sites";
 static NSString *const ALNEOCMetadataLineKey = @"line";

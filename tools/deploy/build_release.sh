@@ -65,6 +65,8 @@ json_escape() {
 }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# aln_platform_link_directory: junctions instead of copies under MSYS2.
+source "$script_dir/../platform.sh"
 default_framework_root="$(cd "$script_dir/../.." && pwd)"
 
 path_looks_like_windows_absolute() {
@@ -116,6 +118,17 @@ if not isinstance(status, str) or not status:
 
 print(status)
 PY
+}
+
+# Same app-root test as bin/propane and bin/jobs-worker. If this were narrower,
+# an app with sources other than src/main.m would ship without its binary and
+# propane would try to rebuild it from the release, which it can't (issue 181).
+app_root_has_sources() {
+  local root="$1"
+  if [[ -f "$root/app_lite.m" ]]; then
+    return 0
+  fi
+  [[ -n "$(find "$root/src" -type f -name '*.m' -print -quit 2>/dev/null)" ]]
 }
 
 copy_path_if_exists() {
@@ -780,12 +793,18 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   framework_binary_dir="$framework_root/build/apple"
   app_binary_dir="$app_root/.boomhauer/apple"
 else
+  # make runs the freshly built eocc, and boomhauer --prepare-only runs it
+  # again; both need the GNUstep runtime libraries on the loader path. Source
+  # the env like tools/ci/* do instead of assuming the caller did (issue 181).
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    source "$framework_root/tools/source_gnustep_env.sh"
+  fi
   make -C "$framework_root" arlen boomhauer >/dev/null
   framework_binary_dir="$framework_root/build"
   app_binary_dir="$app_root/.boomhauer/build"
 fi
 
-if [[ -f "$app_root/config/app.plist" ]] && ([[ -f "$app_root/src/main.m" ]] || [[ -f "$app_root/app_lite.m" ]]); then
+if [[ -f "$app_root/config/app.plist" ]] && app_root_has_sources "$app_root"; then
   ARLEN_APP_ROOT="$app_root" ARLEN_FRAMEWORK_ROOT="$framework_root" \
     "$framework_root/bin/boomhauer" --no-watch --prepare-only >/dev/null
 fi
@@ -1076,7 +1095,7 @@ Run propane from this release:
     "$packaged_propane" --env production
 EOF
 
-ln -sfn "$release_dir" "$releases_dir/latest-built"
+aln_platform_link_directory "$release_dir" "$releases_dir/latest-built"
 if [[ "$output_json" == "1" ]]; then
   emit_success_json "ok" "$release_dir" "$releases_dir/latest-built" "$manifest_path"
 else

@@ -11,6 +11,26 @@ FOUNDATION_EXPORT BOOL ALNPlatformUsesGNUstepFoundation(void);
 // true/false). Char-typed numbers are not booleans. Never use objCType for this:
 // @encode(BOOL) is "B" on Apple arm64 while @YES reports "c".
 FOUNDATION_EXPORT BOOL ALNNumberIsBoolean(id _Nullable value);
+// Unsigned integer from a config or request value. YES for any NSNumber (the
+// result is -unsignedIntegerValue, unchanged) and for an NSString that is only
+// ASCII decimal digits after trimming whitespace and newlines (no sign, no
+// fraction or exponent) and fits in NSUInteger. NO otherwise, leaving
+// *outValue untouched. Use this rather than respondsToSelector:
+// @selector(unsignedIntegerValue): Apple's NSString has no
+// -unsignedIntegerValue, so query parameters and old-style plist numbers
+// would be dropped there.
+FOUNDATION_EXPORT BOOL ALNUnsignedIntegerFromValue(id _Nullable value, NSUInteger *_Nullable outValue);
+// ALNUnsignedIntegerFromValue's value, or fallback when it returns NO.
+FOUNDATION_EXPORT NSUInteger ALNUnsignedIntegerValueOrDefault(id _Nullable value, NSUInteger fallback);
+// MSYS2 roots that may hold the CLANG64 toolchain on Windows, in search order:
+// ARLEN_MSYS_ROOT, the gnustep-cli managed toolchain (user, then system
+// install), then the root GNUSTEP_MAKEFILES points into (a stock C:/msys64 only
+// when it is the toolchain in use). Empty on other platforms.
+FOUNDATION_EXPORT NSArray<NSString *> *ALNPlatformWindowsMSYSRoots(void);
+// bash for `bash -lc` helpers: /bin/bash on POSIX. On Windows: ARLEN_BASH_PATH,
+// then usr/bin/bash.exe under the first MSYS2 root that has one, else the
+// managed root's path (which fails to launch: set ARLEN_BASH_PATH).
+FOUNDATION_EXPORT NSString *ALNPlatformBashPath(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultLibpqCandidatePaths(void);
 FOUNDATION_EXPORT NSArray<NSString *> *ALNDefaultODBCCandidatePaths(void);
 NSCalendarUnit ALNPlatformCalendarDateTimeUnitMask(void);
@@ -19,8 +39,33 @@ NSString *ALNPlatformISO8601Now(void);
 NSInteger ALNPlatformProcessIdentifier(void);
 void ALNPlatformSleepMilliseconds(NSUInteger milliseconds);
 BOOL ALNPlatformPathIsAbsolute(NSString *path);
+#if defined(_WIN32)
+// LoadLibraryW for a relative name; for an absolute path, LoadLibraryExW with
+// backslashes and LOAD_WITH_ALTERED_SEARCH_PATH so the DLL's own imports
+// resolve from its directory. Wide-character, so non-ASCII paths load.
+void *_Nullable ALNPlatformLoadWindowsLibrary(NSString *path);
+#endif
 BOOL ALNPlatformFillRandomBytes(void *buffer, size_t count);
 BOOL ALNPlatformGMTimeUTC(const time_t *seconds, struct tm *utc);
+// fopen() for an NSString path. -fileSystemRepresentation is UTF-16 on
+// Windows GNUstep, so this uses _wfopen there and fopen elsewhere.
+FILE *_Nullable ALNPlatformOpenFile(NSString *path, const char *mode);
+// Memory-mapped file contents. On Windows a read-only file mapping
+// (CreateFileMappingW/MapViewOfFile): the MSYS2 gnustep-base has no
+// +dataWithContentsOfFile:options:error:, and its +dataWithContentsOfMappedFile:
+// reads the whole file into the heap (no HAVE_MMAP).
+NSData *_Nullable ALNPlatformMappedFileData(NSString *path, NSError *_Nullable *_Nullable error);
+// Removes a file or directory that ALNPlatformMappedFileData may still have
+// mapped. POSIX unlink leaves existing mappings valid; Windows refuses to delete
+// a mapped file, so whatever cannot go yet is removed when its last mapped view
+// is released.
+void ALNPlatformRemoveItemWhenUnmapped(NSString *path);
+// Opens (creating, 0600) the lock file at path and blocks until this process
+// holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
+// on Windows. Returns the descriptor, or -1 with errno set.
+int ALNPlatformOpenExclusiveLock(NSString *path);
+// Releases a lock from ALNPlatformOpenExclusiveLock and closes its descriptor.
+void ALNPlatformReleaseExclusiveLock(int descriptor);
 
 NS_ASSUME_NONNULL_END
 

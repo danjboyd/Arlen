@@ -14,6 +14,7 @@
 #import "ALNRouter.h"
 #import "ALNHTTPCompat.h"
 #import "ALNLogger.h"
+#import "../shared/ALNTestSupport.h"
 #include <fcntl.h>
 #include <unistd.h>
 static NSDictionary *OAuthTestRSAKeyMaterial(NSString *kid) {
@@ -287,8 +288,7 @@ static NSUInteger OAuthCalls;
 }
 - (NSString *)logOutputOf:(ALNApplication *)app during:(void (^)(void))block {
   int fds[2];
-  XCTAssertEqual(0, pipe(fds));
-  fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+  XCTAssertTrue(ALNTestCreatePipe(fds, YES));
   ALNLogLevel level = app.logger.minimumLevel;
   app.logger.minimumLevel = ALNLogLevelWarn;
   app.logger.outputFileDescriptor = fds[1];

@@ -6,6 +6,7 @@
 #import <unistd.h>
 
 #import "ALNDataCompat.h"
+#import "ALNPlatform.h"
 #import "ALNConfig.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
@@ -44,7 +45,7 @@ static void PrintUsage(void) {
           "  perf\n"
           "  check [--dry-run] [--json]\n"
           "  build [--dry-run] [--json]\n"
-          "  config [--env <name>] [--json]\n"
+          "  config [--env <name>] [--json] [--show-secrets]\n"
           "  doctor [--env <name>] [--json]\n"
           "  webpush <generate-keys|public-key> [--json]\n");
 }
@@ -259,9 +260,7 @@ static NSArray<NSString *> *SortedUniqueStrings(NSArray<NSString *> *values) {
 
 static NSJSONWritingOptions StableJSONWritingOptions(void) {
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return options;
 }
 
@@ -455,7 +454,7 @@ static void CloseFileHandleQuietly(NSFileHandle *handle) {
 
 static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ?: @"" ];
   NSString *stdoutPath = TaskCapturePath(@"arlen-shell-stdout");
   NSString *stderrPath = TaskCapturePath(@"arlen-shell-stderr");
@@ -496,7 +495,7 @@ static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
 
 static int RunShellCommand(NSString *command) {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ];
   task.standardInput = [NSFileHandle fileHandleWithStandardInput];
   task.standardOutput = [NSFileHandle fileHandleWithStandardOutput];
@@ -512,10 +511,16 @@ static int RunShellCommand(NSString *command) {
 // its own process group on Apple, so a terminal Ctrl-C or a signal to arlen
 // stopped arlen and left the server running.
 static int ExecShellCommand(NSString *command) {
+#if defined(_WIN32)
+  // Windows has no exec (MSVCRT's _exec spawns a new process and exits) and no
+  // signals for the process-group problem above, so run it as a waited child.
+  return RunShellCommand(command);
+#else
   fflush(NULL);
   execl("/bin/bash", "bash", "-lc", [command UTF8String], (char *)NULL);
   fprintf(stderr, "arlen: failed to run /bin/bash: %s\n", strerror(errno));
   return 127;
+#endif
 }
 
 static NSString *TaskCommandDescription(NSString *launchPath, NSArray<NSString *> *arguments) {
@@ -3185,7 +3190,7 @@ static NSString *FrameworkRootFromExecutablePath(void) {
 
   NSString *invocation = arguments[0];
   NSString *resolved = invocation;
-  if (![resolved hasPrefix:@"/"]) {
+  if (!ALNPlatformPathIsAbsolute(resolved)) {
     NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
     resolved = [cwd stringByAppendingPathComponent:resolved];
   }
@@ -3815,7 +3820,6 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "    secret = \"\";\n"
                             "    cookieName = \"arlen_session\";\n"
                             "    maxAgeSeconds = 1209600;\n"
-                            "    secure = NO;\n"
                             "    sameSite = \"Lax\";\n"
                             "  };\n"
                             "  csrf = {\n"
@@ -3840,7 +3844,6 @@ static BOOL ScaffoldFullApp(NSString *root, BOOL force, NSError **error) {
                             "  };\n"
                             "  openapi = {\n"
                             "    enabled = YES;\n"
-                            "    docsUIEnabled = YES;\n"
                             "    docsUIStyle = \"interactive\";\n"
                             "    title = \"Arlen API\";\n"
                             "    version = \"0.1.0\";\n"
@@ -3979,7 +3982,7 @@ static BOOL ScaffoldLiteApp(NSString *root, BOOL force, NSError **error) {
 
   BOOL ok = YES;
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/app.plist"],
-                           @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  staticAllowExtensions = (\"css\", \"js\", \"json\", \"txt\", \"html\", \"htm\", \"svg\", \"png\", \"jpg\", \"jpeg\", \"gif\", \"ico\", \"webp\", \"woff\", \"woff2\", \"map\", \"xml\");\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    adapter = \"postgresql\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    secure = NO;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  auth = {\n    enabled = NO;\n    bearerSecret = \"\";\n    issuer = \"\";\n    audience = \"\";\n  };\n  openapi = {\n    enabled = YES;\n    docsUIEnabled = YES;\n    docsUIStyle = \"interactive\";\n    title = \"Arlen API\";\n    version = \"0.1.0\";\n    description = \"Generated by Arlen\";\n  };\n  compatibility = {\n    pageStateEnabled = NO;\n  };\n  apiHelpers = {\n    responseEnvelopeEnabled = NO;\n  };\n  plugins = {\n    classes = ();\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
+                           @"{\n  host = \"127.0.0.1\";\n  port = 3000;\n  serveStatic = YES;\n  staticAllowExtensions = (\"css\", \"js\", \"json\", \"txt\", \"html\", \"htm\", \"svg\", \"png\", \"jpg\", \"jpeg\", \"gif\", \"ico\", \"webp\", \"woff\", \"woff2\", \"map\", \"xml\");\n  listenBacklog = 128;\n  connectionTimeoutSeconds = 30;\n  database = {\n    connectionString = \"\";\n    adapter = \"postgresql\";\n    poolSize = 8;\n  };\n  session = {\n    enabled = NO;\n    secret = \"\";\n    cookieName = \"arlen_session\";\n    maxAgeSeconds = 1209600;\n    sameSite = \"Lax\";\n  };\n  csrf = {\n    enabled = NO;\n    headerName = \"x-csrf-token\";\n    queryParamName = \"csrf_token\";\n  };\n  rateLimit = {\n    enabled = NO;\n    requests = 120;\n    windowSeconds = 60;\n  };\n  securityHeaders = {\n    enabled = YES;\n    contentSecurityPolicy = \"default-src 'self'\";\n  };\n  auth = {\n    enabled = NO;\n    bearerSecret = \"\";\n    issuer = \"\";\n    audience = \"\";\n  };\n  openapi = {\n    enabled = YES;\n    docsUIStyle = \"interactive\";\n    title = \"Arlen API\";\n    version = \"0.1.0\";\n    description = \"Generated by Arlen\";\n  };\n  compatibility = {\n    pageStateEnabled = NO;\n  };\n  apiHelpers = {\n    responseEnvelopeEnabled = NO;\n  };\n  plugins = {\n    classes = ();\n  };\n  propaneAccessories = {\n    workerCount = 4;\n    gracefulShutdownSeconds = 10;\n    respawnDelayMs = 250;\n    reloadOverlapSeconds = 1;\n  };\n}\n",
                            force, error);
   ok = ok && WriteTextFile([root stringByAppendingPathComponent:@"config/deploy.plist.example"],
                            DeployTargetSamplePlist(@"production", nil), force, error);
@@ -4099,8 +4102,22 @@ static int CommandNew(NSArray *args) {
     }
   }
 
-  NSString *root =
-      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:appName];
+  // An absolute name (/srv/app, C:/apps/app) is used as is, not appended to the cwd.
+  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *root = ResolvePathFromRoot(cwd, appName);
+  // A blank or "." name resolves to the cwd itself; with --force that would
+  // scaffold over whatever is there.
+  if ([[root stringByStandardizingPath] isEqualToString:[cwd stringByStandardizingPath]]) {
+    if (asJSON) {
+      return EmitMachineError(@"new", @"scaffold", @"missing_app_name",
+                              @"arlen new: AppName must name a new directory, not the current one",
+                              @"Provide an app name after `arlen new`.",
+                              @"arlen new DemoApp --full --json", 2);
+    }
+    fprintf(stderr, "arlen new: AppName must name a new directory, not the current one\n");
+    PrintNewUsage();
+    return 2;
+  }
   NSError *error = nil;
   BOOL ok = lite ? ScaffoldLiteApp(root, force, &error) : ScaffoldFullApp(root, force, &error);
   if (!ok) {
@@ -5580,7 +5597,7 @@ static NSString *ResolveFrameworkRootForCommandDetailed(NSString *commandName,
   NSString *appRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *override = EnvValue("ARLEN_FRAMEWORK_ROOT");
   if ([override length] > 0) {
-    NSString *candidate = [override hasPrefix:@"/"]
+    NSString *candidate = ALNPlatformPathIsAbsolute(override)
                               ? [override stringByStandardizingPath]
                               : [[appRoot stringByAppendingPathComponent:override] stringByStandardizingPath];
     if (IsFrameworkRoot(candidate)) {
@@ -8167,7 +8184,7 @@ static int CommandDoctor(NSArray *args) {
   NSString *frameworkOverride = EnvValue("ARLEN_FRAMEWORK_ROOT");
   BOOL overrideInvalid = NO;
   if ([frameworkOverride length] > 0) {
-    NSString *candidate = [frameworkOverride hasPrefix:@"/"]
+    NSString *candidate = ALNPlatformPathIsAbsolute(frameworkOverride)
                               ? [frameworkOverride stringByStandardizingPath]
                               : [[appRoot stringByAppendingPathComponent:frameworkOverride]
                                     stringByStandardizingPath];
@@ -8380,6 +8397,37 @@ static int CommandDoctor(NSArray *args) {
                                                 (long)port],
                      @"");
       passCount += 1;
+
+      if ([environment isEqualToString:@"production"]) {
+        NSDictionary *observability = [loadedConfig[@"observability"] isKindOfClass:[NSDictionary class]]
+                                          ? loadedConfig[@"observability"]
+                                          : @{};
+        NSString *operabilityToken = [observability[@"operabilityToken"] isKindOfClass:[NSString class]]
+                                         ? [observability[@"operabilityToken"]
+                                               stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                         : @"";
+        BOOL loopbackOnly = [observability[@"operabilityLoopbackOnly"] respondsToSelector:@selector(boolValue)] &&
+                            [observability[@"operabilityLoopbackOnly"] boolValue];
+        if ([operabilityToken length] > 0 || loopbackOnly) {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"pass",
+                         [NSString stringWithFormat:@"/metrics and /clusterz are restricted (%@)",
+                                                    ([operabilityToken length] > 0 && loopbackOnly)
+                                                        ? @"bearer token, loopback only"
+                                                        : (loopbackOnly ? @"loopback only" : @"bearer token")],
+                         @"");
+          passCount += 1;
+        } else {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"warn",
+                         @"/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)",
+                         @"Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, "
+                         "or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy.");
+          warnCount += 1;
+        }
+      }
     }
   }
 
@@ -8494,9 +8542,130 @@ static int CommandWebPush(NSArray *args) {
   return 0;
 }
 
+static NSString *const ConfigRedactedValue = @"[redacted]";
+
+static BOOL ConfigKeyLooksSecret(NSString *key) {
+  if (![key isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *lower = [key lowercaseString];
+  // Settings about secrets rather than secret values: env var names, endpoints,
+  // TTLs, form/route paths, policy classes and feature flags. Old-style plists
+  // load numbers and booleans as strings, so these are matched by name.
+  for (NSString *suffix in @[
+         @"environmentkey", @"envkey", @"authmethod", @"endpoint", @"url", @"path", @"form", @"class",
+         @"policy", @"version", @"seconds", @"minutes", @"ttl", @"enabled", @"subject"
+       ]) {
+    if ([lower hasSuffix:suffix]) {
+      return NO;
+    }
+  }
+  for (NSString *marker in @[ @"secret", @"password", @"token", @"apikey", @"connectionstring" ]) {
+    if ([lower rangeOfString:marker].location != NSNotFound) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+// Masks the password in scheme://user:password@host URLs and in libpq
+// keyword/value DSNs (password=...).
+static NSString *ConfigRedactEmbeddedPasswords(NSString *value) {
+  NSMutableString *result = [NSMutableString stringWithString:value];
+  NSUInteger searchFrom = 0;
+  while (searchFrom < [result length]) {
+    NSRange scheme = [result rangeOfString:@"://" options:0 range:NSMakeRange(searchFrom, [result length] - searchFrom)];
+    if (scheme.location == NSNotFound) {
+      break;
+    }
+    NSUInteger authorityStart = NSMaxRange(scheme);
+    NSUInteger authorityEnd = authorityStart;
+    NSCharacterSet *terminators = [NSCharacterSet characterSetWithCharactersInString:@"/?# \t\r\n"];
+    while (authorityEnd < [result length] &&
+           ![terminators characterIsMember:[result characterAtIndex:authorityEnd]]) {
+      authorityEnd++;
+    }
+    NSRange authority = NSMakeRange(authorityStart, authorityEnd - authorityStart);
+    NSRange at = [result rangeOfString:@"@" options:NSBackwardsSearch range:authority];
+    if (at.location != NSNotFound) {
+      NSRange colon = [result rangeOfString:@":" options:0
+                                      range:NSMakeRange(authorityStart, at.location - authorityStart)];
+      if (colon.location != NSNotFound && colon.location + 1 < at.location) {
+        NSRange password = NSMakeRange(NSMaxRange(colon), at.location - NSMaxRange(colon));
+        [result replaceCharactersInRange:password withString:ConfigRedactedValue];
+        authorityEnd = authorityEnd - password.length + [ConfigRedactedValue length];
+      }
+    }
+    searchFrom = authorityEnd;
+  }
+
+  searchFrom = 0;
+  while (searchFrom < [result length]) {
+    NSRange key = [result rangeOfString:@"password="
+                                options:NSCaseInsensitiveSearch
+                                  range:NSMakeRange(searchFrom, [result length] - searchFrom)];
+    if (key.location == NSNotFound) {
+      break;
+    }
+    BOOL atWordStart = (key.location == 0) ||
+                       ![[NSCharacterSet alphanumericCharacterSet] characterIsMember:[result characterAtIndex:key.location - 1]];
+    NSUInteger valueStart = NSMaxRange(key);
+    NSUInteger valueEnd = valueStart;
+    if (valueEnd < [result length] && [result characterAtIndex:valueEnd] == '\'') {
+      valueEnd++;
+      while (valueEnd < [result length] && [result characterAtIndex:valueEnd] != '\'') {
+        valueEnd++;
+      }
+      if (valueEnd < [result length]) {
+        valueEnd++;
+      }
+    } else {
+      NSCharacterSet *terminators = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n&;"];
+      while (valueEnd < [result length] && ![terminators characterIsMember:[result characterAtIndex:valueEnd]]) {
+        valueEnd++;
+      }
+    }
+    if (atWordStart && valueEnd > valueStart) {
+      [result replaceCharactersInRange:NSMakeRange(valueStart, valueEnd - valueStart) withString:ConfigRedactedValue];
+      valueEnd = valueStart + [ConfigRedactedValue length];
+    }
+    searchFrom = MAX(valueEnd, NSMaxRange(key));
+  }
+  return result;
+}
+
+// `arlen config` redacts string values (and string list items) under
+// secret-looking keys, and passwords embedded in URLs/DSNs, unless
+// --show-secrets is given. Nested dictionaries are checked key by key; numbers,
+// booleans and empty strings are printed as-is.
+static id ConfigRedactSecrets(id value, BOOL underSecretKey) {
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *redacted = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+    for (id key in value) {
+      redacted[key] = ConfigRedactSecrets(value[key], ConfigKeyLooksSecret(key));
+    }
+    return redacted;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *redacted = [NSMutableArray arrayWithCapacity:[value count]];
+    for (id item in value) {
+      [redacted addObject:ConfigRedactSecrets(item, underSecretKey)];
+    }
+    return redacted;
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    if (underSecretKey) {
+      return ([value length] > 0) ? ConfigRedactedValue : value;
+    }
+    return ConfigRedactEmbeddedPasswords(value);
+  }
+  return value;
+}
+
 static int CommandConfig(NSArray *args) {
   NSString *environment = @"development";
   BOOL asJSON = NO;
+  BOOL showSecrets = NO;
   for (NSUInteger idx = 0; idx < [args count]; idx++) {
     NSString *arg = args[idx];
     if ([arg isEqualToString:@"--env"]) {
@@ -8507,6 +8676,8 @@ static int CommandConfig(NSArray *args) {
       environment = args[++idx];
     } else if ([arg isEqualToString:@"--json"]) {
       asJSON = YES;
+    } else if ([arg isEqualToString:@"--show-secrets"]) {
+      showSecrets = YES;
     } else {
       fprintf(stderr, "arlen config: unknown option %s\n", [arg UTF8String]);
       return 2;
@@ -8520,6 +8691,9 @@ static int CommandConfig(NSArray *args) {
   if (config == nil) {
     fprintf(stderr, "arlen config: %s\n", [[error localizedDescription] UTF8String]);
     return 1;
+  }
+  if (!showSecrets) {
+    config = ConfigRedactSecrets(config, NO);
   }
 
   if (asJSON) {
@@ -8622,21 +8796,17 @@ static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *confi
 static NSUInteger DatabasePoolSizeFromConfigForTarget(NSDictionary *config, NSString *databaseTarget) {
   NSDictionary *database = DatabaseConfigSectionForTarget(config, databaseTarget);
   id value = database[@"poolSize"];
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed >= 1) {
-      return parsed;
-    }
+  NSUInteger parsed = ALNUnsignedIntegerValueOrDefault(value, 0);
+  if (parsed >= 1) {
+    return parsed;
   }
 
   if (![NormalizeDatabaseTarget(databaseTarget) isEqualToString:@"default"]) {
     NSDictionary *fallback = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
     value = fallback[@"poolSize"];
-    if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-      NSUInteger parsed = [value unsignedIntegerValue];
-      if (parsed >= 1) {
-        return parsed;
-      }
+    parsed = ALNUnsignedIntegerValueOrDefault(value, 0);
+    if (parsed >= 1) {
+      return parsed;
     }
   }
   return 4;
@@ -8800,9 +8970,9 @@ static ALNDataverseTarget *DataverseTargetForCommand(NSDictionary *config,
   NSTimeInterval resolvedTimeout =
       [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
   NSUInteger resolvedMaxRetries =
-      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"maxRetries"] unsignedIntegerValue] : 2;
+      ALNUnsignedIntegerValueOrDefault(merged[@"maxRetries"], 2);
   NSUInteger resolvedPageSize =
-      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"pageSize"] unsignedIntegerValue] : 500;
+      ALNUnsignedIntegerValueOrDefault(merged[@"pageSize"], 500);
 
   return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
                                                          tenantID:resolvedTenantID
@@ -8825,7 +8995,7 @@ static NSString *ResolvePathFromRoot(NSString *root, NSString *rawPath) {
     return root;
   }
   NSString *expanded = [candidate stringByExpandingTildeInPath];
-  if ([expanded hasPrefix:@"/"]) {
+  if (ALNPlatformPathIsAbsolute(expanded)) {
     return [expanded stringByStandardizingPath];
   }
   return [[root stringByAppendingPathComponent:expanded] stringByStandardizingPath];
@@ -9429,6 +9599,7 @@ static NSDictionary<NSString *, id> *ALNTypedSQLRenderArtifacts(NSArray<NSDictio
 
 static int CommandTypeScriptCodegen(NSArray *args) {
   NSString *ormInputArg = @"db/schema/arlen_orm_manifest.json";
+  BOOL ormInputExplicit = NO;
   NSString *openAPIInputArg = nil;
   NSString *outputDirArg = @"frontend/generated/arlen";
   NSString *manifestArg = @"db/schema/arlen_typescript.json";
@@ -9446,6 +9617,7 @@ static int CommandTypeScriptCodegen(NSArray *args) {
         return 2;
       }
       ormInputArg = args[++idx];
+      ormInputExplicit = YES;
     } else if ([arg isEqualToString:@"--openapi-input"]) {
       if (idx + 1 >= [args count]) {
         fprintf(stderr, "arlen typescript-codegen: --openapi-input requires a value\n");
@@ -9511,19 +9683,27 @@ static int CommandTypeScriptCodegen(NSArray *args) {
   NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
 
   NSError *error = nil;
-  NSData *ormData = ALNDataReadFromFile(ormInputPath, 0, &error);
-  if (ormData == nil) {
-    fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
-            [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
-    return 1;
+  // Apps without the ORM can generate client/react/meta from OpenAPI alone,
+  // so a missing default manifest is only an error when entities are needed.
+  BOOL skipORMInput = !ormInputExplicit &&
+                      ![[NSFileManager defaultManager] fileExistsAtPath:ormInputPath] &&
+                      ![ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets];
+  NSDictionary<NSString *, id> *ormRoot = nil;
+  if (!skipORMInput) {
+    NSData *ormData = ALNDataReadFromFile(ormInputPath, 0, &error);
+    if (ormData == nil) {
+      fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
+              [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    id ormPayload = [ALNJSONSerialization JSONObjectWithData:ormData options:0 error:&error];
+    if (![ormPayload isKindOfClass:[NSDictionary class]]) {
+      fprintf(stderr, "arlen typescript-codegen: invalid ORM JSON input: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    ormRoot = ormPayload;
   }
-  id ormPayload = [ALNJSONSerialization JSONObjectWithData:ormData options:0 error:&error];
-  if (![ormPayload isKindOfClass:[NSDictionary class]]) {
-    fprintf(stderr, "arlen typescript-codegen: invalid ORM JSON input: %s\n",
-            [[error localizedDescription] UTF8String]);
-    return 1;
-  }
-  NSDictionary<NSString *, id> *ormRoot = ormPayload;
 
   NSDictionary<NSString *, id> *openAPISpecification = nil;
   if ([openAPIInputPath length] > 0) {
@@ -9550,7 +9730,13 @@ static int CommandTypeScriptCodegen(NSArray *args) {
       [ormRoot[@"columns"] isKindOfClass:[NSArray class]];
   BOOL looksLikeORMManifest = [ormRoot[@"models"] isKindOfClass:[NSArray class]];
 
-  if (looksLikeSchemaMetadata) {
+  if (skipORMInput) {
+    artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                        openAPISpecification:openAPISpecification
+                                                                packageName:packageName
+                                                                    targets:targets
+                                                                      error:&error];
+  } else if (looksLikeSchemaMetadata) {
     artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:metadata ?: ormRoot
                                                                classPrefix:classPrefix
                                                             databaseTarget:databaseTarget

@@ -2,12 +2,9 @@
 #import <XCTest/XCTest.h>
 #import "../ALNXCTestCompat.h"
 
-#import <arpa/inet.h>
-#import <netinet/in.h>
 #import <signal.h>
 #import <stdlib.h>
 #import <string.h>
-#import <sys/socket.h>
 #import <unistd.h>
 
 #import "ALNTOTP.h"
@@ -28,29 +25,8 @@
 }
 
 - (int)randomPort {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd >= 0) {
-    int port = 0;
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
-      socklen_t length = sizeof(address);
-      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
-        port = (int)ntohs(address.sin_port);
-      }
-    }
-
-    close(fd);
-    if (port > 0) {
-      return port;
-    }
-  }
-
-  return 32000 + (int)arc4random_uniform(20000);
+  int port = ALNTestFreeLoopbackPort();
+  return port > 0 ? port : 32000 + (int)ALNTestRandomUniform(20000);
 }
 
 - (NSString *)shellQuoted:(NSString *)value {
@@ -59,15 +35,7 @@
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"phase13"]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (NSString *)createTempFilePathWithPrefix:(NSString *)prefix suffix:(NSString *)suffix {
@@ -579,7 +547,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:migrate][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1184,7 +1152,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertTrue([self createPostgresSchemaNamed:isolatedSchema dsn:dsn]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export PGOPTIONS=%@ ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1298,7 +1266,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1425,7 +1393,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1616,7 +1584,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:migrate][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1785,7 +1753,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -1941,7 +1909,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -2309,7 +2277,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],
@@ -2438,7 +2406,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertTrue([ejectPayload[@"created_files"] containsObject:@"templates/auth/partials/bodies/login_body.html.eoc"]);
 
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc",
                           [NSString stringWithFormat:@"cd %@ && export ARLEN_FRAMEWORK_ROOT=%@ && exec %@ --no-watch --port %d >%@ 2>&1",
                                                      [self shellQuoted:appRoot],

@@ -1,7 +1,6 @@
 // Compiled with freshly generated models by ORMCodegenTests, then exec'd for
 // each trial so no earlier test or parent process can warm the descriptors.
-#import <Foundation/Foundation.h>
-#import <pthread.h>
+#import "../runtime/ALNProbeThreading.h"
 #import <stdint.h>
 #import <stdio.h>
 #import <stdlib.h>

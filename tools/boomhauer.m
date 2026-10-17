@@ -242,11 +242,16 @@ static BOOL BenchmarkJSONStringNeedsSlowPath(NSString *value) {
 static void BenchmarkAppendJSONStringLiteral(NSMutableData *data, NSString *value) {
   NSString *resolved = [value isKindOfClass:[NSString class]] ? value : @"";
   if (BenchmarkJSONStringNeedsSlowPath(resolved)) {
-    NSData *literal = [ALNJSONSerialization dataWithJSONObject:resolved options:0 error:NULL];
-    if (literal != nil) {
-      [data appendData:literal];
-      return;
+    // The serializer only accepts container roots, so encode [value] and drop
+    // the brackets. Never fall back to the raw bytes: a route parameter could
+    // close the string and inject JSON (#270).
+    NSData *wrapped = [ALNJSONSerialization dataWithJSONObject:@[ resolved ] options:0 error:NULL];
+    if ([wrapped length] >= 4) {
+      [data appendBytes:(const uint8_t *)[wrapped bytes] + 1 length:[wrapped length] - 2];
+    } else {
+      [data appendBytes:"\"\"" length:2];
     }
+    return;
   }
 
   [data appendBytes:"\"" length:1];
@@ -586,8 +591,13 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
     response.fileBodyMTimeSeconds = (long long)[modificationDate timeIntervalSince1970];
     response.fileBodyMTimeNanoseconds = 0;
     if (useValidatedFileMetadataMode || useBadFileMetadataMode) {
+#if defined(_WIN32)
+      struct _stat64 fileStat;
+      if (_wstat64((const wchar_t *)[path fileSystemRepresentation], &fileStat) == 0) {
+#else
       struct stat fileStat;
       if (stat([path fileSystemRepresentation], &fileStat) == 0) {
+#endif
         response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
         response.fileBodyInode = (unsigned long long)fileStat.st_ino;
         response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;

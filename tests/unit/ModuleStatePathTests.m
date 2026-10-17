@@ -36,7 +36,12 @@
   XCTAssertEqualObjects([self.appRoot stringByStandardizingPath], [app appRootPath]);
   XCTAssertEqualObjects([[self.appRoot stringByAppendingPathComponent:@"var/state.plist"] stringByStandardizingPath],
                         [app pathRelativeToAppRoot:@"var/state.plist"]);
+#if defined(_WIN32)
+  // "/srv/..." has no drive and is not absolute on Windows.
+  XCTAssertEqualObjects(@"C:/srv/app/state.plist", [app pathRelativeToAppRoot:@"C:/srv/app/../app/state.plist"]);
+#else
   XCTAssertEqualObjects(@"/srv/app/state.plist", [app pathRelativeToAppRoot:@"/srv/app/../app/state.plist"]);
+#endif
 
   ALNApplication *noRoot = [[ALNApplication alloc] initWithConfig:@{}];
   NSString *expectedFallback = [[[NSProcessInfo processInfo] environment][@"ARLEN_APP_ROOT"] length] > 0

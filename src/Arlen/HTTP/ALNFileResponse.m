@@ -3,8 +3,10 @@
 #import <errno.h>
 #import <limits.h>
 #import <math.h>
+#import <stdio.h>
 #import <stdlib.h>
 #import <string.h>
+#import <time.h>
 
 #import "ALNMIMETypes.h"
 #import "ALNRequest.h"
@@ -46,15 +48,72 @@ static NSDateFormatter *ALNFileResponseDateFormatter(NSString *format) {
   return formatter;
 }
 
+static const char *const ALNFileResponseWeekdays[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+static const char *const ALNFileResponseMonths[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+// IMF-fixdate (RFC 9110 §5.6.7) from fixed tables. An NSDateFormatter costs an
+// ICU formatter setup per call (~130 us on GNUstep, two per file response);
+// this is a gmtime and a snprintf (#247).
 static NSString *ALNFileResponseHTTPDate(NSTimeInterval seconds) {
-  return [ALNFileResponseDateFormatter(@"EEE, dd MMM yyyy HH:mm:ss 'GMT'")
-      stringFromDate:[NSDate dateWithTimeIntervalSince1970:seconds]];
+  time_t whole = (time_t)floor(seconds);
+  struct tm parts;
+  memset(&parts, 0, sizeof(parts));
+#if defined(_WIN32)
+  if (gmtime_s(&parts, &whole) != 0) return @"";
+#else
+  if (gmtime_r(&whole, &parts) == NULL) return @"";
+#endif
+  if (parts.tm_wday < 0 || parts.tm_wday > 6 || parts.tm_mon < 0 || parts.tm_mon > 11) return @"";
+  char buffer[40];
+  int written = snprintf(buffer, sizeof(buffer), "%s, %02d %s %04d %02d:%02d:%02d GMT",
+                         ALNFileResponseWeekdays[parts.tm_wday], parts.tm_mday,
+                         ALNFileResponseMonths[parts.tm_mon], parts.tm_year + 1900, parts.tm_hour,
+                         parts.tm_min, parts.tm_sec);
+  if (written <= 0 || written >= (int)sizeof(buffer)) return @"";
+  return [[NSString alloc] initWithBytes:buffer length:(NSUInteger)written encoding:NSASCIIStringEncoding] ?: @"";
+}
+
+// Days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant).
+static long long ALNFileResponseDaysFromCivil(long long year, long long month, long long day) {
+  year -= (month <= 2) ? 1 : 0;
+  long long era = (year >= 0 ? year : year - 399) / 400;
+  long long yearOfEra = year - era * 400;
+  long long dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+  long long dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+  return era * 146097 + dayOfEra - 719468;
+}
+
+// Parses IMF-fixdate without a formatter. Re-formatting the result and
+// comparing it with the input rejects impossible dates (Feb 30), a wrong
+// weekday and trailing garbage, as the formatter round trip did.
+static NSDate *ALNFileResponseParseIMFFixdate(NSString *value) {
+  if ([value length] != 29) return nil;
+  const char *text = [value UTF8String];
+  if (text == NULL) return nil;
+  int day = 0, year = 0, hour = 0, minute = 0, second = 0;
+  char month[4] = {0};
+  if (sscanf(text + 5, "%2d %3c %4d %2d:%2d:%2d", &day, month, &year, &hour, &minute, &second) != 6) return nil;
+  int monthIndex = -1;
+  for (int idx = 0; idx < 12; idx++) {
+    if (strncmp(month, ALNFileResponseMonths[idx], 3) == 0) {
+      monthIndex = idx;
+      break;
+    }
+  }
+  if (monthIndex < 0 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) return nil;
+  long long epoch = ALNFileResponseDaysFromCivil(year, monthIndex + 1, day) * 86400LL + hour * 3600LL +
+                    minute * 60LL + MIN(second, 59);
+  if (![ALNFileResponseHTTPDate((NSTimeInterval)epoch) isEqualToString:value]) return nil;
+  return [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)epoch];
 }
 
 static NSDate *ALNFileResponseParseHTTPDate(NSString *value) {
   if ([value length] == 0) return nil;
-  for (NSString *format in @[@"EEE, dd MMM yyyy HH:mm:ss 'GMT'",
-                             @"EEEE, dd-MMM-yy HH:mm:ss 'GMT'",
+  NSDate *fixdate = ALNFileResponseParseIMFFixdate(value);
+  if (fixdate != nil) return fixdate;
+  // The obsolete RFC 850 and asctime forms are rare enough for a formatter.
+  for (NSString *format in @[@"EEEE, dd-MMM-yy HH:mm:ss 'GMT'",
                              @"EEE MMM d HH:mm:ss yyyy"]) {
     NSDateFormatter *formatter = ALNFileResponseDateFormatter(format);
     NSDate *date = [formatter dateFromString:value];
@@ -431,6 +490,19 @@ NSString *ALNStaticCacheControlForPath(NSArray *rules, NSString *relativePath) {
   }
   free(pathChars);
   return match;
+}
+
+BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
+  if (![relativePath isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@"/\\"];
+  for (NSString *component in [relativePath componentsSeparatedByCharactersInSet:separators]) {
+    if ([component hasPrefix:@"."] && ![component isEqualToString:@".well-known"]) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
 @implementation ALNFileResponse

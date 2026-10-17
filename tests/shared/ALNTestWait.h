@@ -10,10 +10,11 @@ NS_ASSUME_NONNULL_BEGIN
 // without slowing the passing case. Each wait records no failure itself:
 // callers assert on the result, with whatever context explains the failure.
 //
-// The checks run on the calling thread's run loop through XCTestExpectation
-// and XCTWaiter, which Apple XCTest and Arlen's tools-xctest fork both provide.
-// Toolchains whose XCTest lacks XCTWaiter (the Windows preview lane) fall back
-// to a sleep-and-check loop.
+// The condition runs on the calling thread; between checks the wait pauses in
+// XCTWaiter (Apple XCTest and Arlen's tools-xctest fork both provide it), which
+// keeps the run loop turning. A slow condition only delays the next check.
+// Toolchains whose XCTest lacks XCTWaiter (the Windows preview lane) pause
+// with a sleep instead.
 
 typedef BOOL (^ALNTestWaitCondition)(void);
 
@@ -29,7 +30,6 @@ FOUNDATION_EXPORT BOOL ALNTestWaitUntil(NSTimeInterval timeout,
 // Returns YES once `task` has exited (and been reaped), NO on timeout.
 FOUNDATION_EXPORT BOOL ALNTestWaitForTaskExit(NSTask *task, NSTimeInterval timeout);
 
-#if !defined(_WIN32)
 // Whether something on 127.0.0.1:`port` accepts a TCP connection. The probe
 // connects and closes without sending a request, so don't use it on a server
 // started with `--once`: the probe would be the one connection it serves.
@@ -37,7 +37,10 @@ FOUNDATION_EXPORT BOOL ALNTestTCPPortAcceptsConnections(int port);
 
 // Returns YES once 127.0.0.1:`port` accepts connections, NO on timeout.
 FOUNDATION_EXPORT BOOL ALNTestWaitForTCPPort(int port, NSTimeInterval timeout);
-#endif
+
+// A loopback TCP port that was free a moment ago (bind to port 0, read it
+// back), or 0 on failure. Winsock on Windows.
+FOUNDATION_EXPORT int ALNTestFreeLoopbackPort(void);
 
 NS_ASSUME_NONNULL_END
 

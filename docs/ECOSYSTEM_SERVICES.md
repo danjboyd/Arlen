@@ -110,6 +110,22 @@ Concrete backend adapter now available:
 
 - `ALNRedisCacheAdapter` (`redis://` URL initializer, namespace isolation, and cache-conformance compatible TTL behavior)
 
+`ALNRedisCacheAdapter` keeps up to four idle connections and shares them across
+threads. Each connection runs `AUTH` (when the URL has a password) and `SELECT`
+(for a non-zero database) once, when it opens. A connection that fails is closed
+instead of returned to the pool, and a command that fails because the server
+dropped an idle pooled connection is retried once on a new connection. Replies
+are bounded: at most 8 nested arrays, 512 MiB per bulk value and 16Mi array
+elements; anything larger fails the command with an `NSError`.
+
+Cached values are stored as binary property lists. Before decoding one, the
+adapter checks that it is a binary plist (the only format it writes) with no
+reference cycles, at most 64 nested containers including the record wrapper,
+and no more than a million objects (or four per payload byte, if larger) once
+shared references are expanded.
+A value nested more than 63 levels deep can be written but reads back as error
+2235. The connection to Redis is plain TCP; run Redis on a trusted network.
+
 ## 6. I18n Baseline
 
 `ALNLocalizationAdapter` supports:

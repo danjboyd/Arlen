@@ -3,7 +3,6 @@
 
 #import "ALNEOCRuntime.h"
 #import <dispatch/dispatch.h>
-#include <pthread.h>
 
 typedef struct {
   dispatch_semaphore_t held;
@@ -136,6 +135,89 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   ALNEOCAppendEscaped(out, value);
   XCTAssertTrue([out containsString:@"k"]);
   XCTAssertTrue([out containsString:@"v"]);
+}
+
+- (void)testEscapeHTMLStringReturnsEquivalentStringWhenNothingNeedsEscaping {
+  NSString *raw = @"plain text with no markup, 100% safe";
+  XCTAssertEqualObjects(ALNEOCEscapeHTMLString(raw), raw);
+  XCTAssertEqualObjects(ALNEOCEscapeHTMLString(@""), @"");
+
+  NSMutableString *mutableRaw = [NSMutableString stringWithString:@"mutable"];
+  NSString *escaped = ALNEOCEscapeHTMLString(mutableRaw);
+  [mutableRaw appendString:@"-changed"];
+  XCTAssertEqualObjects(escaped, @"mutable");
+
+  NSMutableString *out = [NSMutableString stringWithString:@"<p>"];
+  ALNEOCAppendEscaped(out, raw);
+  XCTAssertEqualObjects(out, [@"<p>" stringByAppendingString:raw]);
+}
+
+- (void)testEscapeHTMLStringPreservesNonASCIIAndSurrogatePairs {
+  // U+1F600 (surrogate pair), U+00E9, U+4E2D, U+2028 and an embedded NUL.
+  unichar units[] = {0xD83D, 0xDE00, '<', 0x00E9, '&', 0x4E2D, 0x2028, 0, '\'', 0xD83D, 0xDE00};
+  NSString *raw = [NSString stringWithCharacters:units length:sizeof(units) / sizeof(units[0])];
+  unichar expectedUnits[] = {0xD83D, 0xDE00, '&', 'l', 't', ';', 0x00E9, '&', 'a', 'm', 'p', ';',
+                             0x4E2D, 0x2028, 0, '&', '#', '3', '9', ';', 0xD83D, 0xDE00};
+  NSString *expected =
+      [NSString stringWithCharacters:expectedUnits
+                              length:sizeof(expectedUnits) / sizeof(expectedUnits[0])];
+  XCTAssertEqualObjects(ALNEOCEscapeHTMLString(raw), expected);
+
+  NSString *plainNonASCII = @"caf\u00e9 \u4e2d\u6587 \U0001F600";
+  XCTAssertEqualObjects(ALNEOCEscapeHTMLString(plainNonASCII), plainNonASCII);
+}
+
+- (void)testEscapeHTMLStringHandlesLongInputsAcrossBufferBoundaries {
+  NSMutableString *raw = [NSMutableString string];
+  NSMutableString *expected = [NSMutableString string];
+  for (NSUInteger idx = 0; idx < 700; idx++) {
+    [raw appendString:@"a&b<c>d\"e'f\U0001F600"];
+    [expected appendString:@"a&amp;b&lt;c&gt;d&quot;e&#39;f\U0001F600"];
+  }
+  [raw appendString:@" tail"];
+  [expected appendString:@" tail"];
+  XCTAssertEqualObjects(ALNEOCEscapeHTMLString(raw), expected);
+
+  NSMutableString *out = [NSMutableString stringWithString:@"head "];
+  ALNEOCAppendEscaped(out, raw);
+  XCTAssertEqualObjects(out, [@"head " stringByAppendingString:expected]);
+
+  NSMutableString *checkedOut = [NSMutableString string];
+  NSError *error = nil;
+  XCTAssertTrue(ALNEOCAppendEscapedChecked(checkedOut, raw, @"pages/long.html.eoc", 1, 1, &error));
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(checkedOut, expected);
+}
+
+- (void)testJSONForScriptEscapesScriptBreakoutCharacters {
+  NSDictionary *payload = @{
+    @"name" : @"</script><script>alert(1)</script>",
+    @"note" : @"a & b \u2028 c \u2029 d"
+  };
+  NSString *json = ALNEOCJSONForScript(payload);
+  XCTAssertEqualObjects(
+      json,
+      @"{\"name\":\"\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e\","
+      @"\"note\":\"a \\u0026 b \\u2028 c \\u2029 d\"}");
+  XCTAssertFalse([json containsString:@"<"]);
+  XCTAssertFalse([json containsString:@">"]);
+  XCTAssertFalse([json containsString:@"&"]);
+  XCTAssertFalse([json containsString:@"\u2028"]);
+  XCTAssertFalse([json containsString:@"\u2029"]);
+
+  NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+  id decoded = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  XCTAssertEqualObjects(decoded, payload);
+}
+
+- (void)testJSONForScriptSerializesScalarsNilAndUnsupportedValues {
+  XCTAssertEqualObjects(ALNEOCJSONForScript(@"x<y"), @"\"x\\u003cy\"");
+  XCTAssertEqualObjects(ALNEOCJSONForScript(@42), @"42");
+  XCTAssertEqualObjects(ALNEOCJSONForScript(@[ @1, @"caf\u00e9" ]), @"[1,\"caf\u00e9\"]");
+  XCTAssertEqualObjects(ALNEOCJSONForScript(@{ @"b" : @2, @"a" : @1 }), @"{\"a\":1,\"b\":2}");
+  XCTAssertEqualObjects(ALNEOCJSONForScript(nil), @"null");
+  XCTAssertEqualObjects(ALNEOCJSONForScript([NSNull null]), @"null");
+  XCTAssertEqualObjects(ALNEOCJSONForScript([NSDate date]), @"null");
 }
 
 - (void)testRegisterRenderAndIncludeTemplate {
@@ -412,6 +494,83 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   XCTAssertEqualObjects(@"<li>empty</li>", out);
 }
 
+- (void)testRenderCollectionMatchesPerItemIncludeOutput {
+  ALNEOCRegisterTemplate(@"partials/_row.html.eoc", &RenderCollectionRow);
+
+  NSArray *items = @[ @"first", @"<second>", [NSNull null], @"fourth" ];
+  NSDictionary *locals = @{ @"title" : @"Shared" };
+  NSMutableString *expected = [NSMutableString stringWithString:@"<ul>"];
+  for (id item in items) {
+    NSMutableDictionary *itemLocals = [locals mutableCopy];
+    itemLocals[@"row"] = item;
+    NSError *includeError = nil;
+    XCTAssertTrue(ALNEOCIncludeWithLocals(expected,
+                                          @{ @"title" : @"Base" },
+                                          @"partials/_row",
+                                          itemLocals,
+                                          @"pages/show.html.eoc",
+                                          1,
+                                          1,
+                                          &includeError));
+    XCTAssertNil(includeError);
+  }
+
+  NSMutableString *out = [NSMutableString stringWithString:@"<ul>"];
+  NSError *error = nil;
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         @{ @"title" : @"Base" },
+                                         @"./partials/_row",
+                                         items,
+                                         @"row",
+                                         nil,
+                                         locals,
+                                         @"pages/show.html.eoc",
+                                         9,
+                                         4,
+                                         &error);
+  XCTAssertTrue(rendered);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(out, expected);
+  XCTAssertEqualObjects(out,
+                        @"<ul><li>Shared:first</li><li>Shared:<second></li>"
+                        @"<li>Shared:<null></li><li>Shared:fourth</li>");
+}
+
+- (void)testRenderCollectionReportsMissingPartialOnlyWhenItemsExist {
+  NSMutableString *out = [NSMutableString string];
+  NSError *error = nil;
+  XCTAssertTrue(ALNEOCRenderCollection(out,
+                                       nil,
+                                       @"partials/_missing",
+                                       @[],
+                                       @"row",
+                                       nil,
+                                       nil,
+                                       @"pages/show.html.eoc",
+                                       3,
+                                       2,
+                                       &error));
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(out, @"");
+
+  BOOL rendered = ALNEOCRenderCollection(out,
+                                         nil,
+                                         @"partials/_missing",
+                                         @[ @"first", @"second" ],
+                                         @"row",
+                                         nil,
+                                         nil,
+                                         @"pages/show.html.eoc",
+                                         3,
+                                         2,
+                                         &error);
+  XCTAssertFalse(rendered);
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNEOCErrorTemplateNotFound, [error code]);
+  XCTAssertEqualObjects(@"partials/_missing.html.eoc", error.userInfo[ALNEOCErrorPathKey]);
+  XCTAssertEqualObjects(out, @"");
+}
+
 - (void)testRenderCollectionRejectsEmptyItemLocalName {
   NSMutableString *out = [NSMutableString string];
   NSError *error = nil;
@@ -544,10 +703,15 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   RuntimeClassMonitorState state = {
     dispatch_semaphore_create(0), dispatch_semaphore_create(0), -1
   };
-  pthread_t thread;
-  int rc = pthread_create(&thread, NULL, HoldRuntimeClassMonitor, &state);
-  XCTAssertEqual(rc, 0);
-  if (rc != 0) { return; }
+  // NSThread, not pthread: on Windows <pthread.h> clashes with the pthread
+  // types libdispatch's headers (pulled in by Foundation) declare.
+  RuntimeClassMonitorState *statePointer = &state;
+  dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+  NSThread *thread = [[NSThread alloc] initWithBlock:^{
+    (void)HoldRuntimeClassMonitor(statePointer);
+    dispatch_semaphore_signal(finished);
+  }];
+  [thread start];
   long ready = dispatch_semaphore_wait(state.held, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
   if (ready == 0) {
     ALNEOCRegisterTemplate(@"monitor-independent", RenderGreeting);
@@ -557,12 +721,14 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
     ALNEOCClearTemplateRegistry();
   }
   dispatch_semaphore_signal(state.release);
-  pthread_join(thread, NULL);
+  XCTAssertEqual(0L, dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC)),
+                 @"monitor thread did not finish");
   XCTAssertEqual(ready, 0);
   XCTAssertEqual(state.waitResult, 0, @"Registry operations waited for the shared NSThread class monitor");
 #if !OS_OBJECT_USE_OBJC
   dispatch_release(state.held);
   dispatch_release(state.release);
+  dispatch_release(finished);
 #endif
 }
 

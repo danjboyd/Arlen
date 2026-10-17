@@ -174,6 +174,21 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 
 @end
 
+@interface Phase3EThrowingJobWorkerRuntime : NSObject <ALNJobWorkerRuntime>
+@end
+
+@implementation Phase3EThrowingJobWorkerRuntime
+
+- (ALNJobWorkerDisposition)handleJob:(ALNJobEnvelope *)job error:(NSError **)error {
+  (void)error;
+  if ([job.payload[@"poison"] boolValue]) {
+    [NSException raise:NSRangeException format:@"poison job %@", job.jobID];
+  }
+  return ALNJobWorkerDispositionAcknowledge;
+}
+
+@end
+
 @interface Phase3ETests : XCTestCase
 @end
 
@@ -374,6 +389,45 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
   XCTAssertEqual((NSUInteger)1, [[adapter deadLetterJobsSnapshot] count]);
 }
 
+// GitHub issue 241: a handler that throws must not escape the worker, stop the
+// jobs after it, or leave its in-memory job leased forever.
+- (void)testJobWorkerTreatsHandlerExceptionsAsFailedAttempts_Issue241 {
+  ALNInMemoryJobAdapter *adapter = [[ALNInMemoryJobAdapter alloc] initWithAdapterName:@"phase3e_worker_throw"];
+  XCTAssertNotNil([adapter enqueueJobNamed:@"job.poison"
+                                   payload:@{ @"poison" : @YES }
+                                   options:@{ @"maxAttempts" : @2 }
+                                     error:NULL]);
+  for (NSUInteger idx = 0; idx < 2; idx++) {
+    XCTAssertNotNil([adapter enqueueJobNamed:@"job.ok" payload:@{} options:@{} error:NULL]);
+  }
+
+  ALNJobWorker *worker = [[ALNJobWorker alloc] initWithJobsAdapter:adapter];
+  worker.maxJobsPerRun = 3;
+  worker.retryDelaySeconds = 0;
+  Phase3EThrowingJobWorkerRuntime *runtime = [[Phase3EThrowingJobWorkerRuntime alloc] init];
+
+  // Run until the queue drains. The poison job is requeued (no delay) and may
+  // be leased again within the same run, so only the totals are fixed.
+  NSUInteger acknowledged = 0;
+  NSUInteger handlerErrors = 0;
+  for (NSUInteger run = 0; run < 5 && [[adapter pendingJobsSnapshot] count] > 0; run++) {
+    NSError *runError = nil;
+    ALNJobWorkerRunSummary *summary = nil;
+    XCTAssertNoThrow(summary = [worker runDueJobsAt:[NSDate date] runtime:runtime error:&runError], @"run %lu",
+                     (unsigned long)run);
+    XCTAssertNil(runError);
+    XCTAssertNotNil(summary);
+    acknowledged += summary.acknowledgedCount;
+    handlerErrors += summary.handlerErrorCount;
+  }
+  XCTAssertEqual((NSUInteger)2, acknowledged, @"the jobs queued after the poison job still run");
+  XCTAssertEqual((NSUInteger)2, handlerErrors, @"each of the poison job's maxAttempts fails");
+  XCTAssertEqual((NSUInteger)0, [[adapter pendingJobsSnapshot] count], @"nothing is left queued or leased");
+  NSArray *deadLetters = [adapter deadLetterJobsSnapshot];
+  XCTAssertEqual((NSUInteger)1, [deadLetters count]);
+  XCTAssertEqualObjects(@"job.poison", [(ALNJobEnvelope *)[deadLetters firstObject] name]);
+}
+
 - (void)testJobWorkerRespectsRunLimit {
   ALNInMemoryJobAdapter *adapter = [[ALNInMemoryJobAdapter alloc] initWithAdapterName:@"phase3e_worker_limit"];
   XCTAssertNotNil([adapter enqueueJobNamed:@"job.1" payload:@{} options:@{} error:NULL]);
@@ -463,6 +517,9 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 }
 
 - (void)testFileSystemAttachmentAdapterRejectsInvalidIDsAndSymlinkEscapes {
+#if defined(_WIN32)
+  XCTSkip(@"Creating symlinks needs SeCreateSymbolicLinkPrivilege on Windows");
+#endif
   NSString *rootPath = [self temporaryPathWithPrefix:@"arlen-phase3e-attachments"];
   NSError *adapterError = nil;
   ALNFileSystemAttachmentAdapter *adapter =
@@ -573,6 +630,9 @@ static NSInteger gPhase3EPluginDidStopCount = 0;
 }
 
 - (void)testFileBackedServiceAdaptersPersistPrivatePermissions {
+#if defined(_WIN32)
+  XCTSkip(@"NTFS has no POSIX permission bits; Windows access is per-user ACLs");
+#endif
   NSString *attachmentRoot = [self temporaryPathWithPrefix:@"arlen-phase3e-attachment-perms"];
   ALNFileSystemAttachmentAdapter *attachmentAdapter =
       [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:attachmentRoot
