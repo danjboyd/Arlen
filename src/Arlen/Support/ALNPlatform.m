@@ -568,6 +568,50 @@ NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
 #endif
 }
 
+BOOL ALNPlatformFileVersion(NSString *path,
+                            unsigned long long *fileIndex,
+                            unsigned long long *writeTime,
+                            unsigned long long *changeTime) {
+#if defined(_WIN32)
+  if ([path length] == 0) {
+    return NO;
+  }
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE file = CreateFileW((const wchar_t *)[wide bytes], FILE_READ_ATTRIBUTES,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    return NO;
+  }
+  BY_HANDLE_FILE_INFORMATION info;
+  FILE_BASIC_INFO basic;
+  BOOL ok = GetFileInformationByHandle(file, &info) &&
+            GetFileInformationByHandleEx(file, FileBasicInfo, &basic, sizeof(basic));
+  CloseHandle(file);
+  if (!ok) {
+    return NO;
+  }
+  if (fileIndex != NULL) {
+    *fileIndex = ((unsigned long long)info.nFileIndexHigh << 32) | info.nFileIndexLow;
+  }
+  if (writeTime != NULL) {
+    *writeTime = (unsigned long long)basic.LastWriteTime.QuadPart;
+  }
+  if (changeTime != NULL) {
+    *changeTime = (unsigned long long)basic.ChangeTime.QuadPart;
+  }
+  return YES;
+#else
+  (void)path;
+  (void)fileIndex;
+  (void)writeTime;
+  (void)changeTime;
+  return NO;
+#endif
+}
+
 void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
   if ([path length] == 0) {
     return;

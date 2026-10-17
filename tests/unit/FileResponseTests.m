@@ -6,6 +6,7 @@
 #import "ALNController.h"
 #import "ALNFileResponse.h"
 #import "ALNMIMETypes.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "../shared/ALNWebTestSupport.h"
@@ -246,6 +247,31 @@ static NSDictionary *gFileResponseTestOptions = nil;
   ALNAssertResponseStatus(response, 304);
   XCTAssertNil(response.fileBodyPath);
   XCTAssertEqual((NSUInteger)0, [response bodyLength]);
+}
+
+// A same-size rewrite that keeps the modification time must still change the
+// validator. On Windows struct stat has no inode, whole-second times and
+// creation time as st_ctime, so the ETag used to stay the same and a changed
+// file answered 304.
+- (void)testSameSizeRewriteWithTheSameMTimeChangesTheETag {
+  ALNWebTestHarness *harness = [self loggedInHarnessWithConfig:nil];
+  ALNResponse *first = [self harness:harness method:@"GET" path:@"/media/voice.m4a" headers:nil];
+  NSString *etag = [first headerForName:@"ETag"];
+  XCTAssertTrue([etag length] > 0);
+  NSDate *mtime = [[NSFileManager defaultManager] attributesOfItemAtPath:gFileResponseTestMediaPath
+                                                                   error:NULL][NSFileModificationDate];
+  ALNPlatformSleepMilliseconds(20);
+  XCTAssertTrue([[@"fedcba9876543210" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:gFileResponseTestMediaPath
+                                                                               atomically:NO]);
+  XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : mtime }
+                                                 ofItemAtPath:gFileResponseTestMediaPath
+                                                        error:NULL]);
+  ALNResponse *response = [self harness:harness
+                                 method:@"GET"
+                                   path:@"/media/voice.m4a"
+                                headers:@{ @"if-none-match" : etag ?: @"" }];
+  ALNAssertResponseStatus(response, 200);
+  XCTAssertNotEqualObjects(etag, [response headerForName:@"ETag"]);
 }
 
 - (void)testHeadKeepsFullRepresentationMetadataAndIgnoresRange {

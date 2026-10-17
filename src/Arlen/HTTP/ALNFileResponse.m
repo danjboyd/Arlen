@@ -7,6 +7,7 @@
 #import <string.h>
 
 #import "ALNMIMETypes.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
@@ -241,6 +242,15 @@ void ALNFileResponseApplyStat(ALNResponse *response,
       (unsigned long long)fileStat->st_dev, (unsigned long long)fileStat->st_ino, size,
       (unsigned long long)fileStat->st_mtime, (unsigned long)ALNFileResponseMTimeNanoseconds(fileStat),
       (unsigned long long)fileStat->st_ctime, (unsigned long)ALNFileResponseCTimeNanoseconds(fileStat)];
+#if defined(_WIN32)
+  // struct stat cannot tell a same-size rewrite within a second apart here;
+  // the NTFS file index and 100 ns write/change times can.
+  unsigned long long fileIndex = 0, writeTime = 0, changeTime = 0;
+  if (customETag == nil && ALNPlatformFileVersion(filePath, &fileIndex, &writeTime, &changeTime)) {
+    etag = [NSString stringWithFormat:@"W/\"%llx-%llx-%llx-%llx-%llx\"",
+        (unsigned long long)fileStat->st_dev, fileIndex, size, writeTime, changeTime];
+  }
+#endif
   NSString *resolvedContentType = ([contentType length] > 0 && ALNFileResponseHeaderValueIsSafe(contentType))
                                       ? contentType
                                       : [ALNMIMETypes contentTypeForFilePath:filePath
