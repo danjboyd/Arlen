@@ -35,11 +35,8 @@ static NSString *ALNDataverseTrimmedString(id value) {
 }
 
 static NSUInteger ALNDataverseUnsignedIntegerValue(id value, NSUInteger fallback) {
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    return parsed > 0 ? parsed : fallback;
-  }
-  return fallback;
+  NSUInteger parsed = ALNUnsignedIntegerValueOrDefault(value, 0);
+  return parsed > 0 ? parsed : fallback;
 }
 
 static NSTimeInterval ALNDataverseTimeIntervalValue(id value, NSTimeInterval fallback) {

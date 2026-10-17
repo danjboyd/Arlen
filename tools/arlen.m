@@ -8796,21 +8796,17 @@ static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *confi
 static NSUInteger DatabasePoolSizeFromConfigForTarget(NSDictionary *config, NSString *databaseTarget) {
   NSDictionary *database = DatabaseConfigSectionForTarget(config, databaseTarget);
   id value = database[@"poolSize"];
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed >= 1) {
-      return parsed;
-    }
+  NSUInteger parsed = ALNUnsignedIntegerValueOrDefault(value, 0);
+  if (parsed >= 1) {
+    return parsed;
   }
 
   if (![NormalizeDatabaseTarget(databaseTarget) isEqualToString:@"default"]) {
     NSDictionary *fallback = [config[@"database"] isKindOfClass:[NSDictionary class]] ? config[@"database"] : nil;
     value = fallback[@"poolSize"];
-    if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-      NSUInteger parsed = [value unsignedIntegerValue];
-      if (parsed >= 1) {
-        return parsed;
-      }
+    parsed = ALNUnsignedIntegerValueOrDefault(value, 0);
+    if (parsed >= 1) {
+      return parsed;
     }
   }
   return 4;
@@ -8974,9 +8970,9 @@ static ALNDataverseTarget *DataverseTargetForCommand(NSDictionary *config,
   NSTimeInterval resolvedTimeout =
       [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
   NSUInteger resolvedMaxRetries =
-      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"maxRetries"] unsignedIntegerValue] : 2;
+      ALNUnsignedIntegerValueOrDefault(merged[@"maxRetries"], 2);
   NSUInteger resolvedPageSize =
-      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)] ? [merged[@"pageSize"] unsignedIntegerValue] : 500;
+      ALNUnsignedIntegerValueOrDefault(merged[@"pageSize"], 500);
 
   return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
                                                          tenantID:resolvedTenantID

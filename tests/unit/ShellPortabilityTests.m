@@ -104,6 +104,11 @@
 // the new link, so a respawn could find it missing. The link is now renamed
 // into place. A watcher checks `current` while it is swapped back and forth.
 - (void)testLinkDirectoryKeepsLinkPresentWhileSwapping {
+#if defined(_WIN32)
+  // MSYS2 links releases with NTFS junctions, which can't be renamed over;
+  // deploy on Windows is 0.4.0 scope (#200).
+  XCTSkip(@"junction swaps are not atomic on Windows; deploy is 0.4.0 scope");
+#endif
   NSString *root = ALNTestTemporaryDirectory(@"arlen-link-swap");
   XCTAssertNotNil(root);
   if (root == nil) {

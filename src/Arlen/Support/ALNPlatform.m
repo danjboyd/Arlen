@@ -73,6 +73,44 @@ BOOL ALNNumberIsBoolean(id value) {
 #endif
 }
 
+BOOL ALNUnsignedIntegerFromValue(id value, NSUInteger *outValue) {
+  if ([value isKindOfClass:[NSNumber class]]) {
+    if (outValue != NULL) {
+      *outValue = [value unsignedIntegerValue];
+    }
+    return YES;
+  }
+  if (![value isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *text = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  NSUInteger length = [text length];
+  if (length == 0) {
+    return NO;
+  }
+  NSUInteger parsed = 0;
+  for (NSUInteger index = 0; index < length; index++) {
+    unichar character = [text characterAtIndex:index];
+    if (character < '0' || character > '9') {
+      return NO;
+    }
+    NSUInteger digit = (NSUInteger)(character - '0');
+    if (parsed > (NSUIntegerMax - digit) / 10) {
+      return NO;
+    }
+    parsed = (parsed * 10) + digit;
+  }
+  if (outValue != NULL) {
+    *outValue = parsed;
+  }
+  return YES;
+}
+
+NSUInteger ALNUnsignedIntegerValueOrDefault(id value, NSUInteger fallback) {
+  NSUInteger parsed = 0;
+  return ALNUnsignedIntegerFromValue(value, &parsed) ? parsed : fallback;
+}
+
 static void ALNAppendPrefixLibraryCandidates(NSMutableArray<NSString *> *candidates,
                                              const char *envName,
                                              NSArray<NSString *> *relativePaths) {
