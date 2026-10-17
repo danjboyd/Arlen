@@ -2,12 +2,21 @@
 
 #import <XCTest/XCTest.h>
 
-#if !defined(_WIN32)
+#include <string.h>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET ALNTestSocket;
+#define ALN_TEST_INVALID_SOCKET INVALID_SOCKET
+#define ALNTestCloseSocket closesocket
+#else
 #import <arpa/inet.h>
 #import <netinet/in.h>
-#import <string.h>
 #import <sys/socket.h>
 #import <unistd.h>
+typedef int ALNTestSocket;
+#define ALN_TEST_INVALID_SOCKET (-1)
+#define ALNTestCloseSocket close
 #endif
 
 #if __has_include(<XCTest/XCTWaiter.h>)
@@ -56,10 +65,20 @@ BOOL ALNTestWaitForTaskExit(NSTask *task, NSTimeInterval timeout) {
   return exited;
 }
 
-#if !defined(_WIN32)
+static ALNTestSocket ALNTestOpenLoopbackSocket(void) {
+#if defined(_WIN32)
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    WSADATA data;
+    (void)WSAStartup(MAKEWORD(2, 2), &data);
+  });
+#endif
+  return socket(AF_INET, SOCK_STREAM, 0);
+}
+
 BOOL ALNTestTCPPortAcceptsConnections(int port) {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
+  ALNTestSocket fd = ALNTestOpenLoopbackSocket();
+  if (fd == ALN_TEST_INVALID_SOCKET) {
     return NO;
   }
   struct sockaddr_in address;
@@ -68,7 +87,7 @@ BOOL ALNTestTCPPortAcceptsConnections(int port) {
   address.sin_port = htons((uint16_t)port);
   address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   BOOL connected = (connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0);
-  close(fd);
+  ALNTestCloseSocket(fd);
   return connected;
 }
 
@@ -77,4 +96,24 @@ BOOL ALNTestWaitForTCPPort(int port, NSTimeInterval timeout) {
     return ALNTestTCPPortAcceptsConnections(port);
   });
 }
-#endif
+
+int ALNTestFreeLoopbackPort(void) {
+  ALNTestSocket fd = ALNTestOpenLoopbackSocket();
+  if (fd == ALN_TEST_INVALID_SOCKET) {
+    return 0;
+  }
+  int port = 0;
+  struct sockaddr_in address;
+  memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = 0;
+  if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
+    socklen_t length = sizeof(address);
+    if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
+      port = (int)ntohs(address.sin_port);
+    }
+  }
+  ALNTestCloseSocket(fd);
+  return port;
+}
