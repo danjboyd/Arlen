@@ -39,6 +39,15 @@ extern NSString *ALNPgTimestampStringFromDate(NSDate *value);
 extern NSDate *ALNPgDateFromTimestampString(NSString *value);
 extern NSDate *ALNPgDateFromDateString(NSString *value);
 
+// Some GNUstep tagged-date runtimes represent an exact zero reference interval
+// as two seconds; build test dates the way ALNPg's decoder does.
+static NSDate *PgTestDate(NSTimeInterval interval) {
+#if defined(GNUSTEP)
+  if (interval == 0) return [[NSCalendarDate alloc] initWithTimeIntervalSinceReferenceDate:0];
+#endif
+  return [NSDate dateWithTimeIntervalSinceReferenceDate:interval];
+}
+
 // A connection stand-in that never touches libpq, so the pool-poisoning
 // regression runs in the Linux quality gate without a live PostgreSQL.
 // `simulatedOpen` models the stale cached `isOpen` flag; `simulatedUsable`
@@ -307,13 +316,13 @@ extern NSDate *ALNPgDateFromDateString(NSString *value);
     @(252423993600.0) : @"10000-01-01T00:00:00.000000Z",
   };
   for (NSNumber *interval in cases) {
-    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSDate *date = PgTestDate(interval.doubleValue);
     XCTAssertEqualObjects(cases[interval], ALNPgTimestampStringFromDate(date), @"%@", interval);
   }
 
   // Encode then decode returns the same instant to the microsecond.
   for (NSNumber *interval in @[ @811341296.123456, @(-978307200.000001), @(-31588531200.5), @1.0 ]) {
-    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSDate *date = PgTestDate(interval.doubleValue);
     NSDate *decoded = ALNPgDateFromTimestampString(ALNPgTimestampStringFromDate(date));
     XCTAssertNotNil(decoded);
     XCTAssertEqualWithAccuracy(interval.doubleValue, decoded.timeIntervalSinceReferenceDate, 0.0000005);
@@ -871,7 +880,7 @@ extern NSDate *ALNPgDateFromDateString(NSString *value);
   }
   // Rounding must carry into the next second, including below the reference epoch.
   for (NSNumber *interval in @[@0.9999996, @(-0.0000004)]) {
-    NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:interval.doubleValue];
+    NSDate *date = PgTestDate(interval.doubleValue);
     NSString *expected = interval.doubleValue > 0 ? @"2001-01-01 00:00:01+00" : @"2001-01-01 00:00:00+00";
     NSDictionary *row = [connection executeQueryOne:@"SELECT $1::timestamptz = $2::timestamptz AS equal"
         parameters:@[date, expected] error:&error];
