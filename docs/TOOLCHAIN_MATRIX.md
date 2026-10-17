@@ -162,6 +162,10 @@ Current GitHub Actions workflow surface:
   - authoritative Linux/GNUstep merge gate
 - `linux-sanitizers`
   - authoritative Linux/GNUstep sanitizer merge gate
+- `static-analysis`
+  - required scan-build and clang-tidy merge gate; scan-build comes from the
+    `clang-tools-<major>` package matching the runner's `clang`, clang-tidy
+    is pinned to `clang-tidy==22.1.8` from PyPI
 - `docs-quality`
   - required docs/API-reference/browser-doc merge gate
 - `apple-baseline`
@@ -175,6 +179,8 @@ Current documented required checks for `main`:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
+- `static-analysis / scan-build`
+- `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
 
 Current documented non-required checks:

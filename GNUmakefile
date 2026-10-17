@@ -244,6 +244,12 @@ POSTGRESQL_INCLUDE_FLAGS := $(foreach dir,$(wildcard /clang64/include/postgresql
 endif
 INCLUDE_FLAGS := -Isrc -Isrc/Arlen -Isrc/Arlen/Core -Isrc/Arlen/Data -Isrc/Arlen/HTTP -Isrc/Arlen/MVC/Controller -Isrc/Arlen/MVC/Middleware -Isrc/Arlen/MVC/Routing -Isrc/Arlen/MVC/Template -Isrc/Arlen/MVC/View -Isrc/Arlen/Support -Isrc/Arlen/Support/third_party/argon2/include -Isrc/Arlen/Support/third_party/argon2/src -Isrc/MojoObjc -Isrc/MojoObjc/Core -Isrc/MojoObjc/Data -Isrc/MojoObjc/HTTP -Isrc/MojoObjc/MVC/Controller -Isrc/MojoObjc/MVC/Middleware -Isrc/MojoObjc/MVC/Routing -Isrc/MojoObjc/MVC/Template -Isrc/MojoObjc/MVC/View -Isrc/MojoObjc/Support $(FRAMEWORK_MODULE_INCLUDE_FLAGS) $(POSTGRESQL_INCLUDE_FLAGS)
 EXTRA_OBJC_FLAGS ?=
+# Compiler driver for every compile and link recipe. Arlen requires clang; the
+# default stays plain `clang` from PATH. Override only with a clang-compatible
+# wrapper, e.g. the static-analysis lane passes scan-build's analyzer wrapper.
+# Not part of the build-flags sentinel: switching drivers does not invalidate
+# existing objects, so start from a clean build/ when you change it.
+ARLEN_CC ?= clang
 ARC_REQUIRED_FLAG := -fobjc-arc
 PIC_FLAG := -fPIC
 FEATURE_FLAGS := -DARLEN_ENABLE_YYJSON=$(ARLEN_ENABLE_YYJSON) -DARLEN_ENABLE_LLHTTP=$(ARLEN_ENABLE_LLHTTP) -DARLEN_WINDOWS_PREVIEW=$(ARLEN_WINDOWS_PREVIEW)
@@ -430,7 +436,7 @@ MCP_EXAMPLE_OBJS := $(call objs_from,examples/mcp_app/main.m)
 ALL_OBJECTS := $(sort $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
-.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence windows-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter test-inventory-list test-inventory update-test-inventory browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
+.PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence windows-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter test-inventory-list test-inventory update-test-inventory browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-static-scan-build ci-static-clang-tidy ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
 
 all: eocc transpile generated-compile arlen boomhauer
 
@@ -519,19 +525,19 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 define root_generated_object_rule
 $(call root_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call root_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call root_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && $$(ARLEN_CC) $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call root_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define tech_demo_generated_object_rule
 $(call tech_demo_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call tech_demo_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && $$(ARLEN_CC) $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call tech_demo_generated_source_rel_for,$(1)) -o $$@
 endef
 
 define module_generated_object_rule
 $(call module_generated_object_for,$(1)): $(BUILD_FLAGS_SENTINEL) $(call module_generated_source_for,$(1)) $(1)
 >@mkdir -p $$(@D)
->@source $$(GNUSTEP_SH) && clang $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call module_generated_source_rel_for,$(1)) -o $$@
+>@source $$(GNUSTEP_SH) && $$(ARLEN_CC) $$(OBJC_FLAGS) $$(INCLUDE_FLAGS) -MMD -MP -MF $$(@:.o=.d) -MT$$@ -c $(call module_generated_source_rel_for,$(1)) -o $$@
 endef
 
 $(foreach root_template,$(TEMPLATE_FILES),$(eval $(call root_generated_object_rule,$(root_template))))
@@ -540,11 +546,11 @@ $(foreach module_template,$(MODULE_TEMPLATE_FILES),$(eval $(call module_generate
 
 $(OBJ_DIR)/%.o: %.m $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(OBJ_DIR)/%.o: %.c $(BUILD_FLAGS_SENTINEL)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(C_COMPILE_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF $(@:.o=.d) -MT$@ -c $< -o $@
 
 $(ARLEN_FRAMEWORK_LIB): $(FRAMEWORK_OBJS) | $(LIB_DIR)
 >@rm -f $@
@@ -555,11 +561,11 @@ framework-artifacts: eocc $(ARLEN_FRAMEWORK_LIB)
 # Compile generated-code consumers with the shipped archive and canonical flags.
 .PHONY: test-client-program
 test-client-program: $(ARLEN_FRAMEWORK_LIB)
->@source "$(GNUSTEP_SH)" && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(CLIENT_INCLUDE_FLAGS) $(CLIENT_SOURCES) $(ARLEN_FRAMEWORK_LIB) -o "$(CLIENT_OUTPUT)" $(BASE_LINK_LIBS)
+>@source "$(GNUSTEP_SH)" && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(CLIENT_INCLUDE_FLAGS) $(CLIENT_SOURCES) $(ARLEN_FRAMEWORK_LIB) -o "$(CLIENT_OUTPUT)" $(BASE_LINK_LIBS)
 
 $(EOC_TOOL): $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(EOCC_ENTRY_OBJS) $(EOC_RUNTIME_OBJS) -o $(EOC_TOOL) $(BASE_LINK_LIBS)
 
 eocc: $(EOC_TOOL)
 
@@ -573,96 +579,96 @@ generated-compile: $(ROOT_TRANSPILE_STATE) $(ROOT_GENERATED_OBJS)
 
 $(ARLEN_TOOL): $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_TOOL) $(BASE_LINK_LIBS)
 
 arlen: $(ARLEN_TOOL)
 
 $(JSON_PERF_BENCH_TOOL): $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(JSON_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(JSON_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 json-perf-bench: $(JSON_PERF_BENCH_TOOL)
 
 $(DISPATCH_PERF_BENCH_TOOL): $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(DISPATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(DISPATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 dispatch-perf-bench: $(DISPATCH_PERF_BENCH_TOOL)
 
 $(HTTP_PARSE_PERF_BENCH_TOOL): $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 http-parse-perf-bench: $(HTTP_PARSE_PERF_BENCH_TOOL)
 
 $(ROUTE_MATCH_PERF_BENCH_TOOL): $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ROUTE_MATCH_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
 
 route-match-perf-bench: $(ROUTE_MATCH_PERF_BENCH_TOOL)
 
 $(BACKEND_CONTRACT_MATRIX_TOOL): $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BACKEND_CONTRACT_MATRIX_TOOL) $(BASE_LINK_LIBS)
 
 backend-contract-matrix: $(BACKEND_CONTRACT_MATRIX_TOOL)
 
 $(PHASE23_LIVE_SMOKE_TOOL): $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE23_LIVE_SMOKE_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE23_LIVE_SMOKE_TOOL) $(BASE_LINK_LIBS)
 
 $(PHASE26_ORM_PERF_TOOL): $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE26_ORM_PERF_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE26_ORM_PERF_TOOL) $(BASE_LINK_LIBS)
 
 $(ARLEN_ORM_REFERENCE_TOOL): $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_ORM_REFERENCE_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_ORM_REFERENCE_TOOL) $(BASE_LINK_LIBS)
 
 $(PHASE27_SEARCH_CHARACTERIZE_TOOL): $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE27_SEARCH_CHARACTERIZE_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE27_SEARCH_CHARACTERIZE_TOOL) $(BASE_LINK_LIBS)
 
 $(BOOMHAUER_TOOL): $(BOOMHAUER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BOOMHAUER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BOOMHAUER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
 
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
 
 $(TECH_DEMO_SERVER_TOOL): $(TECH_DEMO_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE) $(TECH_DEMO_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(TECH_DEMO_SERVER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(TECH_DEMO_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 tech-demo-server: $(TECH_DEMO_SERVER_TOOL)
 
 $(API_REFERENCE_SERVER_TOOL): $(API_REFERENCE_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(API_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(API_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 api-reference-server: $(API_REFERENCE_SERVER_TOOL)
 
 $(PHASE28_REFERENCE_SERVER_TOOL): $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE28_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(PHASE28_REFERENCE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 phase28-reference-server: $(PHASE28_REFERENCE_SERVER_TOOL)
 
 $(AUTH_PRIMITIVES_SERVER_TOOL): $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(AUTH_PRIMITIVES_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 auth-primitives-server: $(AUTH_PRIMITIVES_SERVER_TOOL)
 
 $(MIGRATION_SAMPLE_SERVER_TOOL): $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) | $(BUILD_DIR) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(MIGRATION_SAMPLE_SERVER_TOOL) $(BASE_LINK_LIBS)
 
 migration-sample-server: $(MIGRATION_SAMPLE_SERVER_TOOL)
 
 $(ARLEN_DATA_EXAMPLE_TOOL): $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_DATA_EXAMPLE_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(ARLEN_DATA_EXAMPLE_TOOL) $(BASE_LINK_LIBS)
 
 arlen-data-example: $(ARLEN_DATA_EXAMPLE_TOOL)
 
@@ -677,102 +683,102 @@ tech-demo: tech-demo-server
 
 $(SMOKE_RENDER_TOOL): $(SMOKE_RENDER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
 >@mkdir -p $(@D)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(SMOKE_RENDER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(SMOKE_RENDER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(SMOKE_RENDER_TOOL) $(BASE_LINK_LIBS)
 
 smoke-render: $(SMOKE_RENDER_TOOL)
 
 $(UNIT_TEST_BIN): $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(UNIT_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-unit.plist $(UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(INTEGRATION_TEST_BIN): $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(BOOMHAUER_TOOL) $(TECH_DEMO_SERVER_TOOL) $(API_REFERENCE_SERVER_TOOL) $(AUTH_PRIMITIVES_SERVER_TOOL) $(MIGRATION_SAMPLE_SERVER_TOOL) | $(ROOT_TRANSPILE_STATE) $(MODULE_TRANSPILE_STATE)
 >@mkdir -p $(INTEGRATION_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-integration.plist $(INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(BROWSER_ERROR_AUDIT_TEST_BIN): $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_WAIT_OBJS)
 >@mkdir -p $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_WAIT_OBJS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_WAIT_OBJS) -shared -fPIC -o $(BROWSER_ERROR_AUDIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@cp tests/Info-gnustep-browser-error-audit.plist $(BROWSER_ERROR_AUDIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_SQL_BUILDER_TEST_BIN): $(PHASE20_SQL_BUILDER_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE20_SQL_BUILDER_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_SQL_BUILDER_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_SQL_BUILDER_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase20SQLBuilderTests/g' tests/Info-gnustep-unit.plist > $(PHASE20_SQL_BUILDER_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_SCHEMA_TEST_BIN): $(PHASE20_SCHEMA_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE20_SCHEMA_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_SCHEMA_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_SCHEMA_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_SCHEMA_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_SCHEMA_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase20SchemaTests/g' tests/Info-gnustep-unit.plist > $(PHASE20_SCHEMA_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_POSTGRES_LIVE_TEST_BIN): $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_POSTGRES_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase20PostgresLiveTests/g' tests/Info-gnustep-unit.plist > $(PHASE20_POSTGRES_LIVE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_MSSQL_LIVE_TEST_BIN): $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_MSSQL_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_MSSQL_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase20MSSQLLiveTests/g' tests/Info-gnustep-unit.plist > $(PHASE20_MSSQL_LIVE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE20_ROUTING_TEST_BIN): $(PHASE20_ROUTING_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE20_ROUTING_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_ROUTING_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_ROUTING_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE20_ROUTING_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE20_ROUTING_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase20RoutingTests/g' tests/Info-gnustep-unit.plist > $(PHASE20_ROUTING_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE21_TEMPLATE_TEST_BIN): $(PHASE21_TEMPLATE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE21_TEMPLATE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE21_TEMPLATE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE21_TEMPLATE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE21_TEMPLATE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase21TemplateTests/g' tests/Info-gnustep-unit.plist > $(PHASE21_TEMPLATE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE23_DATAVERSE_TEST_BIN): $(PHASE23_DATAVERSE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ARLEN_TOOL)
 >@mkdir -p $(PHASE23_DATAVERSE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE23_DATAVERSE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE23_DATAVERSE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE23_DATAVERSE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE23_DATAVERSE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase23DataverseTests/g' tests/Info-gnustep-unit.plist > $(PHASE23_DATAVERSE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE25_LIVE_TEST_BIN): $(PHASE25_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE25_LIVE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE25_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE25_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE25_LIVE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE25_LIVE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase25LiveTests/g' tests/Info-gnustep-unit.plist > $(PHASE25_LIVE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 $(PHASE26_ORM_TEST_BIN): $(PHASE26_ORM_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE26_ORM_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase26ORMTests/g' tests/Info-gnustep-unit.plist > $(PHASE26_ORM_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE26_ORM_UNIT_TEST_BIN): $(PHASE26_ORM_UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE26_ORM_UNIT_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_UNIT_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase26ORMUnitTests/g' tests/Info-gnustep-unit.plist > $(PHASE26_ORM_UNIT_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE26_ORM_GENERATED_TEST_BIN): $(PHASE26_ORM_GENERATED_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE26_ORM_GENERATED_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_GENERATED_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_GENERATED_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase26ORMGeneratedTests/g' tests/Info-gnustep-unit.plist > $(PHASE26_ORM_GENERATED_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE26_ORM_INTEGRATION_TEST_BIN): $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_INTEGRATION_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase26ORMIntegrationTests/g' tests/Info-gnustep-unit.plist > $(PHASE26_ORM_INTEGRATION_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN): $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE26_ORM_BACKEND_PARITY_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase26ORMBackendParityTests/g' tests/Info-gnustep-unit.plist > $(PHASE26_ORM_BACKEND_PARITY_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE27_SEARCH_TEST_BIN): $(PHASE27_SEARCH_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS)
 >@mkdir -p $(PHASE27_SEARCH_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE27_SEARCH_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE27_SEARCH_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE27_SEARCH_TEST_OBJS) $(TEST_SHARED_OBJS) $(MODULE_OBJS) $(MODULE_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE27_SEARCH_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase27SearchTests/g' tests/Info-gnustep-unit.plist > $(PHASE27_SEARCH_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN): $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE24_WINDOWS_DB_SMOKE_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase24WindowsDBSmokeTests/g' tests/Info-gnustep-unit.plist > $(PHASE24_WINDOWS_DB_SMOKE_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 $(PHASE24_WINDOWS_RUNTIME_TEST_BIN): $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ARLEN_TOOL)
 >@mkdir -p $(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS) $(TEST_SHARED_OBJS) $(ARLEN_FRAMEWORK_LIB) -shared -fPIC -o $(PHASE24_WINDOWS_RUNTIME_TEST_BIN) $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenPhase24WindowsRuntimeParityTests/g' tests/Info-gnustep-unit.plist > $(PHASE24_WINDOWS_RUNTIME_TEST_BUNDLE)/Resources/Info-gnustep.plist
 
 build-tests: $(UNIT_TEST_BIN) $(INTEGRATION_TEST_BIN)
@@ -1103,6 +1109,13 @@ ci-chaos-restart:
 ci-static-analysis:
 >bash ./tools/ci/run_phase10m_static_analysis.sh
 
+# Gating whole-tree static analysis (rebuilds build/ from clean).
+ci-static-scan-build:
+>bash ./tools/ci/run_static_scan_build_gate.sh
+
+ci-static-clang-tidy:
+>bash ./tools/ci/run_static_clang_tidy_gate.sh
+
 ci-blob-throughput:
 >bash ./tools/ci/run_phase10m_blob_throughput.sh
 
@@ -1150,7 +1163,7 @@ clean:
 mcp-example: $(MCP_EXAMPLE_TOOL)
 
 $(MCP_EXAMPLE_TOOL): $(MCP_EXAMPLE_OBJS) $(filter %/mcp/Sources/ALNMCPModule.o %/mcp/Sources/ALNMCPSchema.o,$(MODULE_OBJS)) $(ARLEN_FRAMEWORK_LIB)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
 .PHONY: mcp-check
 mcp-check:
@@ -1171,11 +1184,11 @@ DURABLE_JOBS_OBJ := $(OBJ_DIR)/tests/durable_jobs/DurableJobsTests.o
 DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
 
 $(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
 $(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(TEST_WAIT_OBJS) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources
->@source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)
 >@sed 's/ArlenUnitTests/ArlenDurableJobsTests/g' tests/Info-gnustep-unit.plist > $(DURABLE_JOBS_BUNDLE)/Resources/Info-gnustep.plist
 
 .PHONY: durable-jobs-tests ci-durable-jobs

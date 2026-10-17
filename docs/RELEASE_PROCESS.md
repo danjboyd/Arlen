@@ -149,6 +149,8 @@ For `main`, require these status checks before merge:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
+- `static-analysis / scan-build`
+- `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
 
 Keep these visible but non-required unless the support statement changes:

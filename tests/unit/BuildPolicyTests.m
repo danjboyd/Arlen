@@ -222,7 +222,14 @@
   NSUInteger clangRecipeCount = 0;
   for (NSString *line in lines) {
     NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    if (![trimmed hasPrefix:@">"] || [trimmed containsString:@"clang "] == NO) {
+    if (![trimmed hasPrefix:@">"]) {
+      continue;
+    }
+    // Recipes go through the overridable ARLEN_CC driver (default `clang`), so
+    // analyzer wrappers can be swapped in without changing default builds.
+    XCTAssertFalse([trimmed containsString:@"&& clang "],
+                   @"compile/link recipe must use $(ARLEN_CC), not bare clang: %@", trimmed);
+    if ([trimmed containsString:@"$(ARLEN_CC) "] == NO) {
       continue;
     }
     clangRecipeCount += 1;
@@ -234,6 +241,8 @@
   }
 
   XCTAssertTrue(clangRecipeCount > 0, @"expected at least one clang recipe in GNUmakefile");
+  XCTAssertTrue([makefile containsString:@"\nARLEN_CC ?= clang\n"],
+                @"GNUmakefile must default ARLEN_CC to clang");
 }
 
 - (void)testGNUmakefileCentralizesLinkLibrariesWithDispatch {
@@ -443,7 +452,7 @@
                                "$(THIRD_PARTY_FEATURE_FLAGS)|EXTRA_OBJC_FLAGS=$(EXTRA_OBJC_FLAGS)|"
                                "XCTEST_COMPILE_FLAGS=$(XCTEST_COMPILE_FLAGS)"]);
   XCTAssertTrue([makefile containsString:
-                              @"clang $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD"]);
+                              @"$(ARLEN_CC) $(XCTEST_COMPILE_FLAGS) $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD"]);
   XCTAssertTrue([makefile containsString:
                               @"BUILD_FLAGS_SENTINEL := $(BUILD_DIR)/.build-flags."
                                "$(BUILD_FLAGS_SENTINEL_HASH)"]);
@@ -1480,6 +1489,7 @@
   NSArray<NSString *> *workflowPaths = @[
     @".github/workflows/linux-quality.yml",
     @".github/workflows/linux-sanitizers.yml",
+    @".github/workflows/static-analysis.yml",
     @".github/workflows/docs-quality.yml",
   ];
 
