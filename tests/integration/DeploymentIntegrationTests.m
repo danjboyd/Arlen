@@ -395,6 +395,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testReleaseBuildActivateAndRollbackScripts {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-release-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-release-work"];
@@ -478,6 +481,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testReleaseSmokeScriptValidatesDeployRunbook_ARLEN_BUG_019 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appParent = [self createTempDirectoryWithPrefix:@"arlen-smoke-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-smoke-work"];
@@ -1180,6 +1186,9 @@ static NSString *ALNHostDeployProfile(void) {
 // GitHub issue 89: releases record the app and framework commits they were built
 // from, with a dirty flag scoped to what the release packages.
 - (void)testReleasesRecordSourceRevisionAndRequireCleanRefusesDirtyTrees_Issue89 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-revision-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-revision-work"];
@@ -2073,6 +2082,9 @@ static NSString *ALNHostDeployProfile(void) {
 // survive the next release; prePackageCommands run before packaging, and a
 // failing one aborts the build with its output.
 - (void)testSharedPathsSurviveReleasesAndPrePackageCommandsGateTheBuild_Issue66 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-shared-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-shared-work"];
@@ -2301,6 +2313,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testRemoteDeployDelegateSourcesTargetGNUstepScript_Issue71 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-gnustep-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-gnustep-work"];
@@ -2390,6 +2405,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testRemotePushChecksReleaseLayoutOnTheHostNotLocally_Issue69 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-layout-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-layout-work"];
@@ -3507,6 +3525,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testReleasePackagingDereferencesCompiledRuntimeSymlink_ARLEN_BUG_018 {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-symlink-app"];
   NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-bug-018-symlink-work"];
@@ -4324,6 +4345,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase9IFaultInjectionHarnessProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux fault-injection lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase9i-confidence"];
@@ -5039,6 +5063,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MProtocolAdversarialProbeProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux protocol-adversarial lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-protocol-adversarial"];
@@ -5082,6 +5109,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase11ProtocolAdversarialProbeProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux protocol-adversarial lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-adversarial"];
@@ -5125,6 +5155,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase11ProtocolFuzzAndLiveProbeProduceExpectedPacks {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux fuzz lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fuzzOutputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase11-protocol-fuzz"];
@@ -5202,6 +5235,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase11SanitizerMatrixProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"sanitizer runtimes (libasan.so) are not available in the Windows CLANG64 toolchain");
+#endif
   ALNSkipOnApple(@"Linux sanitizer lane");
   // Runs the sanitizer matrix generator end to end.
   ALNTestSetExecutionTimeAllowance(self, 900);
@@ -5400,6 +5436,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MLongRunSoakGeneratorProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux soak lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-soak"];
@@ -5458,6 +5497,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MChaosRestartGeneratorProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux chaos-restart lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-chaos-restart"];
@@ -5530,6 +5572,9 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 - (void)testPhase10MStaticAnalysisGeneratorProducesExpectedPack {
+#if defined(_WIN32)
+  XCTSkip(@"the perf and fault-injection generators are not ported to Windows (#200)");
+#endif
   ALNSkipOnApple(@"Linux static-analysis lane");
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *outputRoot = [self createTempDirectoryWithPrefix:@"arlen-phase10m-static-analysis"];

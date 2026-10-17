@@ -151,17 +151,19 @@
   [[NSFileManager defaultManager] removeItemAtPath:capturePath error:nil];
   NSString *output = [[NSString alloc] initWithData:capturedData
                                            encoding:NSUTF8StringEncoding];
-#if defined(_WIN32)
-  // Native Windows python3 writes text-mode stdout with \r\n, and splitting on
-  // newlineCharacterSet turns each \r\n into two lines.
-  output = [output stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-#endif
   return output ?: @"";
 }
 
 - (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
   NSString *command = [NSString stringWithFormat:@"python3 - 2>&1 <<'PY'\n%@\nPY", script ?: @""];
-  return [self runShellCapture:command exitCode:exitCode];
+  NSString *output = [self runShellCapture:command exitCode:exitCode];
+#if defined(_WIN32)
+  // Native Windows python3 writes text-mode stdout with \r\n, and splitting on
+  // newlineCharacterSet turns each \r\n into two lines. Only the scripts'
+  // printed lines are normalized; raw HTTP captures keep their \r\n.
+  output = [output stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+#endif
+  return output;
 }
 
 - (NSString *)capturedOutputFromPipe:(NSPipe *)pipe {
