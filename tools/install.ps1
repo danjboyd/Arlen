@@ -41,11 +41,12 @@ function Install-Arlen {
   $ProgressPreference = "SilentlyContinue"
 
   $repoSlug = "danjboyd/Arlen"
-  # gnustep-cli publishes each toolchain version under the release tag of the
-  # same name; 0.1.0 is the toolchain Arlen's Windows support started with.
+  # gnustep-cli publishes each toolchain version, with its PowerShell bootstrap
+  # as a release asset, under the release tag of the same name. 0.1.1 is the
+  # first toolchain Arlen's Windows support runs on.
   function BootstrapSetup([string]$ToolchainVersion) {
-    if (-not $ToolchainVersion) { $ToolchainVersion = "0.1.0" }
-    return "iwr https://raw.githubusercontent.com/danjboyd/gnustep-cli-new/v$ToolchainVersion/scripts/bootstrap/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
+    if (-not $ToolchainVersion) { $ToolchainVersion = "0.1.1" }
+    return "iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1`n" +
       "  powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v$ToolchainVersion/release-manifest.json"
   }
   function Say([string]$Message) { Write-Host "arlen-install: $Message" }
@@ -92,15 +93,18 @@ Then rerun this installer. If the toolchain lives somewhere else, pass
 -MsysRoot or set ARLEN_MSYS_ROOT. See docs/GETTING_STARTED_WINDOWS.md.
 "@
   }
-  # Arlen links -lcurl, which the managed toolchain doesn't ship yet.
+  # Arlen links -lcurl; gnustep-cli ships libcurl from 0.1.1 on, so a root
+  # without it is an older toolchain.
   if (-not (Test-Path (Join-Path $resolvedRoot "clang64\lib\libcurl.dll.a"))) {
     Die @"
-libcurl is missing from $resolvedRoot. Install it inside the toolchain, then rerun this installer:
+libcurl is missing from $resolvedRoot, so this toolchain is older than
+gnustep-cli 0.1.1. Update it with the gnustep-cli PowerShell bootstrap, then
+rerun this installer:
 
-  & '$(Join-Path $resolvedRoot "usr\bin\bash.exe")' -lc 'pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl'
+  $(BootstrapSetup "")
 
-Use plain pacman -S exactly as shown. Never run pacman -Sy or -Syu in the managed toolchain:
-a partial upgrade breaks its python and clang.
+Don't install libcurl with pacman, and never run pacman -Sy or -Syu in the
+managed toolchain: a partial upgrade breaks its python and clang.
 "@
   }
 
