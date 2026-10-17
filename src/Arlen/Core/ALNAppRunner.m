@@ -1,7 +1,5 @@
 #import "ALNAppRunner.h"
 
-#include <pthread.h>
-
 #import <float.h>
 #import <stdio.h>
 #import <stdlib.h>
@@ -116,7 +114,16 @@ static int ALNRunJobsWorker(ALNApplication *application,
   }
 }
 
-static pthread_mutex_t gALNRouteCaptureLock = PTHREAD_MUTEX_INITIALIZER;
+// NSLock rather than pthread_mutex_t: on Windows, <pthread.h> and libdispatch's
+// os/generic_win_base.h (pulled in by Foundation) both define pthread_attr_t.
+static NSLock *ALNRouteCaptureLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
+}
 static BOOL gALNRouteCaptureActive = NO;
 static ALNRouteRegistrationCallback gALNCapturedRouteRegistration = NULL;
 
@@ -124,7 +131,7 @@ ALNRouteRegistrationCallback ALNCaptureRouteRegistration(ALNAppMainFunction appM
   if (appMain == NULL) {
     return NULL;
   }
-  pthread_mutex_lock(&gALNRouteCaptureLock);
+  [ALNRouteCaptureLock() lock];
   gALNRouteCaptureActive = YES;
   gALNCapturedRouteRegistration = NULL;
   const char *argv[] = { "arlen-app-test", NULL };
@@ -132,7 +139,7 @@ ALNRouteRegistrationCallback ALNCaptureRouteRegistration(ALNAppMainFunction appM
   ALNRouteRegistrationCallback captured = gALNCapturedRouteRegistration;
   gALNRouteCaptureActive = NO;
   gALNCapturedRouteRegistration = NULL;
-  pthread_mutex_unlock(&gALNRouteCaptureLock);
+  [ALNRouteCaptureLock() unlock];
   return captured;
 }
 

@@ -185,7 +185,9 @@ static void *ALNOpenLibpqCandidate(const char *candidate) {
   if (candidate == NULL || candidate[0] == '\0') {
     return NULL;
   }
-  return (void *)LoadLibraryA(candidate);
+  // An absolute path (the release's build/dll) also resolves its imports
+  // from its own directory; wide-character, so non-ASCII paths load.
+  return ALNPlatformLoadWindowsLibrary([NSString stringWithUTF8String:candidate] ?: @"");
 }
 
 static void *ALNLookupLibpqSymbol(void *handle, const char *symbolName) {
