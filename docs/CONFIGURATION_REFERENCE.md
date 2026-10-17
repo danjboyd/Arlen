@@ -28,6 +28,16 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
+- `performanceLogging` (default: on, off in `production`): record per-stage
+  request timing in the access log. `ARLEN_PERFORMANCE_LOGGING` overrides it.
+- `performanceHeaders` (default: on, off in `production`): while
+  `performanceLogging` is on, also send the timing as `X-Arlen-Total-Ms`,
+  `X-Arlen-Parse-Ms`, `X-Arlen-Response-Write-Ms` and `X-Mojo-Total-Ms`
+  response headers. They let any client time requests, so keep them off on
+  public deployments. `ARLEN_PERFORMANCE_HEADERS` overrides it.
+- Detailed exception pages (reason, stack, file paths) are shown only when the
+  environment is `development` or `test`. Every other environment, including
+  `staging`, gets the production error response.
 - `serveStatic`: serve files from `public/`, mounted under `/static/` — the
   scaffold's own `public/health.txt` answers at `/static/health.txt`, not at
   `/health.txt`
@@ -229,7 +239,8 @@ Session config:
 - `session.secret`
 - `session.cookieName`
 - `session.maxAgeSeconds`
-- `session.secure`
+- `session.secure` (default: on in `production`, off elsewhere; generated apps
+  leave it unset so this default applies)
 - `session.sameSite`
 
 CSRF config:
@@ -492,7 +503,6 @@ Generated apps include:
 ```plist
 openapi = {
   enabled = YES;
-  docsUIEnabled = YES;
   docsUIStyle = "interactive";
   title = "Arlen API";
   version = "0.1.0";
@@ -503,7 +513,8 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
-- `openapi.docsUIEnabled`
+- `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
+  it unset so `/openapi` is not served in production)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`

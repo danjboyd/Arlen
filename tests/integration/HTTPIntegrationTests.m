@@ -3111,6 +3111,64 @@
   [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_STATIC_FILE_FD_CACHE_CAPACITY": @"0" }];
 }
 
+// Issue 243: a file response is a header write plus a sendfile body. Without
+// TCP_NODELAY, each response after the first on a keep-alive connection waited
+// about 40 ms for the client's delayed ACK (20 requests: ~800 ms, now ~10 ms).
+- (void)testKeepAliveFileResponsesAreNotDelayedByNagle_Issue243 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"request = b'GET /static/sample.txt HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n'\n"
+        @"def read_response():\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk, data\n"
+        @"        data += chunk\n"
+        @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    length = 0\n"
+        @"    for line in head.split(b'\\r\\n')[1:]:\n"
+        @"        name, _, value = line.partition(b':')\n"
+        @"        if name.strip().lower() == b'content-length':\n"
+        @"            length = int(value.strip())\n"
+        @"    while len(body) < length:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk\n"
+        @"        body += chunk\n"
+        @"sock.sendall(request)\n"
+        @"read_response()\n"
+        @"started = time.monotonic()\n"
+        @"for _ in range(20):\n"
+        @"    sock.sendall(request)\n"
+        @"    read_response()\n"
+        @"elapsed_ms = (time.monotonic() - started) * 1000.0\n"
+        @"sock.close()\n"
+        @"print('keep-alive file responses: 20 in %%.1f ms' %% elapsed_ms)\n"
+        @"assert elapsed_ms < 400, elapsed_ms\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testStaticAssetEndpointInDevelopment {
   NSString *body = [self simpleRequestPath:@"/static/sample.txt"];
   XCTAssertEqualObjects(@"static ok\n", body);

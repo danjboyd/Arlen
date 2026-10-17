@@ -28,6 +28,7 @@ typedef SSIZE_T ssize_t;
 #else
 #import <arpa/inet.h>
 #import <netinet/in.h>
+#import <netinet/tcp.h>
 #import <signal.h>
 #import <poll.h>
 #import <sys/socket.h>
@@ -647,6 +648,19 @@ static void ALNApplyClientSocketTimeout(ALNSocketHandle clientFd, NSUInteger tim
 
   (void)setsockopt((int)clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
   (void)setsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+}
+
+// File responses go out as two writes (the header, then the sendfile body).
+// With Nagle on, a keep-alive connection's body waits for the client's delayed
+// ACK of the header, about 40 ms per response (#243).
+static void ALNApplyClientSocketNoDelay(ALNSocketHandle clientFd) {
+  int enabled = 1;
+#if defined(_WIN32)
+  (void)setsockopt(ALNNativeSocketHandle(clientFd), IPPROTO_TCP, TCP_NODELAY, (const char *)&enabled,
+                   sizeof(enabled));
+#else
+  (void)setsockopt((int)clientFd, IPPROTO_TCP, TCP_NODELAY, &enabled, sizeof(enabled));
 #endif
 }
 
@@ -2867,7 +2881,7 @@ static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
 
 static double ALNSendResponse(ALNSocketHandle clientFd,
                               ALNResponse *response,
-                              BOOL performanceLogging,
+                              BOOL performanceHeaders,
                               BOOL sendBody) {
   double serializeStart = ALNNowMilliseconds();
   NSString *fileBodyPath = response.fileBodyPath;
@@ -2907,7 +2921,7 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     return (ALNNowMilliseconds() - writeStart) + serializeMs;
   }
 
-  if (performanceLogging) {
+  if (performanceHeaders) {
     [response setHeader:@"X-Arlen-Response-Write-Ms"
                   value:[NSString stringWithFormat:@"%.3f", serializeMs]];
     double currentTotal = ALNParseHeaderDoubleValue([response headerForName:@"X-Arlen-Total-Ms"]);
@@ -3999,8 +4013,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 // Returns YES when the connection was parked with the idle-connection watcher;
 // the caller must then leave the socket open and keep its session reservation.
 - (BOOL)serveClient:(ALNSocketHandle)clientFd resumed:(BOOL)resumed allowPark:(BOOL)allowPark {
-  BOOL performanceLogging =
-      ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES);
+  // The server only adds timing headers; the performance log is the application's.
+  BOOL performanceHeaders =
+      ALNConfigBool(self.application.config ?: @{}, @"performanceLogging", YES) &&
+      ALNConfigBool(self.application.config ?: @{}, @"performanceHeaders", YES);
   ALNRequestLimits limits = ALNLimitsFromConfig(self.application.config ?: @{});
   NSUInteger largestRouteBodyLimit = [self.application largestRouteMaxBodyBytes];
   if (largestRouteBodyLimit > 0) {
@@ -4010,6 +4026,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   }
   ALNServerSocketTuning tuning = ALNTuningFromConfig(self.application.config ?: @{});
   ALNApplyClientSocketTimeout(clientFd, tuning.connectionTimeoutSeconds);
+  if (!resumed) {
+    ALNApplyClientSocketNoDelay(clientFd);
+  }
   NSString *connectionRemoteAddress = ALNRemoteAddressForClient(clientFd) ?: @"";
   ALNConnectionReadState readState;
   ALNConnectionReadStateInit(&readState);
@@ -4049,10 +4068,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           }
           [errorResponse setHeader:@"Connection" value:@"close"];
           ALNEnsurePerformanceHeaders(errorResponse,
-                                      performanceLogging,
+                                      performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, errorResponse, performanceLogging, YES);
+          (void)ALNSendResponse(clientFd, errorResponse, performanceHeaders, YES);
           return NO;
         }
         request.parseDurationMilliseconds = parseMs;
@@ -4086,13 +4105,13 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
             ALNEnsurePerformanceHeaders(staticResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             request.responseWriteDurationMilliseconds =
                 ALNSendResponse(clientFd,
                                 staticResponse,
-                                performanceLogging,
+                                performanceHeaders,
                                 ![request.method isEqualToString:@"HEAD"]);
             requestsHandled += 1;
             if (!keepAlive) {
@@ -4136,10 +4155,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           ALNResponse *invalidUpgrade = ALNErrorResponse(400, @"invalid websocket upgrade\n");
           [invalidUpgrade setHeader:@"Connection" value:@"close"];
           ALNEnsurePerformanceHeaders(invalidUpgrade,
-                                      performanceLogging,
+                                      performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceLogging, YES);
+          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceHeaders, YES);
           return NO;
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
@@ -4148,10 +4167,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             ALNResponse *originDenied = ALNErrorResponse(403, @"websocket origin not allowed\n");
             [originDenied setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(originDenied,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, originDenied, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, originDenied, performanceHeaders, YES);
             return NO;
           }
           ALNWebSocketClientSession *webSocketSession = nil;
@@ -4169,10 +4188,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                               value:@"websocket_session_limit"];
             [busyResponse setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(busyResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
             return NO;
           }
 
@@ -4193,10 +4212,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                           rejectionReason)];
               [busyResponse setHeader:@"Connection" value:@"close"];
               ALNEnsurePerformanceHeaders(busyResponse,
-                                          performanceLogging,
+                                          performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+              (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
@@ -4209,10 +4228,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                    @"event stream unavailable\n");
               [failure setHeader:@"Connection" value:@"close"];
               ALNEnsurePerformanceHeaders(failure,
-                                          performanceLogging,
+                                          performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
+              (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
@@ -4221,10 +4240,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                                                            replayResult:streamReplayResult];
               [resyncResponse setHeader:@"Connection" value:@"close"];
               ALNEnsurePerformanceHeaders(resyncResponse,
-                                          performanceLogging,
+                                          performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
+              (void)ALNSendResponse(clientFd, resyncResponse, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
@@ -4239,10 +4258,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                 [busyResponse setHeader:@"Retry-After" value:@"1"];
                 [busyResponse setHeader:@"Connection" value:@"close"];
                 ALNEnsurePerformanceHeaders(busyResponse,
-                                            performanceLogging,
+                                            performanceHeaders,
                                             parseMs,
                                             ALNNowMilliseconds() - requestStartMs);
-                (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+                (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
                 [self releaseWebSocketSessionReservation];
                 return NO;
               }
@@ -4291,10 +4310,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                  @"event stream unavailable\n");
             [failure setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(failure,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, failure, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
             return NO;
           }
           if (streamReplayResult.resyncRequired) {
@@ -4302,10 +4321,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                                                          replayResult:streamReplayResult];
             [resyncResponse setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(resyncResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, resyncResponse, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, resyncResponse, performanceHeaders, YES);
             return NO;
           }
 
@@ -4316,10 +4335,10 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             [busyResponse setHeader:@"X-Arlen-Backpressure-Reason" value:@"http_session_limit"];
             [busyResponse setHeader:@"Connection" value:@"close"];
             ALNEnsurePerformanceHeaders(busyResponse,
-                                        performanceLogging,
+                                        performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceLogging, YES);
+            (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
             return NO;
           }
 
@@ -4354,13 +4373,13 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
         BOOL keepAlive = ALNShouldKeepAliveForRequest(request, response);
         [response setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];
         ALNEnsurePerformanceHeaders(response,
-                                    performanceLogging,
+                                    performanceHeaders,
                                     parseMs,
                                     ALNNowMilliseconds() - requestStartMs);
         request.responseWriteDurationMilliseconds =
             ALNSendResponse(clientFd,
                             response,
-                            performanceLogging,
+                            performanceHeaders,
                             ![request.method isEqualToString:@"HEAD"]);
         requestsHandled += 1;
         if (!keepAlive) {
