@@ -76,8 +76,8 @@
     if (exitCode != 0) return;
 
     // A hang is one of the failure modes, so every process runs under an
-    // alarm (perl keeps this portable to macOS, which lacks timeout(1)).
-    NSString *bounded = [NSString stringWithFormat:@"perl -e 'alarm shift; exec @ARGV' 120 %@",
+    // alarm (GNU timeout where present; perl on macOS, which lacks timeout(1)).
+    NSString *bounded = [NSString stringWithFormat:@"%@ %@", ALNTestShellTimeoutPrefix(120),
                                                    ALNTestShellQuote(binary)];
     command = [NSString stringWithFormat:
         @"set -e; ulimit -c 0; export LD_PRELOAD='' XCTEST_LD_PRELOAD=''; %@ 1 %lu; "
