@@ -6,7 +6,12 @@
 #import "ALNResponse.h"
 #import "ALNRoute.h"
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 #include <string.h>
 
 NSString *const ALNContextRoutePolicyNamesStashKey = @"aln.route_policies.names";

@@ -185,7 +185,9 @@ static void *ALNOpenLibpqCandidate(const char *candidate) {
   if (candidate == NULL || candidate[0] == '\0') {
     return NULL;
   }
-  return (void *)LoadLibraryA(candidate);
+  // An absolute path (the release's build/dll) also resolves its imports
+  // from its own directory; wide-character, so non-ASCII paths load.
+  return ALNPlatformLoadWindowsLibrary([NSString stringWithUTF8String:candidate] ?: @"");
 }
 
 static void *ALNLookupLibpqSymbol(void *handle, const char *symbolName) {
@@ -1527,7 +1529,10 @@ static id ALNPgDecodedValueForFieldType(ALNOid fieldType,
   case ALNPGOIDOID_JSONB: {
     NSData *jsonData = [stringValue dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
     if (jsonData != nil) {
-      decoded = [ALNJSONSerialization JSONObjectWithData:jsonData options:0 error:error];
+      // json/jsonb columns may hold scalar documents ('"s"', '42', 'true', 'null').
+      decoded = [ALNJSONSerialization JSONObjectWithData:jsonData
+                                                 options:NSJSONReadingAllowFragments
+                                                   error:error];
       if (decoded == nil && error != NULL && *error != nil) {
         NSError *jsonError = *error;
         NSString *detail = [NSString stringWithFormat:@"column %@ JSON decode failed: %@",

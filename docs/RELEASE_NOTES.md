@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
+  health probe and, if propane's workers cannot bind it, retries on a new port
+  (up to three attempts). The health probe's `curl` now times out after two
+  seconds, so a stray listener on the probe port can no longer hang the smoke
+  run. `DeploymentIntegrationTests` uses `--port 0`; it used to pick a port
+  minutes before propane started and never checked the second probe port, so
+  CI occasionally failed with `bind: Address already in use` (#170).
+
+- `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
+  string, number, boolean or `null`) instead of failing the whole query
+  (#182).
+
 - `arlen typescript-codegen` output compiles in two more cases (#184):
   - Inferred ORM relations no longer reuse a column name on the same model. A
     relation that would shadow a column gets a `Record` or `List` suffix, for
