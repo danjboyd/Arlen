@@ -296,6 +296,32 @@ HTML in its input and filters link URLs, so its output is safe for raw output.
 
 See [Markdown](MARKDOWN.md).
 
+### 5.4 JSON Inside `<script>`
+
+`<%= ... %>` HTML-escapes its output, which is wrong inside a `<script>`
+element, and `<%== ... %>` with plain JSON is unsafe: a string value containing
+`</script>` ends the element early. Use `ALNEOCJSONForScript` with raw output
+instead:
+
+```html
+<script>
+  window.bootstrap = <%== ALNEOCJSONForScript($payload) %>;
+</script>
+```
+
+`ALNEOCJSONForScript(value)` serializes `value` as compact JSON with sorted keys
+and then writes `<`, `>`, `&`, U+2028 and U+2029 as `\u003c`, `\u003e`,
+`\u0026`, `\u2028` and `\u2029`. The result is still valid JSON and decodes to
+the same value, but it cannot close the script element or break a JavaScript
+string literal.
+
+- Dictionaries, arrays, strings, numbers and booleans are supported, including
+  scalars at the top level.
+- `nil`, `NSNull`, and values that cannot be serialized as JSON render as
+  `null`.
+- Only use it in a script element body. It does not make JSON safe inside an
+  HTML attribute; use `<%= ... %>` there.
+
 ## 6. Control Flow and Objective-C in Templates
 
 EOC does not invent a separate control-flow language. Inside `<% ... %>` tags

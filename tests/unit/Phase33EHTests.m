@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dispatch/dispatch.h>
 
 #import "ALNApplication.h"
 #import "ALNContext.h"
@@ -7,6 +8,7 @@
 #import "ALNEventStream.h"
 #import "ALNLogger.h"
 #import "ALNPerf.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
@@ -180,10 +182,125 @@
 
 @end
 
+// Records sequences from concurrent publishers.
+@interface Phase33EHSequenceRecorder : NSObject <ALNEventStreamLiveSubscriber>
+@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, strong) NSMutableArray<NSNumber *> *sequences;
+@end
+
+@implementation Phase33EHSequenceRecorder
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    _lock = [[NSLock alloc] init];
+    _sequences = [NSMutableArray array];
+  }
+  return self;
+}
+- (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
+  (void)streamID;
+  [self.lock lock];
+  [self.sequences addObject:@(event.sequence)];
+  [self.lock unlock];
+}
+@end
+
 @interface Phase33EHTests : XCTestCase
 @end
 
 @implementation Phase33EHTests
+
+- (NSArray<NSNumber *> *)sequencesInStore:(ALNInMemoryEventStreamStore *)store
+                                   stream:(NSString *)stream
+                            afterSequence:(NSNumber *)after
+                                    limit:(NSUInteger)limit {
+  NSArray<ALNEventEnvelope *> *events = [store eventsForStream:stream afterSequence:after limit:limit error:NULL];
+  return [events valueForKey:@"sequence"] ?: @[];
+}
+
+- (void)appendCount:(NSUInteger)count toStore:(ALNInMemoryEventStreamStore *)store stream:(NSString *)stream {
+  for (NSUInteger idx = 0; idx < count; idx++) {
+    NSDictionary *event = @{ @"event_type" : @"tick", @"payload" : @{ @"i" : @(idx) } };
+    XCTAssertNotNil([store appendEvent:event toStream:stream error:NULL]);
+  }
+}
+
+// GitHub issue 242: the in-memory store kept every event forever and copied
+// the whole stream for each replay.
+- (void)testInMemoryStoreRetentionKeepsTheNewestEventsAndSequencesContinue_Issue242 {
+  ALNInMemoryEventStreamStore *store = [[ALNInMemoryEventStreamStore alloc] initWithAdapterName:nil];
+  XCTAssertEqual((NSUInteger)10000, store.maxEventsPerStream);
+  store.maxEventsPerStream = 3;
+  [self appendCount:5 toStore:store stream:@"s"];
+  XCTAssertEqualObjects((@[ @3, @4, @5 ]), [self sequencesInStore:store stream:@"s" afterSequence:nil limit:10]);
+  XCTAssertEqual((NSUInteger)5, [store latestCursorForStream:@"s" error:NULL].sequence);
+  XCTAssertEqual((NSUInteger)3, [store oldestCursorForStream:@"s" error:NULL].sequence);
+  [self appendCount:1 toStore:store stream:@"s"];
+  XCTAssertEqualObjects((@[ @4, @5, @6 ]), [self sequencesInStore:store stream:@"s" afterSequence:nil limit:10]);
+  XCTAssertEqualObjects((@[ @5, @6 ]), [self sequencesInStore:store stream:@"s" afterSequence:@4 limit:10]);
+
+  store.maxEventsPerStream = 0;
+  store.maxEventAgeSeconds = 0.05;
+  ALNPlatformSleepMilliseconds(120);
+  [self appendCount:1 toStore:store stream:@"s"];
+  XCTAssertEqualObjects((@[ @7 ]), [self sequencesInStore:store stream:@"s" afterSequence:nil limit:10],
+                        @"events older than maxEventAgeSeconds are dropped");
+}
+
+- (void)testInMemoryStoreReplayStartsAtTheCursorOffset_Issue242 {
+  ALNInMemoryEventStreamStore *store = [[ALNInMemoryEventStreamStore alloc] initWithAdapterName:nil];
+  store.maxEventsPerStream = 0;
+  [self appendCount:2000 toStore:store stream:@"big"];
+  XCTAssertEqualObjects((@[ @1996, @1997, @1998, @1999, @2000 ]),
+                        [self sequencesInStore:store stream:@"big" afterSequence:@1995 limit:10]);
+  XCTAssertEqualObjects((@[ @1, @2 ]), [self sequencesInStore:store stream:@"big" afterSequence:@0 limit:2]);
+  XCTAssertEqualObjects(@[], [self sequencesInStore:store stream:@"big" afterSequence:@2000 limit:10]);
+}
+
+- (void)testReplayFromBeforeTheOldestKeptEventRequiresResync_Issue242 {
+  ALNInMemoryEventStreamStore *store = [[ALNInMemoryEventStreamStore alloc] initWithAdapterName:nil];
+  store.maxEventsPerStream = 3;
+  [self appendCount:5 toStore:store stream:@"s"];
+  ALNEventStreamService *service = [[ALNEventStreamService alloc] initWithStore:store broker:nil];
+  NSError *error = nil;
+  ALNEventStreamReplayResult *gap = [service replayStream:@"s" afterSequence:@1 limit:10 replayWindow:10 error:&error];
+  XCTAssertTrue(gap.resyncRequired, @"events 2 and 3 are gone; replaying from 4 would be a silent gap");
+  XCTAssertEqual((NSInteger)ALNEventStreamErrorResyncRequired, error.code);
+  error = nil;
+  ALNEventStreamReplayResult *kept = [service replayStream:@"s" afterSequence:@2 limit:10 replayWindow:10 error:&error];
+  XCTAssertFalse(kept.resyncRequired);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects((@[ @3, @4, @5 ]), [kept.events valueForKey:@"sequence"]);
+}
+
+// GitHub issue 240: concurrent appends published out of commit order.
+- (void)testConcurrentAppendsPublishInSequenceOrder_Issue240 {
+  ALNInMemoryEventStreamStore *store = [[ALNInMemoryEventStreamStore alloc] initWithAdapterName:nil];
+  ALNInMemoryEventStreamBroker *broker = [[ALNInMemoryEventStreamBroker alloc] initWithAdapterName:nil];
+  Phase33EHSequenceRecorder *recorder = [[Phase33EHSequenceRecorder alloc] init];
+  XCTAssertNotNil([broker subscribeToStream:@"s" subscriber:recorder error:NULL]);
+  NSUInteger threads = 8;
+  NSUInteger perThread = 50;
+  dispatch_group_t group = dispatch_group_create();
+  for (NSUInteger t = 0; t < threads; t++) {
+    dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+      // Each request builds its own service, as controllers do.
+      ALNEventStreamService *service = [[ALNEventStreamService alloc] initWithStore:store broker:broker];
+      for (NSUInteger idx = 0; idx < perThread; idx++) {
+        (void)[service appendEvent:@{ @"event_type" : @"tick", @"payload" : @{} } toStream:@"s" error:NULL];
+      }
+    });
+  }
+  XCTAssertEqual(0L, dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC))));
+  [recorder.lock lock];
+  NSArray<NSNumber *> *received = [recorder.sequences copy];
+  [recorder.lock unlock];
+  NSMutableArray<NSNumber *> *expected = [NSMutableArray array];
+  for (NSUInteger seq = 1; seq <= threads * perThread; seq++) {
+    [expected addObject:@(seq)];
+  }
+  XCTAssertEqualObjects(expected, received);
+}
 
 - (ALNRequest *)requestWithMethod:(NSString *)method
                              path:(NSString *)path

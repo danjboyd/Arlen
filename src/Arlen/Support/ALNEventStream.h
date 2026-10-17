@@ -147,6 +147,10 @@ FOUNDATION_EXPORT NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code,
 
 @optional
 - (void)reset;
+// The oldest event a store still holds for a stream, for stores with
+// retention. A replay from before it needs a resync rather than a silent gap.
+- (nullable ALNEventStreamCursor *)oldestCursorForStream:(NSString *)streamID
+                                                   error:(NSError *_Nullable *_Nullable)error;
 
 @end
 
@@ -199,6 +203,13 @@ FOUNDATION_EXPORT NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code,
 @end
 
 @interface ALNInMemoryEventStreamStore : NSObject <ALNEventStreamStore>
+
+// Retention per stream: at most maxEventsPerStream events (default 10000; 0
+// keeps every event) and none older than maxEventAgeSeconds (default 0: no age
+// limit). Sequences keep counting across dropped events, and a replay from
+// before the oldest kept event needs a resync.
+@property(nonatomic, assign) NSUInteger maxEventsPerStream;
+@property(nonatomic, assign) NSTimeInterval maxEventAgeSeconds;
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
 

@@ -188,6 +188,24 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
       "multi-worker state contract is quiet for $environment workerCount=$phase39_worker_count" \
       "Warnings are quiet when workerCount <= 1, state.durable=YES, or a database connection string is configured."
   fi
+
+  phase39_operability_restricted=""
+  if [[ -n "${ARLEN_OPERABILITY_TOKEN:-}" ]] || phase39_has_nonempty_assignment "operabilityToken"; then
+    phase39_operability_restricted="bearer token"
+  fi
+  phase39_operability_loopback="$(printf '%s' "${ARLEN_OPERABILITY_LOOPBACK_ONLY:-}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$phase39_operability_loopback" =~ ^(1|yes|true)$ ]] ||
+     phase39_config_blob | grep -Eq 'operabilityLoopbackOnly[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+    phase39_operability_restricted="${phase39_operability_restricted:+$phase39_operability_restricted, }loopback only"
+  fi
+  if [[ -n "$phase39_operability_restricted" ]]; then
+    add_check "operability_endpoints" "pass" \
+      "/metrics and /clusterz are restricted ($phase39_operability_restricted)"
+  else
+    add_check "operability_endpoints" "warn" \
+      "/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)" \
+      "Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy."
+  fi
 fi
 
 matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"

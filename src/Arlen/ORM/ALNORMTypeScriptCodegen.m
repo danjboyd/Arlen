@@ -267,9 +267,7 @@ static NSString *ALNORMTSIndent(NSUInteger depth) {
 
 static NSJSONWritingOptions ALNORMTSJSONWritingOptions(void) {
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return options;
 }
 
@@ -1918,7 +1916,21 @@ static NSString *ALNORMTSRenderModelsModule(NSArray<ALNORMModelDescriptor *> *de
           [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES]
         ]];
     NSMutableArray<NSString *> *relationNames = [NSMutableArray array];
+    NSSet<NSString *> *readFieldNames = [NSSet setWithArray:[readModelRows valueForKey:@"name"]];
     for (ALNORMRelationDescriptor *relation in sortedRelations) {
+      // Relations render as properties next to the fields; a shared name would
+      // emit a duplicate identifier that tsc rejects.
+      if ([readFieldNames containsObject:relation.name ?: @""]) {
+        if (error != NULL) {
+          *error = ALNORMMakeError(ALNORMErrorInvalidMetadata,
+                                   @"ORM relation name collides with a field name on the same model",
+                                   @{
+                                     @"entity_name" : descriptor.entityName ?: @"",
+                                     @"relation_name" : relation.name ?: @"",
+                                   });
+        }
+        return nil;
+      }
       [relationNames addObject:relation.name ?: @""];
       [readModelRows addObject:@{
         @"name" : relation.name ?: @"",
@@ -2712,10 +2724,15 @@ static NSString *ALNORMTSRenderReactModule(NSArray<NSDictionary<NSString *, id> 
     }
     NSString *methodName = operation[@"methodName"] ?: @"operation";
     NSString *typeName = operation[@"typeName"] ?: @"Operation";
-    [output appendFormat:@"  %@: (request: %@Request) => %@,\n",
+    NSString *keyExpression = ALNORMTSReactQueryKeyExpression(operation);
+    // Keys for operations without path or query params ignore the request;
+    // name it `_request` so the output compiles under noUnusedParameters.
+    NSString *parameterName = [keyExpression containsString:@"request."] ? @"request" : @"_request";
+    [output appendFormat:@"  %@: (%@: %@Request) => %@,\n",
                          ALNORMTSQuotedPropertyName(methodName),
+                         parameterName,
                          typeName,
-                         ALNORMTSReactQueryKeyExpression(operation)];
+                         keyExpression];
   }
   [output appendString:@"} as const;\n\n"];
 
