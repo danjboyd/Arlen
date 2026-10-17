@@ -295,11 +295,9 @@ static yyjson_mut_val *ALNYYValueFromFoundation(yyjson_mut_doc *doc,
 
     NSDictionary *dictionary = (NSDictionary *)obj;
     NSArray *keys = [dictionary allKeys];
-#ifdef NSJSONWritingSortedKeys
     if ((options & NSJSONWritingSortedKeys) != 0) {
       keys = [keys sortedArrayUsingSelector:@selector(compare:)];
     }
-#endif
 
     for (id rawKey in keys) {
       if (![rawKey isKindOfClass:[NSString class]]) {

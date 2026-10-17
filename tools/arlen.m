@@ -260,9 +260,7 @@ static NSArray<NSString *> *SortedUniqueStrings(NSArray<NSString *> *values) {
 
 static NSJSONWritingOptions StableJSONWritingOptions(void) {
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return options;
 }
 
@@ -9450,6 +9448,7 @@ static NSDictionary<NSString *, id> *ALNTypedSQLRenderArtifacts(NSArray<NSDictio
 
 static int CommandTypeScriptCodegen(NSArray *args) {
   NSString *ormInputArg = @"db/schema/arlen_orm_manifest.json";
+  BOOL ormInputExplicit = NO;
   NSString *openAPIInputArg = nil;
   NSString *outputDirArg = @"frontend/generated/arlen";
   NSString *manifestArg = @"db/schema/arlen_typescript.json";
@@ -9467,6 +9466,7 @@ static int CommandTypeScriptCodegen(NSArray *args) {
         return 2;
       }
       ormInputArg = args[++idx];
+      ormInputExplicit = YES;
     } else if ([arg isEqualToString:@"--openapi-input"]) {
       if (idx + 1 >= [args count]) {
         fprintf(stderr, "arlen typescript-codegen: --openapi-input requires a value\n");
@@ -9532,19 +9532,27 @@ static int CommandTypeScriptCodegen(NSArray *args) {
   NSString *manifestPath = ResolvePathFromRoot(appRoot, manifestArg);
 
   NSError *error = nil;
-  NSData *ormData = ALNDataReadFromFile(ormInputPath, 0, &error);
-  if (ormData == nil) {
-    fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
-            [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
-    return 1;
+  // Apps without the ORM can generate client/react/meta from OpenAPI alone,
+  // so a missing default manifest is only an error when entities are needed.
+  BOOL skipORMInput = !ormInputExplicit &&
+                      ![[NSFileManager defaultManager] fileExistsAtPath:ormInputPath] &&
+                      ![ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets];
+  NSDictionary<NSString *, id> *ormRoot = nil;
+  if (!skipORMInput) {
+    NSData *ormData = ALNDataReadFromFile(ormInputPath, 0, &error);
+    if (ormData == nil) {
+      fprintf(stderr, "arlen typescript-codegen: failed reading %s: %s\n",
+              [ormInputPath UTF8String], [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    id ormPayload = [ALNJSONSerialization JSONObjectWithData:ormData options:0 error:&error];
+    if (![ormPayload isKindOfClass:[NSDictionary class]]) {
+      fprintf(stderr, "arlen typescript-codegen: invalid ORM JSON input: %s\n",
+              [[error localizedDescription] UTF8String]);
+      return 1;
+    }
+    ormRoot = ormPayload;
   }
-  id ormPayload = [ALNJSONSerialization JSONObjectWithData:ormData options:0 error:&error];
-  if (![ormPayload isKindOfClass:[NSDictionary class]]) {
-    fprintf(stderr, "arlen typescript-codegen: invalid ORM JSON input: %s\n",
-            [[error localizedDescription] UTF8String]);
-    return 1;
-  }
-  NSDictionary<NSString *, id> *ormRoot = ormPayload;
 
   NSDictionary<NSString *, id> *openAPISpecification = nil;
   if ([openAPIInputPath length] > 0) {
@@ -9571,7 +9579,13 @@ static int CommandTypeScriptCodegen(NSArray *args) {
       [ormRoot[@"columns"] isKindOfClass:[NSArray class]];
   BOOL looksLikeORMManifest = [ormRoot[@"models"] isKindOfClass:[NSArray class]];
 
-  if (looksLikeSchemaMetadata) {
+  if (skipORMInput) {
+    artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                        openAPISpecification:openAPISpecification
+                                                                packageName:packageName
+                                                                    targets:targets
+                                                                      error:&error];
+  } else if (looksLikeSchemaMetadata) {
     artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:metadata ?: ormRoot
                                                                classPrefix:classPrefix
                                                             databaseTarget:databaseTarget

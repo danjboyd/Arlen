@@ -14,6 +14,49 @@
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
 
+- `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
+  GNUstep.sh. On Linux it and `smoke_release.sh` source
+  `tools/source_gnustep_env.sh` before they build and run binaries. Before,
+  the freshly built `eocc` couldn't load `libgnustep-base` and the build
+  stopped. `build_release.sh` also uses the same test as `propane` to decide
+  whether an app has sources, so an app with sources but no `src/main.m` now
+  ships its binary. Before, `propane` tried to rebuild that app from the
+  release, which it can't do. Together these kept the `release-certification`
+  workflow from ever passing (#181).
+
+- `arlen typescript-codegen --target client,react` works for apps that
+  don't use the ORM. Before, it always read `--orm-input` and required at
+  least one ORM descriptor, even though the client and React targets only
+  use the OpenAPI document. Now a missing default manifest is skipped for
+  `client`, `react` and `meta`, and the package is generated from
+  `--openapi-input` alone. `models`, `validators`, `query` and `all` still
+  require descriptors, and an explicit `--orm-input` path must exist (#183).
+
+- Idle keep-alive connections no longer hold HTTP workers. Before, each open
+  keep-alive connection held one of the 8 default workers until its next
+  request or the 30-second `connectionTimeoutSeconds`. A browser holds about
+  six connections per site, so a page reload could wait up to 30 seconds.
+  Now a worker hands an idle connection to a watcher thread after
+  `runtimeLimits.keepAliveParkAfterMilliseconds` (default 5), and picks it up
+  again when the next request arrives. `docs/CONFIGURATION_REFERENCE.md` now
+  documents `runtimeLimits` and notes that server-sent event and WebSocket
+  sessions still hold a worker while open (#187).
+
+- `arlen typescript-codegen` output compiles in two more cases (#184):
+  - Inferred ORM relations no longer reuse a column name on the same model. A
+    relation that would shadow a column gets a `Record` or `List` suffix, for
+    example `sectionRecord` or `notesList`. Explicit relation overrides that
+    collide fail with a clear error.
+  - `react.ts` query keys for operations without parameters name their
+    argument `_request`, so the package compiles under `noUnusedParameters`.
+
+- JSON that Arlen writes with sorted keys is now actually sorted, on both
+  Linux and macOS. This covers `typescript-codegen` package files, `eocc`
+  manifests, schema-drift and Dataverse codegen output, and `arlen` JSON
+  reports. A `#ifdef NSJSONWritingSortedKeys` guard was always false
+  because both Foundations declare the option as an enum constant, so
+  output used dictionary hash order and differed between platforms.
+
 - The `mcp` module has an explicit local-development identity,
   `mcp.development.trustLoopback`. It applies only to loopback requests with no
   credentials, `Origin` or proxy-forwarding headers, and is refused outside

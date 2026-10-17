@@ -232,7 +232,8 @@ For login/logout flows that issue multiple cookies, see
 - generating descriptor-first TypeScript models, validators, query/resource
   metadata, clients, and optional React helpers for a frontend app:
   `docs/GETTING_STARTED_API_FIRST.md`, `arlen typescript-codegen`, and
-  `examples/react_typescript_reference/README.md`
+  `examples/react_typescript_reference/README.md`. Apps without the ORM can
+  generate the client and React targets from the OpenAPI export alone.
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
 ## 8. Optional Dataverse Path
