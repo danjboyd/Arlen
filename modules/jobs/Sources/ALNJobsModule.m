@@ -5,6 +5,7 @@
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNController.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 
 NSString *const ALNJobsModuleErrorDomain = @"Arlen.Modules.Jobs.Error";
@@ -660,9 +661,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   self.apiPrefix = JMConfiguredPath(moduleConfig, @"apiPrefix", @"api");
   self.persistencePath = JMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([JMTrimmedString(self.persistencePath) length] > 0);
-  self.defaultWorkerRunLimit = [workerConfig[@"maxJobsPerRun"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                   ? [workerConfig[@"maxJobsPerRun"] unsignedIntegerValue]
-                                   : 50;
+  self.defaultWorkerRunLimit = ALNUnsignedIntegerValueOrDefault(workerConfig[@"maxJobsPerRun"], 50);
   if (self.defaultWorkerRunLimit == 0) {
     self.defaultWorkerRunLimit = 50;
   }
@@ -886,9 +885,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([queue length] == 0) {
     queue = @"default";
   }
-  NSUInteger maxAttempts = [metadata[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? [metadata[@"maxAttempts"] unsignedIntegerValue]
-                               : 3;
+  NSUInteger maxAttempts = ALNUnsignedIntegerValueOrDefault(metadata[@"maxAttempts"], 3);
   if (maxAttempts == 0) {
     maxAttempts = 3;
   }
@@ -950,9 +947,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     NSDictionary *metadata = [self jobDefinitionMetadataForIdentifier:job];
     queue = [JMTrimmedString(metadata[@"queue"]) length] > 0 ? JMTrimmedString(metadata[@"queue"]) : @"default";
   }
-  NSUInteger maxAttempts = [schedule[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? [schedule[@"maxAttempts"] unsignedIntegerValue]
-                               : 0;
+  NSUInteger maxAttempts = ALNUnsignedIntegerValueOrDefault(schedule[@"maxAttempts"], 0);
   BOOL enabled = ![schedule[@"enabled"] respondsToSelector:@selector(boolValue)] ||
                  [schedule[@"enabled"] boolValue];
 
@@ -1067,9 +1062,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     return nil;
   }
 
-  NSUInteger maxAttempts = [normalizedOptions[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? [normalizedOptions[@"maxAttempts"] unsignedIntegerValue]
-                               : [metadata[@"maxAttempts"] unsignedIntegerValue];
+  NSUInteger maxAttempts = ALNUnsignedIntegerValueOrDefault(normalizedOptions[@"maxAttempts"], [metadata[@"maxAttempts"] unsignedIntegerValue]);
   if (maxAttempts == 0) {
     maxAttempts = 3;
   }
@@ -1886,9 +1879,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 
 - (id)apiRunWorker:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
-  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                         ? [parameters[@"limit"] unsignedIntegerValue]
-                         : 0;
+  NSUInteger limit = ALNUnsignedIntegerValueOrDefault(parameters[@"limit"], 0);
   NSError *error = nil;
   NSDictionary *summary = [self.runtime runWorkerAt:[NSDate date] limit:limit error:&error];
   if (summary == nil) {

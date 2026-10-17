@@ -1199,7 +1199,8 @@ static NSArray<NSDictionary<NSString *, id> *> *ALNPostgresInspectorNormalizedCo
        "       COALESCE(definition, '') AS definition "
        "FROM pg_catalog.pg_matviews "
        "WHERE schemaname NOT IN ('pg_catalog', 'information_schema') "
-       "ORDER BY schema, table, relation_kind";
+       // By position: `table` is reserved, so PostgreSQL rejects it here (#237).
+       "ORDER BY 1, 2, 3";
 
   NSString *relationCommentsSQL =
       @"SELECT n.nspname AS schema, "

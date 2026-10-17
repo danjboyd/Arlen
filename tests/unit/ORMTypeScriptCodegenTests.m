@@ -232,6 +232,57 @@
   XCTAssertTrue([[error localizedDescription] containsString:@"OpenAPI"]);
 }
 
+- (void)testClientReactAndMetaTargetsRenderFromOpenAPIWithoutDescriptors {
+  // Issue 183: apps without the ORM generate client/react/meta from OpenAPI alone.
+  // meta.ts describes x-arlen resources, which name ORM entities, so the meta
+  // case uses the fixture without its ORM-backed resources.
+  NSMutableDictionary *openAPIWithoutResources = [[self openAPIFixture] mutableCopy];
+  openAPIWithoutResources[@"x-arlen"] = @{ @"workspace" : [self openAPIFixture][@"x-arlen"][@"workspace"] ?: @{} };
+  for (NSArray<NSString *> *targets in @[ @[ @"client" ], @[ @"client,react" ], @[ @"react" ], @[ @"meta" ] ]) {
+    NSError *error = nil;
+    NSDictionary *openAPI = [targets containsObject:@"meta"] ? openAPIWithoutResources : [self openAPIFixture];
+    NSDictionary *artifacts =
+        [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                openAPISpecification:openAPI
+                                                        packageName:@"arlen-openapi-only-client"
+                                                            targets:targets
+                                                              error:&error];
+    XCTAssertNotNil(artifacts, @"targets %@: %@", targets, error);
+    XCTAssertNil(error, @"targets %@", targets);
+    NSDictionary *files = [artifacts[@"files"] isKindOfClass:[NSDictionary class]] ? artifacts[@"files"] : @{};
+    // client.ts imports the shared envelope types from models.ts.
+    XCTAssertNotNil(files[@"src/models.ts"], @"targets %@", targets);
+    XCTAssertTrue([files[@"src/models.ts"] containsString:@"ArlenErrorEnvelope"], @"targets %@", targets);
+    XCTAssertFalse([files[@"src/models.ts"] containsString:@"export interface Public"], @"targets %@", targets);
+    if ([[targets componentsJoinedByString:@","] containsString:@"react"]) {
+      XCTAssertNotNil(files[@"src/client.ts"]);
+      XCTAssertNotNil(files[@"src/react.ts"]);
+    }
+    if ([targets containsObject:@"meta"]) {
+      XCTAssertNotNil(files[@"src/meta.ts"]);
+    }
+  }
+}
+
+- (void)testModelTargetsStillRequireDescriptors {
+  for (NSArray<NSString *> *targets in @[ @[ @"models" ], @[ @"validators" ], @[ @"query" ], @[ @"all" ], @[ @"client,models" ], @[] ]) {
+    XCTAssertTrue([ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets], @"targets %@", targets);
+    NSError *error = nil;
+    NSDictionary *artifacts =
+        [ALNORMTypeScriptCodegen renderArtifactsFromModelDescriptors:@[]
+                                                openAPISpecification:[self openAPIFixture]
+                                                        packageName:nil
+                                                            targets:targets
+                                                              error:&error];
+    XCTAssertNil(artifacts, @"targets %@", targets);
+    XCTAssertTrue([[error localizedDescription] containsString:@"requires at least one ORM descriptor"],
+                  @"targets %@: %@", targets, error);
+  }
+  for (NSArray<NSString *> *targets in @[ @[ @"client" ], @[ @"react" ], @[ @"meta" ], @[ @"client", @"REACT" ], @[ @"realtime" ] ]) {
+    XCTAssertFalse([ALNORMTypeScriptCodegen targetsRequireModelDescriptors:targets], @"targets %@", targets);
+  }
+}
+
 - (void)testDuplicateOperationIDsFailClosed {
   NSDictionary *openAPI = @{
     @"openapi" : @"3.1.0",
@@ -386,6 +437,139 @@
                                                encoding:NSUTF8StringEncoding
                                                   error:NULL];
   XCTAssertTrue([models containsString:@"export interface PublicUser"]);
+}
+
+// Issue 184: the sections/items/notes schema from the report.
+- (NSDictionary *)columnCollisionMetadata {
+  NSDictionary *(^column)(NSString *, NSString *, NSInteger, NSString *, BOOL) =
+      ^NSDictionary *(NSString *table, NSString *name, NSInteger ordinal, NSString *type, BOOL nullable) {
+        return @{ @"schema" : @"public", @"table" : table, @"column" : name, @"ordinal" : @(ordinal),
+                  @"data_type" : type, @"nullable" : @(nullable) };
+      };
+  return @{
+    @"relations" : @[
+      @{ @"schema" : @"public", @"table" : @"sections", @"relation_kind" : @"table" },
+      @{ @"schema" : @"public", @"table" : @"items", @"relation_kind" : @"table" },
+      @{ @"schema" : @"public", @"table" : @"notes", @"relation_kind" : @"table" },
+    ],
+    @"columns" : @[
+      column(@"sections", @"key", 1, @"text", NO), column(@"sections", @"title", 2, @"text", NO),
+      column(@"items", @"id", 1, @"text", NO), column(@"items", @"section", 2, @"text", NO),
+      column(@"items", @"notes", 3, @"text", YES),
+      column(@"notes", @"id", 1, @"bigint", NO), column(@"notes", @"item_id", 2, @"text", NO),
+      column(@"notes", @"body", 3, @"text", NO),
+    ],
+    @"primary_keys" : @[
+      @{ @"schema" : @"public", @"table" : @"sections", @"columns" : @[ @"key" ] },
+      @{ @"schema" : @"public", @"table" : @"items", @"columns" : @[ @"id" ] },
+      @{ @"schema" : @"public", @"table" : @"notes", @"columns" : @[ @"id" ] },
+    ],
+    @"foreign_keys" : @[
+      @{ @"schema" : @"public", @"table" : @"items", @"constraint_name" : @"items_section_fkey",
+         @"columns" : @[ @"section" ], @"referenced_schema" : @"public", @"referenced_table" : @"sections",
+         @"referenced_columns" : @[ @"key" ] },
+      @{ @"schema" : @"public", @"table" : @"notes", @"constraint_name" : @"notes_item_id_fkey",
+         @"columns" : @[ @"item_id" ], @"referenced_schema" : @"public", @"referenced_table" : @"items",
+         @"referenced_columns" : @[ @"id" ] },
+    ],
+  };
+}
+
+- (void)testInferredRelationNamesDoNotCollideWithColumnNames {
+  NSError *error = nil;
+  NSArray<ALNORMModelDescriptor *> *descriptors =
+      [ALNORMCodegen modelDescriptorsFromSchemaMetadata:[self columnCollisionMetadata] classPrefix:@"ALNORMX" error:&error];
+  XCTAssertNil(error);
+  NSMutableDictionary<NSString *, ALNORMModelDescriptor *> *byEntity = [NSMutableDictionary dictionary];
+  for (ALNORMModelDescriptor *descriptor in descriptors) {
+    byEntity[descriptor.entityName] = descriptor;
+  }
+  ALNORMModelDescriptor *items = byEntity[@"public.items"];
+  XCTAssertEqualObjects(@"section", [items fieldForColumnName:@"section"].name);
+  XCTAssertNotNil([items relationNamed:@"sectionRecord"]);
+  XCTAssertNotNil([items relationNamed:@"notesList"]);
+  XCTAssertNotNil([byEntity[@"public.sections"] relationNamed:@"items"]);
+  XCTAssertNotNil([byEntity[@"public.notes"] relationNamed:@"item"]);
+
+  NSDictionary *artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:[self columnCollisionMetadata]
+                                                                           classPrefix:@"ALNORMX"
+                                                                        databaseTarget:nil
+                                                                    descriptorOverrides:nil
+                                                                   openAPISpecification:nil
+                                                                           packageName:@"collision-client"
+                                                                               targets:@[ @"validators" ]
+                                                                                 error:&error];
+  XCTAssertNil(error);
+  NSString *models = [artifacts[@"files"][@"src/models.ts"] isKindOfClass:[NSString class]]
+                         ? artifacts[@"files"][@"src/models.ts"]
+                         : @"";
+  XCTAssertTrue([models containsString:@"  readonly section: string;\n"], @"%@", models);
+  XCTAssertTrue([models containsString:@"  readonly sectionRecord?: "], @"%@", models);
+  XCTAssertTrue([models containsString:@"  readonly notesList?: "], @"%@", models);
+}
+
+- (void)testExplicitRelationNamedLikeAFieldFailsWithEntityAndRelationName {
+  NSDictionary *overrides = @{
+    @"public.items" : @{
+      @"relations" : @[ @{
+        @"kind" : @"belongs_to",
+        @"name" : @"section",
+        @"target_entity_name" : @"public.sections",
+        @"source_field_names" : @[ @"section" ],
+        @"target_field_names" : @[ @"key" ],
+        @"read_only" : @NO,
+      } ],
+    },
+  };
+  NSError *error = nil;
+  NSDictionary *artifacts = [ALNORMTypeScriptCodegen renderArtifactsFromSchemaMetadata:[self columnCollisionMetadata]
+                                                                           classPrefix:@"ALNORMX"
+                                                                        databaseTarget:nil
+                                                                    descriptorOverrides:overrides
+                                                                   openAPISpecification:nil
+                                                                           packageName:@"collision-client"
+                                                                               targets:@[ @"validators" ]
+                                                                                 error:&error];
+  XCTAssertNil(artifacts);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(@"public.items", error.userInfo[@"entity_name"]);
+  XCTAssertEqualObjects(@"section", error.userInfo[@"relation_name"]);
+}
+
+- (void)testTypeScriptCodegenCLIGeneratesClientWithoutORMManifest {
+  // Issue 183: no db/schema/arlen_orm_manifest.json and no --orm-input.
+  NSString *appRoot = ALNTestTemporaryDirectory(@"orm_typescript_codegen_openapi_only");
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+  NSString *openAPIPath = ALNTestPathFromRepoRoot(@"tests/fixtures/phase28/openapi_contract.json");
+  NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
+  NSString *prefix =
+      [NSString stringWithFormat:@"%@ && cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ typescript-codegen --openapi-input %@ --output-dir out --manifest build/arlen_typescript.json --force",
+                                 ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
+                                 ALNTestShellQuote(appRoot),
+                                 ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),
+                                 ALNTestShellQuote(openAPIPath)];
+
+  int exitCode = 0;
+  NSString *output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target client,react"], &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  for (NSString *relativePath in @[ @"out/src/models.ts", @"out/src/client.ts", @"out/src/react.ts" ]) {
+    XCTAssertTrue([fileManager fileExistsAtPath:[appRoot stringByAppendingPathComponent:relativePath]],
+                  @"%@ missing: %@", relativePath, output);
+  }
+
+  // Targets that need entities still report the missing manifest.
+  output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target models"], &exitCode);
+  XCTAssertNotEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"arlen_orm_manifest.json"], @"%@", output);
+
+  // An explicit --orm-input path that doesn't exist is still an error.
+  output = ALNTestRunShellCapture([prefix stringByAppendingString:@" --target client --orm-input missing.json"], &exitCode);
+  XCTAssertNotEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"missing.json"], @"%@", output);
 }
 
 @end

@@ -225,8 +225,13 @@ never runs on pull requests, so it is not a merge-gate lane.
 `linux-quality` runs `tools/ci/test_release_packaging.py`. It checks the
 source archive's layout (one top directory, `.arlen-dist`, vendored
 `tools-xctest`, no `.git` and no `gnustep-cli-new`) and the managed-toolchain
-`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. This is a step
-inside the existing job, so no required check names change.
+`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. It also runs
+`tools/deploy/build_release.sh` against a stub framework from a shell that
+never sourced GNUstep.sh. It checks that the script sources the env before
+`make` and packages the binary of an app that has no `src/main.m` (#181). No
+PR lane runs the real `smoke_release.sh` on Linux, so this check is the PR-time
+guard for the path `release-certification` uses. This is a step inside the
+existing job, so no required check names change.
 
 Linux has no prebuilt archive. The framework's build-flags sentinel hashes
 absolute toolchain paths, and gnustep-cli managed toolchains live under each

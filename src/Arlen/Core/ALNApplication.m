@@ -25,6 +25,7 @@
 #import "ALNPerf.h"
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNAuthSession.h"
 #import "ALNEventStream.h"
 #import "ALNDataverseClient.h"
@@ -691,6 +692,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, assign) BOOL responseIdentityHeadersEnabled;
 @property(nonatomic, assign) BOOL apiOnly;
 @property(nonatomic, assign) BOOL performanceLoggingEnabled;
+@property(nonatomic, assign) BOOL performanceHeadersEnabled;
 @property(nonatomic, assign) BOOL eocStrictLocalsEnabled;
 @property(nonatomic, assign) BOOL eocStrictStringifyEnabled;
 @property(nonatomic, assign) BOOL pageStateEnabled;
@@ -1006,13 +1008,9 @@ static ALNDataverseTarget *ALNDataverseTargetFromMergedConfig(NSDictionary *merg
   NSTimeInterval resolvedTimeout =
       [merged[@"timeout"] respondsToSelector:@selector(doubleValue)] ? [merged[@"timeout"] doubleValue] : 60.0;
   NSUInteger resolvedMaxRetries =
-      [merged[@"maxRetries"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [merged[@"maxRetries"] unsignedIntegerValue]
-          : 2;
+      ALNUnsignedIntegerValueOrDefault(merged[@"maxRetries"], 2);
   NSUInteger resolvedPageSize =
-      [merged[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [merged[@"pageSize"] unsignedIntegerValue]
-          : 500;
+      ALNUnsignedIntegerValueOrDefault(merged[@"pageSize"], 500);
 
   return [[ALNDataverseTarget alloc] initWithServiceRootURLString:resolvedServiceRoot
                                                          tenantID:resolvedTenantID
@@ -1138,15 +1136,11 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _clusterNodeID = [clusterNodeIDValue copy];
     id expectedNodesValue = cluster[@"expectedNodes"];
     NSUInteger expectedNodes =
-        [expectedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [expectedNodesValue unsignedIntegerValue]
-            : (NSUInteger)1;
+        ALNUnsignedIntegerValueOrDefault(expectedNodesValue, (NSUInteger)1);
     _clusterExpectedNodes = (expectedNodes < 1) ? 1 : expectedNodes;
     id observedNodesValue = cluster[@"observedNodes"];
     NSUInteger observedNodes =
-        [observedNodesValue respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [observedNodesValue unsignedIntegerValue]
-            : _clusterExpectedNodes;
+        ALNUnsignedIntegerValueOrDefault(observedNodesValue, _clusterExpectedNodes);
     _clusterObservedNodes = observedNodes;
     id emitHeadersValue = cluster[@"emitHeaders"];
     _clusterEmitHeaders = [emitHeadersValue respondsToSelector:@selector(boolValue)]
@@ -1176,6 +1170,10 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     id performanceLoggingValue = _config[@"performanceLogging"];
     _performanceLoggingEnabled = [performanceLoggingValue respondsToSelector:@selector(boolValue)]
                                      ? [performanceLoggingValue boolValue]
+                                     : YES;
+    id performanceHeadersValue = _config[@"performanceHeaders"];
+    _performanceHeadersEnabled = [performanceHeadersValue respondsToSelector:@selector(boolValue)]
+                                     ? [performanceHeadersValue boolValue]
                                      : YES;
     NSDictionary *eoc = [_config[@"eoc"] isKindOfClass:[NSDictionary class]]
                             ? _config[@"eoc"]
@@ -1693,11 +1691,9 @@ static BOOL ALNBoolConfigValue(id value, BOOL defaultValue) {
 }
 
 static NSUInteger ALNUIntConfigValue(id value, NSUInteger defaultValue, NSUInteger minimum) {
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger parsed = [value unsignedIntegerValue];
-    if (parsed >= minimum) {
-      return parsed;
-    }
+  NSUInteger parsed = 0;
+  if (ALNUnsignedIntegerFromValue(value, &parsed) && parsed >= minimum) {
+    return parsed;
   }
   return defaultValue;
 }
@@ -3063,6 +3059,60 @@ static BOOL ALNHealthDetailsEnabled(ALNApplication *application) {
   return ALNBoolConfigValue(observability[@"healthDetailsEnabled"], YES);
 }
 
+static BOOL ALNOperabilityAddressIsLoopback(NSString *address) {
+  NSString *candidate = [address isKindOfClass:[NSString class]] ? address : @"";
+  return [candidate hasPrefix:@"127."] || [candidate isEqualToString:@"::1"] ||
+         [candidate hasPrefix:@"::ffff:127."];
+}
+
+// /metrics and /clusterz stay anonymous by default. When
+// observability.operabilityToken is set they require
+// `Authorization: Bearer <token>`; when observability.operabilityLoopbackOnly
+// is YES they only answer direct loopback requests. Both apply when both are set.
+static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
+                                                ALNRequest *request,
+                                                ALNResponse *response) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  NSString *token = [observability[@"operabilityToken"] isKindOfClass:[NSString class]]
+                        ? [observability[@"operabilityToken"]
+                              stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                        : @"";
+  BOOL loopbackOnly = ALNBoolConfigValue(observability[@"operabilityLoopbackOnly"], NO);
+  if (loopbackOnly) {
+    BOOL loopback = ALNOperabilityAddressIsLoopback(request.remoteAddress) &&
+                    ([request.effectiveRemoteAddress length] == 0 ||
+                     ALNOperabilityAddressIsLoopback(request.effectiveRemoteAddress));
+    // A same-host reverse proxy makes remote traffic arrive from loopback.
+    for (NSString *name in @[ @"forwarded", @"x-forwarded-for", @"x-real-ip" ]) {
+      if ([[request headerValueForName:name] length] > 0) {
+        loopback = NO;
+      }
+    }
+    if (!loopback) {
+      response.statusCode = 403;
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"forbidden\n"];
+      response.committed = YES;
+      return NO;
+    }
+  }
+  if ([token length] > 0) {
+    NSString *authorization = [request headerValueForName:@"authorization"] ?: @"";
+    NSString *expected = [@"Bearer " stringByAppendingString:token];
+    BOOL matches = ALNConstantTimeDataEquals([authorization dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data],
+                                             [expected dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]);
+    if (!matches) {
+      response.statusCode = 401;
+      [response setHeader:@"WWW-Authenticate" value:@"Bearer"];
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"unauthorized\n"];
+      response.committed = YES;
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static BOOL ALNReadinessRequiresStartup(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"readinessRequiresStartup"], NO);
@@ -3615,6 +3665,9 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
   }
 
   if ([routePath isEqualToString:@"/clusterz"] || [requestPath isEqualToString:@"/clusterz"]) {
+    if (!ALNOperabilityEndpointAccessAllowed(application, request, response)) {
+      return YES;
+    }
     response.statusCode = 200;
     NSError *jsonError = nil;
     BOOL ok = [response setJSONBody:ALNClusterStatusPayload(application)
@@ -3632,6 +3685,9 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
   }
 
   if ([routePath isEqualToString:@"/metrics"] || [requestPath isEqualToString:@"/metrics"]) {
+    if (!ALNOperabilityEndpointAccessAllowed(application, request, response)) {
+      return YES;
+    }
     response.statusCode = 200;
     if (ALNHeaderPrefersJSON(request)) {
       NSError *jsonError = nil;
@@ -3871,7 +3927,11 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
                                           NSString *publicMessage,
                                           NSString *developerMessage,
                                           NSDictionary *details) {
-  BOOL production = [application.environment isEqualToString:@"production"];
+  // Only development and test get the detailed page (reason, stack, paths);
+  // staging, preview and other environments are treated like production (#215).
+  NSString *environment = application.environment ?: @"";
+  BOOL production = !([environment isEqualToString:@"development"] ||
+                      [environment isEqualToString:@"test"]);
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
@@ -4300,14 +4360,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
     NSNumber *parse = [trace durationMillisecondsForStage:@"parse"] ?: @(0);
     NSNumber *responseWrite = [trace durationMillisecondsForStage:@"response_write"] ?: @(0);
 
-    [response setHeader:@"X-Arlen-Total-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
-    [response setHeader:@"X-Mojo-Total-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
-    [response setHeader:@"X-Arlen-Parse-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [parse doubleValue]]];
-    [response setHeader:@"X-Arlen-Response-Write-Ms"
-                  value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
+    if (application.performanceHeadersEnabled) {
+      [response setHeader:@"X-Arlen-Total-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+      [response setHeader:@"X-Mojo-Total-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [total doubleValue]]];
+      [response setHeader:@"X-Arlen-Parse-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [parse doubleValue]]];
+      [response setHeader:@"X-Arlen-Response-Write-Ms"
+                    value:[NSString stringWithFormat:@"%.3f", [responseWrite doubleValue]]];
+    }
   }
 
   if (application.responseIdentityHeadersEnabled) {
@@ -4569,9 +4631,8 @@ static void ALNFinalizeResponse(ALNApplication *application,
                              ? self.config[@"requestLimits"]
                              : @{};
   id value = limits[@"maxBodyBytes"];
-  return [value respondsToSelector:@selector(unsignedIntegerValue)] && [value unsignedIntegerValue] > 0
-             ? [value unsignedIntegerValue]
-             : 1048576;
+  NSUInteger maxBodyBytes = ALNUnsignedIntegerValueOrDefault(value, 0);
+  return (maxBodyBytes > 0) ? maxBodyBytes : 1048576;
 }
 
 - (NSUInteger)largestRouteMaxBodyBytes {
@@ -4611,9 +4672,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   // body cap and lets one file part use all of it.
   NSMutableDictionary *limits = [base mutableCopy];
   limits[@"maxBodyBytes"] = @(routeLimit);
-  NSUInteger fileLimit = [limits[@"maxMultipartFileBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
-                             ? [limits[@"maxMultipartFileBytes"] unsignedIntegerValue]
-                             : 1048576;
+  NSUInteger fileLimit = ALNUnsignedIntegerValueOrDefault(limits[@"maxMultipartFileBytes"], 1048576);
   limits[@"maxMultipartFileBytes"] = @(MAX(fileLimit, routeLimit));
   return limits;
 }
@@ -5300,9 +5359,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     ALNPgEventStreamStore *store =
         [[ALNPgEventStreamStore alloc] initWithConnectionString:connectionString(storeConfig)
                                                       tableName:ALNStringConfigValue(storeConfig[@"tableName"], @"")
-                                                 maxConnections:[poolSize respondsToSelector:@selector(unsignedIntegerValue)]
-                                                                    ? [poolSize unsignedIntegerValue]
-                                                                    : 4
+                                                 maxConnections:ALNUnsignedIntegerValueOrDefault(poolSize, 4)
                                                           error:&error];
     if (store != nil) {
       self.eventStreamStore = store;

@@ -74,6 +74,11 @@ Mode behavior:
 - `generated-app-ui` keeps the same backend routes but resolves HTML from
   app-owned templates under `templates/auth/...` by default.
 
+Local-password login answers `Invalid email or password` for both an unknown
+email and a wrong password. For an unknown email it still runs one Argon2id
+verification against a throwaway hash, so response time does not reveal whether
+the account exists. (Registration still reports an already-registered email.)
+
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
 provider CTA disappears and the stub provider routes are not registered.

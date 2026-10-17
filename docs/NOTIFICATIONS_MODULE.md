@@ -69,9 +69,53 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
 - explicit channel queueing records queued audit entries before worker delivery and can fan out into per-channel jobs
 - in-app delivery publishes realtime fanout on `notifications.inbox.<recipient>`
 - inbox entries are unread by default, persist read/unread state, and expose unread counts per recipient
-- inbox entry metadata may include `href` or `path`; the HTML inbox renders that as a first-class deep link
+- inbox entry metadata may include `href` or `path`; the HTML inbox renders that as a first-class deep link when it is an `http`/`https` URL or a same-origin relative path (`/settings`, `orders/7`). Other values (`javascript:`, `data:`, `ftp:`, protocol-relative `//host`, anything with a backslash or control character) render without a link. The JSON inbox returns the metadata unchanged, so API clients should apply the same check.
+- the outbox and each recipient's inbox are capped; when a new entry would exceed the cap, the oldest entries are dropped (see [Retention limits](#retention-limits))
 
 Requested channels are validated against the notification definition before queueing or previewing.
+
+## Retention limits
+
+The module keeps its outbox and inboxes in memory (and in the state file when
+persistence is on), so both are capped. Adding an entry past the cap drops the
+oldest entries. The caps also apply when a state file is loaded.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `outbox.maxEntries` | `1000` | Outbox audit entries kept across all notifications. |
+| `inbox.maxEntriesPerRecipient` | `200` | In-app entries kept per recipient. |
+
+```plist
+notificationsModule = {
+  outbox = { maxEntries = 5000; };
+  inbox = { maxEntriesPerRecipient = 500; };
+};
+```
+
+Values must be positive integers; anything else uses the default.
+`resolvedConfigSummary` reports the active caps as `maxOutboxEntries` and
+`maxInboxEntriesPerRecipient`.
+
+## Inbox pagination
+
+`GET /notifications/api/inbox` and `GET /notifications/inbox` accept `limit`
+and `offset` query parameters. Entries stay oldest-first. Without `limit` the
+whole inbox is returned, as before (it is bounded by
+`inbox.maxEntriesPerRecipient`); `limit` is clamped to 200. The JSON response
+adds `pagination = { limit, offset, returned, total, hasMore }`;
+`totalCount` and `unreadCount` still describe the whole inbox. The HTML inbox
+shows previous/next page links when `limit` is set. Runtime callers can use
+`-[ALNNotificationsModuleRuntime inboxSummaryForRecipient:limit:offset:]`.
+
+## Preference validation
+
+`POST /notifications/api/preferences`, `POST /notifications/preferences` and
+`-updateNotificationPreferences:forRecipient:error:` reject preferences for a
+notification identifier that is not registered, or for a channel that is
+neither a first-party channel (`email`, `in_app`, `webhook`, `webpush`) nor
+declared by a registered notification. The API answers `422`; the runtime
+returns `ALNNotificationsModuleErrorValidationFailed` with `notification` (and
+`channel`) in the error's `userInfo`. Stored preferences are left unchanged.
 
 ## Web Push
 
@@ -335,6 +379,7 @@ Manifest defaults:
 - preference hook class: empty
 - persistence: enabled outside `test`, with an auto-resolved module state path when no explicit path is provided
 - Web Push: disabled
+- `outbox.maxEntries`: `1000`; `inbox.maxEntriesPerRecipient`: `200`
 
 ## Current Limits
 

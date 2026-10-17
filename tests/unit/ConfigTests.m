@@ -4,7 +4,9 @@
 #import <stdlib.h>
 #import <string.h>
 
+#import "ALNApplication.h"
 #import "ALNConfig.h"
+#import "ALNDataverseClient.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
 
@@ -313,6 +315,37 @@
   XCTAssertEqualObjects(@"pilot", overriddenState[@"target"]);
 }
 
+// Old-style (text) plists hold bare integers as NSStrings, and ALNConfig passes
+// the dataverse section through. Apple's NSString has no -unsignedIntegerValue,
+// so these used to fall back to their defaults there.
+- (void)testOldStylePlistDataverseNumbersReachTarget {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+  NSString *testPlist = [root stringByAppendingPathComponent:@"config/environments/test.plist"];
+  XCTAssertTrue([self writeFile:testPlist
+                        content:@"{\n"
+                                 "  dataverse = {\n"
+                                 "    serviceRootURL = \"https://example.crm.dynamics.com/api/data/v9.2\";\n"
+                                 "    tenantID = \"tenant-id\";\n"
+                                 "    clientID = \"client-id\";\n"
+                                 "    clientSecret = \"client-secret\";\n"
+                                 "    maxRetries = 5;\n"
+                                 "    pageSize = 250;\n"
+                                 "  };\n"
+                                 "}\n"]);
+
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test" error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(config);
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:config ?: @{}];
+  ALNDataverseTarget *target = [app dataverseTargetNamed:nil error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(target);
+  XCTAssertEqual((NSUInteger)5, target.maxRetries);
+  XCTAssertEqual((NSUInteger)250, target.pageSize);
+}
+
 - (void)testProductionDefaultsToConcurrentRequestDispatchMode {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
@@ -323,6 +356,33 @@
                                                error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@"concurrent", config[@"requestDispatchMode"]);
+}
+
+// Issues 215 and 244: stage timing and the timing headers are off in
+// production and on elsewhere; the environment can still turn them on.
+- (void)testPerformanceLoggingAndHeadersDefaultOffInProduction_Issue244 {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  NSError *error = nil;
+  NSDictionary *production = [ALNConfig loadConfigAtRoot:root environment:@"production" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@NO, production[@"performanceLogging"]);
+  XCTAssertEqualObjects(@NO, production[@"performanceHeaders"]);
+
+  NSDictionary *development = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@YES, development[@"performanceLogging"]);
+  XCTAssertEqualObjects(@YES, development[@"performanceHeaders"]);
+
+  setenv("ARLEN_PERFORMANCE_LOGGING", "1", 1);
+  setenv("ARLEN_PERFORMANCE_HEADERS", "1", 1);
+  NSDictionary *overridden = [ALNConfig loadConfigAtRoot:root environment:@"production" error:&error];
+  unsetenv("ARLEN_PERFORMANCE_LOGGING");
+  unsetenv("ARLEN_PERFORMANCE_HEADERS");
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@YES, overridden[@"performanceLogging"]);
+  XCTAssertEqualObjects(@YES, overridden[@"performanceHeaders"]);
 }
 
 - (void)testClusterEmitHeadersDefaultsToEnabledWhenClusterModeIsEnabled {

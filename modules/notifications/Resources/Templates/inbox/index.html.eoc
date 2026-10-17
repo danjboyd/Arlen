@@ -22,8 +22,7 @@
     </thead>
     <tbody>
       <% for (NSDictionary *entry in inbox) { %>
-        <% NSDictionary *metadata = [entry objectForKey:@"metadata"] ?: @{}; %>
-        <% id rawDestination = [metadata objectForKey:@"href"] ?: ([metadata objectForKey:@"path"] ?: @""); %>
+        <% id rawDestination = [entry objectForKey:@"linkHref"] ?: @""; %>
         <% NSString *destination = [rawDestination isKindOfClass:[NSString class]] ? rawDestination : @""; %>
         <% BOOL isRead = [[entry objectForKey:@"read"] boolValue]; %>
         <tr class="<%= isRead ? @"is-read" : @"is-unread" %>">
@@ -48,4 +47,16 @@
       <% } %>
     </tbody>
   </table>
+  <% NSString *previousPagePath = [inboxSummary objectForKey:@"previousPagePath"] ?: @""; %>
+  <% NSString *nextPagePath = [inboxSummary objectForKey:@"nextPagePath"] ?: @""; %>
+  <% if ([previousPagePath length] > 0 || [nextPagePath length] > 0) { %>
+    <nav class="notifications-actions" aria-label="Inbox pages">
+      <% if ([previousPagePath length] > 0) { %>
+        <a href="<%= previousPagePath %>">Previous page</a>
+      <% } %>
+      <% if ([nextPagePath length] > 0) { %>
+        <a href="<%= nextPagePath %>">Next page</a>
+      <% } %>
+    </nav>
+  <% } %>
 </section>

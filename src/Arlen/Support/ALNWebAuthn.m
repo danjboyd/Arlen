@@ -46,6 +46,15 @@ typedef struct {
 
 static BOOL ALNWebAuthnParseCBORValue(ALNWebAuthnCBORCursor *cursor, id *value, NSError **error);
 
+// Bytes left after the cursor. Length checks compare against this instead of
+// computing offset + length, which can wrap for wire-declared 64-bit lengths.
+static uint64_t ALNWebAuthnCBORRemaining(const ALNWebAuthnCBORCursor *cursor) {
+  if (cursor == NULL || cursor->offset >= cursor->length) {
+    return 0;
+  }
+  return (uint64_t)(cursor->length - cursor->offset);
+}
+
 static BOOL ALNWebAuthnReadCBORLength(ALNWebAuthnCBORCursor *cursor,
                                       uint8_t additionalInfo,
                                       uint64_t *lengthOut,
@@ -83,7 +92,7 @@ static BOOL ALNWebAuthnReadCBORLength(ALNWebAuthnCBORCursor *cursor,
       return NO;
   }
 
-  if (cursor->offset + byteCount > cursor->length) {
+  if ((uint64_t)byteCount > ALNWebAuthnCBORRemaining(cursor)) {
     if (error != NULL) {
       *error = ALNWebAuthnError(ALNWebAuthnErrorMalformedCBOR, @"CBOR length exceeds input");
     }
@@ -103,7 +112,16 @@ static BOOL ALNWebAuthnParseCBORMap(ALNWebAuthnCBORCursor *cursor,
                                     uint64_t count,
                                     id *value,
                                     NSError **error) {
-  NSMutableDictionary *map = [NSMutableDictionary dictionaryWithCapacity:(NSUInteger)count];
+  // Each entry needs at least one byte for its key and one for its value, so a
+  // larger declared count cannot be satisfied by the input. The count is not
+  // used as a capacity hint.
+  if (count > ALNWebAuthnCBORRemaining(cursor) / 2) {
+    if (error != NULL) {
+      *error = ALNWebAuthnError(ALNWebAuthnErrorMalformedCBOR, @"CBOR map length exceeds input");
+    }
+    return NO;
+  }
+  NSMutableDictionary *map = [NSMutableDictionary dictionary];
   for (uint64_t idx = 0; idx < count; idx++) {
     id key = nil;
     id item = nil;
@@ -127,7 +145,15 @@ static BOOL ALNWebAuthnParseCBORArray(ALNWebAuthnCBORCursor *cursor,
                                       uint64_t count,
                                       id *value,
                                       NSError **error) {
-  NSMutableArray *array = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+  // Each element needs at least one byte, so a larger declared count cannot be
+  // satisfied by the input. The count is not used as a capacity hint.
+  if (count > ALNWebAuthnCBORRemaining(cursor)) {
+    if (error != NULL) {
+      *error = ALNWebAuthnError(ALNWebAuthnErrorMalformedCBOR, @"CBOR array length exceeds input");
+    }
+    return NO;
+  }
+  NSMutableArray *array = [NSMutableArray array];
   for (uint64_t idx = 0; idx < count; idx++) {
     id item = nil;
     if (!ALNWebAuthnParseCBORValue(cursor, &item, error)) {
@@ -161,11 +187,17 @@ static BOOL ALNWebAuthnParseCBORValue(ALNWebAuthnCBORCursor *cursor, id *value, 
       break;
     case 1:
       ok = ALNWebAuthnReadCBORLength(cursor, additionalInfo, &length, error);
-      *value = ok ? @(-1 - (NSInteger)length) : nil;
+      if (ok && length > (uint64_t)INT64_MAX) {
+        ok = NO;
+        if (error != NULL) {
+          *error = ALNWebAuthnError(ALNWebAuthnErrorMalformedCBOR, @"CBOR negative integer is out of range");
+        }
+      }
+      *value = ok ? @(-1 - (int64_t)length) : nil;
       break;
     case 2:
       ok = ALNWebAuthnReadCBORLength(cursor, additionalInfo, &length, error);
-      if (ok && cursor->offset + length <= cursor->length) {
+      if (ok && length <= ALNWebAuthnCBORRemaining(cursor)) {
         *value = [NSData dataWithBytes:(cursor->bytes + cursor->offset) length:(NSUInteger)length];
         cursor->offset += (NSUInteger)length;
       } else if (ok) {
@@ -177,7 +209,7 @@ static BOOL ALNWebAuthnParseCBORValue(ALNWebAuthnCBORCursor *cursor, id *value, 
       break;
     case 3:
       ok = ALNWebAuthnReadCBORLength(cursor, additionalInfo, &length, error);
-      if (ok && cursor->offset + length <= cursor->length) {
+      if (ok && length <= ALNWebAuthnCBORRemaining(cursor)) {
         NSData *data = [NSData dataWithBytes:(cursor->bytes + cursor->offset) length:(NSUInteger)length];
         NSString *string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         if ([string length] == 0 && length > 0) {

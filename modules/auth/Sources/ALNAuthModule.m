@@ -12,6 +12,7 @@
 #import "ALNRequest.h"
 #import "ALNJSONSerialization.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
 #import "ALNRecoveryCodes.h"
 #import "ALNSecurityPrimitives.h"
@@ -246,6 +247,40 @@ static NSString *AMRandomToken(NSUInteger byteCount) {
   return ALNLowercaseHexStringFromData(random) ?: @"";
 }
 
+// Unknown-email logins verify against this throwaway hash so they spend about
+// as long as a wrong password for a real account.
+static NSString *AMDummyPasswordHash(void) {
+  static NSString *dummyHash = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    dummyHash = [ALNPasswordHash hashPasswordString:AMRandomToken(32)
+                                            options:[ALNPasswordHash defaultArgon2idOptions]
+                                              error:NULL];
+  });
+  return dummyHash;
+}
+
+static NSUInteger AMDummyPasswordVerifications = 0;
+static NSLock *AMDummyPasswordVerificationLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
+}
+
+static void AMSpendDummyPasswordVerification(NSString *password) {
+  NSString *dummyHash = AMDummyPasswordHash();
+  if ([dummyHash length] > 0) {
+    (void)[ALNPasswordHash verifyPasswordString:(password ?: @"") againstEncodedHash:dummyHash error:NULL];
+  }
+  NSLock *lock = AMDummyPasswordVerificationLock();
+  [lock lock];
+  AMDummyPasswordVerifications += 1;
+  [lock unlock];
+}
+
 static NSDictionary *AMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
@@ -312,11 +347,8 @@ static BOOL AMConfigBool(id value, BOOL fallbackValue) {
 }
 
 static NSUInteger AMConfigUnsignedInteger(id value, NSUInteger fallbackValue) {
-  if ([value respondsToSelector:@selector(unsignedIntegerValue)]) {
-    NSUInteger converted = [value unsignedIntegerValue];
-    return (converted > 0U) ? converted : fallbackValue;
-  }
-  return fallbackValue;
+  NSUInteger converted = ALNUnsignedIntegerValueOrDefault(value, 0U);
+  return (converted > 0U) ? converted : fallbackValue;
 }
 
 static NSString *AMNormalizePhoneNumber(id value) {
@@ -772,6 +804,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email
                                          password:(NSString *)password
                                             error:(NSError **)error;
+- (NSUInteger)dummyPasswordVerificationCount;
 - (nullable NSDictionary *)startSessionForUser:(NSDictionary *)user
                                       provider:(NSString *)provider
                                        methods:(NSArray *)methods
@@ -1925,6 +1958,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return AMUserDictionaryFromRow(row);
 }
 
+- (NSUInteger)dummyPasswordVerificationCount {
+  NSLock *lock = AMDummyPasswordVerificationLock();
+  [lock lock];
+  NSUInteger count = AMDummyPasswordVerifications;
+  [lock unlock];
+  return count;
+}
+
 - (NSDictionary *)authenticateLocalEmail:(NSString *)email
                                 password:(NSString *)password
                                    error:(NSError **)error {
@@ -1941,6 +1982,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                             error:error] firstObject];
   NSString *encodedHash = AMTrimmedString(row[@"password_hash"]);
   if ([encodedHash length] == 0) {
+    AMSpendDummyPasswordVerification(password);
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil);
     }

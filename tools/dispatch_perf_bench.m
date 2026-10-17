@@ -253,9 +253,7 @@ int main(int argc, const char *argv[]) {
     };
 
     NSJSONWritingOptions writeOptions = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
     writeOptions |= NSJSONWritingSortedKeys;
-#endif
     NSError *jsonError = nil;
     NSData *json = [ALNJSONSerialization dataWithJSONObject:payload
                                                     options:writeOptions

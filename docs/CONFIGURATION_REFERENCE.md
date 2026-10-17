@@ -14,6 +14,9 @@ Use this command to inspect the merged effective config for one environment:
 /path/to/Arlen/bin/arlen config --env development --json
 ```
 
+Secret values print as `[redacted]`; add `--show-secrets` to see them. See
+[CLI Reference](CLI_REFERENCE.md#arlen-config---env-name---json---show-secrets).
+
 ## 1. Minimal Mental Model
 
 Start with `config/app.plist` for defaults that apply everywhere. Override only
@@ -28,6 +31,16 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
+- `performanceLogging` (default: on, off in `production`): record per-stage
+  request timing in the access log. `ARLEN_PERFORMANCE_LOGGING` overrides it.
+- `performanceHeaders` (default: on, off in `production`): while
+  `performanceLogging` is on, also send the timing as `X-Arlen-Total-Ms`,
+  `X-Arlen-Parse-Ms`, `X-Arlen-Response-Write-Ms` and `X-Mojo-Total-Ms`
+  response headers. They let any client time requests, so keep them off on
+  public deployments. `ARLEN_PERFORMANCE_HEADERS` overrides it.
+- Detailed exception pages (reason, stack, file paths) are shown only when the
+  environment is `development` or `test`. Every other environment, including
+  `staging`, gets the production error response.
 - `serveStatic`: serve files from `public/`, mounted under `/static/` — the
   scaffold's own `public/health.txt` answers at `/static/health.txt`, not at
   `/health.txt`
@@ -42,8 +55,34 @@ apps need first.
 - `mimeTypes`: optional extension -> `Content-Type` overrides for static mounts
   and controller file responses (see [Static files](STATIC_FILES.md#content-types))
 - `listenBacklog`: socket listen backlog
-- `connectionTimeoutSeconds`: request/connection timeout baseline
+- `connectionTimeoutSeconds`: request/connection timeout baseline. It also
+  limits how long an idle keep-alive connection stays open between requests.
 - `enableReusePort`: opt-in socket reuse for supported deployments
+- `runtimeLimits`: HTTP server concurrency limits
+  - `maxConcurrentHTTPWorkers` (default `8`): threads that run requests.
+  - `maxConcurrentHTTPSessions` (default `256`): open HTTP connections,
+    including idle keep-alive connections. Further connections get a `503`.
+  - `maxQueuedHTTPConnections` (default `256`): connections waiting for a
+    worker.
+  - `keepAliveParkAfterMilliseconds` (default `5`, `0` parks at once): after a
+    keep-alive response, a worker waits this long for the next request on the
+    same connection. If none starts, the connection is handed to a watcher
+    thread and the worker moves on, so idle browser connections don't hold
+    workers. The watcher hands the connection back to a worker when the next
+    request arrives, and closes it after `connectionTimeoutSeconds`. Pipelined
+    requests are served without parking. When other connections are waiting
+    for a worker, a keep-alive connection is parked after every response,
+    even a busy one, so connections take turns instead of holding workers. Windows builds and the serialized
+    `requestDispatchMode` keep each connection on one worker.
+  - `webSocketPingIntervalSeconds` (default `25`, `0` disables): after this long
+    without a frame from the client, the server pings an open WebSocket; a
+    client that sends nothing for another interval is closed with `1001`. A
+    receive-only subscriber that answers pings stays connected however long it
+    is idle. Environment override: `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS`.
+  - Server-sent event streams and WebSocket sessions hold a worker for as long
+    as they stay open. Size `maxConcurrentHTTPWorkers` above the number of
+    streams you expect to be open at once, plus headroom for ordinary
+    requests.
 
 Generated apps start with:
 
@@ -76,9 +115,28 @@ which can also be lower than the default. No middleware or controller runs
 before this check or before the body is read; route matching is the only input.
 On a route with an override, multipart parsing uses that limit for the whole body
 and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
-stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)). Request bodies
-with `Transfer-Encoding: chunked` are not supported and are rejected with `400`
-without reading the body; clients must send `Content-Length`.
+stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)).
+
+Chunked request bodies (`Transfer-Encoding: chunked`) are accepted by the
+default `llhttp` parser. They are buffered in memory, never spooled, and their
+decoded size is held to `requestLimits.maxBodyBytes`; a per-route override
+can't be checked before the body arrives, because there is no
+`Content-Length`. Only the request head (request line and headers) counts
+toward `maxHeaderBytes`, not the chunk-size lines. The legacy parser
+(`ARLEN_HTTP_PARSER_BACKEND=legacy`) rejects chunked bodies with `400`.
+
+Other request-head rules:
+
+- `Expect: 100-continue` gets an interim `100 Continue` once the head has
+  passed the size checks, before the client sends the body. A request rejected
+  at that point (for example `413`) gets the final status instead. Any other
+  expectation gets `417`.
+- An HTTP/1.1 request must carry exactly one `Host` header; a duplicate or a
+  missing one gets `400` (RFC 9112 §3.2). HTTP/1.0 requests may omit it.
+- An absolute-form target (`GET http://example.com/path HTTP/1.1`) is routed by
+  its path, and its authority replaces the `Host` header.
+- Responses written before the application runs (`400`, `408`, `413`, `417`,
+  `431`) carry the configured `securityHeaders`.
 
 ## 4. Database
 
@@ -210,7 +268,8 @@ Session config:
 - `session.secret`
 - `session.cookieName`
 - `session.maxAgeSeconds`
-- `session.secure`
+- `session.secure` (default: on in `production`, off elsewhere; generated apps
+  leave it unset so this default applies)
 - `session.sameSite`
 
 CSRF config:
@@ -263,6 +322,23 @@ Many apps can keep the generated security-header defaults and only tighten the
 CSP later as the frontend becomes more specific. The headers cover every response, including static
 files, 404s and built-in endpoints, not only routed ones (see
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers)).
+
+Operability endpoints:
+
+`/metrics` and `/clusterz` answer anonymous requests by default. `/clusterz`
+reports the node ID (hostname) and worker layout, so production apps that are
+reachable from untrusted networks should restrict them:
+
+- `observability.operabilityToken` (env `ARLEN_OPERABILITY_TOKEN`): require
+  `Authorization: Bearer <token>`. Other requests get `401`.
+- `observability.operabilityLoopbackOnly` (env
+  `ARLEN_OPERABILITY_LOOPBACK_ONLY`, default `NO`): answer only requests whose
+  peer is a loopback address and that carry no `Forwarded`,
+  `X-Forwarded-For` or `X-Real-IP` header. Other requests get `403`.
+
+When both are set, a request must pass both. `/healthz`, `/readyz` and
+`/livez` are not affected. `arlen doctor --env production` warns when neither
+is set.
 
 ## 6.1 Route Policies
 
@@ -473,7 +549,6 @@ Generated apps include:
 ```plist
 openapi = {
   enabled = YES;
-  docsUIEnabled = YES;
   docsUIStyle = "interactive";
   title = "Arlen API";
   version = "0.1.0";
@@ -484,7 +559,8 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
-- `openapi.docsUIEnabled`
+- `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
+  it unset so `/openapi` is not served in production)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`
@@ -529,6 +605,16 @@ For most new apps:
 - `docs/APP_AUTHORING_GUIDE.md`
 - `docs/MODULES.md`
 - `docs/LITE_MODE_GUIDE.md`
+
+## Optional notifications and search module limits
+
+- `notificationsModule.outbox.maxEntries` (default `1000`) and
+  `notificationsModule.inbox.maxEntriesPerRecipient` (default `200`) cap the
+  notifications outbox and each inbox; the oldest entries are dropped. See
+  [Notifications Module](NOTIFICATIONS_MODULE.md#retention-limits).
+- The search module rejects `q` longer than 256 characters (`422`) and clamps
+  `autocomplete_limit`/`suggestions_limit` to 25. See
+  [Search Module](SEARCH_MODULE.md#query-limits).
 
 ## Optional MCP module configuration
 

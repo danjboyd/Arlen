@@ -102,5 +102,64 @@ class ManagedToolchainEnvTests(unittest.TestCase):
             self.assertEqual(ld, "/existing")
 
 
+@unittest.skipUnless(os.uname().sysname == "Linux", "Linux build path only")
+class BuildReleaseEnvTests(unittest.TestCase):
+    """build_release.sh from a shell that never sourced GNUstep.sh (issue 181)."""
+
+    def test_sources_gnustep_env_and_prepares_app_with_any_sources(self):
+        with tempfile.TemporaryDirectory() as base:
+            base = Path(base)
+            gnustep_sh = base / "gs/System/Library/Makefiles/GNUstep.sh"
+            gnustep_sh.parent.mkdir(parents=True)
+            gnustep_sh.write_text("export GNUSTEP_FAKE_SOURCED=1\n")
+
+            framework = base / "framework"
+            (framework / "src/Arlen").mkdir(parents=True)
+            (framework / "GNUmakefile").write_text("")
+            (framework / "tools").mkdir()
+            for name in ("source_gnustep_env.sh", "resolve_gnustep.sh"):
+                (framework / "tools" / name).write_text(
+                    (REPO_ROOT / "tools" / name).read_text())
+            calls = base / "calls.log"
+            (framework / "bin").mkdir()
+            boomhauer = framework / "bin/boomhauer"
+            boomhauer.write_text(
+                "#!/usr/bin/env bash\n"
+                f"echo \"boomhauer sourced=${{GNUSTEP_FAKE_SOURCED:-}}\" >> '{calls}'\n"
+                "mkdir -p \"$ARLEN_APP_ROOT/.boomhauer/build\"\n"
+                "printf '#!/bin/sh\\n' > \"$ARLEN_APP_ROOT/.boomhauer/build/boomhauer-app\"\n"
+                "chmod +x \"$ARLEN_APP_ROOT/.boomhauer/build/boomhauer-app\"\n")
+            boomhauer.chmod(0o755)
+
+            stubs = base / "stubs"
+            stubs.mkdir()
+            make = stubs / "make"
+            make.write_text(
+                "#!/usr/bin/env bash\n"
+                f"echo \"make sourced=${{GNUSTEP_FAKE_SOURCED:-}}\" >> '{calls}'\n")
+            make.chmod(0o755)
+
+            # Like examples/tech_demo: sources, but no src/main.m.
+            app = base / "app"
+            (app / "config").mkdir(parents=True)
+            (app / "config/app.plist").write_text("{}\n")
+            (app / "src").mkdir()
+            (app / "src/demo_server.m").write_text("")
+
+            subprocess.run(
+                ["bash", str(REPO_ROOT / "tools/deploy/build_release.sh"),
+                 "--app-root", str(app), "--framework-root", str(framework),
+                 "--releases-dir", str(base / "releases"), "--release-id", "r1",
+                 "--allow-missing-certification"],
+                env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(base),
+                     "GNUSTEP_SH": str(gnustep_sh)},
+                check=True, capture_output=True, text=True)
+
+            self.assertEqual(calls.read_text().splitlines(),
+                             ["make sourced=1", "boomhauer sourced=1"])
+            self.assertTrue(
+                (base / "releases/r1/app/.boomhauer/build/boomhauer-app").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
