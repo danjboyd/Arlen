@@ -586,8 +586,13 @@ static BOOL BenchmarkRenderBlobResponse(ALNRequest *request, ALNResponse *respon
     response.fileBodyMTimeSeconds = (long long)[modificationDate timeIntervalSince1970];
     response.fileBodyMTimeNanoseconds = 0;
     if (useValidatedFileMetadataMode || useBadFileMetadataMode) {
+#if defined(_WIN32)
+      struct _stat64 fileStat;
+      if (_wstat64((const wchar_t *)[path fileSystemRepresentation], &fileStat) == 0) {
+#else
       struct stat fileStat;
       if (stat([path fileSystemRepresentation], &fileStat) == 0) {
+#endif
         response.fileBodyDevice = (unsigned long long)fileStat.st_dev;
         response.fileBodyInode = (unsigned long long)fileStat.st_ino;
         response.fileBodyMTimeSeconds = (long long)fileStat.st_mtime;

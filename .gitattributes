@@ -1,0 +1,8 @@
+# Check out LF everywhere, whatever core.autocrlf says. Git for Windows sets
+# core.autocrlf=true system-wide, which put CRLF into bash scripts, make
+# recipes and template fixtures; MSYS2 bash then read "\r" into values
+# (propane: "cluster enabled must be a boolean (got: 0\r)").
+* text=auto eol=lf
+
+# HTTP wire-format fixtures are CRLF on purpose; keep their bytes exact.
+*.http -text
