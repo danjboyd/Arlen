@@ -11,6 +11,17 @@ FOUNDATION_EXPORT BOOL ALNPlatformUsesGNUstepFoundation(void);
 // true/false). Char-typed numbers are not booleans. Never use objCType for this:
 // @encode(BOOL) is "B" on Apple arm64 while @YES reports "c".
 FOUNDATION_EXPORT BOOL ALNNumberIsBoolean(id _Nullable value);
+// Unsigned integer from a config or request value. YES for any NSNumber (the
+// result is -unsignedIntegerValue, unchanged) and for an NSString that is only
+// ASCII decimal digits after trimming whitespace and newlines (no sign, no
+// fraction or exponent) and fits in NSUInteger. NO otherwise, leaving
+// *outValue untouched. Use this rather than respondsToSelector:
+// @selector(unsignedIntegerValue): Apple's NSString has no
+// -unsignedIntegerValue, so query parameters and old-style plist numbers
+// would be dropped there.
+FOUNDATION_EXPORT BOOL ALNUnsignedIntegerFromValue(id _Nullable value, NSUInteger *_Nullable outValue);
+// ALNUnsignedIntegerFromValue's value, or fallback when it returns NO.
+FOUNDATION_EXPORT NSUInteger ALNUnsignedIntegerValueOrDefault(id _Nullable value, NSUInteger fallback);
 // MSYS2 roots that may hold the CLANG64 toolchain on Windows, in search order:
 // ARLEN_MSYS_ROOT, the gnustep-cli managed toolchain (user, then system
 // install), then the root GNUSTEP_MAKEFILES points into (a stock C:/msys64 only

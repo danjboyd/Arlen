@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Response headers are serialized into a byte buffer instead of an
+  `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
+  check on each of about 80 appends per response. Serializing a typical
+  19-header response is about 1.6-2x faster, and the bytes are unchanged
+  (#245, partial).
+
+- The vendored yyjson is updated from 0.12.0 to 0.13.0 (#269). That fixes
+  upstream GHSA-f4vc-345x-4mvm: a number token with 2^32 or more significant
+  digits could overflow a stack buffer. Arlen's default 1 MiB body limit kept
+  HTTP input from reaching it. 0.13.0 also fixes an uninitialized read in
+  number parsing.
+
 - `arlen config` now prints secret values as `[redacted]`, in both text and
   `--json` output. A string is redacted when its key contains `secret`,
   `password`, `token`, `apiKey` or `connectionString` (for example
@@ -226,6 +238,22 @@
   the partial and builds the shared locals overlay once per collection
   instead of once per item, so long lists no longer take the global template
   registry lock for every row. Output and errors are unchanged (#246).
+
+- Numbers that arrive as strings are now read on Apple Foundation. Query
+  parameters such as admin-ui `?page=` and `?limit=`, jobs `?limit=`, and
+  search `?limit=` and `?autocomplete_limit=`, and numeric settings in
+  old-style (text) plists such as dataverse `maxRetries`, module `maxAttempts`
+  and pagination limits, were silently replaced by their defaults on macOS:
+  Apple's `NSString` has no `-unsignedIntegerValue`. The new
+  `ALNUnsignedIntegerFromValue` and `ALNUnsignedIntegerValueOrDefault`
+  (`ALNPlatform.h`) accept an `NSNumber` or a string of decimal digits
+  (surrounding whitespace allowed; no sign, fraction, exponent or overflow).
+  On GNUstep, a string that is not plain digits (such as `limit=abc` or
+  `-1`) now gets the default; before, GNUstep read its leading number, or
+  `0`. `admin-ui` and `ops` are now `1.0.3`, `auth` `1.5.3`, `jobs`
+  `1.1.1`, `notifications` `1.1.3`, `search` `1.0.4` and `storage` `1.1.2`
+  (#264).
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
