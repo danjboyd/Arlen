@@ -401,6 +401,26 @@ static NSData *ALNTestBinaryPlist(NSArray<NSData *> *objects) {
   return plist;
 }
 
+// A binary plist dictionary object (4-byte object refs, fewer than 15 pairs).
+static NSData *ALNTestPlistDict(NSArray<NSNumber *> *keyRefs, NSArray<NSNumber *> *valueRefs) {
+  NSMutableData *object = [NSMutableData data];
+  uint8_t marker = (uint8_t)(0xD0 | [keyRefs count]);
+  [object appendBytes:&marker length:1];
+  for (NSNumber *ref in [keyRefs arrayByAddingObjectsFromArray:valueRefs]) {
+    ALNTestAppendBigEndian(object, [ref unsignedLongLongValue], 4);
+  }
+  return object;
+}
+
+// A binary plist ASCII string object (fewer than 15 characters).
+static NSData *ALNTestPlistASCII(NSString *text) {
+  NSMutableData *object = [NSMutableData data];
+  uint8_t marker = (uint8_t)(0x50 | [text length]);
+  [object appendBytes:&marker length:1];
+  [object appendData:[text dataUsingEncoding:NSASCIIStringEncoding]];
+  return object;
+}
+
 static id ALNTestNestedArrays(NSUInteger levels) {
   id value = @"leaf";
   for (NSUInteger level = 0; level < levels; level++) {
@@ -597,6 +617,32 @@ static id ALNTestNestedArrays(NSUInteger levels) {
   error = nil;
   XCTAssertEqualObjects(wide, [adapter objectForKey:@"wide" atTime:[NSDate date] error:&error]);
   XCTAssertNil(error);
+
+  // GNUstep's writer stores one copy of equal objects, dictionaries included,
+  // so a list that repeats a dictionary references the same object 5000 times.
+  // It expands to about 23 objects per entry, far more than four per byte.
+  NSMutableArray<NSNumber *> *tagRefs = [NSMutableArray array];
+  NSMutableArray *tags = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 20; index++) {
+    [tagRefs addObject:@6];
+    [tags addObject:@"a"];
+  }
+  NSMutableArray<NSNumber *> *sharedRefs = [NSMutableArray array];
+  NSMutableArray *expectedShared = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 5000; index++) {
+    [sharedRefs addObject:@3];
+    [expectedShared addObject:@{ @"tags" : tags }];
+  }
+  NSData *sharedRecord = ALNTestBinaryPlist(@[
+    ALNTestPlistDict(@[ @1 ], @[ @2 ]), ALNTestPlistASCII(@"value"), ALNTestPlistArray(sharedRefs),
+    ALNTestPlistDict(@[ @4 ], @[ @5 ]), ALNTestPlistASCII(@"tags"), ALNTestPlistArray(tagRefs),
+    ALNTestPlistASCII(@"a")
+  ]);
+  server.cannedGETReply = ALNTestRedisBulkReply(sharedRecord);
+  error = nil;
+  XCTAssertEqualObjects(expectedShared, [adapter objectForKey:@"shared" atTime:[NSDate date] error:&error]);
+  XCTAssertNil(error);
+  server.cannedGETReply = nil;
 
   XCTAssertTrue([adapter setObject:ALNTestNestedArrays(70) forKey:@"too-deep" ttlSeconds:0 error:&error]);
   error = nil;

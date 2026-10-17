@@ -167,7 +167,8 @@
 - `ALNRedisCacheAdapter` checks a cached value's binary property list before
   Foundation decodes it. The value must be in binary format (the only one the
   adapter writes), with no reference cycles, at most 64 nested containers, and
-  no more objects than its size allows once shared references are expanded.
+  at most a million objects (or four per payload byte, if larger) once shared
+  references are expanded.
   Before, the adapter parsed any plist format, so a hostile Redis server (or a
   MITM on the plain-TCP connection) could send a deeply nested plist that
   Foundation's recursive parser cannot handle. Payloads that fail the check

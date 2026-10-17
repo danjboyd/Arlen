@@ -2119,9 +2119,11 @@ static BOOL ALNRedisBinaryPlistIsBounded(NSData *payload) {
   // state: 0 unvisited, 1 on the current path, 2 done. height: containers
   // nested at and below a finished object (leaves are 0). expanded: objects a
   // finished container stands for once shared references are copied out.
-  // Writers only share leaves in practice, so a real record expands to at most
-  // about one object per payload byte.
-  uint64_t expansionLimit = (uint64_t)layout.length * 4U + 4096U;
+  // Writers may store equal objects once (GNUstep shares equal dictionaries
+  // too), so a real record can expand well past its byte length; allow up to
+  // a million objects, or four per payload byte for larger records. A tiny
+  // plist built to expand exponentially still exceeds that.
+  uint64_t expansionLimit = MAX((uint64_t)1000000U, (uint64_t)layout.length * 4U + 4096U);
   NSMutableData *stateData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
   NSMutableData *heightData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
   NSMutableData *expandedData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount * sizeof(uint64_t)];

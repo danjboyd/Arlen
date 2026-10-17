@@ -121,7 +121,8 @@ elements; anything larger fails the command with an `NSError`.
 Cached values are stored as binary property lists. Before decoding one, the
 adapter checks that it is a binary plist (the only format it writes) with no
 reference cycles, at most 64 nested containers including the record wrapper,
-and no more objects than its size allows once shared references are expanded.
+and no more than a million objects (or four per payload byte, if larger) once
+shared references are expanded.
 A value nested more than 63 levels deep can be written but reads back as error
 2235. The connection to Redis is plain TCP; run Redis on a trusted network.
 
