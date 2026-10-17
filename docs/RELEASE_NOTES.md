@@ -18,6 +18,23 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- Request-path performance and robustness (#218, #247, #265, #270):
+  - Multipart parsing is about 20x faster. Header-name and boundary checks use
+    precomputed tables instead of rebuilding a GNUstep `NSCharacterSet` and
+    its `-invertedSet` for every header line, and quoted parameter values are
+    no longer built with `appendFormat:` per character. A 128-part form went
+    from about 19 ms to under 1 ms to parse.
+  - File responses format `Last-Modified` and `Date` with `gmtime` and fixed
+    tables, and parse `If-Modified-Since` / `If-Unmodified-Since` /
+    `If-Range` IMF-fixdates without building an `NSDateFormatter`. Two ICU
+    formatters per static response were about 40% of static-file CPU. The
+    obsolete RFC 850 and asctime forms are still accepted.
+  - MSSQL text columns use the length the ODBC driver reports, so a value
+    with an embedded NUL is no longer truncated.
+  - The framework's demo `boomhauer` JSON endpoints (`/api/echo/:name` and
+    others) escape route parameters. A quote or backslash in the path used
+    to break out of the JSON string.
+
 - Data layer fixes (#230, #231, #232, #237, #238):
   - `withTransaction` (and `commitTransaction:`) now fails when a statement
     inside the block had already aborted the transaction. PostgreSQL turns
