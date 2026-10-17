@@ -110,6 +110,32 @@
   return ALNTestRunShellCapture(command, exitCode);
 }
 
+// Issue 222: propane's FD-pressure check used to build the per-target
+// breakdown (a readlink per descriptor) for every worker on every check, even
+// when nothing was logged, stalling the single-threaded manager loop.
+- (void)testPropaneFDProbeBuildsTargetsOnlyForEvents_Issue222 {
+#if !defined(__linux__)
+  XCTSkip(@"the FD probe reads /proc");
+#endif
+  NSString *repoRoot = ALNTestRepoRoot();
+  NSString *command = [NSString stringWithFormat:@"bash %@ %@ 2>&1",
+                                                 ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"tests/fixtures/propane/fd_probe_check.sh"]),
+                                                 ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/propane"])];
+  int exitCode = -1;
+  NSString *output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  NSArray<NSString *> *lines = [output componentsSeparatedByString:@"\n"];
+  NSString *countLine = [lines count] > 0 ? lines[0] : @"";
+  NSArray<NSString *> *countParts = [countLine componentsSeparatedByString:@" "];
+  XCTAssertEqual((NSUInteger)2, [countParts count], @"%@", output);
+  if ([countParts count] == 2) {
+    XCTAssertEqualObjects([countParts[0] substringFromIndex:6], [countParts[1] substringFromIndex:9], @"%@", output);
+  }
+  XCTAssertTrue([output containsString:@"healthy top_calls=0 events=0"], @"%@", output);
+  XCTAssertTrue([output containsString:@"warn top_calls=1 events=1"], @"%@", output);
+  XCTAssertTrue([output containsString:@"targets ok"], @"%@", output);
+}
+
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-capture-large-output"];

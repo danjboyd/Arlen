@@ -203,6 +203,31 @@
   XCTAssertTrue([fullIdentifiers containsObject:@"regional_docs"]);
 }
 
+- (void)testOverlongPublicQueryIsRejectedWith422 {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSString *overlong = [@"" stringByPaddingToLength:257 withString:@"a" startingAtIndex:0];
+  ALNResponse *rejected =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:[NSString stringWithFormat:@"q=%@&mode=fuzzy", overlong]
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)422, rejected.statusCode);
+
+  NSString *maximum = [@"" stringByPaddingToLength:256 withString:@"a" startingAtIndex:0];
+  ALNResponse *accepted =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:[NSString stringWithFormat:@"q=%@&mode=fuzzy", maximum]
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, accepted.statusCode);
+}
+
 - (void)testPublicQueryEnvelopeIsShapedAndPolicyRoutesFailClosed {
   ALNApplication *app = [self application];
   [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];

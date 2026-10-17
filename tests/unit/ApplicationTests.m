@@ -419,13 +419,25 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
 - (ALNApplication *)buildAppWithHaltingMiddleware:(BOOL)useHalting
                                performanceLogging:(BOOL)performanceLogging
                                       environment:(NSString *)environment {
-  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+  return [self buildAppWithHaltingMiddleware:useHalting
+                          performanceLogging:performanceLogging
+                                 environment:environment
+                                 extraConfig:nil];
+}
+
+- (ALNApplication *)buildAppWithHaltingMiddleware:(BOOL)useHalting
+                               performanceLogging:(BOOL)performanceLogging
+                                      environment:(NSString *)environment
+                                      extraConfig:(NSDictionary *)extraConfig {
+  NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:@{
     @"environment" : environment ?: @"test",
     @"logFormat" : @"json",
     @"performanceLogging" : @(performanceLogging),
     @"host" : @"127.0.0.1",
     @"port" : @(3000),
   }];
+  [config addEntriesFromDictionary:extraConfig ?: @{}];
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
   [app registerRouteMethod:@"GET"
                       path:@"/dict"
                       name:@"dict"
@@ -1231,6 +1243,40 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertNotNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
 }
 
+// Issue 215: stage timing can stay in the logs while the timing headers, a
+// client-visible timing oracle, are off.
+- (void)testPerformanceHeadersCanBeDisabledWhileLoggingStaysOn_Issue215 {
+  ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                         performanceLogging:YES
+                                                environment:@"test"
+                                                extraConfig:@{ @"performanceHeaders" : @NO }];
+  ALNRequest *request = [self requestForPath:@"/dict" queryString:@"" headers:@{}];
+  request.parseDurationMilliseconds = 12.0;
+  ALNResponse *response = [app dispatchRequest:request];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertNil([response headerForName:@"X-Arlen-Total-Ms"]);
+  XCTAssertNil([response headerForName:@"X-Mojo-Total-Ms"]);
+  XCTAssertNil([response headerForName:@"X-Arlen-Parse-Ms"]);
+  XCTAssertNil([response headerForName:@"X-Arlen-Response-Write-Ms"]);
+}
+
+// Issue 215: only development and test show the detailed exception page;
+// staging and other environments get the production error response.
+- (void)testNonDevelopmentEnvironmentsDoNotShowTheDevelopmentExceptionPage_Issue215 {
+  for (NSString *environment in @[ @"staging", @"preview", @"prod" ]) {
+    ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                           performanceLogging:NO
+                                                  environment:environment];
+    ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/explode"
+                                                           queryString:@""
+                                                               headers:@{ @"accept" : @"text/html" }]];
+    XCTAssertEqual((NSInteger)500, response.statusCode, @"%@", environment);
+    NSString *body = [[NSString alloc] initWithData:response.bodyData encoding:NSUTF8StringEncoding];
+    XCTAssertFalse([body containsString:@"Arlen Development Exception"], @"%@: %@", environment, body);
+    XCTAssertFalse([body containsString:@"AppJSONControllerException"], @"%@: %@", environment, body);
+  }
+}
+
 - (void)testMetricsCanBeDisabledByConfig {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
@@ -1725,6 +1771,50 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
           : @{};
   XCTAssertEqualObjects(@"nominal", readyQuorumCheck[@"status"]);
   XCTAssertEqualObjects(@(YES), readyQuorumCheck[@"ok"]);
+}
+
+- (void)testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted {
+  ALNApplication *open = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"logFormat" : @"json" }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    XCTAssertEqual((NSInteger)200, [open dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+
+  ALNApplication *tokenApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityToken" : @"scrape-secret" },
+  }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    ALNResponse *missing = [tokenApp dispatchRequest:[self requestForPath:path]];
+    XCTAssertEqual((NSInteger)401, missing.statusCode, @"%@", path);
+    XCTAssertEqualObjects(@"Bearer", [missing headerForName:@"WWW-Authenticate"]);
+    ALNResponse *wrong = [tokenApp dispatchRequest:[self requestForPath:path
+                                                            queryString:@""
+                                                                headers:@{ @"authorization" : @"Bearer nope" }]];
+    XCTAssertEqual((NSInteger)401, wrong.statusCode, @"%@", path);
+    ALNResponse *right = [tokenApp dispatchRequest:[self requestForPath:path
+                                                            queryString:@""
+                                                                headers:@{ @"authorization" : @"Bearer scrape-secret" }]];
+    XCTAssertEqual((NSInteger)200, right.statusCode, @"%@", path);
+  }
+  XCTAssertEqual((NSInteger)200, [tokenApp dispatchRequest:[self requestForPath:@"/healthz"]].statusCode);
+
+  ALNApplication *loopbackApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityLoopbackOnly" : @YES },
+  }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    ALNRequest *remote = [self requestForPath:path];
+    remote.remoteAddress = @"203.0.113.5";
+    XCTAssertEqual((NSInteger)403, [loopbackApp dispatchRequest:remote].statusCode, @"%@", path);
+    ALNRequest *local = [self requestForPath:path];
+    local.remoteAddress = @"127.0.0.1";
+    XCTAssertEqual((NSInteger)200, [loopbackApp dispatchRequest:local].statusCode, @"%@", path);
+    ALNRequest *proxied = [self requestForPath:path queryString:@"" headers:@{ @"x-forwarded-for" : @"203.0.113.5" }];
+    proxied.remoteAddress = @"127.0.0.1";
+    XCTAssertEqual((NSInteger)403, [loopbackApp dispatchRequest:proxied].statusCode, @"%@", path);
+  }
 }
 
 - (void)testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix {

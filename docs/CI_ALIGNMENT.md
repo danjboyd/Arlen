@@ -174,6 +174,21 @@ The current runner contract standardizes the intended platform-runner path:
 
 This provisioning work does not change branch protection by itself.
 
+### Per-job temp directory on self-hosted Linux runners
+
+Every job on the self-hosted `iep-apt` runner (linux-quality, both
+linux-sanitizers jobs, docs-quality, release-certification and
+`release-assets / source-archive`) starts with a "Use a per-job temp
+directory" step. It points `TMPDIR`, `TMP` and `TEMP` at `$RUNNER_TEMP/tmp`.
+On Linux, GNUstep's `NSTemporaryDirectory()` reads `TEMP`/`TMP`, not
+`TMPDIR`, so all three are set. The runner's `/tmp` is a 2 GB tmpfs shared
+by every job. Test temp directories that leaked there over several weeks
+(about 22k entries, 1.4 GB by 2026-10-16) left too little room for the eight
+concurrent 20 MiB uploads in
+`testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends`, which failed with
+500s. `$RUNNER_TEMP` is on disk, and the runner empties it between jobs. New
+self-hosted Linux jobs should include the same step.
+
 ## Public-Release Confidence
 
 adds a public-surface contract and service-free acceptance suite:
@@ -210,8 +225,13 @@ never runs on pull requests, so it is not a merge-gate lane.
 `linux-quality` runs `tools/ci/test_release_packaging.py`. It checks the
 source archive's layout (one top directory, `.arlen-dist`, vendored
 `tools-xctest`, no `.git` and no `gnustep-cli-new`) and the managed-toolchain
-`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. This is a step
-inside the existing job, so no required check names change.
+`LD_LIBRARY_PATH` handling in `tools/source_gnustep_env.sh`. It also runs
+`tools/deploy/build_release.sh` against a stub framework from a shell that
+never sourced GNUstep.sh. It checks that the script sources the env before
+`make` and packages the binary of an app that has no `src/main.m` (#181). No
+PR lane runs the real `smoke_release.sh` on Linux, so this check is the PR-time
+guard for the path `release-certification` uses. This is a step inside the
+existing job, so no required check names change.
 
 Linux has no prebuilt archive. The framework's build-flags sentinel hashes
 absolute toolchain paths, and gnustep-cli managed toolchains live under each

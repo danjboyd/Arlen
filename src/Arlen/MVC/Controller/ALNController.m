@@ -1,5 +1,7 @@
 #import "ALNController.h"
 
+#import <stdlib.h>
+
 #import "ALNApplication.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
@@ -1027,6 +1029,17 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
                                }];
     }
     return NO;
+  }
+  // A reconnecting EventSource sends the last id it saw, the stream sequence
+  // (GitHub issue 240). An explicit cursor wins.
+  if (sequence == nil) {
+    NSString *lastEventID = [[self.context.request headerValueForName:@"last-event-id"]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+    if ([lastEventID length] > 0 && [lastEventID length] <= 19 &&
+        [lastEventID rangeOfCharacterFromSet:nonDigits].location == NSNotFound) {
+      sequence = @((NSUInteger)strtoull([lastEventID UTF8String], NULL, 10));
+    }
   }
   if (![application authorizeEventStreamSubscribeToStream:streamID context:self.context error:error] ||
       ![application authorizeEventStreamReplayOfStream:streamID

@@ -563,7 +563,8 @@ def parse_public_header_list(repo_root: Path) -> List[Path]:
                 seen.add(candidate)
                 resolved.append(candidate)
 
-    return sorted(resolved)
+    # as_posix: WindowsPath compares case-insensitively, POSIX paths do not.
+    return sorted(resolved, key=lambda path: path.as_posix())
 
 
 def read_statement(lines: List[str], start_index: int) -> Tuple[str, int]:
@@ -743,7 +744,7 @@ def write_symbol_page(symbol: SymbolDoc, output_dir: Path, metadata: Dict[str, D
             )
 
     destination = output_dir / f"{symbol.name}.md"
-    destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    destination.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def write_index(
@@ -824,7 +825,7 @@ def write_index(
         rel = header.relative_to(repo_root).as_posix()
         lines.append(f"- `{rel}`")
 
-    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    index_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 def main() -> int:

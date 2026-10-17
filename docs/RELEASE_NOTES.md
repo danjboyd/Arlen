@@ -49,9 +49,321 @@
   nested under the current directory on every platform.
 - `make` parses faster: module template paths no longer spawn a shell per
   template (about 0.3 s per invocation on Linux, about 15 s on Windows).
+- `arlen config` now prints secret values as `[redacted]`, in both text and
+  `--json` output. A string is redacted when its key contains `secret`,
+  `password`, `token`, `apiKey` or `connectionString` (for example
+  `session.secret` and `database.connectionString`), and passwords inside
+  URLs and DSNs (`postgres://user:pass@host`, `password=...`) are masked. The
+  JSON shape is unchanged. Pass `--show-secrets` to print the real values;
+  `propane` now does, since it reads its settings from `arlen config --json`
+  (#225).
+
+- Release activation and rollback now swap `releases/current` atomically. They
+  used `ln -sfn`, which removes the old link before creating the new one, so a
+  service restart or `propane` respawn in that window could find
+  `releases/current` missing and fail to start. The new link is now created
+  under a temporary name and renamed over `current` (`mv -T` with GNU
+  coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
+
+- propane's file-descriptor pressure check no longer stalls the manager
+  loop (#222). It counts a worker's descriptors with a shell glob, and it
+  builds the per-target breakdown only when it is about to log a warning or
+  retire the worker, using one `find` instead of one `readlink` per
+  descriptor. That breakdown went from about 1.5 s to under 10 ms for a
+  worker with 2000 descriptors. Before, the check ran for every worker every
+  15 s whether or not anything was logged, and the manager couldn't reap,
+  respawn or handle signals while it ran.
+
+- WebSocket sessions no longer drop an idle receive-only client after
+  `connectionTimeoutSeconds` (about 30 s) without a close frame. After
+  `runtimeLimits.webSocketPingIntervalSeconds` (default 25) without a frame the
+  server pings, and closes with 1001 a client that stays silent for another
+  interval (#239).
+- WebSocket frames follow RFC 6455 more closely (#214): control frames must be
+  unfragmented and at most 125 bytes, nonzero RSV bits and reserved opcodes are
+  rejected (all close with 1002), fragmented messages are reassembled up to the
+  1 MiB message limit (1009 above it) instead of dropping the connection,
+  invalid UTF-8 text closes with 1007 instead of becoming an empty message, the
+  peer's close code is echoed, and payload buffers grow as bytes arrive
+  instead of being allocated from the frame header.
+
+- Request-path performance and robustness (#218, #247, #265, #270):
+  - Multipart parsing is about 20x faster. Header-name and boundary checks use
+    precomputed tables instead of rebuilding a GNUstep `NSCharacterSet` and
+    its `-invertedSet` for every header line, and quoted parameter values are
+    no longer built with `appendFormat:` per character. A 128-part form went
+    from about 19 ms to under 1 ms to parse.
+  - File responses format `Last-Modified` and `Date` with `gmtime` and fixed
+    tables, and parse `If-Modified-Since` / `If-Unmodified-Since` /
+    `If-Range` IMF-fixdates without building an `NSDateFormatter`. Two ICU
+    formatters per static response were about 40% of static-file CPU. The
+    obsolete RFC 850 and asctime forms are still accepted.
+  - MSSQL text columns use the length the ODBC driver reports, so a value
+    with an embedded NUL is no longer truncated.
+  - The framework's demo `boomhauer` JSON endpoints (`/api/echo/:name` and
+    others) escape route parameters. A quote or backslash in the path used
+    to break out of the JSON string.
+
+- Data layer fixes (#230, #231, #232, #237, #238):
+  - `withTransaction` (and `commitTransaction:`) now fails when a statement
+    inside the block had already aborted the transaction. PostgreSQL turns
+    that `COMMIT` into a `ROLLBACK`, and Arlen used to report success while
+    every write in the block was discarded. The transaction is rolled back
+    and an error is returned.
+  - The MSSQL dialect binds parameters in the order the `?` placeholders
+    appear. A trusted expression that reorders or repeats `$N` used to bind
+    the wrong values, or too few. A `$N` with no matching parameter is now a
+    compile error.
+  - `executeBuilderQuery` costs about 2.6x less per call. Query diagnostics
+    events are only built when a listener or stderr output wants them, and
+    the compile signature no longer triggers six caught KVC exceptions per
+    query on a plain `ALNSQLBuilder`.
+  - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` works on
+    PostgreSQL again: the view inventory query ordered by the reserved word
+    `table`, so ORM codegen metadata came back nil.
+  - Read-after-write stickiness drops expired scopes as the map grows, so
+    scopes that write and never read again no longer stay in memory forever.
+
+- Event streams: SSE and websocket stream sessions subscribe before they
+  replay and hold live events until the replay is sent. Events committed while
+  a client connected were lost before, and concurrent appends could arrive out
+  of order; appends now publish in commit order. Live events queue per session
+  (up to 1024) and go out from the session's own thread, so a slow client no
+  longer holds up appenders; a client that falls 1024 events behind is
+  disconnected and resumes from its cursor. SSE `id:` is the stream sequence
+  (it was the `event_id`), and `renderSSEStream:` resumes from a
+  `Last-Event-ID` header when given no cursor (#240).
+- `ALNInMemoryEventStreamStore` keeps at most `maxEventsPerStream` events per
+  stream (default 10000) and optionally none older than `maxEventAgeSeconds`;
+  it kept every event before. Replays start at the cursor instead of scanning
+  the stream, and a cursor older than the oldest kept event gets
+  `resync_required` (#242).
+
+- HTTP request handling follows RFC 9110/9112 more closely (#211, #212, #213,
+  #253):
+  - Chunk-size lines no longer count toward `maxHeaderBytes`. A chunked body
+    sent as many small chunks used to get `431`.
+  - `Expect: 100-continue` gets an interim `100 Continue`. Clients such as curl
+    used to wait about a second before sending the body. Other expectations
+    get `417`.
+  - An HTTP/1.1 request with two `Host` headers, or none, gets `400`. Before,
+    the last `Host` won and a missing one was accepted. Clients that send
+    HTTP/1.1 without `Host` must add it.
+  - An absolute-form target (`GET http://host/path`) is routed by its path,
+    and its authority becomes the `Host`. It used to return `404`.
+  - `400`, `408`, `413`, `417` and `431` responses written before the
+    application runs now carry the configured security headers.
+  - The configuration reference now says that the default parser accepts
+    chunked request bodies; it used to say they were rejected.
+
+- Production defaults are tighter (#215, #244):
+  - `performanceLogging` now defaults to off in `production`. A new
+    `performanceHeaders` setting (`ARLEN_PERFORMANCE_HEADERS`), also off in
+    `production`, controls the `X-Arlen-*-Ms` and `X-Mojo-Total-Ms` timing
+    headers separately from the log. With both on, production paid about twice
+    the CPU per request and every client got a timing oracle.
+  - `arlen new` no longer writes `session.secure = NO` or
+    `openapi.docsUIEnabled = YES` into the base `config/app.plist`, so
+    production gets `Secure` session cookies and no OpenAPI explorer. Existing
+    apps keep those keys until you remove them.
+  - The detailed exception page appears only in `development` and `test`;
+    `staging` and other environments now get the production error response.
+- Accepted connections set `TCP_NODELAY`. File responses (static mounts and
+  `renderFileAtPath:`) on a keep-alive connection waited about 40 ms each for
+  the client's delayed ACK, capping one connection at about 22 file responses
+  per second (#243).
+
+- A job handler that raises an exception no longer escapes `ALNJobWorker`.
+  Before, a throwing ("poison") job stopped the worker run, skipped the jobs
+  after it, and with the in-memory adapter stayed leased forever. The exception
+  now counts as a failed attempt: the job is retried with the usual delay and
+  dead-lettered after `maxAttempts` (#241).
+
+- Static mounts no longer serve hidden files. Any path component starting with
+  `.` returns 404 (`/static/.secret.json`, `/static/.git/config.json`), except
+  `.well-known/`. Before, `arlen new` apps served such files from `public/` in
+  every environment whenever their extension was allowed (#219).
+
+- `ALNPg` decodes `date`, `timestamp` and `timestamptz` values, and encodes
+  `NSDate` parameters, with integer date arithmetic. It no longer creates an
+  `NSCalendar` for each value it decodes or an `NSDateFormatter`, `NSCalendar`
+  and `NSLocale` for each `NSDate` parameter. Decoding 300k timestamps is
+  about 7x faster, and an `NSDate` parameter now costs close to what a
+  string parameter does. Results for years 1583 through 9999 are unchanged. Earlier dates now
+  use the proleptic Gregorian calendar, as PostgreSQL does. Before, they were
+  decoded on the Julian calendar, which shifted them by up to 10 days from the
+  stored value, and dates from 1582-10-05 through 1582-10-14 failed to decode.
+  An `NSDate` before year 1 is now sent with PostgreSQL's ` BC` suffix
+  instead of as the matching AD year. `infinity`, `-infinity` and BC values
+  still fail to decode, as before (#233).
+
+- `ALNPg` encodes and decodes `bytea` hex text through a lookup table over C
+  buffers, and decodes `bytea` columns straight from libpq's result buffer.
+  A 4 MiB value now takes about 0.03 s to insert and 0.01 s to select, down
+  from about 0.5 s and 0.75 s. The hex text format is unchanged. Hex text
+  with whitespace between digits is now rejected like any other non-hex
+  character (#234).
+
+- The `ALNPg` pool runs its `SELECT 1` liveness probe only on connections
+  that have been idle for at least `connectionLivenessCheckIdleThreshold`
+  seconds (default `30`). Before, it ran on every reuse, which added a round
+  trip to every pooled statement. Every reused connection still gets libpq's
+  free connection status check. Set the threshold to `0` to probe on every
+  reuse as before (#236).
+
+- `ALNRedisCacheAdapter` keeps up to four idle connections per adapter and
+  reuses them across commands and worker threads. `AUTH` and `SELECT` run once
+  per connection. Before, every cache command opened a new TCP connection, ran
+  `AUTH` and `SELECT`, and closed it, so each cache access paid a TCP handshake
+  and up to three round trips and left a socket in `TIME_WAIT`. A connection
+  that fails is closed rather than reused, and a command that fails on a
+  pooled connection the server has dropped is retried once on a new
+  connection (#223).
+
+- `ALNRedisCacheAdapter` now stores cache entries without a TTL on macOS.
+  Their record held `NSNull`, which Apple's property-list writer rejects, so
+  `setObject:forKey:ttlSeconds:0` failed there (#223).
+
+- The Redis reply parser bounds what it accepts: replies may nest at most 8
+  arrays deep, bulk replies may be at most 512 MiB, and arrays at most 16Mi
+  elements. Bulk replies are read in 64 KiB chunks and arrays grow as elements
+  arrive, so a declared size no longer allocates memory up front. A reply
+  outside these bounds fails the command with an `NSError`. Before, a deeply
+  nested reply overflowed the stack and a huge declared bulk length
+  allocated it in full (#224).
+
+- The WebAuthn CBOR parser rejects array, map, byte-string and text-string
+  lengths that exceed the remaining input, and no longer uses a declared
+  count as a capacity hint. Before, a short `attestationObject` declaring a
+  huge count or length raised an exception in
+  `verifyRegistrationResponse:expectedOptions:error:` instead of returning
+  `ALNWebAuthnErrorMalformedCBOR` (#229).
+
+- The vendored cmark-gfm `autolink.c` picks up upstream commit `4682993`,
+  which computes the offset of the character before a `mailto:` or `xmpp:`
+  autolink with signed arithmetic. The old expression wrapped the pointer, which
+  is undefined behaviour (UBSan reported it for input such as `<xmpp:@`), even
+  though the byte read was correct (#254).
+
+- EOC `<%= %>` escaping is much faster. `ALNEOCEscapeHTMLString` used to
+  append each ordinary character with a format call; it now copies runs of
+  characters, returns the input unchanged when there is nothing to escape, and
+  `<%= %>` output is escaped straight into the page buffer. Output is
+  unchanged: `& < > " '` are escaped exactly as before. On a 90,000-character
+  string it is about 50 times faster (#216).
+
+- New `ALNEOCJSONForScript(value)` helper for putting JSON inside an inline
+  `<script>` element with `<%== %>`. It writes `<`, `>`, `&`, U+2028 and
+  U+2029 as `\u` escapes, so a string value such as `</script>` cannot end
+  the script element. See EOC Guide section 5.4 (#217).
+
+- EOC collection rendering
+  (`<%@ render "partials/_row" collection:$rows as:"row" %>`) now looks up
+  the partial and builds the shared locals overlay once per collection
+  instead of once per item, so long lists no longer take the global template
+  registry lock for every row. Output and errors are unchanged (#246).
+- `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
+  health probe and, if propane's workers cannot bind it, retries on a new port
+  (up to three attempts). The health probe's `curl` now times out after two
+  seconds, so a stray listener on the probe port can no longer hang the smoke
+  run. `DeploymentIntegrationTests` uses `--port 0`; it used to pick a port
+  minutes before propane started and never checked the second probe port, so
+  CI occasionally failed with `bind: Address already in use` (#170).
+
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
+
+- `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
+  GNUstep.sh. On Linux it and `smoke_release.sh` source
+  `tools/source_gnustep_env.sh` before they build and run binaries. Before,
+  the freshly built `eocc` couldn't load `libgnustep-base` and the build
+  stopped. `build_release.sh` also uses the same test as `propane` to decide
+  whether an app has sources, so an app with sources but no `src/main.m` now
+  ships its binary. Before, `propane` tried to rebuild that app from the
+  release, which it can't do. Together these kept the `release-certification`
+  workflow from ever passing (#181).
+
+- `arlen typescript-codegen --target client,react` works for apps that
+  don't use the ORM. Before, it always read `--orm-input` and required at
+  least one ORM descriptor, even though the client and React targets only
+  use the OpenAPI document. Now a missing default manifest is skipped for
+  `client`, `react` and `meta`, and the package is generated from
+  `--openapi-input` alone. `models`, `validators`, `query` and `all` still
+  require descriptors, and an explicit `--orm-input` path must exist (#183).
+
+- Idle keep-alive connections no longer hold HTTP workers. Before, each open
+  keep-alive connection held one of the 8 default workers until its next
+  request or the 30-second `connectionTimeoutSeconds`. A browser holds about
+  six connections per site, so a page reload could wait up to 30 seconds.
+  Now a worker hands an idle connection to a watcher thread after
+  `runtimeLimits.keepAliveParkAfterMilliseconds` (default 5), and picks it up
+  again when the next request arrives. `docs/CONFIGURATION_REFERENCE.md` now
+  documents `runtimeLimits` and notes that server-sent event and WebSocket
+  sessions still hold a worker while open (#187).
+
+- `arlen typescript-codegen` output compiles in two more cases (#184):
+  - Inferred ORM relations no longer reuse a column name on the same model. A
+    relation that would shadow a column gets a `Record` or `List` suffix, for
+    example `sectionRecord` or `notesList`. Explicit relation overrides that
+    collide fail with a clear error.
+  - `react.ts` query keys for operations without parameters name their
+    argument `_request`, so the package compiles under `noUnusedParameters`.
+
+- JSON that Arlen writes with sorted keys is now actually sorted, on both
+  Linux and macOS. This covers `typescript-codegen` package files, `eocc`
+  manifests, schema-drift and Dataverse codegen output, and `arlen` JSON
+  reports. A `#ifdef NSJSONWritingSortedKeys` guard was always false
+  because both Foundations declare the option as an enum constant, so
+  output used dictionary hash order and differed between platforms.
+
+- The `mcp` module has an explicit local-development identity,
+  `mcp.development.trustLoopback`. It applies only to loopback requests with no
+  credentials, `Origin` or proxy-forwarding headers, and is refused outside
+  development/test, on a non-loopback host, or with `mcp.oauth`. The MCP docs
+  now explain that app identity middleware must be registered from a plugin
+  to run before the module (#185). `mcp` moves to `1.0.4`.
+
+- The `search` module bounds the cost of a query. `q` longer than 256
+  characters is rejected with `422` (`ALNSearchModuleErrorValidationFailed`)
+  instead of being processed. "Did you mean" suggestions are skipped for
+  queries over 64 characters, and `autocomplete_limit`/`suggestions_limit`
+  are clamped to 25. The default engine's fuzzy matching builds the query's
+  trigram set once per query, uses a plain C buffer for edit distance, and
+  skips the edit-distance table when word lengths differ by more than two.
+  Results for other queries are unchanged (#226). `search` moves to `1.0.3`.
+
+- The `notifications` module caps its outbox (`outbox.maxEntries`, default
+  1000) and each recipient's inbox (`inbox.maxEntriesPerRecipient`, default
+  200); past the cap the oldest entries are dropped, including when a larger
+  state file is loaded. The inbox (`GET /notifications/api/inbox`,
+  `GET /notifications/inbox`, and the new
+  `-inboxSummaryForRecipient:limit:offset:`) accepts `limit` and `offset` and
+  returns a `pagination` object; without `limit` it still returns the whole
+  (now bounded) inbox. Preference updates for an unregistered notification or
+  an unknown channel are rejected with `422` instead of being stored. How and
+  when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
+
+- Module hardening (#228):
+  - `/metrics` and `/clusterz` can be restricted with
+    `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` (require
+    `Authorization: Bearer <token>`) and
+    `observability.operabilityLoopbackOnly` /
+    `ARLEN_OPERABILITY_LOOPBACK_ONLY` (direct loopback requests only). Both
+    stay anonymous by default; `arlen doctor --env production` now warns
+    while they are.
+  - MCP `tools/list` only lists tools whose required roles and scopes the
+    caller holds. `tools/call` still enforces every route check. `mcp` moves
+    to `1.0.5`.
+  - Local-password login verifies a throwaway Argon2id hash when the email
+    is unknown, so response time no longer shows whether an account exists.
+    `auth` moves to `1.5.2`.
+  - The notifications HTML inbox links an entry's `href`/`path` only when it
+    is an `http`/`https` URL or a same-origin relative path; other values
+    render without a link.
+  - PostgreSQL search autocomplete escapes `%`, `_` and `\` in the query
+    and uses `LIKE ... ESCAPE '\'`, so `q=%` no longer matches every
+    document.
 
 ## 0.2.1 — 2026-10-15
 

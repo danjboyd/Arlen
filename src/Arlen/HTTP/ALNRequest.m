@@ -358,6 +358,43 @@ static NSDictionary *ALNParseCookies(NSString *cookieHeader) {
   return cookies;
 }
 
+// RFC 9112 §3.2.2: a server must accept an absolute-form target
+// (`GET http://host/path`). Splits off the scheme and authority, leaving the
+// origin-form path, and returns the authority, which replaces Host (#213).
+static NSString *ALNTakeAbsoluteFormAuthority(NSString **pathInOut) {
+  NSString *path = (pathInOut != NULL) ? *pathInOut : nil;
+  if (![path isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSUInteger schemeLength = 0;
+  if ([path length] >= 7 && [[path substringToIndex:7] caseInsensitiveCompare:@"http://"] == NSOrderedSame) {
+    schemeLength = 7;
+  } else if ([path length] >= 8 &&
+             [[path substringToIndex:8] caseInsensitiveCompare:@"https://"] == NSOrderedSame) {
+    schemeLength = 8;
+  } else {
+    return nil;
+  }
+  NSString *rest = [path substringFromIndex:schemeLength];
+  NSRange slash = [rest rangeOfString:@"/"];
+  NSString *authority = (slash.location == NSNotFound) ? rest : [rest substringToIndex:slash.location];
+  *pathInOut = (slash.location == NSNotFound) ? @"/" : [rest substringFromIndex:slash.location];
+  return authority;
+}
+
+// RFC 9112 §3.2: an HTTP/1.1 request must carry exactly one Host header
+// (an absolute-form target supplies the authority instead). Requests with
+// several, or HTTP/1.1 requests with none, get 400 (#213).
+static BOOL ALNHostHeaderCountIsValid(NSUInteger hostHeaderCount, NSString *httpVersion, NSString *authority) {
+  if (hostHeaderCount > 1) {
+    return NO;
+  }
+  if (hostHeaderCount == 0 && authority == nil && [httpVersion isEqualToString:@"HTTP/1.1"]) {
+    return NO;
+  }
+  return YES;
+}
+
 static void ALNSplitURI(NSString *uri, NSString **pathOut, NSString **queryOut) {
   NSString *path = [uri isKindOfClass:[NSString class]] ? uri : @"";
   NSString *query = @"";
@@ -429,6 +466,7 @@ NSMutableData *_headerValueData;
 	NSString *_errorMessage;
 	BOOL _headersComplete;
 	BOOL _messageComplete;
+	NSUInteger _hostHeaderCount;
 }
 
 - (void)resetForNextParse;
@@ -459,6 +497,7 @@ NSMutableData *_headerValueData;
     _errorMessage = @"";
     _headersComplete = NO;
     _messageComplete = NO;
+    _hostHeaderCount = 0;
   }
   return self;
 }
@@ -483,6 +522,7 @@ NSMutableData *_headerValueData;
   _errorMessage = @"";
   _headersComplete = NO;
   _messageComplete = NO;
+  _hostHeaderCount = 0;
 }
 
 @end
@@ -818,6 +858,9 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
                            &fieldByteLength);
   ALNLLHTTPTrimOWS(&fieldBytes, &fieldByteLength);
   NSString *hotKey = ALNLLHTTPHotHeaderKey(fieldBytes, fieldByteLength);
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(fieldBytes, fieldByteLength, "host")) {
+    state->_hostHeaderCount += 1;
+  }
   if (!ALNLLHTTPHeaderNameBytesAreASCII(fieldBytes, fieldByteLength)) {
     return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
   }
@@ -1195,9 +1238,11 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
   NSString *path = nil;
   NSString *query = nil;
   ALNSplitURI(uri, &path, &query);
+  NSString *authority = ALNTakeAbsoluteFormAuthority(&path);
 
   NSMutableDictionary *headers = [NSMutableDictionary dictionary];
   BOOL sawContentLength = NO;
+  NSUInteger hostHeaderCount = 0;
   for (NSUInteger idx = 1; idx < [lines count]; idx++) {
     NSString *line = lines[idx];
     if ([line length] == 0) {
@@ -1229,8 +1274,19 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
         *error = ALNRequestError(3, @"Unsupported Transfer-Encoding header");
       }
       return nil;
+    } else if ([name isEqualToString:@"host"]) {
+      hostHeaderCount += 1;
     }
     headers[name] = value;
+  }
+  if (!ALNHostHeaderCountIsValid(hostHeaderCount, httpVersion, authority)) {
+    if (error != NULL) {
+      *error = ALNRequestError(3, (hostHeaderCount > 1) ? @"Duplicate Host header" : @"Missing Host header");
+    }
+    return nil;
+  }
+  if (authority != nil) {
+    headers[@"host"] = authority;
   }
 
   return [[ALNRequest alloc] initWithMethod:method
@@ -1342,6 +1398,17 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
       *error = ALNRequestError(1, @"Request header is not valid UTF-8");
     }
     return nil;
+  }
+  NSString *authority = ALNTakeAbsoluteFormAuthority(&path);
+  if (!ALNHostHeaderCountIsValid(state->_hostHeaderCount, httpVersion, authority)) {
+    if (error != NULL) {
+      *error = ALNRequestError(3, (state->_hostHeaderCount > 1) ? @"Duplicate Host header" : @"Missing Host header");
+    }
+    return nil;
+  }
+  if (authority != nil) {
+    // Hot and direct headers take precedence over the deferred ones.
+    state->_headers[@"host"] = authority;
   }
 
   NSData *body = ALNLLHTTPCopyDataFromSpan(state->_bodyStart, state->_bodyLength, state->_bodyData);
@@ -1759,14 +1826,16 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     return _headers ?: @{};
   }
 
-  NSMutableDictionary *materialized =
-      [NSMutableDictionary dictionaryWithDictionary:_headers ?: @{}];
+  NSDictionary *direct = _headers ?: @{};
+  NSMutableDictionary *materialized = [NSMutableDictionary dictionaryWithDictionary:direct];
   NSUInteger count =
       MIN([self.deferredHeaderNames count], [self.deferredHeaderValues count]);
   for (NSUInteger idx = 0; idx < count; idx++) {
     NSString *name = ALNDeferredHeaderName(self.deferredHeaderNames[idx],
                                            self.deferredHeaderSourceData);
-    if ([name length] == 0) {
+    // Direct headers win, as in headerValueForName: (an absolute-form target's
+    // authority replaces Host).
+    if ([name length] == 0 || direct[name] != nil) {
       continue;
     }
     NSString *value = ALNDeferredHeaderValue(self.deferredHeaderValues[idx],

@@ -23,4 +23,10 @@ FOUNDATION_EXPORT void ALNFileResponseApplyStat(ALNResponse *response,
 FOUNDATION_EXPORT NSArray *ALNStaticCacheControlRules(id config, NSString **reason);
 FOUNDATION_EXPORT NSString *ALNStaticCacheControlForPath(NSArray *rules, NSString *relativePath);
 
+// YES when a request path below a static mount names a hidden file or
+// directory: any component starting with "." (".env.json", ".git/config.json"),
+// splitting on "/" and "\" (a separator on Windows). ".well-known" (RFC 8615)
+// is the one public dot-directory and is not hidden.
+FOUNDATION_EXPORT BOOL ALNStaticRelativePathIsHidden(NSString *relativePath);
+
 #endif
