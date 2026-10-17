@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `arlen config` now prints secret values as `[redacted]`, in both text and
+  `--json` output. A string is redacted when its key contains `secret`,
+  `password`, `token`, `apiKey` or `connectionString` (for example
+  `session.secret` and `database.connectionString`), and passwords inside
+  URLs and DSNs (`postgres://user:pass@host`, `password=...`) are masked. The
+  JSON shape is unchanged. Pass `--show-secrets` to print the real values;
+  `propane` now does, since it reads its settings from `arlen config --json`
+  (#225).
+
+- Release activation and rollback now swap `releases/current` atomically. They
+  used `ln -sfn`, which removes the old link before creating the new one, so a
+  service restart or `propane` respawn in that window could find
+  `releases/current` missing and fail to start. The new link is now created
+  under a temporary name and renamed over `current` (`mv -T` with GNU
+  coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
+
 - `ALNPg` decodes `date`, `timestamp` and `timestamptz` values, and encodes
   `NSDate` parameters, with integer date arithmetic. It no longer creates an
   `NSCalendar` for each value it decodes or an `NSDateFormatter`, `NSCalendar`
