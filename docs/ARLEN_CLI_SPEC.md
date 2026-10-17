@@ -200,9 +200,11 @@ Behavior:
 
 - builds framework targets (`make all`)
 
-### 4.11 `arlen config [--env <name>] [--json]`
+### 4.11 `arlen config [--env <name>] [--json] [--show-secrets]`
 
 - prints merged runtime config for selected environment
+- redacts secret values (`secret`/`password`/`token`/`apiKey`/`connectionString`
+  keys, and passwords embedded in URLs/DSNs) unless `--show-secrets` is given
 
 ### 4.12 `arlen doctor [--env <name>] [--json]`
 
