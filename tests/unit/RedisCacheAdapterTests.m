@@ -348,6 +348,67 @@ static NSData *ALNFakeRedisASCII(NSString *text) {
   return adapter;
 }
 
+// Frames payload as a RESP bulk-string reply.
+static NSData *ALNTestRedisBulkReply(NSData *payload) {
+  NSMutableData *reply = [[[NSString stringWithFormat:@"$%lu\r\n", (unsigned long)[payload length]]
+      dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+  [reply appendData:payload];
+  [reply appendBytes:"\r\n" length:2];
+  return reply;
+}
+
+static void ALNTestAppendBigEndian(NSMutableData *data, uint64_t value, NSUInteger width) {
+  for (NSUInteger idx = 0; idx < width; idx++) {
+    uint8_t byte = (uint8_t)(value >> (8 * (width - 1 - idx)));
+    [data appendBytes:&byte length:1];
+  }
+}
+
+// A binary plist array object (4-byte object refs).
+static NSData *ALNTestPlistArray(NSArray<NSNumber *> *refs) {
+  NSMutableData *object = [NSMutableData data];
+  if ([refs count] < 15) {
+    uint8_t marker = (uint8_t)(0xA0 | [refs count]);
+    [object appendBytes:&marker length:1];
+  } else {
+    uint8_t marker[2] = {0xAF, 0x12};
+    [object appendBytes:marker length:2];
+    ALNTestAppendBigEndian(object, [refs count], 4);
+  }
+  for (NSNumber *ref in refs) {
+    ALNTestAppendBigEndian(object, [ref unsignedLongLongValue], 4);
+  }
+  return object;
+}
+
+// A "bplist00" document from raw objects; object 0 is the top object.
+static NSData *ALNTestBinaryPlist(NSArray<NSData *> *objects) {
+  NSMutableData *plist = [[@"bplist00" dataUsingEncoding:NSASCIIStringEncoding] mutableCopy];
+  NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
+  for (NSData *object in objects) {
+    [offsets addObject:@([plist length])];
+    [plist appendData:object];
+  }
+  uint64_t tableOffset = [plist length];
+  for (NSNumber *offset in offsets) {
+    ALNTestAppendBigEndian(plist, [offset unsignedLongLongValue], 8);
+  }
+  uint8_t trailerHead[8] = {0, 0, 0, 0, 0, 0, 8, 4};
+  [plist appendBytes:trailerHead length:8];
+  ALNTestAppendBigEndian(plist, [objects count], 8);
+  ALNTestAppendBigEndian(plist, 0, 8);
+  ALNTestAppendBigEndian(plist, tableOffset, 8);
+  return plist;
+}
+
+static id ALNTestNestedArrays(NSUInteger levels) {
+  id value = @"leaf";
+  for (NSUInteger level = 0; level < levels; level++) {
+    value = @[ value ];
+  }
+  return value;
+}
+
 - (NSError *)errorForCannedGETReply:(NSData *)reply server:(ALNFakeRedisServer *)server {
   server.cannedGETReply = reply;
   ALNRedisCacheAdapter *adapter = [self adapterForServer:server database:0];
@@ -475,4 +536,72 @@ static NSData *ALNFakeRedisASCII(NSString *text) {
 #endif
 }
 
+
+- (void)testRedisCacheRejectsUnboundedOrForeignPlistPayloads {
+#if defined(_WIN32)
+  XCTSkip(@"fake Redis server uses POSIX sockets");
+#else
+  ALNFakeRedisServer *server = [self startedServer];
+  uint8_t intLeaf[2] = {0x10, 0x01};
+  NSData *leaf = [NSData dataWithBytes:intLeaf length:2];
+
+  // 100,000 nested arrays: Foundation's parser would recurse once per level.
+  NSMutableArray<NSData *> *chain = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 100000; index++) {
+    [chain addObject:ALNTestPlistArray(@[ @(index + 1) ])];
+  }
+  [chain addObject:leaf];
+  NSError *error = [self errorForCannedGETReply:ALNTestRedisBulkReply(ALNTestBinaryPlist(chain)) server:server];
+  XCTAssertEqual((NSInteger)2235, error.code);
+
+  // An array that contains itself.
+  error = [self errorForCannedGETReply:ALNTestRedisBulkReply(ALNTestBinaryPlist(@[ ALNTestPlistArray(@[ @0 ]) ]))
+                                server:server];
+  XCTAssertEqual((NSInteger)2235, error.code);
+
+  // 60 levels that each reference the next twice: shallow enough, but it
+  // expands to 2^60 objects.
+  NSMutableArray<NSData *> *shared = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 60; index++) {
+    [shared addObject:ALNTestPlistArray(@[ @(index + 1), @(index + 1) ])];
+  }
+  [shared addObject:leaf];
+  NSDate *started = [NSDate date];
+  error = [self errorForCannedGETReply:ALNTestRedisBulkReply(ALNTestBinaryPlist(shared)) server:server];
+  XCTAssertEqual((NSInteger)2235, error.code);
+  XCTAssertLessThan(-[started timeIntervalSinceNow], 5.0);
+
+  // A well-formed record in a format the adapter never writes.
+  NSData *xml = [NSPropertyListSerialization dataWithPropertyList:@{ @"value" : @"x" }
+                                                           format:NSPropertyListXMLFormat_v1_0
+                                                          options:0
+                                                            error:NULL];
+  error = [self errorForCannedGETReply:ALNTestRedisBulkReply(xml) server:server];
+  XCTAssertEqual((NSInteger)2235, error.code);
+  server.cannedGETReply = nil;
+
+  // Values the adapter wrote itself still round-trip, up to the depth limit
+  // (the record dictionary adds one level).
+  ALNRedisCacheAdapter *adapter = [self adapterForServer:server database:0];
+  id nested = ALNTestNestedArrays(60);
+  XCTAssertTrue([adapter setObject:nested forKey:@"nested" ttlSeconds:0 error:&error]);
+  error = nil;
+  XCTAssertEqualObjects(nested, [adapter objectForKey:@"nested" atTime:[NSDate date] error:&error]);
+  XCTAssertNil(error);
+
+  NSMutableArray *wide = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 5000; index++) {
+    [wide addObject:@{ @"name" : @"same", @"tags" : @[ @"a", @"b" ] }];
+  }
+  XCTAssertTrue([adapter setObject:wide forKey:@"wide" ttlSeconds:0 error:&error]);
+  error = nil;
+  XCTAssertEqualObjects(wide, [adapter objectForKey:@"wide" atTime:[NSDate date] error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertTrue([adapter setObject:ALNTestNestedArrays(70) forKey:@"too-deep" ttlSeconds:0 error:&error]);
+  error = nil;
+  XCTAssertNil([adapter objectForKey:@"too-deep" atTime:[NSDate date] error:&error]);
+  XCTAssertEqual((NSInteger)2235, error.code);
+#endif
+}
 @end

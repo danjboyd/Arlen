@@ -1989,6 +1989,215 @@ static NSError *ALNRedisClientError(NSInteger code, NSString *message, NSError *
   return ALNServiceError(code, message, underlying);
 }
 
+// Cached records are binary property lists written by this adapter. A GET
+// reply comes from the network, so before handing it to Foundation (whose
+// plist parsers recurse without a depth limit) check that it is a well-formed
+// "bplist00" document with no reference cycles, whose containers nest at most
+// ALNRedisMaxRecordDepth deep, and which does not expand (by sharing one
+// container under many parents) into far more objects than its size allows.
+// The walk is iterative and visits each object once, so its own cost is
+// linear in the payload.
+enum { ALNRedisMaxRecordDepth = 64 };
+
+typedef struct {
+  NSUInteger refStart;
+  uint64_t refCount;
+  uint64_t nextRef;
+  uint64_t objectIndex;
+  uint8_t tallestChild;
+  uint64_t expandedCount;
+} ALNRedisPlistFrame;
+
+typedef struct {
+  const uint8_t *bytes;
+  NSUInteger length;
+  NSUInteger offsetIntSize;
+  NSUInteger objectRefSize;
+  uint64_t objectCount;
+  uint64_t offsetTableOffset;
+} ALNRedisPlistLayout;
+
+static BOOL ALNRedisReadBigEndian(const uint8_t *bytes,
+                                  NSUInteger length,
+                                  NSUInteger offset,
+                                  NSUInteger width,
+                                  uint64_t *valueOut) {
+  if (width == 0 || width > 8 || offset > length || width > length - offset) {
+    return NO;
+  }
+  uint64_t value = 0;
+  for (NSUInteger idx = 0; idx < width; idx++) {
+    value = (value << 8) | bytes[offset + idx];
+  }
+  *valueOut = value;
+  return YES;
+}
+
+// Sets *isContainer, and for a container its reference range. Returns NO when
+// the object's offset or header is out of bounds.
+static BOOL ALNRedisPlistObjectRefs(const ALNRedisPlistLayout *layout,
+                                    uint64_t objectIndex,
+                                    BOOL *isContainer,
+                                    NSUInteger *refStartOut,
+                                    uint64_t *refCountOut) {
+  uint64_t objectOffset = 0;
+  NSUInteger tableEnd = (NSUInteger)layout->offsetTableOffset;
+  if (!ALNRedisReadBigEndian(layout->bytes,
+                             layout->length,
+                             tableEnd + (NSUInteger)objectIndex * layout->offsetIntSize,
+                             layout->offsetIntSize,
+                             &objectOffset) ||
+      objectOffset < 8 || objectOffset >= layout->offsetTableOffset) {
+    return NO;
+  }
+  uint8_t marker = layout->bytes[objectOffset];
+  uint8_t type = marker >> 4;
+  if (type != 0xA && type != 0xC && type != 0xD) {
+    *isContainer = NO;
+    return YES;
+  }
+  uint64_t count = marker & 0x0F;
+  NSUInteger cursor = (NSUInteger)objectOffset + 1;
+  if (count == 0x0F) {
+    if (cursor >= tableEnd || (layout->bytes[cursor] >> 4) != 0x1 || (layout->bytes[cursor] & 0x0F) > 3) {
+      return NO;
+    }
+    NSUInteger width = (NSUInteger)1 << (layout->bytes[cursor] & 0x0F);
+    if (!ALNRedisReadBigEndian(layout->bytes, tableEnd, cursor + 1, width, &count)) {
+      return NO;
+    }
+    cursor += 1 + width;
+  }
+  if (type == 0xD && count > UINT64_MAX / 2U) {
+    return NO;
+  }
+  uint64_t refCount = (type == 0xD) ? count * 2U : count;
+  if (cursor > tableEnd || refCount > (tableEnd - cursor) / layout->objectRefSize) {
+    return NO;
+  }
+  *isContainer = YES;
+  *refStartOut = cursor;
+  *refCountOut = refCount;
+  return YES;
+}
+
+static BOOL ALNRedisBinaryPlistIsBounded(NSData *payload) {
+  ALNRedisPlistLayout layout;
+  layout.bytes = [payload bytes];
+  layout.length = [payload length];
+  if (layout.length < 8 + 32 || memcmp(layout.bytes, "bplist00", 8) != 0) {
+    return NO;
+  }
+  NSUInteger trailer = layout.length - 32;
+  layout.offsetIntSize = layout.bytes[trailer + 6];
+  layout.objectRefSize = layout.bytes[trailer + 7];
+  uint64_t topObject = 0;
+  if (layout.offsetIntSize == 0 || layout.offsetIntSize > 8 || layout.objectRefSize == 0 ||
+      layout.objectRefSize > 8 ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 8, 8, &layout.objectCount) ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 16, 8, &topObject) ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 24, 8, &layout.offsetTableOffset)) {
+    return NO;
+  }
+  if (layout.objectCount == 0 || topObject >= layout.objectCount || layout.offsetTableOffset < 8 ||
+      layout.offsetTableOffset > trailer ||
+      layout.objectCount > (trailer - layout.offsetTableOffset) / layout.offsetIntSize) {
+    return NO;
+  }
+
+  // state: 0 unvisited, 1 on the current path, 2 done. height: containers
+  // nested at and below a finished object (leaves are 0). expanded: objects a
+  // finished container stands for once shared references are copied out.
+  // Writers only share leaves in practice, so a real record expands to at most
+  // about one object per payload byte.
+  uint64_t expansionLimit = (uint64_t)layout.length * 4U + 4096U;
+  NSMutableData *stateData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
+  NSMutableData *heightData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
+  NSMutableData *expandedData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount * sizeof(uint64_t)];
+  uint8_t *state = [stateData mutableBytes];
+  uint8_t *height = [heightData mutableBytes];
+  uint64_t *expanded = [expandedData mutableBytes];
+  ALNRedisPlistFrame path[ALNRedisMaxRecordDepth];
+  NSUInteger pathLength = 0;
+
+  BOOL isContainer = NO;
+  NSUInteger refStart = 0;
+  uint64_t refCount = 0;
+  if (!ALNRedisPlistObjectRefs(&layout, topObject, &isContainer, &refStart, &refCount)) {
+    return NO;
+  }
+  if (!isContainer) {
+    return YES;
+  }
+  state[topObject] = 1;
+  path[pathLength++] = (ALNRedisPlistFrame){refStart, refCount, 0, topObject, 0, 1};
+
+  while (pathLength > 0) {
+    ALNRedisPlistFrame *frame = &path[pathLength - 1];
+    if (frame->nextRef == frame->refCount) {
+      uint8_t finished = (uint8_t)(frame->tallestChild + 1U);
+      uint64_t finishedCount = frame->expandedCount;
+      state[frame->objectIndex] = 2;
+      height[frame->objectIndex] = finished;
+      expanded[frame->objectIndex] = finishedCount;
+      pathLength--;
+      if (pathLength > 0) {
+        ALNRedisPlistFrame *parent = &path[pathLength - 1];
+        if (finished > parent->tallestChild) {
+          parent->tallestChild = finished;
+        }
+        parent->expandedCount += finishedCount;
+        if (parent->expandedCount > expansionLimit) {
+          return NO;
+        }
+      }
+      continue;
+    }
+    uint64_t child = 0;
+    NSUInteger tableEnd = (NSUInteger)layout.offsetTableOffset;
+    if (!ALNRedisReadBigEndian(layout.bytes,
+                               tableEnd,
+                               frame->refStart + (NSUInteger)frame->nextRef * layout.objectRefSize,
+                               layout.objectRefSize,
+                               &child) ||
+        child >= layout.objectCount) {
+      return NO;
+    }
+    frame->nextRef++;
+    if (state[child] == 1) {
+      return NO;
+    }
+    if (state[child] == 2) {
+      if (height[child] > frame->tallestChild) {
+        frame->tallestChild = height[child];
+      }
+      frame->expandedCount += expanded[child];
+      if (pathLength + height[child] > ALNRedisMaxRecordDepth || frame->expandedCount > expansionLimit) {
+        return NO;
+      }
+      continue;
+    }
+    if (!ALNRedisPlistObjectRefs(&layout, child, &isContainer, &refStart, &refCount)) {
+      return NO;
+    }
+    if (!isContainer) {
+      state[child] = 2;
+      expanded[child] = 1;
+      frame->expandedCount += 1;
+      if (frame->expandedCount > expansionLimit) {
+        return NO;
+      }
+      continue;
+    }
+    if (pathLength == ALNRedisMaxRecordDepth) {
+      return NO;
+    }
+    state[child] = 1;
+    path[pathLength++] = (ALNRedisPlistFrame){refStart, refCount, 0, child, 0, 1};
+  }
+  return YES;
+}
+
 static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length, NSError **error) {
   size_t written = 0;
   while (written < length) {
@@ -2607,13 +2816,19 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
     }
     return nil;
   }
+  if (!ALNRedisBinaryPlistIsBounded(payload)) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2235, @"redis cache payload is not a bounded binary property list", nil);
+    }
+    return nil;
+  }
   NSError *parseError = nil;
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
   id parsed = [NSPropertyListSerialization propertyListWithData:payload
                                                         options:NSPropertyListImmutable
                                                          format:&format
                                                           error:&parseError];
-  if (![parsed isKindOfClass:[NSDictionary class]]) {
+  if (![parsed isKindOfClass:[NSDictionary class]] || format != NSPropertyListBinaryFormat_v1_0) {
     if (error != NULL) {
       *error = ALNRedisClientError(2226, @"redis cache payload is malformed", parseError);
     }
