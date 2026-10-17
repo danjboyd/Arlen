@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The vendored yyjson is updated from 0.12.0 to 0.13.0 (#269). That fixes
+  upstream GHSA-f4vc-345x-4mvm: a number token with 2^32 or more significant
+  digits could overflow a stack buffer. Arlen's default 1 MiB body limit kept
+  HTTP input from reaching it. 0.13.0 also fixes an uninitialized read in
+  number parsing.
+
 - `arlen config` now prints secret values as `[redacted]`, in both text and
   `--json` output. A string is redacted when its key contains `secret`,
   `password`, `token`, `apiKey` or `connectionString` (for example
