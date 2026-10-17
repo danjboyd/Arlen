@@ -433,6 +433,19 @@ NSString *ALNStaticCacheControlForPath(NSArray *rules, NSString *relativePath) {
   return match;
 }
 
+BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
+  if (![relativePath isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@"/\\"];
+  for (NSString *component in [relativePath componentsSeparatedByCharactersInSet:separators]) {
+    if ([component hasPrefix:@"."] && ![component isEqualToString:@".well-known"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 @implementation ALNFileResponse
 
 + (BOOL)prepareResponse:(ALNResponse *)response

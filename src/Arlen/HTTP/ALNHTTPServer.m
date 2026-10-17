@@ -2724,7 +2724,8 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   }
 
   if ([relativePath containsString:@".."] ||
-      [relativePath hasPrefix:@"/"]) {
+      [relativePath hasPrefix:@"/"] ||
+      ALNStaticRelativePathIsHidden(relativePath)) {
     return ALNStaticNotFoundResponse();
   }
 

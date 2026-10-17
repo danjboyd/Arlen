@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Static mounts no longer serve hidden files. Any path component starting with
+  `.` returns 404 (`/static/.secret.json`, `/static/.git/config.json`), except
+  `.well-known/`. Before, `arlen new` apps served such files from `public/` in
+  every environment whenever their extension was allowed (#219).
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

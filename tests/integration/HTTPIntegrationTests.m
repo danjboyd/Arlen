@@ -4090,6 +4090,76 @@
   XCTAssertTrue([body containsString:@"http"]);
 }
 
+// GitHub issue 219: static mounts served dotfiles and dot-directories whose
+// extension was allowed. Any "."-prefixed path component is now 404, except
+// the public ".well-known" directory (RFC 8615).
+- (void)testStaticMountRefusesHiddenPaths_Issue219 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-hidden"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "  serveStatic = YES;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+    NSDictionary *files = @{
+      @"public/visible.json" : @"{\"visible\":true}\n",
+      @"public/.secret.json" : @"{\"secret\":1}\n",
+      @"public/.git/config.json" : @"{\"secret\":2}\n",
+      @"public/sub/.env.json" : @"{\"secret\":3}\n",
+      @"public/.well-known/security.txt" : @"Contact: mailto:security@example.com\n",
+    };
+    for (NSString *relativePath in files) {
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:relativePath] content:files[relativePath]]);
+    }
+
+    NSString *envPrefix =
+        [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
+    int prepareCode = 0;
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix]
+                     exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    NSString *preparedBinary = [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
+
+    NSDictionary *expectedStatus = @{
+      @"visible.json" : @"200",
+      @".secret.json" : @"404",
+      @".git/config.json" : @"404",
+      @"sub/.env.json" : @"404",
+      @"%%2esecret.json" : @"404",
+      @".well-known/security.txt" : @"200",
+    };
+    for (NSString *path in expectedStatus) {
+      int curlCode = 0;
+      int serverCode = 0;
+      NSString *curl = [NSString
+          stringWithFormat:@"curl -sS -o /dev/null -w '%%%%{http_code}' http://127.0.0.1:%%d/static/%@", path];
+      NSString *status = [self requestWithServerEnv:envPrefix
+                                       serverBinary:preparedBinary
+                                           curlBody:curl
+                                           curlCode:&curlCode
+                                         serverCode:&serverCode];
+      XCTAssertEqual(0, curlCode, @"%@: %@", path, status);
+      XCTAssertEqualObjects(expectedStatus[path],
+                            [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]],
+                            @"%@", path);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testStaticMountRejectsSymlinkEscape {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-symlink"];
