@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Response headers are serialized into a byte buffer instead of an
+  `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
+  check on each of about 80 appends per response. Serializing a typical
+  19-header response is about 1.6-2x faster, and the bytes are unchanged
+  (#245, partial).
+
 - `arlen config` now prints secret values as `[redacted]`, in both text and
   `--json` output. A string is redacted when its key contains `secret`,
   `password`, `token`, `apiKey` or `connectionString` (for example
