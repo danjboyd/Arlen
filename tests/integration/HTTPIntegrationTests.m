@@ -958,6 +958,76 @@
   }
 }
 
+// GitHub issue 187: idle keep-alive connections must not pin the fixed HTTP
+// worker pool (default 8 workers, 30 s connection timeout). Open twice as many
+// idle keep-alive connections as there are workers, then a fresh request must
+// still be served promptly, and every parked connection must still work.
+- (void)testIdleKeepAliveConnectionsDoNotStarveHTTPWorkers {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSPipe pipe];
+  server.standardError = [NSPipe pipe];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time\n"
+                                         @"PORT=%d\n"
+                                         @"IDLE=16\n"
+                                         @"def request(sock, connection):\n"
+                                         @"    sock.sendall((f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"                  f'Connection: {connection}\\r\\n\\r\\n').encode('utf-8'))\n"
+                                         @"    data = b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    while len(body) < 3:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before body')\n"
+                                         @"        body += chunk\n"
+                                         @"    if b' 200 ' not in head.split(b'\\r\\n', 1)[0] or body[:3] != b'ok\\n':\n"
+                                         @"        raise RuntimeError(head.decode('utf-8', 'replace'))\n"
+                                         @"idle = []\n"
+                                         @"for _ in range(IDLE):\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+                                         @"    request(sock, 'keep-alive')\n"
+                                         @"    idle.append(sock)\n"
+                                         @"start = time.time()\n"
+                                         @"fresh = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+                                         @"request(fresh, 'close')\n"
+                                         @"fresh.close()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"if elapsed > 3.0:\n"
+                                         @"    raise RuntimeError(f'fresh request waited {elapsed:.1f}s behind idle keep-alive connections')\n"
+                                         @"for sock in idle:\n"
+                                         @"    request(sock, 'keep-alive')\n"
+                                         @"for sock in idle:\n"
+                                         @"    request(sock, 'close')\n"
+                                         @"    sock.close()\n"
+                                         @"print(f'ok {elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)kill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testKeepAliveSupportsPipelinedRequestsOnSingleConnection {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
