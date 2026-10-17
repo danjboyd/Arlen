@@ -910,6 +910,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (metricsEnabledValue != nil) {
     observability[@"metricsEnabled"] = metricsEnabledValue;
   }
+  NSString *operabilityToken = ALNEnvValue("ARLEN_OPERABILITY_TOKEN");
+  if ([operabilityToken length] > 0) {
+    observability[@"operabilityToken"] = operabilityToken;
+  }
+  NSNumber *operabilityLoopbackOnlyValue = ALNParseBooleanString(ALNEnvValue("ARLEN_OPERABILITY_LOOPBACK_ONLY"));
+  if (operabilityLoopbackOnlyValue != nil) {
+    observability[@"operabilityLoopbackOnly"] = operabilityLoopbackOnlyValue;
+  }
   config[@"observability"] = observability;
 
   NSMutableDictionary *cluster =

@@ -204,6 +204,41 @@ static NSUInteger NMConfiguredLimit(id rawValue, NSUInteger defaultValue) {
   return defaultValue;
 }
 
+// Inbox deep links render only for http(s) URLs and same-origin relative
+// references; anything else (other schemes, protocol-relative `//host`,
+// backslashes or control characters) renders without a link.
+static NSString *NMSafeInboxHref(id rawValue) {
+  NSString *href = NMTrimmedString(rawValue);
+  if ([href length] == 0) {
+    return @"";
+  }
+  for (NSUInteger index = 0; index < [href length]; index++) {
+    unichar character = [href characterAtIndex:index];
+    if (character < 0x20 || character == 0x7f || character == '\\') {
+      return @"";
+    }
+  }
+  if ([href hasPrefix:@"//"]) {
+    return @"";
+  }
+  if ([href hasPrefix:@"/"]) {
+    return href;
+  }
+  NSRange delimiter = [href rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@":/?#"]];
+  if (delimiter.location == NSNotFound || [href characterAtIndex:delimiter.location] != ':') {
+    return href;
+  }
+  NSString *scheme = [[href substringToIndex:delimiter.location] lowercaseString];
+  if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) {
+    return @"";
+  }
+  NSURL *url = [NSURL URLWithString:href];
+  if ([[url host] length] == 0) {
+    return @"";
+  }
+  return href;
+}
+
 // Drops the oldest entries so at most `limit` remain.
 static void NMTrimOldestEntries(NSMutableArray *entries, NSUInteger limit) {
   if (limit > 0 && [entries count] > limit) {
@@ -2750,6 +2785,14 @@ notificationIdentifier:(NSString *)identifier
                          errors:(NSArray *)errors {
   NSString *recipient = [ctx authSubject] ?: @"";
   NSMutableDictionary *inboxSummary = [NSMutableDictionary dictionaryWithDictionary:[self inboxPageForRecipient:recipient]];
+  NSMutableArray *displayEntries = [NSMutableArray array];
+  for (NSDictionary *entry in NMNormalizeArray(inboxSummary[@"entries"])) {
+    NSMutableDictionary *displayEntry = [NSMutableDictionary dictionaryWithDictionary:entry];
+    NSDictionary *metadata = NMNormalizeDictionary(entry[@"metadata"]);
+    displayEntry[@"linkHref"] = NMSafeInboxHref(metadata[@"href"] ?: metadata[@"path"]);
+    [displayEntries addObject:displayEntry];
+  }
+  inboxSummary[@"entries"] = displayEntries;
   NSDictionary *pagination = NMNormalizeDictionary(inboxSummary[@"pagination"]);
   NSUInteger pageLimit = [pagination[@"limit"] unsignedIntegerValue];
   NSUInteger pageOffset = [pagination[@"offset"] unsignedIntegerValue];

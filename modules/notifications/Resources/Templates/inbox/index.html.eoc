@@ -22,8 +22,7 @@
     </thead>
     <tbody>
       <% for (NSDictionary *entry in inbox) { %>
-        <% NSDictionary *metadata = [entry objectForKey:@"metadata"] ?: @{}; %>
-        <% id rawDestination = [metadata objectForKey:@"href"] ?: ([metadata objectForKey:@"path"] ?: @""); %>
+        <% id rawDestination = [entry objectForKey:@"linkHref"] ?: @""; %>
         <% NSString *destination = [rawDestination isKindOfClass:[NSString class]] ? rawDestination : @""; %>
         <% BOOL isRead = [[entry objectForKey:@"read"] boolValue]; %>
         <tr class="<%= isRead ? @"is-read" : @"is-unread" %>">

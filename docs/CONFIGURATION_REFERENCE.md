@@ -283,6 +283,23 @@ CSP later as the frontend becomes more specific. The headers cover every respons
 files, 404s and built-in endpoints, not only routed ones (see
 [Response Headers](RESPONSE_HEADERS.md#concurrent-security-headers)).
 
+Operability endpoints:
+
+`/metrics` and `/clusterz` answer anonymous requests by default. `/clusterz`
+reports the node ID (hostname) and worker layout, so production apps that are
+reachable from untrusted networks should restrict them:
+
+- `observability.operabilityToken` (env `ARLEN_OPERABILITY_TOKEN`): require
+  `Authorization: Bearer <token>`. Other requests get `401`.
+- `observability.operabilityLoopbackOnly` (env
+  `ARLEN_OPERABILITY_LOOPBACK_ONLY`, default `NO`): answer only requests whose
+  peer is a loopback address and that carry no `Forwarded`,
+  `X-Forwarded-For` or `X-Real-IP` header. Other requests get `403`.
+
+When both are set, a request must pass both. `/healthz`, `/readyz` and
+`/livez` are not affected. `arlen doctor --env production` warns when neither
+is set.
+
 ## 6.1 Route Policies
 
 Route policies are named access-control checks evaluated by middleware before a

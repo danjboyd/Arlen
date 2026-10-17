@@ -25,6 +25,7 @@
 #import "ALNPerf.h"
 #import "ALNMetrics.h"
 #import "ALNAuth.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNAuthSession.h"
 #import "ALNEventStream.h"
 #import "ALNDataverseClient.h"
@@ -3063,6 +3064,60 @@ static BOOL ALNHealthDetailsEnabled(ALNApplication *application) {
   return ALNBoolConfigValue(observability[@"healthDetailsEnabled"], YES);
 }
 
+static BOOL ALNOperabilityAddressIsLoopback(NSString *address) {
+  NSString *candidate = [address isKindOfClass:[NSString class]] ? address : @"";
+  return [candidate hasPrefix:@"127."] || [candidate isEqualToString:@"::1"] ||
+         [candidate hasPrefix:@"::ffff:127."];
+}
+
+// /metrics and /clusterz stay anonymous by default. When
+// observability.operabilityToken is set they require
+// `Authorization: Bearer <token>`; when observability.operabilityLoopbackOnly
+// is YES they only answer direct loopback requests. Both apply when both are set.
+static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
+                                                ALNRequest *request,
+                                                ALNResponse *response) {
+  NSDictionary *observability = ALNObservabilityConfig(application);
+  NSString *token = [observability[@"operabilityToken"] isKindOfClass:[NSString class]]
+                        ? [observability[@"operabilityToken"]
+                              stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                        : @"";
+  BOOL loopbackOnly = ALNBoolConfigValue(observability[@"operabilityLoopbackOnly"], NO);
+  if (loopbackOnly) {
+    BOOL loopback = ALNOperabilityAddressIsLoopback(request.remoteAddress) &&
+                    ([request.effectiveRemoteAddress length] == 0 ||
+                     ALNOperabilityAddressIsLoopback(request.effectiveRemoteAddress));
+    // A same-host reverse proxy makes remote traffic arrive from loopback.
+    for (NSString *name in @[ @"forwarded", @"x-forwarded-for", @"x-real-ip" ]) {
+      if ([[request headerValueForName:name] length] > 0) {
+        loopback = NO;
+      }
+    }
+    if (!loopback) {
+      response.statusCode = 403;
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"forbidden\n"];
+      response.committed = YES;
+      return NO;
+    }
+  }
+  if ([token length] > 0) {
+    NSString *authorization = [request headerValueForName:@"authorization"] ?: @"";
+    NSString *expected = [@"Bearer " stringByAppendingString:token];
+    BOOL matches = ALNConstantTimeDataEquals([authorization dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data],
+                                             [expected dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]);
+    if (!matches) {
+      response.statusCode = 401;
+      [response setHeader:@"WWW-Authenticate" value:@"Bearer"];
+      [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+      [response setTextBody:@"unauthorized\n"];
+      response.committed = YES;
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static BOOL ALNReadinessRequiresStartup(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"readinessRequiresStartup"], NO);
@@ -3615,6 +3670,9 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
   }
 
   if ([routePath isEqualToString:@"/clusterz"] || [requestPath isEqualToString:@"/clusterz"]) {
+    if (!ALNOperabilityEndpointAccessAllowed(application, request, response)) {
+      return YES;
+    }
     response.statusCode = 200;
     NSError *jsonError = nil;
     BOOL ok = [response setJSONBody:ALNClusterStatusPayload(application)
@@ -3632,6 +3690,9 @@ static BOOL ALNApplyBuiltInResponse(ALNApplication *application,
   }
 
   if ([routePath isEqualToString:@"/metrics"] || [requestPath isEqualToString:@"/metrics"]) {
+    if (!ALNOperabilityEndpointAccessAllowed(application, request, response)) {
+      return YES;
+    }
     response.statusCode = 200;
     if (ALNHeaderPrefersJSON(request)) {
       NSError *jsonError = nil;

@@ -84,6 +84,27 @@
   an unknown channel are rejected with `422` instead of being stored. How and
   when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
 
+- Module hardening (#228):
+  - `/metrics` and `/clusterz` can be restricted with
+    `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` (require
+    `Authorization: Bearer <token>`) and
+    `observability.operabilityLoopbackOnly` /
+    `ARLEN_OPERABILITY_LOOPBACK_ONLY` (direct loopback requests only). Both
+    stay anonymous by default; `arlen doctor --env production` now warns
+    while they are.
+  - MCP `tools/list` only lists tools whose required roles and scopes the
+    caller holds. `tools/call` still enforces every route check. `mcp` moves
+    to `1.0.5`.
+  - Local-password login verifies a throwaway Argon2id hash when the email
+    is unknown, so response time no longer shows whether an account exists.
+    `auth` moves to `1.5.2`.
+  - The notifications HTML inbox links an entry's `href`/`path` only when it
+    is an `http`/`https` URL or a same-origin relative path; other values
+    render without a link.
+  - PostgreSQL search autocomplete escapes `%`, `_` and `\` in the query
+    and uses `LIKE ... ESCAPE '\'`, so `q=%` no longer matches every
+    document.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

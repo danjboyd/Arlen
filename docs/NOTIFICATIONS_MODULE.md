@@ -69,7 +69,7 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
 - explicit channel queueing records queued audit entries before worker delivery and can fan out into per-channel jobs
 - in-app delivery publishes realtime fanout on `notifications.inbox.<recipient>`
 - inbox entries are unread by default, persist read/unread state, and expose unread counts per recipient
-- inbox entry metadata may include `href` or `path`; the HTML inbox renders that as a first-class deep link
+- inbox entry metadata may include `href` or `path`; the HTML inbox renders that as a first-class deep link when it is an `http`/`https` URL or a same-origin relative path (`/settings`, `orders/7`). Other values (`javascript:`, `data:`, `ftp:`, protocol-relative `//host`, anything with a backslash or control character) render without a link. The JSON inbox returns the metadata unchanged, so API clients should apply the same check.
 - the outbox and each recipient's inbox are capped; when a new entry would exceed the cap, the oldest entries are dropped (see [Retention limits](#retention-limits))
 
 Requested channels are validated against the notification definition before queueing or previewing.

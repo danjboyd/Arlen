@@ -830,6 +830,24 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqualObjects([results valueForKey:@"recordID"], [repeated[@"results"] valueForKey:@"recordID"]);
 }
 
+- (void)testPostgresAutocompleteTreatsLikeWildcardsLiterally {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
+  NSDictionary *prefix = [runtime searchQuery:@"pri" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"autocomplete" } error:&error];
+  XCTAssertNotNil(prefix);
+  XCTAssertNil(error);
+  XCTAssertTrue([[prefix[@"results"] valueForKey:@"recordID"] containsObject:@"sku-102"]);
+  for (NSString *wildcard in @[ @"%", @"_", @"\\" ]) {
+    NSDictionary *literal = [runtime searchQuery:wildcard resourceIdentifier:@"products"
+        filters:nil sort:nil limit:10 offset:0 queryOptions:@{ @"mode" : @"autocomplete" } error:&error];
+    XCTAssertNotNil(literal, @"%@", wildcard);
+    XCTAssertNil(error, @"%@", wildcard);
+    XCTAssertEqual((NSUInteger)0, [literal[@"results"] count], @"%@ matched %@", wildcard, literal[@"results"]);
+  }
+}
+
 - (void)testPostgresEngineSupportsFTSIncrementalSyncAndDegradedFallback {
   ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
   if (runtime == nil) { return; }

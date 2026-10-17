@@ -94,6 +94,16 @@ static NSDictionary *STJSONDictionaryFromPath(NSString *path, NSError **error) {
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
+// Escapes LIKE metacharacters so user input matches literally; pair with
+// `ESCAPE '\'` in the SQL.
+static NSString *STEscapedLikePattern(NSString *value) {
+  NSString *escaped = value ?: @"";
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"%" withString:@"\\%"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"_" withString:@"\\_"];
+  return escaped;
+}
+
 static NSUInteger STClampedSuggestionLimit(id value, NSUInteger defaultValue) {
   if (![value respondsToSelector:@selector(unsignedIntegerValue)]) {
     return defaultValue;
@@ -2288,14 +2298,14 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
           self.textSearchConfiguration,
           self.textSearchConfiguration];
     } else if ([queryMode isEqualToString:@"autocomplete"]) {
-      [parameters addObject:[NSString stringWithFormat:@"%@%%", normalizedQuery ?: @""]];
+      [parameters addObject:[NSString stringWithFormat:@"%@%%", STEscapedLikePattern(normalizedQuery)]];
       sql = [NSString stringWithFormat:
           @"SELECT record_id, "
-           "CASE WHEN lower(autocomplete_text) LIKE lower($4) THEN 1.0 ELSE similarity(autocomplete_text, $3) END AS score, "
+           "CASE WHEN lower(autocomplete_text) LIKE lower($4) ESCAPE '\\' THEN 1.0 ELSE similarity(autocomplete_text, $3) END AS score, "
            "autocomplete_text AS highlight "
            "FROM %@ "
            "WHERE resource_identifier = $1 AND generation = $2 "
-           "AND (lower(autocomplete_text) LIKE lower($4) OR autocomplete_text %% $3) "
+           "AND (lower(autocomplete_text) LIKE lower($4) ESCAPE '\\' OR autocomplete_text %% $3) "
            "ORDER BY score DESC, record_id ASC",
           self.tableName];
     } else {

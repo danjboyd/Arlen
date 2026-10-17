@@ -233,6 +233,8 @@ for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
 `search` moved to `1.0.3` to bound query cost (GitHub issue 226).
 `notifications` moved to `1.1.2` for outbox/inbox caps, inbox pagination and
 preference validation (GitHub issue 227).
+`mcp` moved to `1.0.5` to filter `tools/list` by role and scope, and `auth` to
+`1.5.2` to equalize unknown-email login timing (GitHub issue 228).
 
 ## MCP tools
 

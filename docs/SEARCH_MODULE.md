@@ -318,6 +318,10 @@ the module's templates escape it. Backend rankings need not match other engines.
 Promotions continue to match configured queries exactly after trimming and
 lowercasing; phrase and fuzzy queries do not implicitly activate promotions.
 
+PostgreSQL autocomplete matches the query as a literal prefix: `%`, `_` and `\`
+in `q` are escaped before the `LIKE` comparison, so `q=%` no longer matches
+every document.
+
 ## Migration Notes
 
 - Start with the default engine while you are still shaping the public-safe
