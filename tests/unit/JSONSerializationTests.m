@@ -175,11 +175,10 @@
 }
 
 - (void)testSortedKeysOptionParsesToEquivalentContentAcrossBackends {
-#ifdef NSJSONWritingSortedKeys
   NSDictionary *payload = @{ @"z" : @1, @"a" : @2, @"m" : @{ @"b" : @1, @"a" : @2 } };
   NSJSONWritingOptions options = NSJSONWritingSortedKeys;
 
-  id baselineParsed = nil;
+  __block id baselineParsed = nil;
   [self forEachBackend:^(ALNJSONBackend backend) {
     NSError *error = nil;
     NSData *encoded = [ALNJSONSerialization dataWithJSONObject:payload options:options error:&error];
@@ -188,6 +187,9 @@
     if (encoded == nil) {
       return;
     }
+    NSString *text = [[NSString alloc] initWithData:encoded encoding:NSUTF8StringEncoding];
+    XCTAssertEqualObjects(@"{\"a\":2,\"m\":{\"a\":2,\"b\":1},\"z\":1}", text,
+                          @"backend=%lu", (unsigned long)backend);
     id parsed = [ALNJSONSerialization JSONObjectWithData:encoded options:0 error:&error];
     XCTAssertNil(error, @"backend=%lu", (unsigned long)backend);
     if (baselineParsed == nil) {
@@ -196,7 +198,6 @@
       XCTAssertEqualObjects(baselineParsed, parsed, @"backend=%lu", (unsigned long)backend);
     }
   }];
-#endif
 }
 
 - (void)testRuntimeJSONCallsitesUseAbstraction {

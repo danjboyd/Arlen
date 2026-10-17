@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNAuthModule.h"
+#import "ALNPasswordHash.h"
 
 static NSUInteger gPhase13FRegistrationCalls = 0;
 static NSUInteger gPhase13FProviderMappingCalls = 0;
@@ -49,6 +50,31 @@ static NSUInteger gPhase13FProviderMappingCalls = 0;
 
 @end
 
+// Stands in for ALNPg so local-password login runs without a database.
+@interface Phase13FFakeAuthDatabase : NSObject
+@property(nonatomic, copy) NSArray<NSDictionary *> *rows;
+@end
+
+@implementation Phase13FFakeAuthDatabase
+
+- (NSArray *)executeQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
+  (void)sql;
+  (void)parameters;
+  if (error != NULL) {
+    *error = nil;
+  }
+  return self.rows ?: @[];
+}
+
+@end
+
+@interface ALNAuthModuleRuntime (Phase13FLoginTiming)
+- (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email
+                                         password:(NSString *)password
+                                            error:(NSError **)error;
+- (NSUInteger)dummyPasswordVerificationCount;
+@end
+
 @interface Phase13FTests : XCTestCase
 @end
 
@@ -61,6 +87,56 @@ static NSUInteger gPhase13FProviderMappingCalls = 0;
   NSError *error = nil;
   XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:&error]);
   XCTAssertNil(error);
+}
+
+- (void)testUnknownEmailLoginStillVerifiesADummyPasswordHash {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  id originalDatabase = [runtime valueForKey:@"database"];
+  Phase13FFakeAuthDatabase *database = [[Phase13FFakeAuthDatabase alloc] init];
+  [runtime setValue:database forKey:@"database"];
+  @try {
+    NSError *error = nil;
+    NSString *knownHash = [ALNPasswordHash hashPasswordString:@"correct horse battery staple"
+                                                      options:[ALNPasswordHash defaultArgon2idOptions]
+                                                        error:&error];
+    XCTAssertNotNil(knownHash, @"%@", error);
+
+    database.rows = @[];
+    NSUInteger before = [runtime dummyPasswordVerificationCount];
+    error = nil;
+    XCTAssertNil([runtime authenticateLocalEmail:@"nobody@example.test" password:@"guess" error:&error]);
+    XCTAssertEqual(ALNAuthModuleErrorAuthenticationFailed, error.code);
+    XCTAssertEqualObjects(@"Invalid email or password", error.localizedDescription);
+    XCTAssertEqual(before + 1U, [runtime dummyPasswordVerificationCount]);
+
+    NSDate *started = [NSDate date];
+    XCTAssertNil([runtime authenticateLocalEmail:@"nobody@example.test" password:@"guess" error:NULL]);
+    NSTimeInterval unknownElapsed = -[started timeIntervalSinceNow];
+    XCTAssertEqual(before + 2U, [runtime dummyPasswordVerificationCount]);
+
+    database.rows = @[ @{
+      @"id" : @"1",
+      @"subject" : @"user:1",
+      @"email" : @"known@example.test",
+      @"display_name" : @"Known",
+      @"roles_json" : @"[]",
+      @"email_verified_at" : @"",
+      @"password_hash" : knownHash ?: @"",
+    } ];
+    started = [NSDate date];
+    XCTAssertNil([runtime authenticateLocalEmail:@"known@example.test" password:@"guess" error:NULL]);
+    NSTimeInterval knownElapsed = -[started timeIntervalSinceNow];
+    XCTAssertEqual(before + 2U, [runtime dummyPasswordVerificationCount]);
+    // Both paths run one Argon2 verification; allow generous scheduling noise.
+    XCTAssertGreaterThan(unknownElapsed, knownElapsed * 0.25,
+                         @"unknown=%f known=%f", unknownElapsed, knownElapsed);
+
+    XCTAssertNotNil([runtime authenticateLocalEmail:@"known@example.test"
+                                           password:@"correct horse battery staple"
+                                              error:NULL]);
+  } @finally {
+    [runtime setValue:originalDatabase forKey:@"database"];
+  }
 }
 
 - (void)testRegistrationPolicyHookIsDeterministic {

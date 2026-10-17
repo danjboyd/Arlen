@@ -364,12 +364,31 @@ static NSDictionary<NSString *, NSString *> *ALNORMCodegenTypeDescriptor(NSStrin
   };
 }
 
+// Relation names share a namespace with the entity's fields in generated models
+// (Objective-C properties and TypeScript interfaces), so a relation that would
+// shadow a field gets a cardinality suffix: `section` -> `sectionRecord`,
+// `notes` -> `notesList`.
 static NSString *ALNORMCodegenUniqueRelationName(NSString *baseName,
-                                                 NSMutableSet<NSString *> *usedNames) {
-  NSString *candidate = ([baseName length] > 0) ? baseName : @"relation";
+                                                 BOOL multiple,
+                                                 NSDictionary *entity) {
+  NSMutableSet<NSString *> *usedNames = entity[@"relation_names"];
+  NSMutableSet<NSString *> *fieldNames = [NSMutableSet set];
+  for (ALNORMFieldDescriptor *field in entity[@"fields"]) {
+    if ([field.name length] > 0) {
+      [fieldNames addObject:field.name];
+    }
+    if ([field.propertyName length] > 0) {
+      [fieldNames addObject:field.propertyName];
+    }
+  }
+  NSString *base = ([baseName length] > 0) ? baseName : @"relation";
+  if ([fieldNames containsObject:base]) {
+    base = [base stringByAppendingString:(multiple ? @"List" : @"Record")];
+  }
+  NSString *candidate = base;
   NSUInteger suffix = 2;
-  while ([usedNames containsObject:candidate]) {
-    candidate = [NSString stringWithFormat:@"%@%lu", baseName ?: @"relation", (unsigned long)suffix];
+  while ([usedNames containsObject:candidate] || [fieldNames containsObject:candidate]) {
+    candidate = [NSString stringWithFormat:@"%@%lu", base, (unsigned long)suffix];
     suffix += 1;
   }
   [usedNames addObject:candidate];
@@ -839,11 +858,9 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
     NSString *inverseBaseName = sourceUnique ? ALNORMCodegenSingularize(sourceEntity[@"table_name"])
                                              : ALNORMCodegenPluralize(sourceEntity[@"table_name"]);
     NSString *belongsToName =
-        ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(belongsToBaseName),
-                                        sourceEntity[@"relation_names"]);
+        ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(belongsToBaseName), NO, sourceEntity);
     NSString *inverseName =
-        ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(inverseBaseName),
-                                        targetEntity[@"relation_names"]);
+        ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(inverseBaseName), !sourceUnique, targetEntity);
 
     ALNORMRelationDescriptor *belongsTo =
         [[ALNORMRelationDescriptor alloc] initWithKind:ALNORMRelationKindBelongsTo
@@ -932,10 +949,10 @@ static NSString *ALNORMCodegenObjectiveCStringArray(NSArray<NSString *> *values)
 
     NSString *leftRelationName =
         ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(ALNORMCodegenPluralize(rightEntity[@"table_name"])),
-                                        leftEntity[@"relation_names"]);
+                                        YES, leftEntity);
     NSString *rightRelationName =
         ALNORMCodegenUniqueRelationName(ALNORMCodegenCamelCase(ALNORMCodegenPluralize(leftEntity[@"table_name"])),
-                                        rightEntity[@"relation_names"]);
+                                        YES, rightEntity);
 
     ALNORMRelationDescriptor *leftRelation =
         [[ALNORMRelationDescriptor alloc] initWithKind:ALNORMRelationKindManyToMany

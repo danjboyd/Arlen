@@ -46,9 +46,9 @@
     NSString *libraries = @"-framework Foundation -framework CoreFoundation -L\"${ARLEN_OPENSSL_PREFIX:-$(brew --prefix openssl@3)}/lib\" -lcrypto -lcurl";
 #else
     NSString *compiler = [NSString stringWithFormat:
-        @"%@ && clang $(gnustep-config --objc-flags) -fobjc-arc -fblocks -pthread",
-        ALNTestGNUstepSourceCommandForRepoRoot(repoRoot)];
-    NSString *libraries = @"$(gnustep-config --base-libs) -lcrypto -ldispatch -ldl -lcurl";
+        @"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -fblocks -pthread",
+        ALNTestGNUstepSourceCommandForRepoRoot(repoRoot), ALNTestPlatformObjCFlags()];
+    NSString *libraries = [NSString stringWithFormat:@"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl %@", ALNTestPlatformLinkLibraries()];
 #endif
     NSMutableString *sanitizers = [NSMutableString string];
     NSUInteger rounds = 2000;
@@ -76,8 +76,8 @@
     if (exitCode != 0) return;
 
     // A hang is one of the failure modes, so every process runs under an
-    // alarm (perl keeps this portable to macOS, which lacks timeout(1)).
-    NSString *bounded = [NSString stringWithFormat:@"perl -e 'alarm shift; exec @ARGV' 120 %@",
+    // alarm (GNU timeout where present; perl on macOS, which lacks timeout(1)).
+    NSString *bounded = [NSString stringWithFormat:@"%@ %@", ALNTestShellTimeoutPrefix(120),
                                                    ALNTestShellQuote(binary)];
     command = [NSString stringWithFormat:
         @"set -e; ulimit -c 0; export LD_PRELOAD='' XCTEST_LD_PRELOAD=''; %@ 1 %lu; "

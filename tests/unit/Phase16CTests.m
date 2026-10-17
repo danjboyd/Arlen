@@ -6,6 +6,7 @@
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNStorageModule.h"
+#import "../shared/ALNTestSupport.h"
 
 static NSInteger gPhase16CRemainingVariantFailures = 0;
 
@@ -84,17 +85,9 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
 @implementation Phase16CTests
 
 - (NSString *)temporaryDirectory {
-  NSString *template =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:@"arlen-phase16c-XXXXXX"];
-  const char *templateCString = [template fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  XCTAssertNotEqual(buffer, NULL);
-  char *created = mkdtemp(buffer);
-  XCTAssertNotEqual(created, NULL);
-  NSString *result = [[NSFileManager defaultManager] stringWithFileSystemRepresentation:buffer
-                                                                                  length:strlen(buffer)];
-  free(buffer);
-  return result;
+  NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16c");
+  XCTAssertNotNil(directory);
+  return directory;
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath

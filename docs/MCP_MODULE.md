@@ -271,9 +271,58 @@ The MCP endpoint accepts `requiredScopes`, `requiredRoles`, and named `policies`
 in its config. Custom tools need their own service permissions. Route-backed
 tools retain the original route's permissions and path-based policies. Custom
 tools have private paths, so attach policies by name instead of relying on an
-unrelated HTTP route's path-prefix rules. Catalog visibility is shared among
-authenticated endpoint users: listing a tool never grants permission to call
-it. Use endpoint permissions if catalog metadata itself is sensitive.
+unrelated HTTP route's path-prefix rules. `tools/list` only shows a caller the
+tools whose `requiredRoles` and `requiredScopes` (the route's for route-backed
+tools, the registration's for custom tools) that caller holds. Named
+`policies`, assurance level and authentication age are checked only when the
+tool is called, so a listed tool can still be refused. Listing a tool never
+grants permission to call it, and `tools/call` keeps enforcing every route
+check. A tool with no roles or scopes is listed for, and callable by, every
+authenticated endpoint user. Use endpoint permissions if the catalog itself is
+sensitive.
+
+### App-supplied identity middleware runs from a plugin
+
+An app that establishes MCP identity itself (writing claims with
+`[ALNAuth applyClaims:toContext:]`) must register that middleware from a
+**plugin**. Plugins load before modules, so plugin middleware runs before the
+MCP module's. Middleware added later runs after the module's own checks, and
+private tool dispatch then still answers 401.
+
+### Local development without an auth setup
+
+For a loopback-only development app with no auth module yet, opt in to a fixed
+local identity:
+
+```plist
+mcp = {
+  enabled = YES;
+  providerClass = "CatalogMCPProvider";
+  development = {
+    trustLoopback = YES;
+    subject = "local";
+    scopes = ("catalog:read");
+    roles = ("reader");
+  };
+};
+```
+
+A request then acts as `subject`, with the listed scopes and roles, only when
+all of these hold:
+
+- the TCP peer and the effective (trusted-proxy) client address are loopback
+  (`127.0.0.0/8`, `::1`);
+- it carries no `Authorization` header (credentials are never downgraded);
+- it carries no `Origin` header, so browsers never receive the identity;
+- it carries no `Forwarded`, `X-Forwarded-For` or `X-Real-IP` header, because a
+  reverse proxy on the same host makes remote traffic arrive from loopback.
+
+Route scopes, roles and policies apply to that identity as usual. The module
+refuses to start with `trustLoopback` outside the `development` and `test`
+environments, when `host` is not a loopback address, or together with
+`mcp.oauth`, and logs a warning at startup when it is on. `subject` defaults
+to `local`; `scopes` and `roles` default to empty. The setting is off by
+default; use real authentication for anything beyond one developer's machine.
 
 CSRF/session middleware remains active. Session clients must provide their
 valid cookie and CSRF header on MCP POSTs, even for read-only tools. A bearer

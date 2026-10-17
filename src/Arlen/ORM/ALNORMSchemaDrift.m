@@ -15,9 +15,7 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *ALNORMSchemaDri
 static NSString *ALNORMSchemaDriftJSONString(id value) {
   NSError *error = nil;
   NSJSONWritingOptions options = 0;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   NSData *data = [ALNJSONSerialization dataWithJSONObject:value ?: @{} options:options error:&error];
   if (data == nil || error != nil) {
     return @"";

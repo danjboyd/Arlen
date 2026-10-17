@@ -294,6 +294,62 @@ static NSData *WASignAssertion(NSString *privateKeyPEM, NSData *signedData) {
                                   actionName:@""];
 }
 
+- (NSError *)registrationErrorForAttestationObject:(NSData *)attestationObject {
+  NSDictionary *options = [self registrationOptionsWithOrigin:@"https://example.com"];
+  NSDictionary *clientDataObject = @{
+    @"type" : @"webauthn.create",
+    @"challenge" : options[@"challenge"] ?: @"",
+    @"origin" : @"https://example.com",
+  };
+  NSData *clientDataJSON =
+      [NSJSONSerialization dataWithJSONObject:clientDataObject options:0 error:NULL];
+  NSDictionary *response = @{
+    @"id" : @"AAAA",
+    @"rawId" : @"AAAA",
+    @"type" : @"public-key",
+    @"response" : @{
+      @"clientDataJSON" : ALNBase64URLStringFromData(clientDataJSON) ?: @"",
+      @"attestationObject" : ALNBase64URLStringFromData(attestationObject) ?: @"",
+    },
+  };
+
+  NSError *error = nil;
+  NSDictionary *verified = nil;
+  @try {
+    verified = [ALNWebAuthn verifyRegistrationResponse:response expectedOptions:options error:&error];
+  } @catch (NSException *exception) {
+    XCTFail(@"CBOR parsing raised %@: %@", exception.name, exception.reason);
+  }
+  XCTAssertNil(verified);
+  return error;
+}
+
+- (void)testRegistrationVerificationRejectsOversizedCBORCounts {
+  // Array, map, byte string and text string headers whose 8-byte declared
+  // length cannot be satisfied by the remaining input.
+  const uint8_t majorHeaders[] = { 0x9b, 0xbb, 0x5b, 0x7b };
+  const uint64_t declaredLengths[] = { 0xffffffffffffffffULL, 0x1000000000ULL, 0x10000000ULL, 2 };
+  for (size_t headerIndex = 0; headerIndex < sizeof(majorHeaders); headerIndex++) {
+    for (size_t lengthIndex = 0; lengthIndex < sizeof(declaredLengths) / sizeof(declaredLengths[0]);
+         lengthIndex++) {
+      uint8_t bytes[9] = { majorHeaders[headerIndex] };
+      for (int idx = 0; idx < 8; idx++) {
+        bytes[1 + idx] = (uint8_t)(declaredLengths[lengthIndex] >> (8 * (7 - idx)));
+      }
+      NSError *error = [self registrationErrorForAttestationObject:[NSData dataWithBytes:bytes length:9]];
+      XCTAssertEqual(ALNWebAuthnErrorMalformedCBOR, error.code,
+                     @"header 0x%02x length %llu", majorHeaders[headerIndex],
+                     (unsigned long long)declaredLengths[lengthIndex]);
+    }
+  }
+
+  // A map declaring two entries with only three bytes left cannot be complete.
+  const uint8_t shortMap[] = { 0xa2, 0x01, 0x02, 0x03 };
+  NSError *error = [self registrationErrorForAttestationObject:[NSData dataWithBytes:shortMap
+                                                                              length:sizeof(shortMap)]];
+  XCTAssertEqual(ALNWebAuthnErrorMalformedCBOR, error.code);
+}
+
 - (void)testRegistrationVerificationExtractsCredentialAndPublicKey {
   NSDictionary *keyMaterial = WAGeneratedKeyMaterial();
   NSData *credentialID = ALNSecureRandomData(32);

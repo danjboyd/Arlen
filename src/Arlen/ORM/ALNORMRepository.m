@@ -7,6 +7,7 @@
 #import "ALNORMFieldDescriptor.h"
 #import "ALNORMModel.h"
 #import "ALNORMRelationDescriptor.h"
+#import "ALNPlatform.h"
 
 static NSDictionary<NSString *, id> *ALNORMRepositoryCompileBuilder(id<ALNDatabaseAdapter> adapter,
                                                                     ALNSQLBuilder *builder,
@@ -706,7 +707,7 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
     return 0;
   }
   id scalar = ALNDatabaseScalarValueFromRows(rows, @"count_value", error);
-  return [scalar respondsToSelector:@selector(unsignedIntegerValue)] ? [scalar unsignedIntegerValue] : 0;
+  return ALNUnsignedIntegerValueOrDefault(scalar, 0);
 }
 
 - (BOOL)exists:(NSError **)error {

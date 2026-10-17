@@ -295,6 +295,53 @@
   XCTAssertEqual((NSInteger)2, reader.queryCount);
 }
 
+// Issue 238: a scope that writes and never reads again used to stay in the
+// stickiness map forever. Expired entries are now pruned as the map grows;
+// live ones are kept.
+- (void)testReadAfterWriteStickinessPrunesExpiredScopes_Issue238 {
+  Phase5BFakeAdapter *reader = [[Phase5BFakeAdapter alloc] initWithName:@"reader"];
+  Phase5BFakeAdapter *writer = [[Phase5BFakeAdapter alloc] initWithName:@"writer"];
+  ALNDatabaseRouter *router = [self routerWithRead:reader write:writer];
+  XCTAssertNotNil(router);
+  if (router == nil) {
+    return;
+  }
+
+  NSError *error = nil;
+  // Scopes that wrote long ago and never read again. Seeding the map directly
+  // keeps this independent of clock resolution (Windows ticks in ~1 ms steps,
+  // so back-to-back writes can share a timestamp).
+  router.readAfterWriteStickinessSeconds = 60;
+  NSMutableDictionary *seeded = [router valueForKey:@"lastWriteByScope"];
+  NSDate *longAgo = [NSDate dateWithTimeIntervalSinceNow:-3600];
+  for (NSUInteger idx = 0; idx < 3000; idx++) {
+    seeded[[NSString stringWithFormat:@"session-%lu", (unsigned long)idx]] = longAgo;
+  }
+  // The next write finds the map past its prune threshold and drops them.
+  (void)[router executeCommand:@"INSERT INTO widgets(v) VALUES ($1)"
+                    parameters:@[ @"a" ]
+                routingContext:@{ ALNDatabaseRoutingContextStickinessScopeKey : @"fresh" }
+                         error:&error];
+  NSDictionary *expiredMap = [router valueForKey:@"lastWriteByScope"];
+  XCTAssertEqual((NSUInteger)1, [expiredMap count]);
+  XCTAssertNotNil(expiredMap[@"fresh"]);
+
+  // Entries still inside the window are never dropped.
+  router.readAfterWriteStickinessSeconds = 600;
+  [[router valueForKey:@"lastWriteByScope"] removeAllObjects];
+  for (NSUInteger idx = 0; idx < 3000; idx++) {
+    NSDictionary *scope = @{ ALNDatabaseRoutingContextStickinessScopeKey : [NSString stringWithFormat:@"live-%lu", (unsigned long)idx] };
+    (void)[router executeCommand:@"INSERT INTO widgets(v) VALUES ($1)" parameters:@[ @"a" ] routingContext:scope error:&error];
+  }
+  XCTAssertEqual((NSUInteger)3000, [[router valueForKey:@"lastWriteByScope"] count]);
+  NSArray *rows = [router executeQuery:@"SELECT * FROM widgets"
+                            parameters:@[]
+                        routingContext:@{ ALNDatabaseRoutingContextStickinessScopeKey : @"live-0" }
+                                 error:&error];
+  XCTAssertNotNil(rows);
+  XCTAssertEqual((NSInteger)0, reader.queryCount);
+}
+
 - (void)testRouteTargetResolverSupportsTenantAndShardHints {
   Phase5BFakeAdapter *readEast = [[Phase5BFakeAdapter alloc] initWithName:@"read-east"];
   Phase5BFakeAdapter *readWest = [[Phase5BFakeAdapter alloc] initWithName:@"read-west"];

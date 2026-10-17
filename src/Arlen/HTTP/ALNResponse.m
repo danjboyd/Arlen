@@ -2,6 +2,8 @@
 
 #import "ALNJSONSerialization.h"
 #import <dispatch/dispatch.h>
+#import <stdio.h>
+#import <string.h>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -212,6 +214,8 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return @"Unsupported Media Type";
   case 416:
     return @"Range Not Satisfiable";
+  case 417:
+    return @"Expectation Failed";
   case 422:
     return @"Unprocessable Content";
   case 428:
@@ -786,6 +790,30 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   return YES;
 }
 
+// Writes the string's UTF-8 straight into the buffer (GNUstep has no
+// -getBytes:maxLength:usedLength:..., and header text never contains NUL).
+static void ALNResponseAppendUTF8(NSMutableData *data, NSString *string) {
+  if ([string length] == 0) {
+    return;
+  }
+  NSUInteger capacity = [string maximumLengthOfBytesUsingEncoding:NSUTF8StringEncoding] + 1;
+  NSUInteger offset = [data length];
+  [data increaseLengthBy:capacity];
+  char *destination = (char *)[data mutableBytes] + offset;
+  if ([string getCString:destination maxLength:capacity encoding:NSUTF8StringEncoding]) {
+    [data setLength:offset + strlen(destination)];
+  } else {
+    [data setLength:offset];
+  }
+}
+
+static void ALNResponseAppendHeaderLine(NSMutableData *data, NSString *name, NSString *value) {
+  ALNResponseAppendUTF8(data, name);
+  [data appendBytes:": " length:2];
+  ALNResponseAppendUTF8(data, value);
+  [data appendBytes:"\r\n" length:2];
+}
+
 - (NSData *)serializedHeaderData {
   if (!self.serializedHeadersDirty && self.cachedHeaderData != nil) {
     return self.cachedHeaderData;
@@ -819,13 +847,17 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   }
 
   [self rebuildOrderedHeaderKeysIfNeeded];
-  NSUInteger estimatedCapacity = 64 + ([self.orderedHeaderKeys count] * 32);
-  NSMutableString *head = [NSMutableString stringWithCapacity:estimatedCapacity];
-  [head appendString:@"HTTP/1.1 "];
-  [head appendFormat:@"%ld", (long)self.statusCode];
-  [head appendString:@" "];
-  [head appendString:ALNStatusText(self.statusCode)];
-  [head appendString:@"\r\n"];
+  // Bytes go straight into one buffer. Appending to an NSMutableString cost a
+  // temporary NSData and an encoding check per append on GNUstep, about 80
+  // per response (#245). The output is unchanged.
+  NSMutableData *head = [NSMutableData dataWithCapacity:64 + ([self.orderedHeaderKeys count] * 48)];
+  char statusLine[32];
+  int statusLength = snprintf(statusLine, sizeof(statusLine), "HTTP/1.1 %ld ", (long)self.statusCode);
+  if (statusLength > 0 && statusLength < (int)sizeof(statusLine)) {
+    [head appendBytes:statusLine length:(NSUInteger)statusLength];
+  }
+  ALNResponseAppendUTF8(head, ALNStatusText(self.statusCode));
+  [head appendBytes:"\r\n" length:2];
   for (NSString *normalizedKey in self.orderedHeaderKeys) {
     NSString *value = self.headers[normalizedKey];
     if (![value isKindOfClass:[NSString class]]) {
@@ -834,19 +866,13 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
     NSString *displayName = [self.headerNamesByNormalizedKey[normalizedKey] isKindOfClass:[NSString class]]
                                 ? self.headerNamesByNormalizedKey[normalizedKey]
                                 : normalizedKey;
-    [head appendString:displayName];
-    [head appendString:@": "];
-    [head appendString:value];
-    [head appendString:@"\r\n"];
+    ALNResponseAppendHeaderLine(head, displayName, value);
     for (NSString *additional in self.additionalHeaderValues[normalizedKey]) {
-      [head appendString:displayName];
-      [head appendString:@": "];
-      [head appendString:additional];
-      [head appendString:@"\r\n"];
+      ALNResponseAppendHeaderLine(head, displayName, additional);
     }
   }
-  [head appendString:@"\r\n"];
-  NSData *serialized = [head dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  [head appendBytes:"\r\n" length:2];
+  NSData *serialized = head;
   self.cachedHeaderData = serialized;
   self.serializedHeadersDirty = NO;
   return serialized;

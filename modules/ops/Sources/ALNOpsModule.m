@@ -6,6 +6,7 @@
 #import "ALNController.h"
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
+#import "ALNPlatform.h"
 #import "ALNMetrics.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
@@ -427,9 +428,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   self.apiPrefix = OTConfiguredPath(moduleConfig, @"apiPrefix", @"api");
   self.accessRoles = [NSArray arrayWithArray:roles];
   self.minimumAuthAssuranceLevel =
-      [access[@"minimumAuthAssuranceLevel"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [access[@"minimumAuthAssuranceLevel"] unsignedIntegerValue]
-          : 2;
+      ALNUnsignedIntegerValueOrDefault(access[@"minimumAuthAssuranceLevel"], 2);
   if (self.minimumAuthAssuranceLevel == 0) {
     self.minimumAuthAssuranceLevel = 2;
   }

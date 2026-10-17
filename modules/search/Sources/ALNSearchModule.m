@@ -9,6 +9,7 @@
 #import "ALNEOCRuntime.h"
 #import "ALNHTTPCompat.h"
 #import "ALNPg.h"
+#import "ALNPlatform.h"
 #import "ALNJobsModule.h"
 #import "ALNRequest.h"
 
@@ -17,6 +18,13 @@ NSString *const ALNSearchModuleErrorDomain = @"Arlen.Modules.Search.Error";
 static NSString *const ALNSearchReindexJobIdentifier = @"search.reindex";
 static NSUInteger const ALNSearchHistoryLimit = 30;
 static NSUInteger const ALNSearchGenerationHistoryLimit = 6;
+// Queries longer than this are rejected with a validation error (HTTP 422).
+static NSUInteger const ALNSearchMaxQueryLength = 256;
+// "Did you mean" suggestions are skipped for queries longer than this; they
+// compare the whole query against single indexed terms.
+static NSUInteger const ALNSearchSuggestionsMaxQueryLength = 64;
+// Upper bound for the autocomplete_limit and suggestions_limit query options.
+static NSUInteger const ALNSearchMaxSuggestionLimit = 25;
 
 extern NSString *ALNEOCRender_modules_search_dashboard_index_html_eoc(id ctx, NSError **error);
 extern NSString *ALNEOCRender_modules_search_layouts_main_html_eoc(id ctx, NSError **error);
@@ -85,6 +93,27 @@ static NSDictionary *STJSONDictionaryFromPath(NSString *path, NSError **error) {
   }
   id object = STJSONObjectFromData(data, error);
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
+}
+
+// Escapes LIKE metacharacters so user input matches literally; pair with
+// `ESCAPE '\'` in the SQL.
+static NSString *STEscapedLikePattern(NSString *value) {
+  NSString *escaped = value ?: @"";
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"%" withString:@"\\%"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"_" withString:@"\\_"];
+  return escaped;
+}
+
+static NSUInteger STClampedSuggestionLimit(id value, NSUInteger defaultValue) {
+  NSUInteger parsed = 0U;
+  if (!ALNUnsignedIntegerFromValue(value, &parsed)) {
+    return defaultValue;
+  }
+  if ([value isKindOfClass:[NSNumber class]] && [value longLongValue] < 0) {
+    return 1U;
+  }
+  return MIN(ALNSearchMaxSuggestionLimit, MAX((NSUInteger)1U, parsed));
 }
 
 static BOOL STBooleanValue(id value, BOOL defaultValue) {
@@ -1006,6 +1035,53 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   return [tokens array];
 }
 
+static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
+  NSUInteger leftLength = [left length];
+  NSUInteger rightLength = [right length];
+  if (leftLength == 0U) {
+    return rightLength;
+  }
+  if (rightLength == 0U) {
+    return leftLength;
+  }
+  unichar *leftChars = malloc(sizeof(unichar) * leftLength);
+  unichar *rightChars = malloc(sizeof(unichar) * rightLength);
+  NSUInteger *previous = malloc(sizeof(NSUInteger) * (rightLength + 1U));
+  NSUInteger *current = malloc(sizeof(NSUInteger) * (rightLength + 1U));
+  if (leftChars == NULL || rightChars == NULL || previous == NULL || current == NULL) {
+    free(leftChars);
+    free(rightChars);
+    free(previous);
+    free(current);
+    return MAX(leftLength, rightLength);
+  }
+  [left getCharacters:leftChars range:NSMakeRange(0, leftLength)];
+  [right getCharacters:rightChars range:NSMakeRange(0, rightLength)];
+  for (NSUInteger column = 0; column <= rightLength; column++) {
+    previous[column] = column;
+  }
+  for (NSUInteger row = 1; row <= leftLength; row++) {
+    current[0] = row;
+    unichar leftChar = leftChars[row - 1U];
+    for (NSUInteger column = 1; column <= rightLength; column++) {
+      NSUInteger substitutionCost = (leftChar == rightChars[column - 1U]) ? 0U : 1U;
+      NSUInteger deletion = previous[column] + 1U;
+      NSUInteger insertion = current[column - 1U] + 1U;
+      NSUInteger substitution = previous[column - 1U] + substitutionCost;
+      current[column] = MIN(MIN(deletion, insertion), substitution);
+    }
+    NSUInteger *swap = previous;
+    previous = current;
+    current = swap;
+  }
+  NSUInteger distance = previous[rightLength];
+  free(leftChars);
+  free(rightChars);
+  free(previous);
+  free(current);
+  return distance;
+}
+
 - (NSSet<NSString *> *)trigramsForString:(NSString *)text {
   NSString *normalized = [NSString stringWithFormat:@"  %@  ", STLowerTrimmedString(text)];
   if ([normalized length] < 3) {
@@ -1019,8 +1095,11 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 }
 
 - (double)trigramSimilarityForString:(NSString *)lhs other:(NSString *)rhs {
+  return [self trigramSimilarityForString:lhs otherTrigrams:[self trigramsForString:rhs]];
+}
+
+- (double)trigramSimilarityForString:(NSString *)lhs otherTrigrams:(NSSet<NSString *> *)right {
   NSSet<NSString *> *left = [self trigramsForString:lhs];
-  NSSet<NSString *> *right = [self trigramsForString:rhs];
   if ([left count] == 0 || [right count] == 0) {
     return 0.0;
   }
@@ -1030,38 +1109,22 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 }
 
 - (NSUInteger)levenshteinDistanceBetween:(NSString *)lhs and:(NSString *)rhs {
-  NSString *left = STLowerTrimmedString(lhs);
-  NSString *right = STLowerTrimmedString(rhs);
+  return STLevenshteinDistance(STLowerTrimmedString(lhs), STLowerTrimmedString(rhs));
+}
+
+// Fuzzy scoring only distinguishes distances <= 2 from larger ones. When the
+// lengths differ by more than 2 the distance is necessarily larger, so the
+// full O(n*m) computation is skipped and the length difference returned.
+- (NSUInteger)fuzzyEditDistanceBetween:(NSString *)token and:(NSString *)needle {
+  NSString *left = STLowerTrimmedString(token);
+  NSString *right = STLowerTrimmedString(needle);
   NSUInteger leftLength = [left length];
   NSUInteger rightLength = [right length];
-  if (leftLength == 0U) {
-    return rightLength;
+  NSUInteger lengthDelta = (leftLength > rightLength) ? (leftLength - rightLength) : (rightLength - leftLength);
+  if (lengthDelta > 2U) {
+    return lengthDelta;
   }
-  if (rightLength == 0U) {
-    return leftLength;
-  }
-  NSMutableArray<NSNumber *> *previous = [NSMutableArray arrayWithCapacity:(rightLength + 1U)];
-  NSMutableArray<NSNumber *> *current = [NSMutableArray arrayWithCapacity:(rightLength + 1U)];
-  for (NSUInteger column = 0; column <= rightLength; column++) {
-    [previous addObject:@(column)];
-    [current addObject:@0];
-  }
-  for (NSUInteger row = 1; row <= leftLength; row++) {
-    current[0] = @(row);
-    unichar leftChar = [left characterAtIndex:(row - 1U)];
-    for (NSUInteger column = 1; column <= rightLength; column++) {
-      unichar rightChar = [right characterAtIndex:(column - 1U)];
-      NSUInteger substitutionCost = (leftChar == rightChar) ? 0U : 1U;
-      NSUInteger deletion = [previous[column] unsignedIntegerValue] + 1U;
-      NSUInteger insertion = [current[column - 1U] unsignedIntegerValue] + 1U;
-      NSUInteger substitution = [previous[column - 1U] unsignedIntegerValue] + substitutionCost;
-      current[column] = @(MIN(MIN(deletion, insertion), substitution));
-    }
-    NSMutableArray<NSNumber *> *swap = previous;
-    previous = current;
-    current = swap;
-  }
-  return [[previous lastObject] unsignedIntegerValue];
+  return STLevenshteinDistance(left, right);
 }
 
 - (BOOL)text:(NSString *)text containsQueryAtWordBoundary:(NSString *)query {
@@ -1298,6 +1361,15 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
               query:(NSString *)query
                mode:(NSString *)mode
           highlight:(NSString **)highlight {
+  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:nil highlight:highlight];
+}
+
+- (double)scoreText:(NSString *)text
+             weight:(NSUInteger)weight
+              query:(NSString *)query
+               mode:(NSString *)mode
+      queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+          highlight:(NSString **)highlight {
   NSString *source = STStringifyValue(text);
   NSString *needle = STLowerTrimmedString(query);
   NSString *lowerSource = [source lowercaseString];
@@ -1321,9 +1393,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       score = (double)(weight * 10U);
       resolvedHighlight = [self snippetForText:source query:needle];
     } else {
+      NSSet<NSString *> *needleTrigrams = queryTrigrams ?: [self trigramsForString:needle];
       for (NSString *token in [self tokensForText:source]) {
-        double trigram = [self trigramSimilarityForString:token other:needle];
-        NSUInteger distance = [self levenshteinDistanceBetween:token and:needle];
+        double trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
+        NSUInteger distance = [self fuzzyEditDistanceBetween:token and:needle];
         if (trigram < 0.25 && distance > 2U) {
           continue;
         }
@@ -1365,6 +1438,20 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                        generation:(NSNumber *)generation
                                             query:(NSString *)query
                                              mode:(NSString *)mode {
+  return [self rankedMatchForDocument:document
+                             metadata:metadata
+                           generation:generation
+                                query:query
+                                 mode:mode
+                        queryTrigrams:nil];
+}
+
+- (nullable NSDictionary *)rankedMatchForDocument:(NSDictionary *)document
+                                         metadata:(NSDictionary *)metadata
+                                       generation:(NSNumber *)generation
+                                            query:(NSString *)query
+                                             mode:(NSString *)mode
+                                    queryTrigrams:(NSSet<NSString *> *)queryTrigrams {
   NSString *needle = STTrimmedString(query);
   NSString *resolvedHighlight = @"";
   double score = 0.0;
@@ -1377,11 +1464,14 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     if ([text length] == 0) {
       continue;
     }
-    NSUInteger weight = [weights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [weights[field] unsignedIntegerValue])
-                            : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(weights[field], 1U));
     NSString *fieldHighlight = @"";
-    double fieldScore = [self scoreText:text weight:weight query:needle mode:mode highlight:&fieldHighlight];
+    double fieldScore = [self scoreText:text
+                                 weight:weight
+                                  query:needle
+                                   mode:mode
+                          queryTrigrams:queryTrigrams
+                              highlight:&fieldHighlight];
     if (fieldScore > 0.0 && ![matchedFields containsObject:field]) {
       [matchedFields addObject:field];
     }
@@ -1485,9 +1575,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                               query:(NSString *)query
                                               limit:(NSUInteger)limit {
   NSString *needle = STLowerTrimmedString(query);
-  if ([needle length] == 0) {
+  if ([needle length] == 0 || [needle length] > ALNSearchSuggestionsMaxQueryLength) {
     return @[];
   }
+  NSSet<NSString *> *needleTrigrams = [self trigramsForString:needle];
   NSMutableDictionary<NSString *, NSNumber *> *scoresByCandidate = [NSMutableDictionary dictionary];
   NSArray *fields = [self suggestionFieldsForMetadata:metadata];
   for (NSDictionary *document in documents) {
@@ -1497,8 +1588,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
         if ([token isEqualToString:needle]) {
           continue;
         }
-        double trigram = [self trigramSimilarityForString:token other:needle];
-        NSUInteger distance = [self levenshteinDistanceBetween:token and:needle];
+        double trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
+        NSUInteger distance = [self fuzzyEditDistanceBetween:token and:needle];
         if (trigram < 0.22 && distance > 2U) {
           continue;
         }
@@ -1702,12 +1793,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSMutableArray *matches = [NSMutableArray array];
   NSMutableArray *candidateDocuments = [NSMutableArray array];
   NSMutableOrderedSet<NSString *> *availableModes = [NSMutableOrderedSet orderedSet];
-  NSUInteger autocompleteLimit = [options[@"autocompleteLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                     ? MAX((NSUInteger)1U, [options[@"autocompleteLimit"] unsignedIntegerValue])
-                                     : 5U;
-  NSUInteger suggestionsLimit = [options[@"suggestionsLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                    ? MAX((NSUInteger)1U, [options[@"suggestionsLimit"] unsignedIntegerValue])
-                                    : 3U;
+  NSUInteger autocompleteLimit = STClampedSuggestionLimit(options[@"autocompleteLimit"], 5U);
+  NSUInteger suggestionsLimit = STClampedSuggestionLimit(options[@"suggestionsLimit"], 3U);
+  NSString *rankingQuery = STLowerTrimmedString(normalizedQuery);
+  NSSet<NSString *> *queryTrigrams = ([rankingQuery length] > 0) ? [self trigramsForString:rankingQuery] : nil;
 
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
@@ -1756,7 +1845,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                                                  metadata:metadata
                                                generation:snapshot[@"generation"]
                                                     query:normalizedQuery
-                                                     mode:queryMode];
+                                                     mode:queryMode
+                                            queryTrigrams:queryTrigrams];
       if (ranked == nil && [normalizedQuery length] > 0) {
         continue;
       }
@@ -1924,9 +2014,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     }
     return NO;
   }
-  NSUInteger maxConnections = [postgres[@"maxConnections"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? MAX((NSUInteger)1U, [postgres[@"maxConnections"] unsignedIntegerValue])
-                                  : 2U;
+  NSUInteger maxConnections = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(postgres[@"maxConnections"], 2U));
   NSError *dbError = nil;
   self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:maxConnections error:&dbError];
   if (self.database == nil) {
@@ -2208,14 +2296,14 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
           self.textSearchConfiguration,
           self.textSearchConfiguration];
     } else if ([queryMode isEqualToString:@"autocomplete"]) {
-      [parameters addObject:[NSString stringWithFormat:@"%@%%", normalizedQuery ?: @""]];
+      [parameters addObject:[NSString stringWithFormat:@"%@%%", STEscapedLikePattern(normalizedQuery)]];
       sql = [NSString stringWithFormat:
           @"SELECT record_id, "
-           "CASE WHEN lower(autocomplete_text) LIKE lower($4) THEN 1.0 ELSE similarity(autocomplete_text, $3) END AS score, "
+           "CASE WHEN lower(autocomplete_text) LIKE lower($4) ESCAPE '\\' THEN 1.0 ELSE similarity(autocomplete_text, $3) END AS score, "
            "autocomplete_text AS highlight "
            "FROM %@ "
            "WHERE resource_identifier = $1 AND generation = $2 "
-           "AND (lower(autocomplete_text) LIKE lower($4) OR autocomplete_text %% $3) "
+           "AND (lower(autocomplete_text) LIKE lower($4) ESCAPE '\\' OR autocomplete_text %% $3) "
            "ORDER BY score DESC, record_id ASC",
           self.tableName];
     } else {
@@ -2609,11 +2697,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     self.serviceURL = STTrimmedString(self.engineConfig[@"baseURL"]);
   }
   self.apiKey = STTrimmedString(self.engineConfig[@"apiKey"]);
-  self.chunkSize = [self.engineConfig[@"chunkSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                       ? MAX((NSUInteger)1U, [self.engineConfig[@"chunkSize"] unsignedIntegerValue])
-                       : ([self.engineConfig[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                              ? MAX((NSUInteger)1U, [self.engineConfig[@"bulkBatchSize"] unsignedIntegerValue])
-                              : 250U);
+  NSUInteger defaultChunkSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(self.engineConfig[@"bulkBatchSize"], 250U));
+  self.chunkSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(self.engineConfig[@"chunkSize"], defaultChunkSize));
   self.liveRequestsEnabled = ([self.serviceURL length] > 0) && STBooleanValue(self.engineConfig[@"liveRequestsEnabled"], YES);
   NSDictionary *inlineFixtures = STNormalizeDictionary(self.engineConfig[@"fixtures"]);
   NSString *fixturesPath = STTrimmedString(self.engineConfig[@"fixturesPath"]);
@@ -3429,9 +3514,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSDictionary *weights = STNormalizeDictionary(metadata[@"weightedFields"]);
   NSMutableArray<NSString *> *resolved = [NSMutableArray array];
   for (NSString *field in fields) {
-    NSUInteger weight = [weights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [weights[field] unsignedIntegerValue])
-                            : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(weights[field], 1U));
     if (weight > 1U) {
       [resolved addObject:[NSString stringWithFormat:@"%@^%lu", field, (unsigned long)weight]];
     } else {
@@ -3733,9 +3816,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     if ([field length] == 0) {
       continue;
     }
-    NSUInteger facetLimit = [facet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? MAX((NSUInteger)1U, [facet[@"limit"] unsignedIntegerValue])
-                                : 10U;
+    NSUInteger facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(facet[@"limit"], 10U));
     aggregations[field] = @{
       @"terms" : @{
         @"field" : [self openSearchExactFieldNameForField:field metadata:metadata],
@@ -3891,9 +3972,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       continue;
     }
     [indexedFields addObject:name];
-    NSUInteger weight = [field[@"searchWeight"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [field[@"searchWeight"] unsignedIntegerValue])
-                            : ([name isEqualToString:STLowerTrimmedString(self.metadata[@"primaryField"])] ? 4U : 1U);
+    NSUInteger defaultWeight = [name isEqualToString:STLowerTrimmedString(self.metadata[@"primaryField"])] ? 4U : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(field[@"searchWeight"], defaultWeight));
     weights[name] = @(weight);
     if (STBooleanValue(field[@"list"], NO) || STBooleanValue(field[@"detail"], NO)) {
       [resultFields addObject:name];
@@ -4039,9 +4119,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   self.apiPrefix = STConfiguredPath(moduleConfig, @"apiPrefix", @"api");
   self.accessRoles = ([roles count] > 0) ? roles : @[ @"operator", @"admin" ];
   self.minimumAuthAssuranceLevel =
-      [access[@"minimumAuthAssuranceLevel"] respondsToSelector:@selector(unsignedIntegerValue)]
-          ? [access[@"minimumAuthAssuranceLevel"] unsignedIntegerValue]
-          : 2;
+      ALNUnsignedIntegerValueOrDefault(access[@"minimumAuthAssuranceLevel"], 2);
   if (self.minimumAuthAssuranceLevel == 0) {
     self.minimumAuthAssuranceLevel = 2;
   }
@@ -4363,9 +4441,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   NSMutableDictionary *weightedFields = [NSMutableDictionary dictionary];
   NSDictionary *rawWeights = STNormalizeDictionary(rawMetadata[@"weightedFields"]);
   for (NSString *field in indexedFields) {
-    NSUInteger weight = [rawWeights[field] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [rawWeights[field] unsignedIntegerValue])
-                            : ([field isEqualToString:primaryField] ? 4U : 1U);
+    NSUInteger defaultWeight = [field isEqualToString:primaryField] ? 4U : 1U;
+    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawWeights[field], defaultWeight));
     weightedFields[field] = @(weight);
   }
   NSMutableArray *filters = [NSMutableArray array];
@@ -4438,29 +4515,26 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     }
   }
   NSDictionary *rawPagination = STNormalizeDictionary(rawMetadata[@"pagination"]);
-  NSUInteger defaultLimit = [rawPagination[@"defaultLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? [rawPagination[@"defaultLimit"] unsignedIntegerValue]
-                                : ([rawMetadata[@"pageSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                       ? [rawMetadata[@"pageSize"] unsignedIntegerValue]
-                                       : 25U);
+  NSUInteger defaultLimit = ALNUnsignedIntegerValueOrDefault(rawPagination[@"defaultLimit"],
+                                                              ALNUnsignedIntegerValueOrDefault(rawMetadata[@"pageSize"], 25U));
   if (defaultLimit == 0U) {
     defaultLimit = 25U;
   }
-  NSUInteger maxLimit = [rawPagination[@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? [rawPagination[@"maxLimit"] unsignedIntegerValue]
-                            : MAX(defaultLimit, 100U);
+  NSUInteger maxLimit = ALNUnsignedIntegerValueOrDefault(rawPagination[@"maxLimit"], MAX(defaultLimit, 100U));
   if (maxLimit < defaultLimit) {
     maxLimit = defaultLimit;
   }
   NSMutableOrderedSet<NSNumber *> *pageSizes = [NSMutableOrderedSet orderedSet];
   for (id entry in STNormalizeArray(rawPagination[@"pageSizes"])) {
-    if ([entry respondsToSelector:@selector(unsignedIntegerValue)] && [entry unsignedIntegerValue] > 0U) {
-      [pageSizes addObject:@([entry unsignedIntegerValue])];
+    NSUInteger pageSize = ALNUnsignedIntegerValueOrDefault(entry, 0U);
+    if (pageSize > 0U) {
+      [pageSizes addObject:@(pageSize)];
     }
   }
   for (id entry in STNormalizeArray(rawMetadata[@"pageSizes"])) {
-    if ([entry respondsToSelector:@selector(unsignedIntegerValue)] && [entry unsignedIntegerValue] > 0U) {
-      [pageSizes addObject:@([entry unsignedIntegerValue])];
+    NSUInteger pageSize = ALNUnsignedIntegerValueOrDefault(entry, 0U);
+    if (pageSize > 0U) {
+      [pageSizes addObject:@(pageSize)];
     }
   }
   [pageSizes addObject:@(defaultLimit)];
@@ -4481,9 +4555,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
       label = STTrimmedString(rawFacet[@"label"]);
       facetType = STLowerTrimmedString(rawFacet[@"type"]);
       choices = STNormalizedChoiceArray(rawFacet[@"choices"]);
-      if ([rawFacet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]) {
-        facetLimit = MAX((NSUInteger)1U, [rawFacet[@"limit"] unsignedIntegerValue]);
-      }
+      facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawFacet[@"limit"], facetLimit));
     } else {
       name = STLowerTrimmedString(rawFacet);
     }
@@ -4595,12 +4667,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     }];
   }
   NSDictionary *rawSyncPolicy = STNormalizeDictionary(rawMetadata[@"syncPolicy"]);
-  NSUInteger bulkBatchSize = [rawSyncPolicy[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                 ? MAX((NSUInteger)1U, [rawSyncPolicy[@"bulkBatchSize"] unsignedIntegerValue])
-                                 : 250U;
-  NSUInteger replayLimit = [rawSyncPolicy[@"replayLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? MAX((NSUInteger)1U, [rawSyncPolicy[@"replayLimit"] unsignedIntegerValue])
-                               : 20U;
+  NSUInteger bulkBatchSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawSyncPolicy[@"bulkBatchSize"], 250U));
+  NSUInteger replayLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(rawSyncPolicy[@"replayLimit"], 20U));
   NSString *softDeleteMode = STLowerTrimmedString(rawSyncPolicy[@"softDeleteMode"]);
   if (![softDeleteMode isEqualToString:@"delete"]) {
     softDeleteMode = ([softDeleteField length] > 0) ? @"filter" : @"ignore";
@@ -4907,9 +4975,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     return nil;
   }
   id<ALNSearchResourceDefinition> definition = nil;
-  NSUInteger batchSize = [syncPolicy[@"bulkBatchSize"] respondsToSelector:@selector(unsignedIntegerValue)]
-                             ? MAX((NSUInteger)1U, [syncPolicy[@"bulkBatchSize"] unsignedIntegerValue])
-                             : 250U;
+  NSUInteger batchSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(syncPolicy[@"bulkBatchSize"], 250U));
   NSTimeInterval startedAt = [[NSDate date] timeIntervalSince1970];
   [self.lock lock];
   definition = self.resourceDefinitionsByIdentifier[resourceIdentifier];
@@ -5571,9 +5637,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
     return;
   }
   NSDictionary *syncPolicy = STNormalizeDictionary(metadata[@"syncPolicy"]);
-  NSUInteger replayLimit = [syncPolicy[@"replayLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                               ? MAX((NSUInteger)1U, [syncPolicy[@"replayLimit"] unsignedIntegerValue])
-                               : 20U;
+  NSUInteger replayLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(syncPolicy[@"replayLimit"], 20U));
   NSMutableArray *queue = [self.pendingReplayOperationsByResource[resourceIdentifier] isKindOfClass:[NSMutableArray class]]
                               ? self.pendingReplayOperationsByResource[resourceIdentifier]
                               : [NSMutableArray array];
@@ -5839,9 +5903,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
         }
         return [STLowerTrimmedString(labels[lhs]) compare:STLowerTrimmedString(labels[rhs])];
       }];
-      NSUInteger facetLimit = [facet[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? MAX((NSUInteger)1U, [facet[@"limit"] unsignedIntegerValue])
-                                  : 10U;
+      NSUInteger facetLimit = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(facet[@"limit"], 10U));
       if ([sortedValues count] > facetLimit) {
         sortedValues = [sortedValues subarrayWithRange:NSMakeRange(0, facetLimit)];
       }
@@ -5879,6 +5941,18 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
                        offset:(NSUInteger)offset
                  queryOptions:(NSDictionary *)queryOptions
                         error:(NSError **)error {
+  if ([STTrimmedString(query) length] > ALNSearchMaxQueryLength) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       [NSString stringWithFormat:@"query is too long (maximum %lu characters)",
+                                                  (unsigned long)ALNSearchMaxQueryLength],
+                       @{
+                         @"field" : @"q",
+                         @"maxLength" : @(ALNSearchMaxQueryLength),
+                       });
+    }
+    return nil;
+  }
   NSString *resource = STLowerTrimmedString(resourceIdentifier);
   NSSet *allowedSet = ([allowedResourceIdentifiers count] > 0) ? [NSSet setWithArray:allowedResourceIdentifiers] : nil;
   NSArray *candidateMetadata = nil;
@@ -5973,16 +6047,12 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   }
 
   NSDictionary *pagination = ([candidateMetadata count] == 1) ? STNormalizeDictionary(candidateMetadata[0][@"pagination"]) : @{};
-  NSUInteger defaultLimit = [pagination[@"defaultLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                ? [pagination[@"defaultLimit"] unsignedIntegerValue]
-                                : 25U;
+  NSUInteger defaultLimit = ALNUnsignedIntegerValueOrDefault(pagination[@"defaultLimit"], 25U);
   if (defaultLimit == 0U) {
     defaultLimit = 25U;
   }
   NSUInteger resolvedLimit = (limit > 0U) ? limit : defaultLimit;
-  NSUInteger maxLimit = [pagination[@"maxLimit"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? [pagination[@"maxLimit"] unsignedIntegerValue]
-                            : 100U;
+  NSUInteger maxLimit = ALNUnsignedIntegerValueOrDefault(pagination[@"maxLimit"], 100U);
   if (maxLimit == 0U) {
     maxLimit = 100U;
   }
@@ -6720,13 +6790,11 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   if ([mode length] > 0) {
     options[@"mode"] = mode;
   }
-  if ([parameters[@"autocomplete_limit"] respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [parameters[@"autocomplete_limit"] unsignedIntegerValue] > 0U) {
-    options[@"autocompleteLimit"] = @([parameters[@"autocomplete_limit"] unsignedIntegerValue]);
+  if (ALNUnsignedIntegerValueOrDefault(parameters[@"autocomplete_limit"], 0U) > 0U) {
+    options[@"autocompleteLimit"] = @(STClampedSuggestionLimit(parameters[@"autocomplete_limit"], 5U));
   }
-  if ([parameters[@"suggestions_limit"] respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [parameters[@"suggestions_limit"] unsignedIntegerValue] > 0U) {
-    options[@"suggestionsLimit"] = @([parameters[@"suggestions_limit"] unsignedIntegerValue]);
+  if (ALNUnsignedIntegerValueOrDefault(parameters[@"suggestions_limit"], 0U) > 0U) {
+    options[@"suggestionsLimit"] = @(STClampedSuggestionLimit(parameters[@"suggestions_limit"], 3U));
   }
   NSString *cursor = STTrimmedString(parameters[@"cursor"]);
   if ([cursor length] > 0) {
@@ -6840,8 +6908,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
   if (visibleResources == nil) {
     return nil;
   }
-  NSUInteger limit = [parameters[@"limit"] respondsToSelector:@selector(unsignedIntegerValue)] ? [parameters[@"limit"] unsignedIntegerValue] : 25;
-  NSUInteger offset = [parameters[@"offset"] respondsToSelector:@selector(unsignedIntegerValue)] ? [parameters[@"offset"] unsignedIntegerValue] : 0;
+  NSUInteger limit = ALNUnsignedIntegerValueOrDefault(parameters[@"limit"], 25);
+  NSUInteger offset = ALNUnsignedIntegerValueOrDefault(parameters[@"offset"], 0);
   NSDictionary *explicitFilters = [self searchFiltersFromParameters:parameters] ?: @{};
   NSString *query = STTrimmedString(parameters[@"q"]);
   if ([query length] == 0 && [STLowerTrimmedString(resourceIdentifier) length] == 0 && [explicitFilters count] == 0) {

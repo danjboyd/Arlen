@@ -156,6 +156,10 @@ curl -i http://127.0.0.1:3000/openapi
 `boomhauer` watches app files by default and rebuilds when inputs change.
 Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
 for built-in operability, so app routes should not reuse those paths.
+`/metrics` and `/clusterz` are anonymous by default; before production, see
+[Configuration Reference](CONFIGURATION_REFERENCE.md#6-rate-limits-and-security-headers)
+for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
+(`arlen doctor --env production` warns until one is set).
 
 ## 5. Add One More Route
 
@@ -195,6 +199,9 @@ From app root:
 /path/to/Arlen/bin/arlen check
 ```
 
+`arlen config` prints secret values (session secrets, connection-string
+passwords and similar) as `[redacted]`; pass `--show-secrets` to see them.
+
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 
@@ -232,7 +239,8 @@ For login/logout flows that issue multiple cookies, see
 - generating descriptor-first TypeScript models, validators, query/resource
   metadata, clients, and optional React helpers for a frontend app:
   `docs/GETTING_STARTED_API_FIRST.md`, `arlen typescript-codegen`, and
-  `examples/react_typescript_reference/README.md`
+  `examples/react_typescript_reference/README.md`. Apps without the ORM can
+  generate the client and React targets from the OpenAPI export alone.
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
 ## 8. Optional Dataverse Path
