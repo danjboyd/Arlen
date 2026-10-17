@@ -220,8 +220,8 @@ python3 tools/docs/generate_api_reference.py
 
 ## Public Header List
 
-- `src/Arlen/Core/ALNApplication.h`
 - `src/Arlen/Core/ALNAppRunner.h`
+- `src/Arlen/Core/ALNApplication.h`
 - `src/Arlen/Core/ALNConfig.h`
 - `src/Arlen/Core/ALNModuleSystem.h`
 - `src/Arlen/Core/ALNOpenAPI.h`
@@ -237,16 +237,16 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Data/ALNDataverseQuery.h`
 - `src/Arlen/Data/ALNDisplayGroup.h`
 - `src/Arlen/Data/ALNGDL2Adapter.h`
-- `src/Arlen/Data/ALNMigrationRunner.h`
 - `src/Arlen/Data/ALNMSSQL.h`
 - `src/Arlen/Data/ALNMSSQLDialect.h`
 - `src/Arlen/Data/ALNMSSQLSQLBuilder.h`
+- `src/Arlen/Data/ALNMigrationRunner.h`
 - `src/Arlen/Data/ALNPg.h`
 - `src/Arlen/Data/ALNPostgresDialect.h`
 - `src/Arlen/Data/ALNPostgresSQLBuilder.h`
-- `src/Arlen/Data/ALNSchemaCodegen.h`
 - `src/Arlen/Data/ALNSQLBuilder.h`
 - `src/Arlen/Data/ALNSQLDialect.h`
+- `src/Arlen/Data/ALNSchemaCodegen.h`
 - `src/Arlen/HTTP/ALNFileResponse.h`
 - `src/Arlen/HTTP/ALNHTTPServer.h`
 - `src/Arlen/HTTP/ALNMIMETypes.h`
@@ -311,6 +311,6 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNRealtime.h`
 - `src/Arlen/Support/ALNRecoveryCodes.h`
 - `src/Arlen/Support/ALNServices.h`
-- `src/Arlen/Support/ALNTestClient.h`
 - `src/Arlen/Support/ALNTOTP.h`
+- `src/Arlen/Support/ALNTestClient.h`
 - `src/Arlen/Support/ALNWebAuthn.h`
