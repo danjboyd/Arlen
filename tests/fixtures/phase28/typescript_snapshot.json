@@ -9,7 +9,7 @@
     "package.json": {
       "bytes": 683,
       "lines": 29,
-      "sha256": "5929c788456bd15d736e18be8fc44e8a1fe5327e5dfdeaa9deca69b601786173"
+      "sha256": "f3926f52acf4ff5454b7665ee5a4b97086829f313c61216e95f386b898ccb138"
     },
     "src/client.ts": {
       "bytes": 10972,
@@ -24,7 +24,7 @@
     "src/meta.ts": {
       "bytes": 3097,
       "lines": 124,
-      "sha256": "21883c30f4e357b5399739d2879bca1d6b8f3bc25127a7142cb84dc273d0f2ec"
+      "sha256": "ba7ec73995a222a261f239e46291c8d3be700f7bb21e5a5bcbcbda0ea8f6cf46"
     },
     "src/models.ts": {
       "bytes": 10185,
@@ -49,12 +49,12 @@
     "src/validators.ts": {
       "bytes": 29100,
       "lines": 1148,
-      "sha256": "45f020bd1c6bc7a50d3c6b1bc1f056923b087cda19d7162701dbbd1872763871"
+      "sha256": "69e72b3af7f826401b0b4333341396f5525f80ff06db34c2d7477a582494229e"
     },
     "tsconfig.json": {
       "bytes": 356,
       "lines": 20,
-      "sha256": "2c23cf7b70792fba949fd74deaed955eeba1dbe8f5b5a5276aa3f0ad5948520d"
+      "sha256": "eac6eac8cb130e1d24088f2490bf89d33f219bd988b43e76e87199419606b4ee"
     }
   },
   "manifest": {
@@ -104,7 +104,229 @@
         "path": "tsconfig.json"
       }
     ],
+    "format": "arlen-typescript-contract-v1",
+    "model_count": 6,
+    "models": [
+      {
+        "available_include_type": "PublicPostTagAvailableInclude",
+        "create_input_name": "PublicPostTagCreateInput",
+        "create_schema_name": "publicPostTagCreateInputSchema",
+        "entity_name": "public.post_tags",
+        "field_name_type": "PublicPostTagFieldName",
+        "read_only": false,
+        "relation_name_type": "PublicPostTagRelationName",
+        "type_name": "PublicPostTag",
+        "update_input_name": "PublicPostTagUpdateInput",
+        "update_schema_name": "publicPostTagUpdateInputSchema"
+      },
+      {
+        "available_include_type": "PublicPostAvailableInclude",
+        "create_input_name": "PublicPostCreateInput",
+        "create_schema_name": "publicPostCreateInputSchema",
+        "entity_name": "public.posts",
+        "field_name_type": "PublicPostFieldName",
+        "read_only": false,
+        "relation_name_type": "PublicPostRelationName",
+        "type_name": "PublicPost",
+        "update_input_name": "PublicPostUpdateInput",
+        "update_schema_name": "publicPostUpdateInputSchema"
+      },
+      {
+        "available_include_type": "PublicProfileAvailableInclude",
+        "create_input_name": "PublicProfileCreateInput",
+        "create_schema_name": "publicProfileCreateInputSchema",
+        "entity_name": "public.profiles",
+        "field_name_type": "PublicProfileFieldName",
+        "read_only": false,
+        "relation_name_type": "PublicProfileRelationName",
+        "type_name": "PublicProfile",
+        "update_input_name": "PublicProfileUpdateInput",
+        "update_schema_name": "publicProfileUpdateInputSchema"
+      },
+      {
+        "available_include_type": "PublicTagAvailableInclude",
+        "create_input_name": "PublicTagCreateInput",
+        "create_schema_name": "publicTagCreateInputSchema",
+        "entity_name": "public.tags",
+        "field_name_type": "PublicTagFieldName",
+        "read_only": false,
+        "relation_name_type": "PublicTagRelationName",
+        "type_name": "PublicTag",
+        "update_input_name": "PublicTagUpdateInput",
+        "update_schema_name": "publicTagUpdateInputSchema"
+      },
+      {
+        "available_include_type": "PublicUserEmailAvailableInclude",
+        "create_input_name": "PublicUserEmailCreateInput",
+        "create_schema_name": "publicUserEmailCreateInputSchema",
+        "entity_name": "public.user_emails",
+        "field_name_type": "PublicUserEmailFieldName",
+        "read_only": true,
+        "relation_name_type": "PublicUserEmailRelationName",
+        "type_name": "PublicUserEmail",
+        "update_input_name": "PublicUserEmailUpdateInput",
+        "update_schema_name": "publicUserEmailUpdateInputSchema"
+      },
+      {
+        "available_include_type": "PublicUserAvailableInclude",
+        "create_input_name": "PublicUserCreateInput",
+        "create_schema_name": "publicUserCreateInputSchema",
+        "entity_name": "public.users",
+        "field_name_type": "PublicUserFieldName",
+        "read_only": false,
+        "relation_name_type": "PublicUserRelationName",
+        "type_name": "PublicUser",
+        "update_input_name": "PublicUserUpdateInput",
+        "update_schema_name": "publicUserUpdateInputSchema"
+      }
+    ],
     "module_count": 4,
+    "modules": [
+      {
+        "kind": "admin",
+        "name": "admin-ui",
+        "operation_ids": [],
+        "resource_names": [
+          "users"
+        ]
+      },
+      {
+        "kind": "auth",
+        "name": "auth",
+        "operation_ids": [
+          "get_session"
+        ],
+        "resource_names": []
+      },
+      {
+        "kind": "ops",
+        "name": "ops",
+        "operation_ids": [
+          "ops_summary"
+        ],
+        "resource_names": []
+      },
+      {
+        "kind": "search",
+        "name": "search",
+        "operation_ids": [
+          "search_capabilities"
+        ],
+        "resource_names": []
+      }
+    ],
+    "operation_count": 7,
+    "operations": [
+      {
+        "http_method": "GET",
+        "kind": "query",
+        "method_name": "getSession",
+        "operation_id": "get_session",
+        "path": "/api/session",
+        "request_schema_name": "getSessionRequestSchema",
+        "request_type": "GetSessionRequest",
+        "response_type": "GetSessionResponse",
+        "tags": [
+          "auth",
+          "session"
+        ]
+      },
+      {
+        "http_method": "GET",
+        "kind": "query",
+        "method_name": "listUsers",
+        "operation_id": "list_users",
+        "path": "/api/users",
+        "request_schema_name": "listUsersRequestSchema",
+        "request_type": "ListUsersRequest",
+        "response_type": "ListUsersResponse",
+        "tags": [
+          "users"
+        ]
+      },
+      {
+        "http_method": "POST",
+        "kind": "mutation",
+        "method_name": "createUser",
+        "operation_id": "create_user",
+        "path": "/api/users",
+        "request_schema_name": "createUserRequestSchema",
+        "request_type": "CreateUserRequest",
+        "response_type": "CreateUserResponse",
+        "tags": [
+          "users"
+        ]
+      },
+      {
+        "http_method": "GET",
+        "kind": "query",
+        "method_name": "getUser",
+        "operation_id": "get_user",
+        "path": "/api/users/{id}",
+        "request_schema_name": "getUserRequestSchema",
+        "request_type": "GetUserRequest",
+        "response_type": "GetUserResponse",
+        "tags": [
+          "users"
+        ]
+      },
+      {
+        "http_method": "PATCH",
+        "kind": "mutation",
+        "method_name": "updateUser",
+        "operation_id": "update_user",
+        "path": "/api/users/{id}",
+        "request_schema_name": "updateUserRequestSchema",
+        "request_type": "UpdateUserRequest",
+        "response_type": "UpdateUserResponse",
+        "tags": [
+          "users"
+        ]
+      },
+      {
+        "http_method": "GET",
+        "kind": "query",
+        "method_name": "opsSummary",
+        "operation_id": "ops_summary",
+        "path": "/ops/api/summary",
+        "request_schema_name": "opsSummaryRequestSchema",
+        "request_type": "OpsSummaryRequest",
+        "response_type": "OpsSummaryResponse",
+        "tags": [
+          "ops"
+        ]
+      },
+      {
+        "http_method": "GET",
+        "kind": "query",
+        "method_name": "searchCapabilities",
+        "operation_id": "search_capabilities",
+        "path": "/search/api/capabilities",
+        "request_schema_name": "searchCapabilitiesRequestSchema",
+        "request_type": "SearchCapabilitiesRequest",
+        "response_type": "SearchCapabilitiesResponse",
+        "tags": [
+          "search"
+        ]
+      }
+    ],
+    "package_name": "arlen-phase28-client",
+    "resource_count": 1,
+    "resources": [
+      {
+        "admin_enabled": true,
+        "entity_name": "public.users",
+        "model_type_name": "PublicUser",
+        "name": "users",
+        "operation_ids": [
+          "list_users",
+          "get_user",
+          "create_user",
+          "update_user"
+        ],
+        "query_contract_name": "usersResourceQueryContract"
+      }
+    ],
     "targets": [
       "models",
       "validators",
@@ -114,237 +336,15 @@
       "meta",
       "realtime"
     ],
-    "operations": [
-      {
-        "http_method": "GET",
-        "operation_id": "get_session",
-        "kind": "query",
-        "response_type": "GetSessionResponse",
-        "method_name": "getSession",
-        "tags": [
-          "auth",
-          "session"
-        ],
-        "request_schema_name": "getSessionRequestSchema",
-        "request_type": "GetSessionRequest",
-        "path": "/api/session"
-      },
-      {
-        "http_method": "GET",
-        "operation_id": "list_users",
-        "kind": "query",
-        "response_type": "ListUsersResponse",
-        "method_name": "listUsers",
-        "tags": [
-          "users"
-        ],
-        "request_schema_name": "listUsersRequestSchema",
-        "request_type": "ListUsersRequest",
-        "path": "/api/users"
-      },
-      {
-        "http_method": "POST",
-        "operation_id": "create_user",
-        "kind": "mutation",
-        "response_type": "CreateUserResponse",
-        "method_name": "createUser",
-        "tags": [
-          "users"
-        ],
-        "request_schema_name": "createUserRequestSchema",
-        "request_type": "CreateUserRequest",
-        "path": "/api/users"
-      },
-      {
-        "http_method": "GET",
-        "operation_id": "get_user",
-        "kind": "query",
-        "response_type": "GetUserResponse",
-        "method_name": "getUser",
-        "tags": [
-          "users"
-        ],
-        "request_schema_name": "getUserRequestSchema",
-        "request_type": "GetUserRequest",
-        "path": "/api/users/{id}"
-      },
-      {
-        "http_method": "PATCH",
-        "operation_id": "update_user",
-        "kind": "mutation",
-        "response_type": "UpdateUserResponse",
-        "method_name": "updateUser",
-        "tags": [
-          "users"
-        ],
-        "request_schema_name": "updateUserRequestSchema",
-        "request_type": "UpdateUserRequest",
-        "path": "/api/users/{id}"
-      },
-      {
-        "http_method": "GET",
-        "operation_id": "ops_summary",
-        "kind": "query",
-        "response_type": "OpsSummaryResponse",
-        "method_name": "opsSummary",
-        "tags": [
-          "ops"
-        ],
-        "request_schema_name": "opsSummaryRequestSchema",
-        "request_type": "OpsSummaryRequest",
-        "path": "/ops/api/summary"
-      },
-      {
-        "http_method": "GET",
-        "operation_id": "search_capabilities",
-        "kind": "query",
-        "response_type": "SearchCapabilitiesResponse",
-        "method_name": "searchCapabilities",
-        "tags": [
-          "search"
-        ],
-        "request_schema_name": "searchCapabilitiesRequestSchema",
-        "request_type": "SearchCapabilitiesRequest",
-        "path": "/search/api/capabilities"
-      }
-    ],
-    "resource_count": 1,
-    "format": "arlen-typescript-contract-v1",
-    "models": [
-      {
-        "type_name": "PublicPostTag",
-        "update_schema_name": "publicPostTagUpdateInputSchema",
-        "field_name_type": "PublicPostTagFieldName",
-        "read_only": false,
-        "create_input_name": "PublicPostTagCreateInput",
-        "available_include_type": "PublicPostTagAvailableInclude",
-        "relation_name_type": "PublicPostTagRelationName",
-        "create_schema_name": "publicPostTagCreateInputSchema",
-        "update_input_name": "PublicPostTagUpdateInput",
-        "entity_name": "public.post_tags"
-      },
-      {
-        "type_name": "PublicPost",
-        "update_schema_name": "publicPostUpdateInputSchema",
-        "field_name_type": "PublicPostFieldName",
-        "read_only": false,
-        "create_input_name": "PublicPostCreateInput",
-        "available_include_type": "PublicPostAvailableInclude",
-        "relation_name_type": "PublicPostRelationName",
-        "create_schema_name": "publicPostCreateInputSchema",
-        "update_input_name": "PublicPostUpdateInput",
-        "entity_name": "public.posts"
-      },
-      {
-        "type_name": "PublicProfile",
-        "update_schema_name": "publicProfileUpdateInputSchema",
-        "field_name_type": "PublicProfileFieldName",
-        "read_only": false,
-        "create_input_name": "PublicProfileCreateInput",
-        "available_include_type": "PublicProfileAvailableInclude",
-        "relation_name_type": "PublicProfileRelationName",
-        "create_schema_name": "publicProfileCreateInputSchema",
-        "update_input_name": "PublicProfileUpdateInput",
-        "entity_name": "public.profiles"
-      },
-      {
-        "type_name": "PublicTag",
-        "update_schema_name": "publicTagUpdateInputSchema",
-        "field_name_type": "PublicTagFieldName",
-        "read_only": false,
-        "create_input_name": "PublicTagCreateInput",
-        "available_include_type": "PublicTagAvailableInclude",
-        "relation_name_type": "PublicTagRelationName",
-        "create_schema_name": "publicTagCreateInputSchema",
-        "update_input_name": "PublicTagUpdateInput",
-        "entity_name": "public.tags"
-      },
-      {
-        "type_name": "PublicUserEmail",
-        "update_schema_name": "publicUserEmailUpdateInputSchema",
-        "field_name_type": "PublicUserEmailFieldName",
-        "read_only": true,
-        "create_input_name": "PublicUserEmailCreateInput",
-        "available_include_type": "PublicUserEmailAvailableInclude",
-        "relation_name_type": "PublicUserEmailRelationName",
-        "create_schema_name": "publicUserEmailCreateInputSchema",
-        "update_input_name": "PublicUserEmailUpdateInput",
-        "entity_name": "public.user_emails"
-      },
-      {
-        "type_name": "PublicUser",
-        "update_schema_name": "publicUserUpdateInputSchema",
-        "field_name_type": "PublicUserFieldName",
-        "read_only": false,
-        "create_input_name": "PublicUserCreateInput",
-        "available_include_type": "PublicUserAvailableInclude",
-        "relation_name_type": "PublicUserRelationName",
-        "create_schema_name": "publicUserCreateInputSchema",
-        "update_input_name": "PublicUserUpdateInput",
-        "entity_name": "public.users"
-      }
-    ],
-    "operation_count": 7,
-    "model_count": 6,
+    "version": 1,
     "workspace_hints": {
       "devCommand": "pnpm exec vite",
-      "typecheckCommand": "pnpm exec tsc --noEmit",
-      "packageManager": "pnpm",
-      "outputDir": "frontend/generated/arlen",
+      "installCommand": "pnpm install",
       "manifestPath": "db/schema/arlen_typescript.json",
-      "installCommand": "pnpm install"
-    },
-    "modules": [
-      {
-        "resource_names": [
-          "users"
-        ],
-        "kind": "admin",
-        "operation_ids": [],
-        "name": "admin-ui"
-      },
-      {
-        "resource_names": [],
-        "kind": "auth",
-        "operation_ids": [
-          "get_session"
-        ],
-        "name": "auth"
-      },
-      {
-        "resource_names": [],
-        "kind": "ops",
-        "operation_ids": [
-          "ops_summary"
-        ],
-        "name": "ops"
-      },
-      {
-        "resource_names": [],
-        "kind": "search",
-        "operation_ids": [
-          "search_capabilities"
-        ],
-        "name": "search"
-      }
-    ],
-    "package_name": "arlen-phase28-client",
-    "resources": [
-      {
-        "query_contract_name": "usersResourceQueryContract",
-        "entity_name": "public.users",
-        "admin_enabled": true,
-        "operation_ids": [
-          "list_users",
-          "get_user",
-          "create_user",
-          "update_user"
-        ],
-        "model_type_name": "PublicUser",
-        "name": "users"
-      }
-    ],
-    "version": 1
+      "outputDir": "frontend/generated/arlen",
+      "packageManager": "pnpm",
+      "typecheckCommand": "pnpm exec tsc --noEmit"
+    }
   },
-  "manifestSha256": "2862226773f5db451afd5791a81c14928b943f89128432bafd431273fb9642b5"
+  "manifestSha256": "1315d4b006d35b14b162b39bd8e6525552b4d2aa5cb1826ee3babde0ef743607"
 }

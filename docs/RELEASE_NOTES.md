@@ -50,6 +50,13 @@
   - `react.ts` query keys for operations without parameters name their
     argument `_request`, so the package compiles under `noUnusedParameters`.
 
+- JSON that Arlen writes with sorted keys is now actually sorted, on both
+  Linux and macOS. This covers `typescript-codegen` package files, `eocc`
+  manifests, schema-drift and Dataverse codegen output, and `arlen` JSON
+  reports. A `#ifdef NSJSONWritingSortedKeys` guard was always false
+  because both Foundations declare the option as an enum constant, so
+  output used dictionary hash order and differed between platforms.
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

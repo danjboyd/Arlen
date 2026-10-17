@@ -267,9 +267,7 @@ static NSString *ALNORMTSIndent(NSUInteger depth) {
 
 static NSJSONWritingOptions ALNORMTSJSONWritingOptions(void) {
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return options;
 }
 

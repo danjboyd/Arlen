@@ -260,9 +260,7 @@ static NSArray<NSString *> *SortedUniqueStrings(NSArray<NSString *> *values) {
 
 static NSJSONWritingOptions StableJSONWritingOptions(void) {
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   return options;
 }
 
