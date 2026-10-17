@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 #import "ALNHTTPCompat.h"
+#import "../shared/ALNTestSupport.h"
 
 extern NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line);
 
@@ -23,8 +24,8 @@ extern NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line);
   [[NSFileManager defaultManager] createFileAtPath:_tracePath contents:[NSData data] attributes:nil];
 
   _peer = [NSTask new];
-  _peer.launchPath = @"/usr/bin/env";
-  _peer.arguments = @[ @"python3", @"tests/fixtures/http/metadata_server.py", @"--trace", _tracePath ];
+  _peer.launchPath = ALNTestToolPath(@"python3");
+  _peer.arguments = @[ @"tests/fixtures/http/metadata_server.py", @"--trace", _tracePath ];
   // Sanitizer lanes preload runtimes into xctest; an uninstrumented python
   // child must not inherit them.
   NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
@@ -44,8 +45,7 @@ extern NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line);
 }
 
 - (void)tearDown {
-  [_peer terminate];
-  [_peer waitUntilExit];
+  (void)ALNTestStopServerTask(_peer);
   [[NSFileManager defaultManager] removeItemAtPath:_tracePath error:nil];
   [super tearDown];
 }

@@ -16,6 +16,9 @@
 
 // @{ total, dev_null } for this process, or nil where /proc is unavailable.
 - (NSDictionary *)descriptorCounts {
+#if defined(_WIN32)
+  return nil;  // no /proc, and no readlink
+#else
   NSArray *entries = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:@"/proc/self/fd" error:NULL];
   if (entries == nil) {
     return nil;
@@ -33,6 +36,7 @@
     }
   }
   return @{ @"total" : @([entries count]), @"dev_null" : @(devNull) };
+#endif
 }
 
 - (void)testDataverseCurlTransportReleasesItsDescriptors {

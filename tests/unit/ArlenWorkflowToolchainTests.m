@@ -81,6 +81,9 @@
   // arlen boomhauer, propane and jobs worker must run the server in the
   // caller's process group, so a terminal Ctrl-C (or a signal to that group)
   // stops the server instead of only arlen.
+#if defined(_WIN32)
+  XCTSkip(@"Process groups are POSIX; Windows console Ctrl-C reaches the whole console, and native python has no os.getpgrp");
+#endif
   NSString *root = [self createFrameworkFixtureWithAppleBuilder:NO];
   NSError *error = nil;
   NSString *pgidScript = @"#!/usr/bin/env bash\n"

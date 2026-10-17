@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #import "ALNLogger.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface LoggerTests : XCTestCase
 @end
@@ -21,7 +22,7 @@
   }
 
   int pipeFDs[2] = { -1, -1 };
-  XCTAssertEqual(0, pipe(pipeFDs));
+  XCTAssertTrue(ALNTestCreatePipe(pipeFDs, NO));
   if (pipeFDs[0] < 0 || pipeFDs[1] < 0) {
     (void)close(saved);
     return @"";
@@ -69,6 +70,12 @@
 // mirroring the StateCompulsoryPoolingAPI failure where the test harness stops
 // draining the server's stderr. Returns the number of bytes parked in the pipe.
 - (size_t)fillPipeWriteEnd:(int)writeFD {
+#if defined(_WIN32)
+  // Windows anonymous pipes have no O_NONBLOCK; the ARLEN-BUG-033 tests that
+  // call this skip there.
+  (void)writeFD;
+  return 0;
+#else
   int flags = fcntl(writeFD, F_GETFL);
   XCTAssertTrue(flags >= 0);
   XCTAssertEqual(0, fcntl(writeFD, F_SETFL, flags | O_NONBLOCK));
@@ -86,14 +93,18 @@
   // bounded poll, not because the descriptor happens to be O_NONBLOCK.
   XCTAssertEqual(0, fcntl(writeFD, F_SETFL, flags));
   return total;
+#endif
 }
 
 // ARLEN-BUG-033: a stalled/full log sink must not block the request path. The
 // logger has to drop the line and return promptly instead of parking in
 // pipe_write the way fprintf(stderr, ...) did.
 - (void)testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033 {
+#if defined(_WIN32)
+  XCTSkip(@"ALNLogger's bounded drop-instead-of-block write is POSIX-only: Windows pipes have no O_NONBLOCK");
+#endif
   int pipeFDs[2] = { -1, -1 };
-  XCTAssertEqual(0, pipe(pipeFDs));
+  XCTAssertTrue(ALNTestCreatePipe(pipeFDs, NO));
   if (pipeFDs[0] < 0 || pipeFDs[1] < 0) {
     return;
   }
@@ -120,8 +131,11 @@
 
 // Once the sink drains, emission resumes and nothing is counted as dropped.
 - (void)testLoggerResumesWritingAfterSinkDrains_ARLEN_BUG_033 {
+#if defined(_WIN32)
+  XCTSkip(@"ALNLogger's bounded drop-instead-of-block write is POSIX-only: Windows pipes have no O_NONBLOCK");
+#endif
   int pipeFDs[2] = { -1, -1 };
-  XCTAssertEqual(0, pipe(pipeFDs));
+  XCTAssertTrue(ALNTestCreatePipe(pipeFDs, NO));
   if (pipeFDs[0] < 0 || pipeFDs[1] < 0) {
     return;
   }

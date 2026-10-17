@@ -5,6 +5,7 @@
 #import <string.h>
 
 #import "ALNModuleSystem.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase13CTests : XCTestCase
 @end
@@ -12,15 +13,7 @@
 @implementation Phase13CTests
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (void)testModulesLockDocumentIsSortedDeterministically {
