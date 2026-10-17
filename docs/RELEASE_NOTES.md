@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- HTTP request handling follows RFC 9110/9112 more closely (#211, #212, #213,
+  #253):
+  - Chunk-size lines no longer count toward `maxHeaderBytes`. A chunked body
+    sent as many small chunks used to get `431`.
+  - `Expect: 100-continue` gets an interim `100 Continue`. Clients such as curl
+    used to wait about a second before sending the body. Other expectations
+    get `417`.
+  - An HTTP/1.1 request with two `Host` headers, or none, gets `400`. Before,
+    the last `Host` won and a missing one was accepted. Clients that send
+    HTTP/1.1 without `Host` must add it.
+  - An absolute-form target (`GET http://host/path`) is routed by its path,
+    and its authority becomes the `Host`. It used to return `404`.
+  - `400`, `408`, `413`, `417` and `431` responses written before the
+    application runs now carry the configured security headers.
+  - The configuration reference now says that the default parser accepts
+    chunked request bodies; it used to say they were rejected.
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

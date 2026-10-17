@@ -100,6 +100,66 @@
   }
 }
 
+// Issue 213 (RFC 9112 §3.2): an HTTP/1.1 request needs exactly one Host.
+- (void)testHostHeaderMustAppearExactlyOnceOnHTTP11AcrossBackends {
+  NSDictionary<NSString *, NSNumber *> *cases = @{
+    @"GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n" : @NO,
+    @"GET / HTTP/1.1\r\nhost: a\r\nHOST: a\r\n\r\n" : @NO,
+    @"GET / HTTP/1.1\r\nX-Test: 1\r\n\r\n" : @NO,
+    @"GET / HTTP/1.0\r\nX-Test: 1\r\n\r\n" : @YES,
+    @"GET / HTTP/1.1\r\nHost: a\r\n\r\n" : @YES,
+  };
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    for (NSString *raw in cases) {
+      NSError *error = nil;
+      ALNRequest *request = [ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                                   backend:backend
+                                                     error:&error];
+      if ([cases[raw] boolValue]) {
+        XCTAssertNotNil(request, @"backend=%@ raw=%@ error=%@", [self backendName:backend], raw, error);
+      } else {
+        XCTAssertNil(request, @"backend=%@ raw=%@", [self backendName:backend], raw);
+        XCTAssertNotNil(error, @"backend=%@ raw=%@", [self backendName:backend], raw);
+      }
+    }
+  }
+}
+
+// Issue 213 (RFC 9112 §3.2.2): an absolute-form target routes by its path,
+// and its authority replaces the Host header.
+- (void)testAbsoluteFormTargetUsesItsPathAndAuthorityAcrossBackends {
+  NSString *raw = @"GET http://example.test:8080/items/list?name=Peggy HTTP/1.1\r\n"
+                  "Host: ignored.test\r\n"
+                  "X-Test: 1\r\n\r\n";
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                                 backend:backend
+                                                   error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"/items/list", request.path, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Peggy", request.queryParams[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test:8080", [request headerValueForName:@"host"],
+                          @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test:8080", request.headers[@"host"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"1", request.headers[@"x-test"], @"backend=%@", [self backendName:backend]);
+  }
+  NSString *bare = @"GET HTTPS://example.test HTTP/1.1\r\n\r\n";
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:[bare dataUsingEncoding:NSUTF8StringEncoding]
+                                                 backend:backend
+                                                   error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"/", request.path, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test", [request headerValueForName:@"host"], @"backend=%@",
+                          [self backendName:backend]);
+  }
+}
+
 - (void)testDefaultsHTTPVersionWhenMissingFromRequestLineAcrossBackends {
   NSString *raw = @"GET /healthz\r\n"
                   "Host: localhost\r\n\r\n";

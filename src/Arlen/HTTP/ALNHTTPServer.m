@@ -2014,6 +2014,87 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
   return request;
 }
 
+typedef NS_ENUM(NSInteger, ALNExpectation) {
+  ALNExpectationNone = 0,
+  ALNExpectationContinue,
+  ALNExpectationUnsupported,
+};
+
+// The request head's Expect header (RFC 9110 §10.1.1). HTTP/1.0 requests and
+// a missing header expect nothing; `100-continue` is the only expectation
+// defined, so anything else is unsupported (417).
+static ALNExpectation ALNRequestHeadExpectation(const uint8_t *bytes, size_t headLength) {
+  size_t lineEnd = SIZE_MAX;
+  for (size_t idx = 0; idx + 1 < headLength; idx++) {
+    if (bytes[idx] == '\r' && bytes[idx + 1] == '\n') {
+      lineEnd = idx;
+      break;
+    }
+  }
+  if (lineEnd == SIZE_MAX || lineEnd < 8 || memcmp(bytes + lineEnd - 8, "HTTP/1.0", 8) == 0) {
+    return ALNExpectationNone;
+  }
+  size_t lineStart = lineEnd + 2;
+  ALNExpectation expectation = ALNExpectationNone;
+  while (lineStart + 1 < headLength) {
+    size_t end = lineStart;
+    while (end + 1 < headLength && !(bytes[end] == '\r' && bytes[end + 1] == '\n')) {
+      end++;
+    }
+    if (end == lineStart) {
+      break;
+    }
+    static const char name[] = "expect:";
+    size_t nameLength = sizeof(name) - 1;
+    if (end - lineStart > nameLength && strncasecmp((const char *)bytes + lineStart, name, nameLength) == 0) {
+      size_t valueStart = lineStart + nameLength;
+      size_t valueEnd = end;
+      while (valueStart < valueEnd && (bytes[valueStart] == ' ' || bytes[valueStart] == '\t')) {
+        valueStart++;
+      }
+      while (valueEnd > valueStart && (bytes[valueEnd - 1] == ' ' || bytes[valueEnd - 1] == '\t')) {
+        valueEnd--;
+      }
+      if (valueEnd - valueStart == 12 && strncasecmp((const char *)bytes + valueStart, "100-continue", 12) == 0) {
+        expectation = ALNExpectationContinue;
+      } else {
+        return ALNExpectationUnsupported;
+      }
+    }
+    lineStart = end + 2;
+  }
+  return expectation;
+}
+
+// Sends `100 Continue` once the head passed the size checks and before the
+// client sends the body, so clients that wait for it (curl, most HTTP
+// libraries) don't stall for their expect timeout (#212). Returns NO with a
+// 417 status for an unsupported expectation.
+static BOOL ALNAnswerRequestExpectation(ALNSocketHandle clientFd,
+                                        const uint8_t *bytes,
+                                        size_t headLength,
+                                        size_t bufferedLength,
+                                        BOOL *continueSent,
+                                        NSInteger *statusCode) {
+  if (*continueSent) {
+    return YES;
+  }
+  ALNExpectation expectation = ALNRequestHeadExpectation(bytes, headLength);
+  if (expectation == ALNExpectationUnsupported) {
+    if (statusCode != NULL) {
+      *statusCode = 417;
+    }
+    return NO;
+  }
+  // Body bytes already buffered mean the client didn't wait.
+  if (expectation == ALNExpectationContinue && bufferedLength <= headLength) {
+    static const char continueLine[] = "HTTP/1.1 100 Continue\r\n\r\n";
+    (void)ALNSendAll(clientFd, continueLine, sizeof(continueLine) - 1);
+  }
+  *continueSent = YES;
+  return YES;
+}
+
 static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
@@ -2029,6 +2110,7 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
     return nil;
   }
 
+  BOOL continueAnswered = NO;
   while (1) {
     if (!readState->metadataReady) {
       if (readState->length > limits.maxHeaderBytes) {
@@ -2068,6 +2150,12 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
       if (statusCode != NULL) {
         *statusCode = 413;
       }
+      return nil;
+    }
+
+    if (readState->metadataReady && readState->metadata.contentLength > 0 &&
+        !ALNAnswerRequestExpectation(clientFd, readState->bytes, readState->metadata.headerBytes,
+                                     readState->length, &continueAnswered, statusCode)) {
       return nil;
     }
 
@@ -2155,6 +2243,7 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
     return nil;
   }
 
+  BOOL continueAnswered = NO;
   while (1) {
     NSUInteger consumedLength = 0;
     BOOL headersComplete = NO;
@@ -2208,6 +2297,10 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
           return nil;
         }
         if (request == nil && (NSUInteger)head.contentLength > limits.spoolThresholdBytes) {
+          if (!ALNAnswerRequestExpectation(clientFd, readState->bytes, separatorLocation + 4, readState->length,
+                                           &continueAnswered, statusCode)) {
+            return nil;
+          }
           return ALNReadSpooledRequest(clientFd, limits, ALNHTTPParserBackendLLHTTP, separatorLocation + 4,
                                        (NSUInteger)head.contentLength, statusCode, readState);
         }
@@ -2247,13 +2340,25 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
         }
         return nil;
       }
+      if (request == nil) {
+        size_t headTerminator = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+        if (headTerminator != SIZE_MAX &&
+            !ALNAnswerRequestExpectation(clientFd, readState->bytes, headTerminator + 4, readState->length,
+                                         &continueAnswered, statusCode)) {
+          return nil;
+        }
+      }
     }
 
     if (request != nil) {
-      NSUInteger parsedBodyBytes = [request.body length];
-      NSUInteger parsedHeaderBytes = 0;
-      if (consumedLength >= parsedBodyBytes) {
-        parsedHeaderBytes = consumedLength - parsedBodyBytes;
+      // Measure the head itself. consumedLength minus the decoded body also
+      // counted chunked framing (size lines and CRLFs) as header bytes, so a
+      // body sent in many small chunks got 431 (#211). The framing stays
+      // bounded by the header + body buffering cap above.
+      NSUInteger parsedHeaderBytes = consumedLength;
+      size_t headTerminator = ALNFindHeaderTerminator(readState->bytes, consumedLength, 0);
+      if (headTerminator != SIZE_MAX) {
+        parsedHeaderBytes = (NSUInteger)(headTerminator + 4);
       }
       if (parsedHeaderBytes > limits.maxHeaderBytes) {
         if (statusCode != NULL) {
@@ -4044,10 +4149,15 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             errorResponse = ALNErrorResponse(431, @"request headers too large\n");
           } else if (readStatus == 408) {
             errorResponse = ALNErrorResponse(408, @"request timeout\n");
+          } else if (readStatus == 417) {
+            errorResponse = ALNErrorResponse(417, @"expectation failed\n");
           } else {
             errorResponse = ALNErrorResponse(400, @"bad request\n");
           }
           [errorResponse setHeader:@"Connection" value:@"close"];
+          // These responses are written before the application runs, so add
+          // the configured security headers here (#253).
+          [errorResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
           ALNEnsurePerformanceHeaders(errorResponse,
                                       performanceLogging,
                                       parseMs,

@@ -3959,6 +3959,89 @@
   }
 }
 
+// Issues 211, 212 and 253: chunk framing is not counted as header bytes,
+// Expect: 100-continue gets an interim response (other expectations get 417),
+// and parser-level rejections carry the configured security headers.
+- (void)testChunkFramingExpectContinueAndEarlyErrorHeaders_Issues211_212_253 {
+  for (NSString *backend in @[ @"llhttp", @"legacy" ]) {
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[
+      @"-lc", [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=%@ exec ./build/boomhauer --port %d", backend, port]
+    ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
+    [server launch];
+
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready, @"%@", backend);
+      NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"BACKEND='%@'\n"
+        @"def connect():\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.settimeout(5)\n"
+        @"    return sock\n"
+        @"def read_head(sock):\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    return data\n"
+        @"def status(head):\n"
+        @"    return int(head.split(b' ')[1]) if head else 0\n"
+        @"# Issue 211 (llhttp; the legacy parser rejects Transfer-Encoding): 7000 one-byte chunks are framing, not header bytes.\n"
+        @"if BACKEND == 'llhttp':\n"
+        @"    sock = connect()\n"
+        @"    chunks = b'1\\r\\na\\r\\n' * 7000\n"
+        @"    sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\nConnection: close\\r\\n\\r\\n' + chunks + b'0\\r\\n\\r\\n')\n"
+        @"    small_chunks = status(read_head(sock))\n"
+        @"    sock.close()\n"
+        @"    assert small_chunks not in (400, 413, 431), small_chunks\n"
+        @"# Issue 212: Expect: 100-continue gets an interim 100 before the body is sent.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: 100-continue\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"sock.settimeout(0.5)\n"
+        @"interim = read_head(sock)\n"
+        @"assert interim.startswith(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'), interim\n"
+        @"sock.settimeout(5)\n"
+        @"sock.sendall(b'ping')\n"
+        @"final = interim[len(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'):]\n"
+        @"if b'\\r\\n\\r\\n' not in final:\n"
+        @"    final += read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(final) not in (0, 100, 400, 417), final\n"
+        @"# An expectation other than 100-continue is answered with 417.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: something-else\\r\\n\\r\\n')\n"
+        @"unsupported = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(unsupported) == 417, unsupported\n"
+        @"# Issue 253: responses written before the app runs carry the security headers.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: abc\\r\\n\\r\\n')\n"
+        @"rejected = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(rejected) == 400, rejected\n"
+        @"assert b'x-content-type-options: nosniff' in rejected.lower(), rejected\n"
+        @"print('framing checks passed')\n",
+          port, backend];
+      int pyCode = 0;
+      NSString *output = [self runPythonScript:script exitCode:&pyCode];
+      XCTAssertEqual(0, pyCode, @"%@: %@", backend, output);
+      XCTAssertTrue([output containsString:@"framing checks passed"], @"%@: %@", backend, output);
+    } @finally {
+      ALNTestStopServerTask(server);
+    }
+  }
+}
+
 - (void)testLegacyParserRejectsAmbiguousFramingHeaders {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
