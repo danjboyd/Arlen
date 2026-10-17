@@ -57,8 +57,8 @@ apps need first.
     thread and the worker moves on, so idle browser connections don't hold
     workers. The watcher hands the connection back to a worker when the next
     request arrives, and closes it after `connectionTimeoutSeconds`. Pipelined
-    requests are served without parking. Windows builds and the serialized
-    `requestDispatchMode` keep each connection on one worker.
+    requests are served without parking. The serialized `requestDispatchMode`
+    keeps each connection on one worker. On Windows the watcher uses `WSAPoll`.
   - Server-sent event streams and WebSocket sessions hold a worker for as long
     as they stay open. Size `maxConcurrentHTTPWorkers` above the number of
     streams you expect to be open at once, plus headroom for ordinary
