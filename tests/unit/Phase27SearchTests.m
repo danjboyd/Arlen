@@ -5,6 +5,7 @@
 #import "ALNJobsModule.h"
 #import "ALNSearchModule.h"
 #import "../shared/Phase27SearchTestSupport.h"
+#import "../shared/ALNTestSupport.h"
 
 static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *Phase27StreamingBuildBatches(void) {
   static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *batches = nil;
@@ -361,9 +362,8 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
                                           opensearchManifest:(NSString *)opensearchManifest {
   NSString *script = [[self repoRoot] stringByAppendingPathComponent:@"tools/ci/generate_phase27_confidence_artifacts.py"];
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/usr/bin/env";
+  task.launchPath = ALNTestToolPath(@"python3");
   task.arguments = @[
-    @"python3",
     script,
     @"--output-dir",
     outputDir ?: @"",

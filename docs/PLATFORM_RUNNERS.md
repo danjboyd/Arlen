@@ -21,7 +21,9 @@ Purpose:
 - run `.github/workflows/windows-preview.yml`
 - validate MSYS2 `CLANG64` runtime parity through
   `tools/ci/run_windows_preview.sh`
-- validate packaged release/deploy parity through `make windows-confidence`
+- run the unit suite (`make test-unit`) on Windows
+- `make windows-confidence` (packaged release/deploy parity) is not part of the
+  workflow until Windows production support (0.4.0); run it by hand
 
 Required GitHub Actions labels:
 
@@ -70,15 +72,15 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "gnustep-config --objc-flags"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "xctest --help"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_windows_preview.sh"
-powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make windows-confidence"
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
 ```
 
 Workflow contract:
 
 - `.github/workflows/windows-preview.yml` must keep `submodules: recursive`
 - the job must run on `[self-hosted, Windows, X64, arlen, msys2-clang64]`
-- failure artifacts must include `build/phase24`, `build/release_confidence/phase31`,
-  and `build/tests`
+- failure artifacts must include `build/phase24`, `build/tests` and
+  `test-results` (JUnit)
 - the workflow remains non-required until the Windows support statement is
   deliberately promoted
 

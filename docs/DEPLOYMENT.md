@@ -626,8 +626,9 @@ Windows support statement for deployment:
 
 - packaged release and deploy workflows are now available on MSYS2 `CLANG64`
  as a preview path
-- the preview path is verified by the Windows self-hosted workflow and the
- repo-native `windows-confidence` lane
+- the repo-native `windows-confidence` lane exercises it, but only by hand:
+ it left the Windows self-hosted workflow with 0.3.0's development-only
+ Windows scope and returns with Windows production in 0.4.0
 - this is still not a general production support claim for Windows hosts
 
 ### 6.1 Build a release artifact

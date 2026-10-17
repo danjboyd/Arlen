@@ -6,6 +6,7 @@
 #import "ALNPg.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "../shared/ALNTestSupport.h"
 
 // GitHub issue 90: /readyz reports and (by default in production) fails on
 // pending schema migrations.
@@ -91,7 +92,7 @@
   }
   NSString *dsn = [NSString stringWithUTF8String:dsnValue];
   NSString *migrations = [self.appRoot stringByAppendingPathComponent:@"db/migrations"];
-  NSString *prefix = [NSString stringWithFormat:@"9%010u", arc4random_uniform(1000000000)];
+  NSString *prefix = [NSString stringWithFormat:@"9%010u", ALNTestRandomUniform(1000000000)];
   NSString *first = [prefix stringByAppendingString:@"1_first"];
   NSString *second = [prefix stringByAppendingString:@"2_second"];
   NSString *firstOnly = [self.appRoot stringByAppendingPathComponent:@"first-only"];
