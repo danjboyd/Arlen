@@ -11,7 +11,10 @@ Options:
   --app-root <path>        App root to package (default: cwd)
   --framework-root <path>  Framework root (default: script ../..)
   --work-dir <path>        Working directory for temporary release artifacts
-  --port <n>               Base probe port (default: 3901)
+  --port <n>               Base probe port (default: 3901); release B is probed
+                           on <n> and release A on <n>+1. With 0, a free port is
+                           picked right before each probe and the probe is
+                           retried on a new port if the bind is lost.
   --release-a <id>         First release id (default: smoke-a)
   --release-b <id>         Second release id (default: smoke-b)
   --json                   Emit machine-readable result payload
@@ -177,30 +180,55 @@ cleanup() {
 }
 trap cleanup EXIT
 
+pick_free_port() {
+  python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
+
 run_release_health_check() {
   local release_dir="$1"
   local probe_port="$2"
   local server_log="$3"
   local helper_path="$4"
 
-  ARLEN_APP_ROOT="$release_dir/app" \
-    ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
-    "$release_dir/framework/bin/propane" --port "$probe_port" --pid-file "$release_dir/app/tmp/propane-smoke.pid" \
-    >"$server_log" 2>&1 &
-  local server_pid=$!
-
+  # A port chosen early can be taken while releases build, e.g. as the source
+  # port of an outgoing connection. With --port 0, pick it just before starting
+  # propane and retry on a fresh port when the workers cannot bind.
+  local attempts=1
+  if [[ "$probe_port" == "0" ]]; then
+    attempts=3
+  fi
+  local attempt=0
+  local server_pid=""
   local success=0
-  for _ in $(seq 1 60); do
-    if curl -fsS "http://127.0.0.1:${probe_port}/healthz" >/dev/null 2>&1; then
-      success=1
+  while [[ "$attempt" -lt "$attempts" ]]; do
+    attempt=$((attempt + 1))
+    if [[ "$attempts" -gt 1 ]]; then
+      probe_port="$(pick_free_port)"
+    fi
+    ARLEN_APP_ROOT="$release_dir/app" \
+      ARLEN_FRAMEWORK_ROOT="$release_dir/framework" \
+      "$release_dir/framework/bin/propane" --port "$probe_port" --pid-file "$release_dir/app/tmp/propane-smoke.pid" \
+      >"$server_log" 2>&1 &
+    server_pid=$!
+
+    for _ in $(seq 1 60); do
+      if curl -fsS --max-time 2 "http://127.0.0.1:${probe_port}/healthz" >/dev/null 2>&1; then
+        success=1
+        break
+      fi
+      sleep 0.05
+    done
+    if [[ "$success" == "1" ]]; then
       break
     fi
-    sleep 0.05
+    kill -TERM "$server_pid" >/dev/null 2>&1 || true
+    wait "$server_pid" || true
+    if ! grep -q 'Address already in use' "$server_log"; then
+      break
+    fi
   done
 
   if [[ "$success" != "1" ]]; then
-    kill -TERM "$server_pid" >/dev/null 2>&1 || true
-    wait "$server_pid" || true
     local message="health probe failed for $release_dir"
     if [[ "$output_json" == "1" ]]; then
       emit_json "error" "$release_dir" "" "" "$message"
@@ -282,7 +310,11 @@ if [[ "$current_release" != "$releases_dir/$release_a" ]]; then
 fi
 release_a_server_log="$work_dir/server_${release_a}.log"
 release_a_helper="$(resolve_operability_helper "$current_release")"
-run_release_health_check "$current_release" "$((port + 1))" "$release_a_server_log" "$release_a_helper"
+release_a_port=0
+if [[ "$port" != "0" ]]; then
+  release_a_port=$((port + 1))
+fi
+run_release_health_check "$current_release" "$release_a_port" "$release_a_server_log" "$release_a_helper"
 
 success_message="release smoke passed: releases_dir=$releases_dir active=$current_release"
 if [[ "$output_json" == "1" ]]; then

@@ -174,6 +174,41 @@ static NSString *OIDCTestRS256JWT(NSDictionary *claims, NSString *privateKeyPEM,
   XCTAssertEqual(ALNOIDCClientErrorCallbackStateMismatch, error.code);
 }
 
+// An immediate callback must validate: issuedAt round-trips through
+// timeIntervalSince1970, which can leave it ~1e-7 s after "now" (about 30% of
+// the time with GNUstep's ~1 ms clock on Windows). Real future dates still fail.
+- (void)testCallbackIssuedJustNowValidatesAndFutureStateIsRejected {
+  NSDictionary *callback = @{ @"code" : @"stub-code", @"state" : @"expected-state" };
+  for (NSUInteger attempt = 0; attempt < 2000; attempt++) {
+    NSNumber *issuedAt = @([[NSDate date] timeIntervalSince1970]);
+    NSError *error = nil;
+    NSDictionary *validated =
+        [ALNOIDCClient validateAuthorizationCallbackParameters:callback
+                                                 expectedState:@"expected-state"
+                                                  issuedAtDate:[NSDate dateWithTimeIntervalSince1970:[issuedAt doubleValue]]
+                                                 maxAgeSeconds:300
+                                                         error:&error];
+    XCTAssertNotNil(validated, @"attempt %lu: %@", (unsigned long)attempt, error);
+    if (validated == nil) {
+      return;
+    }
+  }
+  NSError *error = nil;
+  XCTAssertNotNil([ALNOIDCClient validateAuthorizationCallbackParameters:callback
+                                                           expectedState:@"expected-state"
+                                                            issuedAtDate:[NSDate dateWithTimeIntervalSinceNow:0.5]
+                                                           maxAgeSeconds:300
+                                                                   error:&error],
+                  @"%@", error);
+  error = nil;
+  XCTAssertNil([ALNOIDCClient validateAuthorizationCallbackParameters:callback
+                                                        expectedState:@"expected-state"
+                                                         issuedAtDate:[NSDate dateWithTimeIntervalSinceNow:5.0]
+                                                        maxAgeSeconds:300
+                                                                error:&error]);
+  XCTAssertEqual(ALNOIDCClientErrorCallbackExpired, error.code);
+}
+
 - (void)testTokenExchangeRequestRedactsClientSecretDeterministically {
   NSError *error = nil;
   NSDictionary *request =

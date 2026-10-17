@@ -18,73 +18,32 @@
 
 const NSTimeInterval ALNTestWaitDefaultInterval = 0.05;
 
-#if ALN_TEST_WAIT_HAS_WAITER
-// Fulfills the expectation the first time the condition holds. Its timer runs
-// on the waiting thread's run loop, which XCTWaiter spins while it waits.
-@interface ALNTestWaitPoller : NSObject
-- (instancetype)initWithCondition:(ALNTestWaitCondition)condition
-                      expectation:(XCTestExpectation *)expectation;
-- (void)poll:(NSTimer *)timer;
-@end
-
-@implementation ALNTestWaitPoller {
-  ALNTestWaitCondition _condition;
-  XCTestExpectation *_expectation;
-  BOOL _met;
-}
-
-- (instancetype)initWithCondition:(ALNTestWaitCondition)condition
-                      expectation:(XCTestExpectation *)expectation {
-  self = [super init];
-  if (self != nil) {
-    _condition = [condition copy];
-    _expectation = expectation;
-  }
-  return self;
-}
-
-- (void)poll:(NSTimer *)timer {
-  (void)timer;
-  if (!_met && _condition()) {
-    _met = YES;
-    [_expectation fulfill];
-  }
-}
-@end
-#endif
-
 BOOL ALNTestWaitUntil(NSTimeInterval timeout, NSTimeInterval interval, ALNTestWaitCondition condition) {
-  if (condition()) {
-    return YES;
-  }
   NSTimeInterval checkInterval = (interval > 0) ? interval : ALNTestWaitDefaultInterval;
-#if ALN_TEST_WAIT_HAS_WAITER
-  XCTestExpectation *expectation =
-      [[XCTestExpectation alloc] initWithDescription:@"ALNTestWaitUntil condition"];
-  ALNTestWaitPoller *poller = [[ALNTestWaitPoller alloc] initWithCondition:condition
-                                                               expectation:expectation];
-  NSTimer *timer = [NSTimer timerWithTimeInterval:checkInterval
-                                           target:poller
-                                         selector:@selector(poll:)
-                                         userInfo:nil
-                                          repeats:YES];
-  [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSDefaultRunLoopMode];
-  XCTWaiterResult result = [XCTWaiter waitForExpectations:@[ expectation ] timeout:timeout];
-  [timer invalidate];
-  if (result == XCTWaiterResultCompleted) {
-    return YES;
-  }
-#else
   NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
-  while ([deadline timeIntervalSinceNow] > 0) {
-    // sleep-ok: fallback for toolchain XCTest builds without XCTWaiter.
-    [NSThread sleepForTimeInterval:checkInterval];
+  while (YES) {
     if (condition()) {
       return YES;
     }
-  }
+    NSTimeInterval remaining = [deadline timeIntervalSinceNow];
+    if (remaining <= 0) {
+      return NO;
+    }
+    NSTimeInterval pause = MIN(checkInterval, remaining);
+#if ALN_TEST_WAIT_HAS_WAITER
+    // Check the condition outside XCTWaiter and use the waiter only for the
+    // pause. A condition can block (a curl that a busy server never answers);
+    // run inside a waiter, that overran the timeout and Apple XCTest's stall
+    // detector aborted the whole bundle. The class-method waiter records no
+    // failure when the never-fulfilled expectation times out.
+    XCTestExpectation *pauseExpectation =
+        [[XCTestExpectation alloc] initWithDescription:@"ALNTestWaitUntil pause"];
+    (void)[XCTWaiter waitForExpectations:@[ pauseExpectation ] timeout:pause];
+#else
+    // sleep-ok: fallback for toolchain XCTest builds without XCTWaiter.
+    [NSThread sleepForTimeInterval:pause];
 #endif
-  return condition();
+  }
 }
 
 BOOL ALNTestWaitForTaskExit(NSTask *task, NSTimeInterval timeout) {

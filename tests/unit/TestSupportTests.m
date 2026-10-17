@@ -90,6 +90,29 @@
   }));
   XCTAssertGreaterThanOrEqual(-[started timeIntervalSinceNow], 0.2);
 }
+// A condition can block (a curl to a server that accepts but never answers).
+// Checked inside XCTWaiter, one that overran the timeout far enough (about
+// 20s on Apple) tripped Apple XCTest's stall detector, which aborts the whole
+// bundle instead of failing the wait. Conditions now run outside the waiter,
+// so an overrun just ends the wait.
+- (void)testWaitUntilSurvivesAConditionThatBlocksPastTheTimeout {
+  __block NSUInteger checks = 0;
+  NSDate *started = [NSDate date];
+  XCTAssertFalse(ALNTestWaitUntil(0.2, 0.01, ^BOOL {
+    checks += 1;
+    if (checks == 2) {
+      NSTask *task = [[NSTask alloc] init];
+      task.launchPath = @"/bin/sh";
+      task.arguments = @[ @"-c", @"exec sleep ${ALN_TEST_BLOCKED_CONDITION_SECONDS:-1}" ];
+      [task launch];
+      [task waitUntilExit];
+    }
+    return NO;
+  }));
+  // The overrunning check is the last one: no extra check after the deadline.
+  XCTAssertEqual((NSUInteger)2, checks);
+  XCTAssertGreaterThanOrEqual(-[started timeIntervalSinceNow], 1.0);
+}
 - (void)testWaitForTaskExitReapsTheTask {
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = @"/bin/sh";
