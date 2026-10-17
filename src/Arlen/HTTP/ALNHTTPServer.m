@@ -30,7 +30,6 @@ typedef SSIZE_T ssize_t;
 #import <netinet/in.h>
 #import <signal.h>
 #import <poll.h>
-#import <sys/select.h>
 #import <sys/socket.h>
 #import <sys/uio.h>
 #import <unistd.h>
@@ -1893,23 +1892,29 @@ static BOOL ALNWebSocketIsValidUTF8(const unsigned char *bytes, NSUInteger lengt
   return YES;
 }
 
-// 1 when the socket is readable within timeoutMilliseconds, 0 on timeout, -1
-// on error. select() takes a socket on both POSIX and Winsock.
+// 1 when the socket is readable (or hung up) within timeoutMilliseconds, 0 on
+// timeout, -1 on error. poll(), not select(): FD_SET on a POSIX descriptor at
+// or above FD_SETSIZE writes past the fd_set, and a busy server has those.
 static int ALNWebSocketWaitReadable(ALNSocketHandle fd, NSUInteger timeoutMilliseconds) {
-  fd_set readSet;
-  FD_ZERO(&readSet);
 #if defined(_WIN32)
-  FD_SET((SOCKET)fd, &readSet);
+  WSAPOLLFD entry;
+  entry.fd = ALNNativeSocketHandle(fd);
+  entry.events = POLLRDNORM;
+  entry.revents = 0;
+  int rc = WSAPoll(&entry, 1, (INT)timeoutMilliseconds);
+  if (rc == SOCKET_ERROR) {
+    return -1;
+  }
 #else
-  FD_SET((int)fd, &readSet);
-#endif
-  struct timeval timeout;
-  timeout.tv_sec = (long)(timeoutMilliseconds / 1000);
-  timeout.tv_usec = (long)((timeoutMilliseconds % 1000) * 1000);
-  int rc = select((int)fd + 1, &readSet, NULL, NULL, &timeout);
+  struct pollfd entry;
+  entry.fd = (int)fd;
+  entry.events = POLLIN;
+  entry.revents = 0;
+  int rc = poll(&entry, 1, (int)timeoutMilliseconds);
   if (rc < 0) {
     return (errno == EINTR) ? 0 : -1;
   }
+#endif
   return (rc > 0) ? 1 : 0;
 }
 
