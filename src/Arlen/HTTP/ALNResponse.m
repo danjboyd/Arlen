@@ -212,6 +212,8 @@ static NSString *ALNStatusText(NSInteger statusCode) {
     return @"Unsupported Media Type";
   case 416:
     return @"Range Not Satisfiable";
+  case 417:
+    return @"Expectation Failed";
   case 422:
     return @"Unprocessable Content";
   case 428:

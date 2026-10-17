@@ -208,6 +208,27 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqual(404, [self send:@{} headers:nil method:@"POST" path:@"/mcp/_tools/mcp.private.0"].statusCode);
   XCTAssertEqual(1u, Calls);
 }
+- (void)testToolsListOnlyShowsToolsTheCallerMayCall {
+  [self routeTool];
+  ALNMCPToolHandler handler = ^NSDictionary *(NSDictionary *args, ALNContext *ctx, NSError **error) {
+    Calls++; return @{@"structuredContent":@{@"ok":@YES}};
+  };
+  XCTAssertTrue(([self.module registerTool:@{@"name":@"admin.purge", @"annotations":Annotations(), @"inputSchema":ObjectSchema(), @"requiredRoles":@[@"admin"]} handler:handler error:NULL]));
+  XCTAssertTrue(([self.module registerTool:@{@"name":@"scoped.export", @"annotations":Annotations(), @"inputSchema":ObjectSchema(), @"requiredScopes":@[@"catalog:export"]} handler:handler error:NULL]));
+  XCTAssertTrue(([self.module registerTool:@{@"name":@"public.ping", @"annotations":Annotations(), @"inputSchema":ObjectSchema()} handler:handler error:NULL]));
+  [self install];
+
+  NSArray *readerTools = [[self rpc:@"tools/list" params:nil headers:nil][@"result"][@"tools"] valueForKey:@"name"];
+  XCTAssertEqualObjects((@[@"catalog.get", @"public.ping"]), readerTools);
+  NSArray *visitorTools = [[self rpc:@"tools/list" params:nil headers:@{@"authorization":@"Bearer visitor"}][@"result"][@"tools"] valueForKey:@"name"];
+  XCTAssertEqualObjects((@[@"public.ping"]), visitorTools);
+
+  // Call-time enforcement still applies to tools that are not listed.
+  XCTAssertEqualObjects(@YES, [self call:@"admin.purge" arguments:@{} headers:nil][@"result"][@"isError"]);
+  XCTAssertEqualObjects(@YES, [self call:@"scoped.export" arguments:@{} headers:nil][@"result"][@"isError"]);
+  XCTAssertEqualObjects(@NO, [self call:@"public.ping" arguments:@{} headers:@{@"authorization":@"Bearer visitor"}][@"result"][@"isError"]);
+  XCTAssertEqual(1u, Calls);
+}
 - (void)testOutputValidationBoundsAndSafeFailure {
   [self configure:@{@"mcp":@{@"enabled":@YES, @"maxOutputBytes":@1024}}];
   for (NSString *name in @[@"bad.schema", @"too.big", @"throws"]) {

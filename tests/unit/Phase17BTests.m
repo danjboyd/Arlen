@@ -92,6 +92,35 @@
   XCTAssertEqualObjects((@[ @"dale", @7 ]), updateBuilt[@"parameters"]);
 }
 
+// Issue 231: MSSQL binds positionally, so parameters must follow the order of
+// the `?` placeholders in the text, including reordered and repeated `$N`.
+- (void)testMSSQLDialectBindsReorderedAndRepeatedPlaceholders_Issue231 {
+  NSError *error = nil;
+  ALNSQLBuilder *reordered = [ALNSQLBuilder selectFrom:@"documents" columns:@[ @"id" ]];
+  [reordered whereExpression:@"owner_id = $2 AND tenant_id = $1" parameters:@[ @"TENANT", @"OWNER" ]];
+  NSDictionary *built = [reordered buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([built[@"sql"] containsString:@"owner_id = ? AND tenant_id = ?"], @"%@", built[@"sql"]);
+  XCTAssertEqualObjects((@[ @"OWNER", @"TENANT" ]), built[@"parameters"]);
+
+  ALNSQLBuilder *repeated = [ALNSQLBuilder selectFrom:@"documents" columns:@[ @"id" ]];
+  [repeated whereExpression:@"(created_by = $1 OR updated_by = $1) AND kind = $2" parameters:@[ @"hank", @"memo" ]];
+  built = [repeated buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects((@[ @"hank", @"hank", @"memo" ]), built[@"parameters"]);
+
+  ALNSQLBuilder *combined = [ALNSQLBuilder selectFrom:@"documents" columns:@[ @"id" ]];
+  [combined whereField:@"id" equals:@7];
+  [combined whereExpression:@"owner_id = $2 AND tenant_id = $1" parameters:@[ @"TENANT", @"OWNER" ]];
+  NSDictionary *postgres = [combined build:&error];
+  XCTAssertNil(error);
+  built = [combined buildWithDialect:[ALNMSSQLDialect sharedDialect] error:&error];
+  XCTAssertNil(error);
+  // Same values as PostgreSQL resolves through $N, in text order.
+  XCTAssertEqual([postgres[@"parameters"] count], (NSUInteger)3);
+  XCTAssertEqualObjects((@[ @7, @"OWNER", @"TENANT" ]), built[@"parameters"], @"%@ / %@", postgres, built);
+}
+
 - (void)testMSSQLDialectRejectsUnsupportedPostgresOnlyFeatures {
   NSError *error = nil;
 
