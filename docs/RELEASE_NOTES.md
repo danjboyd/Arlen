@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- JSON log lines are written from the serializer's UTF-8 bytes with the
+  newline appended once. Before, each line was decoded to an `NSString`,
+  appended to, and encoded again (two encodes and three copies). An access-log
+  line costs about 10-15% less (#248, partial: JSON encoding itself still
+  dominates).
+
 - Busy keep-alive clients no longer lock out new connections (#187,
   PERF-07). #193 stopped idle keep-alive connections from holding HTTP
   workers. But clients that kept sending requests on persistent connections
