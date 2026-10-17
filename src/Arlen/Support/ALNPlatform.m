@@ -409,17 +409,196 @@ void *ALNPlatformLoadWindowsLibrary(NSString *path) {
 }
 #endif
 
-NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
-#if defined(_WIN32) && defined(GNUSTEP_BASE_LIBRARY)
-  NSData *data = [NSData dataWithContentsOfMappedFile:path];
-  if (data == nil && error != NULL) {
-    *error = [NSError errorWithDomain:NSCocoaErrorDomain
-                                 code:NSFileReadUnknownError
-                             userInfo:@{NSFilePathErrorKey : path ?: @""}];
+#if defined(_WIN32)
+// A read-only file mapping behind NSData. The MSYS2 gnustep-base is built
+// without HAVE_MMAP, so +dataWithContentsOfMappedFile: there reads the whole
+// file into the heap (a 256 MiB spool file grew private memory by 257 MiB),
+// which broke the spool-to-disk memory bound for request bodies and uploads.
+@interface ALNWindowsMappedFileData : NSData {
+  const void *_view;
+  NSUInteger _length;
+  NSString *_path;
+}
+- (instancetype)initWithView:(const void *)view length:(NSUInteger)length path:(NSString *)path;
+@end
+
+// Windows refuses to delete a file that still has a mapped view, where POSIX
+// unlink just drops the name. Paths whose removal had to wait for their views
+// (files, and the spool directories holding them) are finished off by the last
+// ALNWindowsMappedFileData of each file as it is released.
+static NSMutableSet<NSString *> *ALNPendingRemovalPaths(void) {
+  static NSMutableSet<NSString *> *paths = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    paths = [NSMutableSet set];
+  });
+  return paths;
+}
+
+// Guards ALNPendingRemovalPaths. A lock created up front, not @synchronized on
+// the set (BuildPolicyTests bans @synchronized on instance receivers).
+static NSLock *ALNPendingRemovalLock(void) {
+  static NSLock *lock = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    lock = [[NSLock alloc] init];
+  });
+  return lock;
+}
+
+static NSString *ALNRemovalKey(NSString *path) {
+  return [[[path stringByStandardizingPath] stringByReplacingOccurrencesOfString:@"\\" withString:@"/"]
+      lowercaseString];
+}
+
+static void ALNFinishPendingRemoval(NSString *path) {
+  NSString *key = ALNRemovalKey(path);
+  NSString *parent = [path stringByDeletingLastPathComponent];
+  NSString *parentKey = ALNRemovalKey(parent);
+  NSMutableSet<NSString *> *pending = ALNPendingRemovalPaths();
+  [ALNPendingRemovalLock() lock];
+  @try {
+    if (![pending containsObject:key] && ![pending containsObject:parentKey]) {
+      return;
+    }
+    if ([[NSFileManager defaultManager] removeItemAtPath:path error:NULL] ||
+        ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+      [pending removeObject:key];
+    }
+    if ([pending containsObject:parentKey] &&
+        [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:parent error:NULL] count] == 0 &&
+        [[NSFileManager defaultManager] removeItemAtPath:parent error:NULL]) {
+      [pending removeObject:parentKey];
+    }
+    } @finally {
+    [ALNPendingRemovalLock() unlock];
   }
-  return data;
+}
+
+@implementation ALNWindowsMappedFileData
+- (instancetype)initWithView:(const void *)view length:(NSUInteger)length path:(NSString *)path {
+  self = [self initWithBytesNoCopy:(void *)view length:length freeWhenDone:NO];
+  _path = [path copy];
+  return self;
+}
+// NSData's designated initializer, which GNUstep's -init forwards to and an
+// NSData subclass must implement. The view is unmapped in -dealloc, never freed.
+- (instancetype)initWithBytesNoCopy:(void *)bytes length:(NSUInteger)length freeWhenDone:(BOOL)shouldFree {
+  (void)shouldFree;
+  _view = bytes;
+  _length = length;
+  return self;
+}
+- (const void *)bytes {
+  return _view;
+}
+- (NSUInteger)length {
+  return _length;
+}
+- (void)dealloc {
+  if (_view != NULL) {
+    UnmapViewOfFile(_view);
+  }
+  if (_path != nil) {
+    ALNFinishPendingRemoval(_path);
+  }
+}
+@end
+
+static NSError *ALNPlatformMappedFileError(NSString *path) {
+  return [NSError errorWithDomain:NSCocoaErrorDomain
+                             code:NSFileReadUnknownError
+                         userInfo:@{
+                           NSFilePathErrorKey : path ?: @"",
+                           @"ALNWindowsLastError" : @((unsigned long)GetLastError()),
+                         }];
+}
+#endif
+
+NSData *ALNPlatformMappedFileData(NSString *path, NSError **error) {
+#if defined(_WIN32)
+  NSMutableData *wide = [[[path ?: @"" stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  // Share everything, delete included: spool files are moved (an upload's
+  // -writeToFile:) or removed while their bytes are still mapped.
+  HANDLE file = CreateFileW((const wchar_t *)[wide bytes], GENERIC_READ,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  LARGE_INTEGER size;
+  if (!GetFileSizeEx(file, &size) || (unsigned long long)size.QuadPart > (unsigned long long)NSUIntegerMax) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    CloseHandle(file);
+    return nil;
+  }
+  if (size.QuadPart == 0) {
+    CloseHandle(file);
+    return [NSData data];  // a zero-length file cannot be mapped
+  }
+  HANDLE mapping = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
+  CloseHandle(file);  // the mapping keeps the file referenced
+  if (mapping == NULL) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  const void *view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+  CloseHandle(mapping);  // the view keeps the mapping alive
+  if (view == NULL) {
+    if (error != NULL) {
+      *error = ALNPlatformMappedFileError(path);
+    }
+    return nil;
+  }
+  return [[ALNWindowsMappedFileData alloc] initWithView:view length:(NSUInteger)size.QuadPart path:path];
 #else
   return [NSData dataWithContentsOfFile:path options:NSDataReadingMappedAlways error:error];
+#endif
+}
+
+void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
+  if ([path length] == 0) {
+    return;
+  }
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+#if defined(_WIN32)
+  NSMutableSet<NSString *> *pending = ALNPendingRemovalPaths();
+  [ALNPendingRemovalLock() lock];
+  @try {
+    if ([fileManager removeItemAtPath:path error:NULL] || ![fileManager fileExistsAtPath:path]) {
+      return;
+    }
+    // Something under `path` is still mapped. Remove what can go now and leave
+    // the rest, and the directory, to the mapped data's release.
+    BOOL isDirectory = NO;
+    if ([fileManager fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory) {
+      for (NSString *name in [fileManager contentsOfDirectoryAtPath:path error:NULL]) {
+        NSString *child = [path stringByAppendingPathComponent:name];
+        if (![fileManager removeItemAtPath:child error:NULL]) {
+          [pending addObject:ALNRemovalKey(child)];
+        }
+      }
+      if ([[fileManager contentsOfDirectoryAtPath:path error:NULL] count] == 0 &&
+          [fileManager removeItemAtPath:path error:NULL]) {
+        return;
+      }
+    }
+    [pending addObject:ALNRemovalKey(path)];
+    } @finally {
+    [ALNPendingRemovalLock() unlock];
+  }
+#else
+  // POSIX unlink drops the name; existing mappings stay valid.
+  (void)[fileManager removeItemAtPath:path error:NULL];
 #endif
 }
 

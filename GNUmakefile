@@ -3,7 +3,12 @@ SHELL := /bin/bash
 
 ROOT_DIR := $(CURDIR)
 GNUSTEP_RESOLVER := $(ROOT_DIR)/tools/resolve_gnustep.sh
-GNUSTEP_SH ?= $(shell bash "$(GNUSTEP_RESOLVER)" 2>/dev/null || true)
+# Always through the resolver, even when GNUSTEP_SH is exported: it prefers an
+# exported GNUSTEP_SH but prints one spelling of it. Under MSYS2 an exported
+# /clang64/... comes back as C:/... once it has passed through a native process
+# (xctest), and that spelling changed the build-flags sentinel hash and rebuilt
+# the framework mid-test. `make GNUSTEP_SH=...` still overrides.
+GNUSTEP_SH := $(shell bash "$(GNUSTEP_RESOLVER)" 2>/dev/null || true)
 MSYSTEM_NAME := $(strip $(MSYSTEM))
 GNUSTEP_HOST_OS := $(strip $(shell gnustep-config --variable=GNUSTEP_HOST_OS 2>/dev/null))
 ARLEN_WINDOWS_PREVIEW ?= 0

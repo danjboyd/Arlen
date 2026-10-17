@@ -65,7 +65,7 @@ static BOOL ALNReplaceFile(NSString *from, NSString *to) {
   NSData *mapped = ALNPlatformMappedFileData(self.backingPath, error);
   if (!mapped || ![mapped writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
   if (!self.backingMoved) {
-    [[NSFileManager defaultManager] removeItemAtPath:self.backingPath error:NULL];
+    ALNPlatformRemoveItemWhenUnmapped(self.backingPath);  // `mapped` still maps it
     self.backingPath = path;
     self.backingMoved = YES;
   }
