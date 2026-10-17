@@ -326,6 +326,33 @@
   XCTAssertEqualObjects(@"concurrent", config[@"requestDispatchMode"]);
 }
 
+// Issues 215 and 244: stage timing and the timing headers are off in
+// production and on elsewhere; the environment can still turn them on.
+- (void)testPerformanceLoggingAndHeadersDefaultOffInProduction_Issue244 {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  NSError *error = nil;
+  NSDictionary *production = [ALNConfig loadConfigAtRoot:root environment:@"production" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@NO, production[@"performanceLogging"]);
+  XCTAssertEqualObjects(@NO, production[@"performanceHeaders"]);
+
+  NSDictionary *development = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@YES, development[@"performanceLogging"]);
+  XCTAssertEqualObjects(@YES, development[@"performanceHeaders"]);
+
+  setenv("ARLEN_PERFORMANCE_LOGGING", "1", 1);
+  setenv("ARLEN_PERFORMANCE_HEADERS", "1", 1);
+  NSDictionary *overridden = [ALNConfig loadConfigAtRoot:root environment:@"production" error:&error];
+  unsetenv("ARLEN_PERFORMANCE_LOGGING");
+  unsetenv("ARLEN_PERFORMANCE_HEADERS");
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@YES, overridden[@"performanceLogging"]);
+  XCTAssertEqualObjects(@YES, overridden[@"performanceHeaders"]);
+}
+
 - (void)testClusterEmitHeadersDefaultsToEnabledWhenClusterModeIsEnabled {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);

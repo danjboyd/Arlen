@@ -18,6 +18,23 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- Production defaults are tighter (#215, #244):
+  - `performanceLogging` now defaults to off in `production`. A new
+    `performanceHeaders` setting (`ARLEN_PERFORMANCE_HEADERS`), also off in
+    `production`, controls the `X-Arlen-*-Ms` and `X-Mojo-Total-Ms` timing
+    headers separately from the log. With both on, production paid about twice
+    the CPU per request and every client got a timing oracle.
+  - `arlen new` no longer writes `session.secure = NO` or
+    `openapi.docsUIEnabled = YES` into the base `config/app.plist`, so
+    production gets `Secure` session cookies and no OpenAPI explorer. Existing
+    apps keep those keys until you remove them.
+  - The detailed exception page appears only in `development` and `test`;
+    `staging` and other environments now get the production error response.
+- Accepted connections set `TCP_NODELAY`. File responses (static mounts and
+  `renderFileAtPath:`) on a keep-alive connection waited about 40 ms each for
+  the client's delayed ACK, capping one connection at about 22 file responses
+  per second (#243).
+
 - A job handler that raises an exception no longer escapes `ALNJobWorker`.
   Before, a throwing ("poison") job stopped the worker run, skipped the jobs
   after it, and with the in-memory adapter stayed leased forever. The exception

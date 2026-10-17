@@ -433,6 +433,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_TRUSTED_PROXY_CIDRS", "MOJOOBJC_TRUSTED_PROXY_CIDRS");
   NSString *performanceLogging = ALNEnvValueCompat("ARLEN_PERFORMANCE_LOGGING",
                                                    "MOJOOBJC_PERFORMANCE_LOGGING");
+  NSString *performanceHeaders = ALNEnvValueCompat("ARLEN_PERFORMANCE_HEADERS", NULL);
   NSString *tracePropagationEnabled =
       ALNEnvValueCompat("ARLEN_TRACE_PROPAGATION_ENABLED",
                         "MOJOOBJC_TRACE_PROPAGATION_ENABLED");
@@ -623,6 +624,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSNumber *performanceLoggingValue = ALNParseBooleanString(performanceLogging);
   if (performanceLoggingValue != nil) {
     config[@"performanceLogging"] = performanceLoggingValue;
+  }
+  NSNumber *performanceHeadersValue = ALNParseBooleanString(performanceHeaders);
+  if (performanceHeadersValue != nil) {
+    config[@"performanceHeaders"] = performanceHeadersValue;
   }
   NSNumber *serveStaticValue = ALNParseBooleanString(serveStatic);
   if (serveStaticValue != nil) {
@@ -1050,8 +1055,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   } else {
     config[@"trustedProxyCIDRs"] = configuredTrustedProxyCIDRs;
   }
+  // Stage timing costs CPU on every request, and the X-Arlen-*-Ms response
+  // headers give clients a timing oracle, so production leaves both off
+  // (#215, #244). performanceHeaders only matters while performanceLogging is on.
   if (config[@"performanceLogging"] == nil) {
-    config[@"performanceLogging"] = @(YES);
+    config[@"performanceLogging"] = @(![env isEqualToString:@"production"]);
+  }
+  if (config[@"performanceHeaders"] == nil) {
+    config[@"performanceHeaders"] = @(![env isEqualToString:@"production"]);
   }
   if (config[@"serveStatic"] == nil) {
     config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
@@ -1377,6 +1388,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   config[@"trustedProxyCIDRs"] = normalizedTrustedProxyCIDRs;
   config[@"performanceLogging"] = @([config[@"performanceLogging"] boolValue]);
+  config[@"performanceHeaders"] = @([config[@"performanceHeaders"] boolValue]);
   config[@"serveStatic"] = @([config[@"serveStatic"] boolValue]);
   NSArray *normalizedStaticAllowExtensions =
       ALNNormalizeExtensionList([config[@"staticAllowExtensions"] isKindOfClass:[NSArray class]]
