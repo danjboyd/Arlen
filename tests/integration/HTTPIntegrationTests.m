@@ -5331,8 +5331,8 @@
     env[@"ARLEN_APP_ROOT"] = appRoot;
     env[@"ARLEN_PROPANE_LIFECYCLE_LOG"] = lifecycleLog;
     server.environment = env;
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
 
     @try {
@@ -5434,8 +5434,8 @@
   env[@"ARLEN_MAX_HTTP_WORKERS"] = @"1";
   env[@"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS"] = @"4";
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -5572,8 +5572,8 @@
   env[@"ARLEN_APP_ROOT"] = appRoot;
   env[@"ARLEN_PROPANE_LIFECYCLE_LOG"] = lifecycleLog;
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
