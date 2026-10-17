@@ -100,4 +100,87 @@
   XCTAssertEqual((NSUInteger)0, [violations count], @"%@", [violations componentsJoinedByString:@"\n"]);
 }
 
+// Release activation (#225): `ln -sfn` unlinks releases/current before making
+// the new link, so a respawn could find it missing. The link is now renamed
+// into place. A watcher checks `current` while it is swapped back and forth.
+- (void)testLinkDirectoryKeepsLinkPresentWhileSwapping {
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-link-swap");
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    NSString *script = [NSString stringWithFormat:
+        @"set -euo pipefail\n"
+         "source %@\n"
+         "cd %@\n"
+         "mkdir -p rel1 rel2\n"
+         "aln_platform_link_directory \"$PWD/rel1\" current\n"
+         "( for i in $(seq 1 150); do\n"
+         "    aln_platform_link_directory \"$PWD/rel2\" current\n"
+         "    aln_platform_link_directory \"$PWD/rel1\" current\n"
+         "  done\n"
+         "  aln_platform_link_directory \"$PWD/rel2\" current ) &\n"
+         "swapper=$!\n"
+         "missing=0\n"
+         "while kill -0 \"$swapper\" 2>/dev/null; do\n"
+         "  [[ -L current ]] || missing=$((missing + 1))\n"
+         "done\n"
+         "wait \"$swapper\"\n"
+         "echo \"missing=$missing\"\n"
+         "echo \"target=$(readlink current)\"\n"
+         "echo \"entries=$(ls -A | tr '\\n' ' ')\"\n"
+         "echo \"rel2=$(ls -A rel2 | tr '\\n' ' ')\"\n",
+        ALNTestShellQuote(ALNTestPathFromRepoRoot(@"tools/platform.sh")), ALNTestShellQuote(root)];
+    int code = 0;
+    NSString *output = ALNTestRunShellCapture(script, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"missing=0\n"], @"%@", output);
+    NSString *expectedTarget =
+        [NSString stringWithFormat:@"target=%@/rel2\n", [root stringByResolvingSymlinksInPath]];
+    NSString *unresolvedTarget = [NSString stringWithFormat:@"target=%@/rel2\n", root];
+    XCTAssertTrue([output containsString:expectedTarget] || [output containsString:unresolvedTarget], @"%@", output);
+    // No temporary link is left behind, and the swap never links inside a release.
+    XCTAssertTrue([output containsString:@"entries=current rel1 rel2 \n"], @"%@", output);
+    XCTAssertTrue([output containsString:@"rel2=\n"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
+  }
+}
+
+- (void)testActivateAndRollbackRepointCurrentLink {
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-activate-swap");
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    NSString *releases = [root stringByAppendingPathComponent:@"releases"];
+    NSString *script = [NSString stringWithFormat:
+        @"set -euo pipefail\n"
+         "releases=%@\n"
+         "mkdir -p \"$releases/rel1/metadata\" \"$releases/rel2/metadata\"\n"
+         "%@ --releases-dir \"$releases\" --release-id rel1 >/dev/null\n"
+         "%@ --releases-dir \"$releases\" --release-id rel2 >/dev/null\n"
+         "echo \"activated=$(basename \"$(readlink \"$releases/current\")\")\"\n"
+         "echo \"entries=$(ls -A \"$releases\" | tr '\\n' ' ')\"\n"
+         "%@ --releases-dir \"$releases\" --release-id rel1 >/dev/null\n"
+         "echo \"rolledback=$(basename \"$(readlink \"$releases/current\")\")\"\n"
+         "echo \"rel1=$(ls -A \"$releases/rel1\" | tr '\\n' ' ')\"\n",
+        ALNTestShellQuote(releases),
+        ALNTestShellQuote(ALNTestPathFromRepoRoot(@"tools/deploy/activate_release.sh")),
+        ALNTestShellQuote(ALNTestPathFromRepoRoot(@"tools/deploy/activate_release.sh")),
+        ALNTestShellQuote(ALNTestPathFromRepoRoot(@"tools/deploy/rollback_release.sh"))];
+    int code = 0;
+    NSString *output = ALNTestRunShellCapture(script, &code);
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"activated=rel2\n"], @"%@", output);
+    XCTAssertTrue([output containsString:@"entries=current rel1 rel2 \n"], @"%@", output);
+    XCTAssertTrue([output containsString:@"rolledback=rel1\n"], @"%@", output);
+    XCTAssertTrue([output containsString:@"rel1=metadata \n"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
+  }
+}
+
 @end
