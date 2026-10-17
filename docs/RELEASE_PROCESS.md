@@ -200,7 +200,13 @@ GitHub Actions release entrypoints (both jobs of one workflow):
 
 That workflow is triggered on published releases and can also be run manually
 with `workflow_dispatch` when release evidence needs to be regenerated without
-changing the merge-gate workflow contract.
+changing the merge-gate workflow contract. A manual run takes a `lane` input
+(`all`, `linux` or `windows`) so one platform's evidence can be regenerated
+without occupying the other runner:
+
+```bash
+gh workflow run release-certification.yml --ref <branch> -f lane=windows
+```
 
 For changes to HTTP/data client contracts, retain the existing required Linux
 quality, sanitizer, and docs check names. Verify the Apple confidence job's

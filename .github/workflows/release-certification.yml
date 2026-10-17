@@ -4,6 +4,12 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      lane:
+        description: "Which certification jobs to run"
+        type: choice
+        options: [all, linux, windows]
+        default: all
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.release.tag_name || github.ref }}
@@ -11,6 +17,7 @@ concurrency:
 
 jobs:
   release-certification:
+    if: github.event_name == 'release' || inputs.lane != 'windows'
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
     timeout-minutes: 150
     steps:
@@ -62,6 +69,7 @@ jobs:
   # build and boomhauer work through the installed launcher.
   windows-release-certification:
     name: release-certification / windows
+    if: github.event_name == 'release' || inputs.lane != 'linux'
     runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
     timeout-minutes: 60
     steps:
