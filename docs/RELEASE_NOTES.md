@@ -13,6 +13,14 @@
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
+- Windows is now documented as a supported development platform, on the
+  gnustep-cli `v0.1.1` managed MSYS2 `CLANG64` toolchain, which includes
+  libcurl. The new
+  `docs/GETTING_STARTED_WINDOWS.md` covers the toolchain, `install.ps1`, and
+  building and running apps. README, the docs index, `WINDOWS_CLANG64.md`,
+  `TOOLCHAIN_MATRIX.md` and `CLI_REFERENCE.md` carry the new support
+  statement. Windows production (`propane`, `jobs-worker`, service deploys) is
+  planned for 0.4.0 (#200).
 
 ## 0.2.1 — 2026-10-15
 

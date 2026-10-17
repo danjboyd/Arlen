@@ -5,10 +5,10 @@
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/license-LGPL--2.1--or--later-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/danjboyd/Arlen)](https://github.com/danjboyd/Arlen/releases)
 [![Linux Quality](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml/badge.svg?branch=main)](https://github.com/danjboyd/Arlen/actions/workflows/linux-quality.yml)
-![Platforms: Linux | macOS | Windows (preview)](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows%20(preview)-lightgrey.svg)
+![Platforms: Linux | macOS | Windows](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 
 Arlen is a free, open-source web framework for Objective-C. It runs natively on
-GNUstep (Linux) and the Apple runtime (macOS). It's in the spirit of
+GNUstep (Linux, and Windows for development) and the Apple runtime (macOS). It's in the spirit of
 Mojolicious and Rails: one coherent toolchain that takes you from
 `arlen new` to a supervised production deployment. You don't have to assemble
 an HTTP layer from a dozen unrelated libraries.
@@ -76,6 +76,7 @@ First install your platform's toolchain:
 |---|---|---|
 | **macOS, Apple Silicon** | macOS 14 or later, the Xcode Command Line Tools (`xcode-select --install`), and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
 | **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
+| **Windows x64** (development) | The [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed MSYS2 `CLANG64` toolchain (`v0.1.1`); see [Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md). Use the PowerShell installer below. | Installs **prebuilt** framework tools; nothing to compile. |
 | **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
 
 The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
@@ -89,16 +90,23 @@ curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/
 sudo apt-get install -y libssl-dev
 ```
 
-Releases unpack to `~/.local/share/arlen/<version>`. Every download is checked
+On Windows, run the PowerShell installer instead:
+
+```powershell
+irm https://github.com/danjboyd/Arlen/releases/latest/download/install.ps1 | iex
+```
+
+Releases unpack to `~/.local/share/arlen/<version>` (`%LOCALAPPDATA%\Arlen\<version>` on Windows). Every download is checked
 against the release's `SHA256SUMS`. Rerun the installer to upgrade, or pass
 `--version X.Y.Z` to pin a release. `arlen doctor` checks your setup and
 explains anything that's missing. Platform details are in
-[Getting Started (Linux)](docs/GETTING_STARTED.md) and
-[Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md).
+[Getting Started (Linux)](docs/GETTING_STARTED.md),
+[Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md) and
+[Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md).
 
 Prefer a git checkout? Run `git clone --recursive https://github.com/danjboyd/Arlen.git`,
 then `make all` on Linux (after `source tools/source_gnustep_env.sh`) or
-`./bin/build-apple` on macOS, and use `./bin/arlen`.
+`./bin/build-apple` on macOS, or `make all` inside `scripts\run_clang64.ps1` on Windows, and use `./bin/arlen`.
 
 ## Quick Start
 
@@ -130,7 +138,7 @@ Prefer a single file? `arlen new MyApp --lite` puts the controller, routes, and
 ## Start Here
 
 - **[First App Guide](docs/FIRST_APP_GUIDE.md)**: the shortest walkthrough to a real app.
-- [Getting Started (Linux)](docs/GETTING_STARTED.md) · [Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md) · [Windows CLANG64 preview](docs/WINDOWS_CLANG64.md)
+- [Getting Started (Linux)](docs/GETTING_STARTED.md) · [Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md) · [Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md)
 - [Getting Started Tracks](docs/GETTING_STARTED_TRACKS.md): HTML-first, API-first, or data-layer-first.
 - [App Authoring Guide](docs/APP_AUTHORING_GUIDE.md): the long-form guide to building apps.
 - [EOC Template Guide](docs/EOC_GUIDE.md) · [Modules](docs/MODULES.md) · [Deployment](docs/DEPLOYMENT.md) · [API Reference](docs/API_REFERENCE.md)
@@ -200,7 +208,7 @@ and docs lanes.
 |---|---|
 | Linux, clang-built GNUstep | **Production baseline.** This is the authoritative target. |
 | macOS, Apple runtime | Verified for development and production (propane, launchd deploys). See [Apple Platform](docs/APPLE_PLATFORM.md) for the Linux-only test lanes. |
-| Windows, CLANG64 | Preview. |
+| Windows, gnustep-cli `CLANG64` | Supported for development (install, `arlen new`, build, `boomhauer`). Production (`propane`, `jobs-worker`, service deploys) is planned for 0.4.0. See [Windows CLANG64](docs/WINDOWS_CLANG64.md). |
 
 The current release is **v0.2.1**. Arlen follows semantic versioning; while it
 is on `0.x`, minor releases may still change public API, with migration notes.

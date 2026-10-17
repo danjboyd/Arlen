@@ -1,9 +1,16 @@
-# Windows CLANG64 Preview
+# Windows CLANG64
 
-Last updated: 2026-04-20
+Last updated: 2026-10-16
 
-This document records the current `main`-branch reintegration slice of Arlen's
-native Windows work for MSYS2 `CLANG64`.
+Windows is supported for **development** from Arlen 0.3.0, on the
+gnustep-cli managed MSYS2 `CLANG64` toolchain. You can install Arlen with
+`install.ps1`, create apps with `arlen new`, build them, and run them under
+`boomhauer`. **Production on Windows is not supported yet**: `propane`,
+`jobs-worker` and service deploys are planned for 0.4.0. To install and get
+started, see [Getting Started on Windows](GETTING_STARTED_WINDOWS.md).
+
+This document covers the `CLANG64` entry path, the Windows CI lanes, and the
+packaged-release contract.
 
 Current scope on `main`:
 
@@ -16,10 +23,8 @@ Current scope on `main`:
 - focused Windows DB smoke and runtime parity lanes
 - a main-based Windows preview workflow
 
-This is still not a full claim that current `main` has complete Windows
-support. Runtime parity, packaged-release parity, deploy/doctor parity, and
-preview CI coverage are now forward ported, but Windows remains a preview
-target rather than a general production support claim.
+Development is the supported scope. Production hosting stays out of scope
+until 0.4.0; see the support statement below.
 
 ## 1. Host Entry Path
 
@@ -57,7 +62,7 @@ Expected inside the active `CLANG64` environment:
 - `gnustep-config`
 - `xctest`
 - `libdispatch`
-- libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`)
+- libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`, included in gnustep-cli `v0.1.1`)
 
 Recommended for the current Windows preview lanes:
 
@@ -141,22 +146,28 @@ Minimum assumptions that still remain external on Windows:
 - the preview path is validated through a self-hosted Windows workflow rather
   than a generic GitHub-hosted runner image
 
-## 5. Current Non-Claims
+## 5. Not Supported Yet
 
-Not yet claimed on current `main`:
+Planned for 0.4.0:
 
-- full unit/integration/live/perf confidence parity
-- generic supported production hosting on Windows
-- a Windows operator path that does not depend on MSYS2 `CLANG64` and the
-  GNUstep/MSYS2 runtime stack
+- `propane`. Its prefork worker model assumes POSIX `fork`, which Windows
+  lacks, so it needs its own design.
+- Supervised `jobs-worker` processes and Windows service deploys
+  (`arlen deploy` targets).
+
+Not planned:
+
+- A Windows path that does not depend on MSYS2 `CLANG64` and the
+  GNUstep/MSYS2 runtime.
 
 ## 6. Support Statement
 
-Current Windows support statement:
-
-- Windows on MSYS2 `CLANG64` is a supported preview workflow for framework
-  development, runtime parity checks, and packaged release/deploy validation
-- the authoritative preview verification entrypoints are
-  `make phase24-windows-confidence` and `make windows-confidence`
-- Arlen does not yet claim broad production support for Windows deployments;
-  Linux remains the authoritative production baseline
+- **Development: supported.** Installing from the release
+  (`arlen-X.Y.Z-windows-x64.zip` through `install.ps1`), `arlen new`, building
+  apps, and running them under `boomhauer` with watch mode are supported on
+  64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
+- **Production: not supported until 0.4.0.** Deploy production apps to Linux,
+  the authoritative production baseline, or to macOS.
+- The `windows-preview` CI lane runs `make phase24-windows-confidence` and
+  `make test-unit`. `make windows-confidence` (packaged release and deploy
+  parity) is a manual lane until Windows production support lands in 0.4.0.
