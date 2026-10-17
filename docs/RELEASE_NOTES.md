@@ -18,6 +18,15 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- propane's file-descriptor pressure check no longer stalls the manager
+  loop (#222). It counts a worker's descriptors with a shell glob, and it
+  builds the per-target breakdown only when it is about to log a warning or
+  retire the worker, using one `find` instead of one `readlink` per
+  descriptor. That breakdown went from about 1.5 s to under 10 ms for a
+  worker with 2000 descriptors. Before, the check ran for every worker every
+  15 s whether or not anything was logged, and the manager couldn't reap,
+  respawn or handle signals while it ran.
+
 - WebSocket sessions no longer drop an idle receive-only client after
   `connectionTimeoutSeconds` (about 30 s) without a close frame. After
   `runtimeLimits.webSocketPingIntervalSeconds` (default 25) without a frame the
