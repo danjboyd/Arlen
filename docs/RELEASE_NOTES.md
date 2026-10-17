@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Busy keep-alive clients no longer lock out new connections (#187,
+  PERF-07). #193 stopped idle keep-alive connections from holding HTTP
+  workers. But clients that kept sending requests on persistent connections
+  still held a worker each (8 by default), and every other client waited
+  indefinitely. After a response, a worker now yields its connection to the
+  idle-connection watcher whenever other connections are queued. The
+  connection rejoins the end of the queue when its next request arrives, so
+  workers take turns. A new request behind 16 busy keep-alive clients went
+  from no response (10 s timeout) to about 1 ms. Single-client throughput is
+  unchanged.
+
 - `arlen config` now prints secret values as `[redacted]`, in both text and
   `--json` output. A string is redacted when its key contains `secret`,
   `password`, `token`, `apiKey` or `connectionString` (for example

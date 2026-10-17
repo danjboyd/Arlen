@@ -1028,6 +1028,81 @@
   }
 }
 
+// PERF-07 on #187: #193 parks *idle* keep-alive connections, but clients that
+// keep sending requests held every worker (8 by default), so a new client got
+// no service at all. A worker now yields its connection when others are
+// queued, and the connection rejoins the queue when its next request arrives.
+- (void)testBusyKeepAliveConnectionsDoNotStarveNewClients_Issue187 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import socket, threading, time\n"
+        @"PORT=%d\n"
+        @"BUSY=16\n"
+        @"def request(sock, connection):\n"
+        @"    sock.sendall((f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\nConnection: {connection}\\r\\n\\r\\n').encode('utf-8'))\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(4096)\n"
+        @"        if not chunk:\n"
+        @"            raise RuntimeError('connection closed before headers')\n"
+        @"        data += chunk\n"
+        @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+        @"    while len(body) < 3:\n"
+        @"        chunk = sock.recv(4096)\n"
+        @"        if not chunk:\n"
+        @"            raise RuntimeError('connection closed before body')\n"
+        @"        body += chunk\n"
+        @"    if b' 200 ' not in head.split(b'\\r\\n', 1)[0]:\n"
+        @"        raise RuntimeError(head.decode('utf-8', 'replace'))\n"
+        @"stop = threading.Event()\n"
+        @"served = [0] * BUSY\n"
+        @"errors = []\n"
+        @"def busy(index):\n"
+        @"    try:\n"
+        @"        sock = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+        @"        while not stop.is_set():\n"
+        @"            request(sock, 'keep-alive')\n"
+        @"            served[index] += 1\n"
+        @"        sock.close()\n"
+        @"    except Exception as exc:\n"
+        @"        errors.append(repr(exc))\n"
+        @"threads = [threading.Thread(target=busy, args=(i,)) for i in range(BUSY)]\n"
+        @"[t.start() for t in threads]\n"
+        @"deadline = time.time() + 10\n"
+        @"while min(served) == 0 and time.time() < deadline:\n"
+        @"    time.sleep(0.05)\n"
+        @"start = time.time()\n"
+        @"fresh = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+        @"request(fresh, 'close')\n"
+        @"fresh.close()\n"
+        @"elapsed = time.time() - start\n"
+        @"stop.set()\n"
+        @"[t.join() for t in threads]\n"
+        @"assert not errors, errors\n"
+        @"assert min(served) > 0, served\n"
+        @"if elapsed > 3.0:\n"
+        @"    raise RuntimeError(f'fresh request waited {elapsed:.1f}s behind busy keep-alive connections')\n"
+        @"print(f'ok {elapsed:.3f} served={sum(served)}')\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testKeepAliveSupportsPipelinedRequestsOnSingleConnection {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
