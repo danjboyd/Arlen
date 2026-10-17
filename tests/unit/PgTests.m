@@ -615,6 +615,86 @@
   XCTAssertEqualObjects(@7, [[ordered first] objectAtColumnIndex:1]);
 }
 
+// Issue 230: a failed statement aborts the transaction, and PostgreSQL then
+// turns COMMIT into ROLLBACK. withTransaction used to report that as success,
+// with every write in the block silently discarded.
+- (void)testWithTransactionReportsAnAbortedTransactionAsFailed_Issue230 {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [NSString stringWithFormat:@"arlen_tx_abort_%u", ALNTestRandomUniform(1000000)];
+  NSString *create = [NSString stringWithFormat:@"CREATE TABLE %@ (id integer PRIMARY KEY)", table];
+  NSInteger created = [database executeCommand:create parameters:@[] error:&error];
+  XCTAssertGreaterThanOrEqual(created, 0, @"%@", error);
+  @try {
+    NSString *insert = [NSString stringWithFormat:@"INSERT INTO %@ (id) VALUES ($1)", table];
+    error = nil;
+    BOOL committed = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+      (void)txError;
+      NSError *ignored = nil;
+      [connection executeCommand:insert parameters:@[ @1 ] error:&ignored];
+      // An "expected" duplicate-key error the block chooses to tolerate.
+      [connection executeCommand:insert parameters:@[ @1 ] error:&ignored];
+      XCTAssertNotNil(ignored);
+      return YES;
+    } error:&error];
+    XCTAssertFalse(committed);
+    XCTAssertNotNil(error);
+
+    NSString *count = [NSString stringWithFormat:@"SELECT count(*)::int AS n FROM %@", table];
+    NSDictionary *row = [[database executeQuery:count parameters:@[] error:&error] firstObject];
+    XCTAssertEqualObjects(@0, row[@"n"], @"%@", error);
+
+    // A clean transaction still commits.
+    error = nil;
+    committed = [database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+      return [connection executeCommand:insert parameters:@[ @2 ] error:txError] >= 0;
+    } error:&error];
+    XCTAssertTrue(committed, @"%@", error);
+    row = [[database executeQuery:count parameters:@[] error:&error] firstObject];
+    XCTAssertEqualObjects(@1, row[@"n"], @"%@", error);
+  } @finally {
+    NSString *drop = [NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table];
+    (void)[database executeCommand:drop parameters:@[] error:NULL];
+  }
+}
+
+// Issue 237: the view inventory query ordered by `table`, a reserved word, so
+// PostgreSQL rejected it and schema metadata (the ORM codegen input) was nil.
+- (void)testSchemaMetadataInspectionRunsAgainstLivePostgres_Issue237 {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *suffix = [NSString stringWithFormat:@"%u", ALNTestRandomUniform(1000000)];
+  NSString *table = [@"arlen_inspect_" stringByAppendingString:suffix];
+  NSString *view = [@"arlen_inspect_view_" stringByAppendingString:suffix];
+  @try {
+    NSString *createTable = [NSString stringWithFormat:@"CREATE TABLE %@ (id integer PRIMARY KEY)", table];
+    NSInteger created = [database executeCommand:createTable parameters:@[] error:&error];
+    XCTAssertGreaterThanOrEqual(created, 0, @"%@", error);
+    NSString *createView = [NSString stringWithFormat:@"CREATE VIEW %@ AS SELECT id FROM %@", view, table];
+    created = [database executeCommand:createView parameters:@[] error:&error];
+    XCTAssertGreaterThanOrEqual(created, 0, @"%@", error);
+    error = nil;
+    NSDictionary *metadata = [ALNDatabaseInspector inspectSchemaMetadataForAdapter:database error:&error];
+    XCTAssertNotNil(metadata, @"%@", error);
+    XCTAssertNil(error);
+  } @finally {
+    (void)[database executeCommand:[NSString stringWithFormat:@"DROP VIEW IF EXISTS %@", view] parameters:@[] error:NULL];
+    (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table] parameters:@[] error:NULL];
+  }
+}
+
 - (void)testPostgresTimestampMicrosecondRoundTrips {
   NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

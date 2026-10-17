@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Data layer fixes (#230, #231, #232, #237, #238):
+  - `withTransaction` (and `commitTransaction:`) now fails when a statement
+    inside the block had already aborted the transaction. PostgreSQL turns
+    that `COMMIT` into a `ROLLBACK`, and Arlen used to report success while
+    every write in the block was discarded. The transaction is rolled back
+    and an error is returned.
+  - The MSSQL dialect binds parameters in the order the `?` placeholders
+    appear. A trusted expression that reorders or repeats `$N` used to bind
+    the wrong values, or too few. A `$N` with no matching parameter is now a
+    compile error.
+  - `executeBuilderQuery` costs about 2.6x less per call. Query diagnostics
+    events are only built when a listener or stderr output wants them, and
+    the compile signature no longer triggers six caught KVC exceptions per
+    query on a plain `ALNSQLBuilder`.
+  - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` works on
+    PostgreSQL again: the view inventory query ordered by the reserved word
+    `table`, so ORM codegen metadata came back nil.
+  - Read-after-write stickiness drops expired scopes as the map grows, so
+    scopes that write and never read again no longer stay in memory forever.
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

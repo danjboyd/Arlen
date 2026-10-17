@@ -60,6 +60,7 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
 @property(nonatomic, copy, readwrite) NSString *defaultReadTarget;
 @property(nonatomic, copy, readwrite) NSString *defaultWriteTarget;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDate *> *lastWriteByScope;
+@property(nonatomic, assign) NSUInteger stickinessPruneThreshold;
 @property(nonatomic, strong) NSLock *stickinessLock;
 
 @end
@@ -132,6 +133,7 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
   _stickinessScopeContextKey = [ALNDatabaseRoutingContextStickinessScopeKey copy];
   _readFallbackPolicy = ALNDatabaseReadFallbackPolicyConnectivityErrors;
   _lastWriteByScope = [NSMutableDictionary dictionary];
+  _stickinessPruneThreshold = 1024;
   // Created before the router is shared; libobjc2's first @synchronized on an
   // instance can race (gnustep/libobjc2#424).
   _stickinessLock = [[NSLock alloc] init];
@@ -499,9 +501,25 @@ NSString *ALNDatabaseReadFallbackPolicyName(ALNDatabaseReadFallbackPolicy policy
 
 - (void)recordWriteForScope:(NSString *)scope atDate:(NSDate *)now {
   NSString *safeScope = ([scope length] > 0) ? scope : @"__global__";
+  NSDate *writeDate = now ?: [NSDate date];
   [self.stickinessLock lock];
   @try {
-    self.lastWriteByScope[safeScope] = now ?: [NSDate date];
+    self.lastWriteByScope[safeScope] = writeDate;
+    // A scope that writes and never reads again would otherwise stay forever,
+    // and scope values (session IDs) can come from clients (#238). Drop expired
+    // entries whenever the map doubles; the cost stays linear in writes.
+    if ([self.lastWriteByScope count] >= self.stickinessPruneThreshold) {
+      NSTimeInterval window = MAX(self.readAfterWriteStickinessSeconds, 0);
+      NSMutableArray<NSString *> *expired = [NSMutableArray array];
+      [self.lastWriteByScope enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDate *date, BOOL *stop) {
+        (void)stop;
+        if ([writeDate timeIntervalSinceDate:date] > window) {
+          [expired addObject:key];
+        }
+      }];
+      [self.lastWriteByScope removeObjectsForKeys:expired];
+      self.stickinessPruneThreshold = MAX((NSUInteger)1024, [self.lastWriteByScope count] * 2);
+    }
   } @finally {
     [self.stickinessLock unlock];
   }

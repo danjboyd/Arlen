@@ -113,6 +113,7 @@ static ALNPGnotify *(*ALNPQnotifies)(PGconn *conn) = NULL;
 static int (*ALNPQsocket)(const PGconn *conn) = NULL;
 static void (*ALNPQfreemem)(void *ptr) = NULL;
 static int (*ALNPQstatus)(const PGconn *conn) = NULL;
+static int (*ALNPQtransactionStatus)(const PGconn *conn) = NULL;
 static void (*ALNPQfinish)(PGconn *conn) = NULL;
 static char *(*ALNPQerrorMessage)(const PGconn *conn) = NULL;
 static PGresult *(*ALNPQexec)(PGconn *conn, const char *query) = NULL;
@@ -284,6 +285,7 @@ static BOOL ALNLoadLibpq(NSError **error) {
     BOOL ok = YES;
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQconnectdb, handle, "PQconnectdb");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQstatus, handle, "PQstatus");
+    ok = ok && ALNBindLibpqSymbol((void **)&ALNPQtransactionStatus, handle, "PQtransactionStatus");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQfinish, handle, "PQfinish");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQerrorMessage, handle, "PQerrorMessage");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQexec, handle, "PQexec");
@@ -568,6 +570,11 @@ static NSArray<NSString *> *ALNPgBuilderSnapshotKeys(void) {
 
 static id ALNPgBuilderValueForKey(ALNSQLBuilder *builder, NSString *key) {
   if (builder == nil || [key length] == 0) {
+    return [NSNull null];
+  }
+  // Only ALNPostgresSQLBuilder has the conflict* keys; asking a plain builder
+  // raised and caught NSUnknownKeyException six times per query (#232).
+  if (![builder respondsToSelector:NSSelectorFromString(key)]) {
     return [NSNull null];
   }
   @try {
@@ -2049,6 +2056,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                    executionMode:(NSString *)executionMode
                                              sql:(NSString *)sql
                                       parameters:(NSArray *)parameters {
+  // Events cost three dictionaries plus an SQL hash and token per query, so
+  // build none when nothing consumes them; callers message the nil result
+  // harmlessly (#232).
+  if (self.queryDiagnosticsListener == nil && !self.emitDiagnosticsEventsToStderr) {
+    return nil;
+  }
   NSMutableDictionary *event = [NSMutableDictionary dictionary];
   event[ALNPgQueryEventStageKey] = stage ?: @"";
   event[ALNPgQueryEventSourceKey] = source ?: @"";
@@ -2068,6 +2081,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 }
 
 - (void)emitQueryEvent:(NSDictionary *)event {
+  if (event == nil) {
+    return;
+  }
   NSDictionary *immutable = [NSDictionary dictionaryWithDictionary:event ?: @{}];
   ALNPgQueryDiagnosticsListener listener = self.queryDiagnosticsListener;
   if (listener != nil) {
@@ -3089,9 +3105,23 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NO;
   }
 
+  // A statement that failed inside the transaction aborts it, and PostgreSQL
+  // then answers COMMIT with a successful ROLLBACK. Report that as a failed
+  // commit instead of success with every write discarded (#230).
+  // PQTRANS_INERROR is 3 in libpq's PGTransactionStatusType.
+  BOOL aborted = (_conn != NULL && ALNPQtransactionStatus(_conn) == 3);
   NSError *runError = nil;
-  BOOL ok = [self runTransactionSQL:@"COMMIT" error:&runError];
+  BOOL ok = [self runTransactionSQL:(aborted ? @"ROLLBACK" : @"COMMIT") error:&runError];
   _inTransaction = NO;
+  if (aborted) {
+    if (error != NULL) {
+      *error = ALNPgMakeError(ALNPgErrorTransactionFailed,
+                              @"transaction was aborted by an earlier failed statement and was rolled back",
+                              nil,
+                              nil);
+    }
+    return NO;
+  }
   if (!ok && error != NULL) {
     *error = runError;
   }
