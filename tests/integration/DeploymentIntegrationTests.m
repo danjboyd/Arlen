@@ -306,7 +306,11 @@ static NSString *ALNHostDeployProfile(void) {
                                   "  (void)argv;\n"
                                   "  @autoreleasepool {\n"
                                   "    [ALNJSONSerialization resetBackendForTesting];\n"
+                                  "#if defined(_WIN32)\n"
+                                  "    _putenv(\"ARLEN_HTTP_PARSER_BACKEND=\");\n"
+                                  "#else\n"
                                   "    unsetenv(\"ARLEN_HTTP_PARSER_BACKEND\");\n"
+                                  "#endif\n"
                                   "    fprintf(stdout,\n"
                                   "            \"json_available=%d json_backend=%s yyjson_version=%s\\n\",\n"
                                   "            [ALNJSONSerialization isYYJSONAvailable] ? 1 : 0,\n"
@@ -324,13 +328,13 @@ static NSString *ALNHostDeployProfile(void) {
     int code = 0;
     NSString *compileOutput = [self runShellCapture:[NSString stringWithFormat:
         @"%@ && clang $(gnustep-config --objc-flags) "
-         "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 "
+         "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 %@ "
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/Support/ALNPlatform.m "
          "%@/src/Arlen/HTTP/ALNRequest.m %@/src/Arlen/HTTP/ALNMultipart.m "
-         "-o %@ $(gnustep-config --base-libs) -ldispatch -ldl -lcrypto",
-        [self gnustepSourceCommandForRepoRoot:repoRoot], repoRoot, repoRoot, repoRoot, sourcePath, repoRoot, repoRoot,
-        repoRoot, repoRoot, binaryPath]
+         "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
+        [self gnustepSourceCommandForRepoRoot:repoRoot], ALNTestPlatformObjCFlags(), repoRoot, repoRoot, repoRoot,
+        sourcePath, repoRoot, repoRoot, repoRoot, repoRoot, binaryPath, ALNTestPlatformLinkLibraries()]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 
