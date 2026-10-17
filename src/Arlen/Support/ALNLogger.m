@@ -213,7 +213,20 @@ static NSString *ALNEscapedTextLogComponent(NSString *value) {
   if (data == nil) {
     return;
   }
+  [self emitLogBytes:data];
+}
 
+// JSON lines arrive as UTF-8 bytes from the serializer: append the newline to
+// one copy instead of decoding to an NSString, appending, and encoding again
+// (two encodes and three copies per access-log line, #248).
+- (void)emitLogData:(NSData *)data {
+  NSMutableData *line = [NSMutableData dataWithCapacity:[data length] + 1];
+  [line appendData:data];
+  [line appendBytes:"\n" length:1];
+  [self emitLogBytes:line];
+}
+
+- (void)emitLogBytes:(NSData *)data {
   [_writeLock lock];
   int fd = self.outputFileDescriptor;
 #if defined(_WIN32)
@@ -263,11 +276,8 @@ static NSString *ALNEscapedTextLogComponent(NSString *value) {
                                                     options:0
                                                       error:&jsonError];
     if (data != nil) {
-      NSString *line = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-      if (line != nil) {
-        [self emitLogLine:line];
-        return;
-      }
+      [self emitLogData:data];
+      return;
     }
   }
 

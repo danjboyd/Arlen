@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- JSON log lines are written from the serializer's UTF-8 bytes with the
+  newline appended once. Before, each line was decoded to an `NSString`,
+  appended to, and encoded again (two encodes and three copies). An access-log
+  line costs about 10-15% less (#248, partial: JSON encoding itself still
+  dominates).
+
 - Response headers are serialized into a byte buffer instead of an
   `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
   check on each of about 80 appends per response. Serializing a typical
