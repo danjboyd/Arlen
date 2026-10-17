@@ -5,8 +5,11 @@
 - Event streams: SSE and websocket stream sessions subscribe before they
   replay and hold live events until the replay is sent. Events committed while
   a client connected were lost before, and concurrent appends could arrive out
-  of order; appends now publish in commit order. SSE `id:` is the stream
-  sequence (it was the `event_id`), and `renderSSEStream:` resumes from a
+  of order; appends now publish in commit order. Live events queue per session
+  (up to 1024) and go out from the session's own thread, so a slow client no
+  longer holds up appenders; a client that falls 1024 events behind is
+  disconnected and resumes from its cursor. SSE `id:` is the stream sequence
+  (it was the `event_id`), and `renderSSEStream:` resumes from a
   `Last-Event-ID` header when given no cursor (#240).
 - `ALNInMemoryEventStreamStore` keeps at most `maxEventsPerStream` events per
   stream (default 10000) and optionally none older than `maxEventAgeSeconds`;

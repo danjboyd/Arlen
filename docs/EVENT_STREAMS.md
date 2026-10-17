@@ -236,6 +236,12 @@ events until the replay (and, for websockets, the `101`) is sent. A client sees
 every event after its cursor once, in sequence order, including events
 committed while it connected; appends publish in commit order.
 
+Publishing only queues an event for each session (up to 1024 events); the
+session's own thread writes it to the socket, so a slow client never holds up
+an append. A session that falls 1024 events behind is disconnected (SSE ends
+the stream, a websocket gets a close frame), and the client reconnects from
+its cursor.
+
 SSE frames carry the stream sequence as `id:` (the `event_id` is in the data).
 When `renderSSEStream:` gets no `afterSequence`, a numeric `Last-Event-ID`
 request header is used instead, so a reconnecting `EventSource` resumes after

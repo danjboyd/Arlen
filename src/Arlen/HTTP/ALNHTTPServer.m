@@ -3076,24 +3076,35 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 }
 
 // Event-stream delivery to one client (GitHub issue 240). The session
-// subscribes before it replays, so the gate holds live events until the replay
-// is sent, then delivers in sequence order, skipping any sequence at or below
-// the last one sent (an event both replayed and published goes out once).
+// subscribes before it replays. Broker callbacks only enqueue here, under the
+// gate's own lock: no socket I/O runs on the appender's thread or under the
+// stream's publish lock. The session's own thread sends: first the replay,
+// then the queue in sequence order, skipping any sequence at or below the last
+// one sent (an event both replayed and published goes out once). The queue is
+// bounded; on overflow the session ends, and the client resumes from its
+// cursor (Last-Event-ID for SSE) instead of the server buffering without limit.
 @interface ALNEventStreamDeliveryGate : NSObject
 
 - (instancetype)initWithSender:(BOOL (^)(ALNEventEnvelope *event))sender;
-- (void)holdAfterSequence:(NSUInteger)sequence;
+- (void)startAfterSequence:(NSUInteger)sequence;
 - (BOOL)deliverReplayedEvent:(ALNEventEnvelope *)event;
-- (BOOL)releaseHeldEvents;
+// Sends what is queued. NO when a send failed or the queue overflowed.
+- (BOOL)drainQueued;
+// Waits up to `seconds` for queued events; YES when there are some.
+- (BOOL)waitForQueuedEvents:(NSTimeInterval)seconds;
+- (BOOL)hasOverflowed;
 - (void)receiveLiveEvent:(ALNEventEnvelope *)event;
 
 @end
 
+static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
+
 @implementation ALNEventStreamDeliveryGate {
   BOOL (^_sender)(ALNEventEnvelope *event);
-  NSLock *_lock;
-  BOOL _holding;
-  NSMutableArray<ALNEventEnvelope *> *_held;
+  NSCondition *_condition;
+  NSMutableArray<ALNEventEnvelope *> *_queued;
+  BOOL _overflowed;
+  // Touched only by the session's thread.
   NSUInteger _lastSequence;
 }
 
@@ -3101,21 +3112,17 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   self = [super init];
   if (self) {
     _sender = [sender copy];
-    _lock = [[NSLock alloc] init];
-    _held = [NSMutableArray array];
+    _condition = [[NSCondition alloc] init];
+    _queued = [NSMutableArray array];
   }
   return self;
 }
 
-- (void)holdAfterSequence:(NSUInteger)sequence {
-  [_lock lock];
-  _holding = YES;
+- (void)startAfterSequence:(NSUInteger)sequence {
   _lastSequence = sequence;
-  [_lock unlock];
 }
 
-// Called with _lock held.
-- (BOOL)sendIfNewLocked:(ALNEventEnvelope *)event {
+- (BOOL)sendIfNew:(ALNEventEnvelope *)event {
   if (event.sequence <= _lastSequence) {
     return YES;
   }
@@ -3127,40 +3134,59 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
 }
 
 - (BOOL)deliverReplayedEvent:(ALNEventEnvelope *)event {
-  [_lock lock];
-  BOOL ok = [self sendIfNewLocked:event];
-  [_lock unlock];
-  return ok;
+  return [self sendIfNew:event];
 }
 
-- (BOOL)releaseHeldEvents {
-  [_lock lock];
-  NSArray<ALNEventEnvelope *> *held =
-      [_held sortedArrayUsingComparator:^NSComparisonResult(ALNEventEnvelope *a, ALNEventEnvelope *b) {
+- (BOOL)drainQueued {
+  [_condition lock];
+  NSArray<ALNEventEnvelope *> *queued =
+      [_queued sortedArrayUsingComparator:^NSComparisonResult(ALNEventEnvelope *a, ALNEventEnvelope *b) {
         return (a.sequence < b.sequence) ? NSOrderedAscending
                                          : ((a.sequence > b.sequence) ? NSOrderedDescending : NSOrderedSame);
       }];
-  [_held removeAllObjects];
-  _holding = NO;
-  BOOL ok = YES;
-  for (ALNEventEnvelope *event in held) {
-    if (![self sendIfNewLocked:event]) {
-      ok = NO;
-      break;
+  [_queued removeAllObjects];
+  BOOL overflowed = _overflowed;
+  [_condition unlock];
+  if (overflowed) {
+    return NO;
+  }
+  for (ALNEventEnvelope *event in queued) {
+    if (![self sendIfNew:event]) {
+      return NO;
     }
   }
-  [_lock unlock];
-  return ok;
+  return YES;
+}
+
+- (BOOL)waitForQueuedEvents:(NSTimeInterval)seconds {
+  [_condition lock];
+  if ([_queued count] == 0 && !_overflowed) {
+    [_condition waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+  }
+  BOOL ready = ([_queued count] > 0) || _overflowed;
+  [_condition unlock];
+  return ready;
+}
+
+- (BOOL)hasOverflowed {
+  [_condition lock];
+  BOOL overflowed = _overflowed;
+  [_condition unlock];
+  return overflowed;
 }
 
 - (void)receiveLiveEvent:(ALNEventEnvelope *)event {
-  [_lock lock];
-  if (_holding) {
-    [_held addObject:event];
-  } else {
-    (void)[self sendIfNewLocked:event];
+  [_condition lock];
+  if (!_overflowed) {
+    if ([_queued count] >= ALNEventStreamDeliveryQueueLimit) {
+      _overflowed = YES;
+      [_queued removeAllObjects];
+    } else {
+      [_queued addObject:event];
+    }
   }
-  [_lock unlock];
+  [_condition signal];
+  [_condition unlock];
 }
 
 @end
@@ -4070,21 +4096,43 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   }
 }
 
+// Sends a websocket stream session's live events (see
+// ALNEventStreamDeliveryGate) until the session closes. On a failed send or an
+// overflowed queue it closes the session and shuts the socket down, which also
+// ends the session's blocked read loop; the client resumes from its cursor.
+- (void)runWebSocketStreamSender:(ALNWebSocketClientSession *)session {
+  @autoreleasepool {
+    while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      (void)[session.streamGate waitForQueuedEvents:1.0];
+      if (![session.streamGate drainQueued]) {
+        [session sendCloseFrame];
+        (void)ALNSocketShutdown(session.clientFd);
+        break;
+      }
+    }
+  }
+}
+
 - (void)runSSEStreamSession:(ALNSSEClientSession *)session
                subscription:(ALNEventStreamBrokerSubscription *)subscription {
   if (session == nil) {
     return;
   }
-  NSUInteger keepaliveCounter = 0;
+  double lastKeepaliveMs = ALNNowMilliseconds();
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
-      [NSThread sleepForTimeInterval:1.0];
-      keepaliveCounter += 1;
-      if (keepaliveCounter >= 15) {
+      // Live events go out from this thread (see ALNEventStreamDeliveryGate).
+      // An overflowed queue ends the stream; the client resumes with
+      // Last-Event-ID.
+      (void)[session.streamGate waitForQueuedEvents:1.0];
+      if (![session.streamGate drainQueued]) {
+        break;
+      }
+      if (ALNNowMilliseconds() - lastKeepaliveMs >= 15000.0) {
         if (![session sendKeepalive]) {
           break;
         }
-        keepaliveCounter = 0;
+        lastKeepaliveMs = ALNNowMilliseconds();
       }
     }
   } @finally {
@@ -4310,7 +4358,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
             // the handshake.
             webSocketSession = [[ALNWebSocketClientSession alloc] initWithClientFd:clientFd];
             [webSocketSession.streamGate
-                holdAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
+                startAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
             if (self.application.eventStreamBroker != nil) {
               streamSubscription = [self.application.eventStreamBroker
                   subscribeToStream:[self eventStreamIdentifierFromResponse:response]
@@ -4361,7 +4409,11 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                     break;
                   }
                 }
-                (void)[webSocketSession.streamGate releaseHeldEvents];
+                // The read loop below blocks on the socket, so live events go
+                // out from a sender thread.
+                [NSThread detachNewThreadSelector:@selector(runWebSocketStreamSender:)
+                                         toTarget:self
+                                       withObject:webSocketSession];
               }
               [self runWebSocketSessionWithMode:webSocketMode
                                         channel:webSocketChannel
@@ -4369,6 +4421,9 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                                    subscription:channelSubscription
                               streamSubscription:streamSubscription
                                        clientFd:clientFd];
+              // Marks the session closed even when the peer vanished without a
+              // close frame, so a stream sender thread ends with it.
+              [webSocketSession sendCloseFrame];
             } else {
               if (channelSubscription != nil) {
                 [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
@@ -4390,7 +4445,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
           // between is lost; it then sends them in order, without repeats.
           ALNSSEClientSession *sseSession = [[ALNSSEClientSession alloc] initWithClientFd:clientFd];
           [sseSession.streamGate
-              holdAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
+              startAfterSequence:[[self eventStreamAfterSequenceFromResponse:response] unsignedIntegerValue]];
           ALNEventStreamBrokerSubscription *streamSubscription = nil;
           if (self.application.eventStreamBroker != nil) {
             streamSubscription = [self.application.eventStreamBroker
@@ -4450,7 +4505,7 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
                   return NO;
                 }
               }
-              if (![sseSession.streamGate releaseHeldEvents]) {
+              if (![sseSession.streamGate drainQueued]) {
                 return NO;
               }
               subscriptionHandedOff = YES;  // runSSEStreamSession unsubscribes

@@ -84,4 +84,17 @@ assert not problems, "\n".join(problems)
 latest = int(re.search(r"last=(\d+)", get(f"/append?stream={STREAM}&n=3")).group(1))
 resumed = [seq for _, seq in read_sse(f"/sse?stream={STREAM}", f"Last-Event-ID: {latest - 2}\r\n", 0.8)]
 assert resumed[:2] == [latest - 1, latest], (latest, resumed)
+
+# A client that stops reading must not stall appenders: live events queue per
+# session (bounded) and the session's own thread does the socket sends.
+stalled = socket.create_connection(("127.0.0.1", PORT), timeout=10)
+stalled.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+stalled.sendall(f"GET /sse?stream={STREAM}&after={latest} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+time.sleep(0.3)
+started = time.time()
+for _ in range(30):
+    get(f"/append?stream={STREAM}&n=100")
+elapsed = time.time() - started
+stalled.close()
+assert elapsed < 20, f"3000 appends took {elapsed:.1f}s with a stalled subscriber"
 print("event stream checks passed")
