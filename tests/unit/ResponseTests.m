@@ -92,6 +92,28 @@
   XCTAssertTrue([headerText containsString:@"Content-Length: 321\r\n"]);
 }
 
+// Issue 245: headers are serialized into a byte buffer instead of an
+// NSMutableString. The bytes must be exactly what the string path produced.
+- (void)testSerializedHeaderBytesAreExact_Issue245 {
+  ALNResponse *response = [[ALNResponse alloc] init];
+  response.statusCode = 201;
+  [response setHeader:@"Content-Type" value:@"application/json; charset=utf-8"];
+  [response setHeader:@"X-Request-Id" value:@"abc123"];
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"a=1; Path=/"]);
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"b=2; Path=/"]);
+  [response appendText:@"{}"];
+  NSString *text = [[NSString alloc] initWithData:[response serializedHeaderData] encoding:NSUTF8StringEncoding];
+  XCTAssertEqualObjects(@"HTTP/1.1 201 Created\r\n"
+                        @"Content-Length: 2\r\n"
+                        @"Content-Type: application/json; charset=utf-8\r\n"
+                        @"Server: Arlen\r\n"
+                        @"Set-Cookie: a=1; Path=/\r\n"
+                        @"Set-Cookie: b=2; Path=/\r\n"
+                        @"X-Request-Id: abc123\r\n"
+                        @"\r\n",
+                        text);
+}
+
 - (void)testSerializedHeaderCacheInvalidatesOnMutation {
   ALNResponse *response = [[ALNResponse alloc] init];
   [response appendText:@"hello"];

@@ -7,6 +7,7 @@
 #import "ALNApplication.h"
 #import "ALNController.h"
 #import "ALNContext.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNRealtime.h"
 #import "ALNResponse.h"
@@ -412,9 +413,7 @@ static NSDictionary *NMNormalizedChannelPolicies(id rawValue) {
       continue;
     }
     NSString *queue = NMTrimmedString(policy[@"queue"]);
-    NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                 ? [policy[@"maxAttempts"] unsignedIntegerValue]
-                                 : 0;
+    NSUInteger maxAttempts = ALNUnsignedIntegerValueOrDefault(policy[@"maxAttempts"], 0);
     normalized[channel] = @{
       @"queue" : queue ?: @"",
       @"maxAttempts" : @(maxAttempts),
@@ -914,9 +913,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   }
   NSArray *hosts = [config[@"allowedEndpointHosts"] isKindOfClass:[NSArray class]] ? config[@"allowedEndpointHosts"]
                                                                                    : NMWebPushDefaultAllowedHosts();
-  NSUInteger maxSubscriptions = [config[@"maxSubscriptionsPerRecipient"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                    ? [config[@"maxSubscriptionsPerRecipient"] unsignedIntegerValue]
-                                    : 10;
+  NSUInteger maxSubscriptions = ALNUnsignedIntegerValueOrDefault(config[@"maxSubscriptionsPerRecipient"], 10);
   NSDictionary *testRoute = NMNormalizeDictionary(config[@"testRoute"]);
   NSDictionary *nudge = NMNormalizeDictionary(config[@"nudge"]);
   NSMutableDictionary *nudgeDefaults = [NSMutableDictionary dictionary];
