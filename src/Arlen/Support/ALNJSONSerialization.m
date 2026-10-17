@@ -544,7 +544,14 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
-  if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
+  // Where Foundation cannot sort keys (gnustep-base 1.31.1 on the Windows
+  // toolchain; see GNUmakefile), sorted-keys writes use the yyjson writer.
+#if defined(ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS) && ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS
+  BOOL foundationCanWrite = (options & NSJSONWritingSortedKeys) == 0;
+#else
+  BOOL foundationCanWrite = YES;
+#endif
+  if (([self backend] == ALNJSONBackendFoundation && foundationCanWrite) || ![self isYYJSONAvailable]) {
     return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
   }
 
