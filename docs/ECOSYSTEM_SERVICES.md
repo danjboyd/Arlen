@@ -110,6 +110,14 @@ Concrete backend adapter now available:
 
 - `ALNRedisCacheAdapter` (`redis://` URL initializer, namespace isolation, and cache-conformance compatible TTL behavior)
 
+`ALNRedisCacheAdapter` keeps up to four idle connections and shares them across
+threads. Each connection runs `AUTH` (when the URL has a password) and `SELECT`
+(for a non-zero database) once, when it opens. A connection that fails is closed
+instead of returned to the pool, and a command that fails because the server
+dropped an idle pooled connection is retried once on a new connection. Replies
+are bounded: at most 8 nested arrays, 512 MiB per bulk value and 16Mi array
+elements; anything larger fails the command with an `NSError`.
+
 ## 6. I18n Baseline
 
 `ALNLocalizationAdapter` supports:

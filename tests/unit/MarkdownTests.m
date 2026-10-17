@@ -480,6 +480,15 @@
   }
 }
 
+- (void)testMailtoAndXmppAutolinkProtocolChecks {
+  // These inputs reach the autolink protocol check that reads the character
+  // before `mailto:` / `xmpp:`.
+  XCTAssertEqualObjects(@"<p>&lt;xmpp:@</p>\n", [self html:@"<xmpp:@"]);
+  XCTAssertEqualObjects(@"<p>x <a href=\"mailto:a@b.c\">mailto:a@b.c</a></p>\n", [self html:@"x mailto:a@b.c"]);
+  XCTAssertEqualObjects(@"<p>xmailto:<a href=\"mailto:a@b.c\">a@b.c</a></p>\n", [self html:@"xmailto:a@b.c"]);
+  XCTAssertEqualObjects(@"<p><a href=\"mailto:a@b.c\">mailto:a@b.c</a></p>\n", [self html:@"mailto:a@b.c"]);
+}
+
 - (void)testInputEdgeCases {
   XCTAssertEqualObjects(@"", [self html:@""]);
   XCTAssertEqualObjects(@"", [self html:nil]);
