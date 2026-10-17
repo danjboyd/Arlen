@@ -18,6 +18,26 @@
   under a temporary name and renamed over `current` (`mv -T` with GNU
   coreutils, `mv -h` on macOS/BSD, `os.replace` otherwise) (#225).
 
+- Data layer fixes (#230, #231, #232, #237, #238):
+  - `withTransaction` (and `commitTransaction:`) now fails when a statement
+    inside the block had already aborted the transaction. PostgreSQL turns
+    that `COMMIT` into a `ROLLBACK`, and Arlen used to report success while
+    every write in the block was discarded. The transaction is rolled back
+    and an error is returned.
+  - The MSSQL dialect binds parameters in the order the `?` placeholders
+    appear. A trusted expression that reorders or repeats `$N` used to bind
+    the wrong values, or too few. A `$N` with no matching parameter is now a
+    compile error.
+  - `executeBuilderQuery` costs about 2.6x less per call. Query diagnostics
+    events are only built when a listener or stderr output wants them, and
+    the compile signature no longer triggers six caught KVC exceptions per
+    query on a plain `ALNSQLBuilder`.
+  - `ALNDatabaseInspector inspectSchemaMetadataForAdapter:` works on
+    PostgreSQL again: the view inventory query ordered by the reserved word
+    `table`, so ORM codegen metadata came back nil.
+  - Read-after-write stickiness drops expired scopes as the map grows, so
+    scopes that write and never read again no longer stay in memory forever.
+
 - Event streams: SSE and websocket stream sessions subscribe before they
   replay and hold live events until the replay is sent. Events committed while
   a client connected were lost before, and concurrent appends could arrive out
