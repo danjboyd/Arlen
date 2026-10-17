@@ -308,14 +308,23 @@
   }
 
   NSError *error = nil;
-  // Every earlier write has expired by the time the next one is recorded.
-  router.readAfterWriteStickinessSeconds = 0.000001;
+  // Scopes that wrote long ago and never read again. Seeding the map directly
+  // keeps this independent of clock resolution (Windows ticks in ~1 ms steps,
+  // so back-to-back writes can share a timestamp).
+  router.readAfterWriteStickinessSeconds = 60;
+  NSMutableDictionary *seeded = [router valueForKey:@"lastWriteByScope"];
+  NSDate *longAgo = [NSDate dateWithTimeIntervalSinceNow:-3600];
   for (NSUInteger idx = 0; idx < 3000; idx++) {
-    NSDictionary *scope = @{ ALNDatabaseRoutingContextStickinessScopeKey : [NSString stringWithFormat:@"session-%lu", (unsigned long)idx] };
-    (void)[router executeCommand:@"INSERT INTO widgets(v) VALUES ($1)" parameters:@[ @"a" ] routingContext:scope error:&error];
+    seeded[[NSString stringWithFormat:@"session-%lu", (unsigned long)idx]] = longAgo;
   }
+  // The next write finds the map past its prune threshold and drops them.
+  (void)[router executeCommand:@"INSERT INTO widgets(v) VALUES ($1)"
+                    parameters:@[ @"a" ]
+                routingContext:@{ ALNDatabaseRoutingContextStickinessScopeKey : @"fresh" }
+                         error:&error];
   NSDictionary *expiredMap = [router valueForKey:@"lastWriteByScope"];
-  XCTAssertLessThanOrEqual([expiredMap count], (NSUInteger)1024);
+  XCTAssertEqual((NSUInteger)1, [expiredMap count]);
+  XCTAssertNotNil(expiredMap[@"fresh"]);
 
   // Entries still inside the window are never dropped.
   router.readAfterWriteStickinessSeconds = 600;
