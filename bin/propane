@@ -357,7 +357,9 @@ else
   fi
 fi
 
-config_json="$(cd "$app_root" && "$arlen_binary" config --env "$environment" --json 2>/dev/null || true)"
+# --show-secrets: values such as propaneAccessories.jobWorkerCommand must reach
+# propane unredacted (arlen config masks embedded passwords by default).
+config_json="$(cd "$app_root" && "$arlen_binary" config --env "$environment" --json --show-secrets 2>/dev/null || true)"
 if [[ -z "$config_json" ]]; then
   echo "propane: failed to load app config via arlen config --json" >&2
   exit 1

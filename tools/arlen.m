@@ -45,7 +45,7 @@ static void PrintUsage(void) {
           "  perf\n"
           "  check [--dry-run] [--json]\n"
           "  build [--dry-run] [--json]\n"
-          "  config [--env <name>] [--json]\n"
+          "  config [--env <name>] [--json] [--show-secrets]\n"
           "  doctor [--env <name>] [--json]\n"
           "  webpush <generate-keys|public-key> [--json]\n");
 }
@@ -8513,9 +8513,130 @@ static int CommandWebPush(NSArray *args) {
   return 0;
 }
 
+static NSString *const ConfigRedactedValue = @"[redacted]";
+
+static BOOL ConfigKeyLooksSecret(NSString *key) {
+  if (![key isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *lower = [key lowercaseString];
+  // Settings about secrets rather than secret values: env var names, endpoints,
+  // TTLs, form/route paths, policy classes and feature flags. Old-style plists
+  // load numbers and booleans as strings, so these are matched by name.
+  for (NSString *suffix in @[
+         @"environmentkey", @"envkey", @"authmethod", @"endpoint", @"url", @"path", @"form", @"class",
+         @"policy", @"version", @"seconds", @"minutes", @"ttl", @"enabled", @"subject"
+       ]) {
+    if ([lower hasSuffix:suffix]) {
+      return NO;
+    }
+  }
+  for (NSString *marker in @[ @"secret", @"password", @"token", @"apikey", @"connectionstring" ]) {
+    if ([lower rangeOfString:marker].location != NSNotFound) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+// Masks the password in scheme://user:password@host URLs and in libpq
+// keyword/value DSNs (password=...).
+static NSString *ConfigRedactEmbeddedPasswords(NSString *value) {
+  NSMutableString *result = [NSMutableString stringWithString:value];
+  NSUInteger searchFrom = 0;
+  while (searchFrom < [result length]) {
+    NSRange scheme = [result rangeOfString:@"://" options:0 range:NSMakeRange(searchFrom, [result length] - searchFrom)];
+    if (scheme.location == NSNotFound) {
+      break;
+    }
+    NSUInteger authorityStart = NSMaxRange(scheme);
+    NSUInteger authorityEnd = authorityStart;
+    NSCharacterSet *terminators = [NSCharacterSet characterSetWithCharactersInString:@"/?# \t\r\n"];
+    while (authorityEnd < [result length] &&
+           ![terminators characterIsMember:[result characterAtIndex:authorityEnd]]) {
+      authorityEnd++;
+    }
+    NSRange authority = NSMakeRange(authorityStart, authorityEnd - authorityStart);
+    NSRange at = [result rangeOfString:@"@" options:NSBackwardsSearch range:authority];
+    if (at.location != NSNotFound) {
+      NSRange colon = [result rangeOfString:@":" options:0
+                                      range:NSMakeRange(authorityStart, at.location - authorityStart)];
+      if (colon.location != NSNotFound && colon.location + 1 < at.location) {
+        NSRange password = NSMakeRange(NSMaxRange(colon), at.location - NSMaxRange(colon));
+        [result replaceCharactersInRange:password withString:ConfigRedactedValue];
+        authorityEnd = authorityEnd - password.length + [ConfigRedactedValue length];
+      }
+    }
+    searchFrom = authorityEnd;
+  }
+
+  searchFrom = 0;
+  while (searchFrom < [result length]) {
+    NSRange key = [result rangeOfString:@"password="
+                                options:NSCaseInsensitiveSearch
+                                  range:NSMakeRange(searchFrom, [result length] - searchFrom)];
+    if (key.location == NSNotFound) {
+      break;
+    }
+    BOOL atWordStart = (key.location == 0) ||
+                       ![[NSCharacterSet alphanumericCharacterSet] characterIsMember:[result characterAtIndex:key.location - 1]];
+    NSUInteger valueStart = NSMaxRange(key);
+    NSUInteger valueEnd = valueStart;
+    if (valueEnd < [result length] && [result characterAtIndex:valueEnd] == '\'') {
+      valueEnd++;
+      while (valueEnd < [result length] && [result characterAtIndex:valueEnd] != '\'') {
+        valueEnd++;
+      }
+      if (valueEnd < [result length]) {
+        valueEnd++;
+      }
+    } else {
+      NSCharacterSet *terminators = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n&;"];
+      while (valueEnd < [result length] && ![terminators characterIsMember:[result characterAtIndex:valueEnd]]) {
+        valueEnd++;
+      }
+    }
+    if (atWordStart && valueEnd > valueStart) {
+      [result replaceCharactersInRange:NSMakeRange(valueStart, valueEnd - valueStart) withString:ConfigRedactedValue];
+      valueEnd = valueStart + [ConfigRedactedValue length];
+    }
+    searchFrom = MAX(valueEnd, NSMaxRange(key));
+  }
+  return result;
+}
+
+// `arlen config` redacts string values (and string list items) under
+// secret-looking keys, and passwords embedded in URLs/DSNs, unless
+// --show-secrets is given. Nested dictionaries are checked key by key; numbers,
+// booleans and empty strings are printed as-is.
+static id ConfigRedactSecrets(id value, BOOL underSecretKey) {
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *redacted = [NSMutableDictionary dictionaryWithCapacity:[value count]];
+    for (id key in value) {
+      redacted[key] = ConfigRedactSecrets(value[key], ConfigKeyLooksSecret(key));
+    }
+    return redacted;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *redacted = [NSMutableArray arrayWithCapacity:[value count]];
+    for (id item in value) {
+      [redacted addObject:ConfigRedactSecrets(item, underSecretKey)];
+    }
+    return redacted;
+  }
+  if ([value isKindOfClass:[NSString class]]) {
+    if (underSecretKey) {
+      return ([value length] > 0) ? ConfigRedactedValue : value;
+    }
+    return ConfigRedactEmbeddedPasswords(value);
+  }
+  return value;
+}
+
 static int CommandConfig(NSArray *args) {
   NSString *environment = @"development";
   BOOL asJSON = NO;
+  BOOL showSecrets = NO;
   for (NSUInteger idx = 0; idx < [args count]; idx++) {
     NSString *arg = args[idx];
     if ([arg isEqualToString:@"--env"]) {
@@ -8526,6 +8647,8 @@ static int CommandConfig(NSArray *args) {
       environment = args[++idx];
     } else if ([arg isEqualToString:@"--json"]) {
       asJSON = YES;
+    } else if ([arg isEqualToString:@"--show-secrets"]) {
+      showSecrets = YES;
     } else {
       fprintf(stderr, "arlen config: unknown option %s\n", [arg UTF8String]);
       return 2;
@@ -8539,6 +8662,9 @@ static int CommandConfig(NSArray *args) {
   if (config == nil) {
     fprintf(stderr, "arlen config: %s\n", [[error localizedDescription] UTF8String]);
     return 1;
+  }
+  if (!showSecrets) {
+    config = ConfigRedactSecrets(config, NO);
   }
 
   if (asJSON) {

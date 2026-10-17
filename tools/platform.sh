@@ -31,18 +31,51 @@ aln_platform_is_msys() {
   return 1
 }
 
+# aln_platform_rename_over <source> <dest>
+# rename(2) <source> onto <dest> without following <dest> when it is a symlink
+# to a directory: GNU `mv -T`, BSD/macOS `mv -h`, else python3 os.replace.
+aln_platform_rename_over() {
+  local source="$1"
+  local dest="$2"
+  if mv --version 2>/dev/null | grep -q 'GNU coreutils'; then
+    mv -fT "$source" "$dest"
+    return
+  fi
+  case "$(uname -s)" in
+    Darwin|*BSD|DragonFly)
+      mv -fh "$source" "$dest"
+      return
+      ;;
+  esac
+  python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$source" "$dest"
+}
+
 # aln_platform_link_directory <target> <link>
-# Points <link> at the directory <target>, replacing an existing link: `ln -sfn`
-# on POSIX. Under MSYS2, `ln -s` copies the directory (real symlinks need
-# admin rights or Developer Mode), and a later `ln -sfn` then links inside the
-# copy, so release activation and rollback silently kept the old release. Use
-# an NTFS junction there instead; MSYS2 reports junctions as symlinks, so
-# `readlink -f` and `[[ -L ]]` keep working.
+# Points <link> at the directory <target>, replacing an existing link. On POSIX
+# the new link is made under a temporary name and renamed over <link>, so
+# <link> is never missing (`ln -sfn` unlinks first, which left releases/current
+# absent for a moment during activation). Under MSYS2, `ln -s` copies the
+# directory (real symlinks need admin rights or Developer Mode), and a later
+# `ln -sfn` then links inside the copy, so release activation and rollback
+# silently kept the old release. Use an NTFS junction there instead; MSYS2
+# reports junctions as symlinks, so `readlink -f` and `[[ -L ]]` keep working.
 aln_platform_link_directory() {
   local target="$1"
   local link="$2"
   if ! aln_platform_is_msys; then
-    ln -sfn "$target" "$link"
+    if [[ -d "$link" && ! -L "$link" ]]; then
+      # A real directory: keep `ln -sfn` semantics (link created inside it).
+      ln -sfn "$target" "$link"
+      return
+    fi
+    local tmp_link
+    tmp_link="$(dirname "$link")/.$(basename "$link").tmp.$$"
+    rm -f "$tmp_link"
+    ln -s "$target" "$tmp_link"
+    if ! aln_platform_rename_over "$tmp_link" "$link"; then
+      rm -f "$tmp_link"
+      return 1
+    fi
     return
   fi
   if [[ -L "$link" ]]; then
