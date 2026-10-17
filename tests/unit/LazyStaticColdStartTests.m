@@ -75,7 +75,7 @@
     XCTAssertEqual(0, exitCode, @"%@", output);
     if (exitCode != 0) return;
 
-    NSString *bounded = [NSString stringWithFormat:@"perl -e 'alarm shift; exec @ARGV' 60 %@",
+    NSString *bounded = [NSString stringWithFormat:@"%@ %@", ALNTestShellTimeoutPrefix(60),
                                                    ALNTestShellQuote(binary)];
     command = [NSString stringWithFormat:
         @"set -e; ulimit -c 0; export LD_PRELOAD='' XCTEST_LD_PRELOAD=''; %@ 1; "
