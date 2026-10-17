@@ -1,12 +1,11 @@
 #import "ALNNotificationsWebPush.h"
 
-#import <fcntl.h>
-#import <sys/file.h>
-#import <unistd.h>
+#include <errno.h>
 
 #import "ALNDataCompat.h"
 #import "ALNHTTPCompat.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 #import "ALNSecurityPrimitives.h"
 
 static NSString *WPTrimmed(id value) {
@@ -125,11 +124,8 @@ NSTimeInterval ALNWebPushRetryAfterSeconds(NSString *value, NSDate *now) {
                             withIntermediateDirectories:YES
                                              attributes:nil
                                                   error:NULL];
-  int descriptor = open([lockPath fileSystemRepresentation], O_RDWR | O_CREAT, 0600);
-  if (descriptor < 0 || flock(descriptor, LOCK_EX) != 0) {
-    if (descriptor >= 0) {
-      close(descriptor);
-    }
+  int descriptor = ALNPlatformOpenExclusiveLock(lockPath);
+  if (descriptor < 0) {
     [self.lock unlock];
     if (error != NULL) {
       *error = [NSError errorWithDomain:NSPOSIXErrorDomain
@@ -144,8 +140,7 @@ NSTimeInterval ALNWebPushRetryAfterSeconds(NSString *value, NSDate *now) {
   if (changed && ![self writeFileState:state error:error]) {
     result = nil;
   }
-  flock(descriptor, LOCK_UN);
-  close(descriptor);
+  ALNPlatformReleaseExclusiveLock(descriptor);
   [self.lock unlock];
   return result;
 }

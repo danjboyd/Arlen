@@ -468,7 +468,9 @@ static void *ALNOpenODBCCandidate(const char *candidate) {
   if (candidate == NULL || candidate[0] == '\0') {
     return NULL;
   }
-  return (void *)LoadLibraryA(candidate);
+  // As for libpq: an absolute path also resolves its imports from its own
+  // directory.
+  return ALNPlatformLoadWindowsLibrary([NSString stringWithUTF8String:candidate] ?: @"");
 }
 
 static void *ALNLookupODBCSymbol(void *handle, const char *symbolName) {

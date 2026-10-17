@@ -743,6 +743,39 @@
   [database releaseConnection:connection];
 }
 
+- (void)testJSONAndJSONBScalarDocumentsDecodeToFoundationValues {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNil(error);
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+
+  // Issue 182: one scalar json/jsonb value used to fail the whole query.
+  NSArray<NSDictionary *> *rows =
+      [database executeQuery:@"SELECT '\"hello\"'::jsonb AS text_value, '42'::jsonb AS int_value, "
+                              "'1.5'::jsonb AS float_value, 'true'::jsonb AS bool_value, "
+                              "'null'::jsonb AS null_value, '\"plain\"'::json AS json_text, "
+                              "ARRAY['\"a\"'::jsonb, '7'::jsonb, '{\"k\":1}'::jsonb] AS mixed"
+                 parameters:@[]
+                      error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [rows count]);
+  NSDictionary *row = rows.firstObject;
+  XCTAssertEqualObjects(@"hello", row[@"text_value"]);
+  XCTAssertEqualObjects(@42, row[@"int_value"]);
+  XCTAssertEqualObjects(@1.5, row[@"float_value"]);
+  XCTAssertEqualObjects(@YES, row[@"bool_value"]);
+  XCTAssertEqualObjects([NSNull null], row[@"null_value"]);
+  XCTAssertEqualObjects(@"plain", row[@"json_text"]);
+  NSArray *expectedMixed = @[ @"a", @7, @{ @"k" : @1 } ];
+  XCTAssertEqualObjects(expectedMixed, row[@"mixed"]);
+}
+
 - (void)testPostgresTypeCodecFixtureCoversLiveCommonScalarAndArrayRows {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
