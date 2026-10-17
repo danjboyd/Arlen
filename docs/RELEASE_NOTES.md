@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Response headers are serialized into a byte buffer instead of an
+  `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
+  check on each of about 80 appends per response. Serializing a typical
+  19-header response is about 1.6-2x faster, and the bytes are unchanged
+  (#245, partial).
+
 - The vendored yyjson is updated from 0.12.0 to 0.13.0 (#269). That fixes
   upstream GHSA-f4vc-345x-4mvm: a number token with 2^32 or more significant
   digits could overflow a stack buffer. Arlen's default 1 MiB body limit kept
