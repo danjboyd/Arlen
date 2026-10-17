@@ -24,6 +24,14 @@
   release, which it can't do. Together these kept the `release-certification`
   workflow from ever passing (#181).
 
+- `arlen typescript-codegen --target client,react` works for apps that
+  don't use the ORM. Before, it always read `--orm-input` and required at
+  least one ORM descriptor, even though the client and React targets only
+  use the OpenAPI document. Now a missing default manifest is skipped for
+  `client`, `react` and `meta`, and the package is generated from
+  `--openapi-input` alone. `models`, `validators`, `query` and `all` still
+  require descriptors, and an explicit `--orm-input` path must exist (#183).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.
