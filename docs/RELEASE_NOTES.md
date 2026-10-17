@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A job handler that raises an exception no longer escapes `ALNJobWorker`.
+  Before, a throwing ("poison") job stopped the worker run, skipped the jobs
+  after it, and with the in-memory adapter stayed leased forever. The exception
+  now counts as a failed attempt: the job is retried with the usual delay and
+  dead-lettered after `maxAttempts` (#241).
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two
