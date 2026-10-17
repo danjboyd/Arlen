@@ -381,8 +381,9 @@ static NSData *ALNTestPlistArray(NSArray<NSNumber *> *refs) {
   return object;
 }
 
-// A "bplist00" document from raw objects; object 0 is the top object.
-static NSData *ALNTestBinaryPlist(NSArray<NSData *> *objects) {
+// A "bplist00" document from raw objects with the given offset and object
+// reference sizes; object 0 is the top object. Object builders write 4-byte refs.
+static NSData *ALNTestBinaryPlistWithSizes(NSArray<NSData *> *objects, uint8_t offsetSize, uint8_t refSize) {
   NSMutableData *plist = [[@"bplist00" dataUsingEncoding:NSASCIIStringEncoding] mutableCopy];
   NSMutableArray<NSNumber *> *offsets = [NSMutableArray array];
   for (NSData *object in objects) {
@@ -391,14 +392,18 @@ static NSData *ALNTestBinaryPlist(NSArray<NSData *> *objects) {
   }
   uint64_t tableOffset = [plist length];
   for (NSNumber *offset in offsets) {
-    ALNTestAppendBigEndian(plist, [offset unsignedLongLongValue], 8);
+    ALNTestAppendBigEndian(plist, [offset unsignedLongLongValue], offsetSize);
   }
-  uint8_t trailerHead[8] = {0, 0, 0, 0, 0, 0, 8, 4};
+  uint8_t trailerHead[8] = {0, 0, 0, 0, 0, 0, offsetSize, refSize};
   [plist appendBytes:trailerHead length:8];
   ALNTestAppendBigEndian(plist, [objects count], 8);
   ALNTestAppendBigEndian(plist, 0, 8);
   ALNTestAppendBigEndian(plist, tableOffset, 8);
   return plist;
+}
+
+static NSData *ALNTestBinaryPlist(NSArray<NSData *> *objects) {
+  return ALNTestBinaryPlistWithSizes(objects, 4, 4);
 }
 
 // A binary plist dictionary object (4-byte object refs, fewer than 15 pairs).
@@ -590,6 +595,21 @@ static id ALNTestNestedArrays(NSUInteger levels) {
   error = [self errorForCannedGETReply:ALNTestRedisBulkReply(ALNTestBinaryPlist(shared)) server:server];
   XCTAssertEqual((NSInteger)2235, error.code);
   XCTAssertLessThan(-[started timeIntervalSinceNow], 5.0);
+
+  // Offset or reference sizes no writer uses for cache-sized records (GNUstep's
+  // reader raises on them): an error, never an exception.
+  NSArray<NSData *> *record = @[ ALNTestPlistDict(@[ @1 ], @[ @2 ]), ALNTestPlistASCII(@"value"), leaf ];
+  for (NSArray<NSNumber *> *sizes in @[ @[ @8, @4 ], @[ @3, @4 ] ]) {
+    NSData *odd = ALNTestBinaryPlistWithSizes(record, (uint8_t)[sizes[0] unsignedIntValue], (uint8_t)[sizes[1] unsignedIntValue]);
+    XCTAssertNoThrow(error = [self errorForCannedGETReply:ALNTestRedisBulkReply(odd) server:server]);
+    XCTAssertEqual((NSInteger)2235, error.code, @"%@", sizes);
+  }
+  // The same record with ordinary sizes decodes.
+  server.cannedGETReply = ALNTestRedisBulkReply(ALNTestBinaryPlist(record));
+  ALNRedisCacheAdapter *recordAdapter = [self adapterForServer:server database:0];
+  error = nil;
+  XCTAssertEqualObjects(@1, [recordAdapter objectForKey:@"record" atTime:[NSDate date] error:&error]);
+  XCTAssertNil(error);
 
   // A well-formed record in a format the adapter never writes.
   NSData *xml = [NSPropertyListSerialization dataWithPropertyList:@{ @"value" : @"x" }

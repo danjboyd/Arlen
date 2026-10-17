@@ -2103,8 +2103,11 @@ static BOOL ALNRedisBinaryPlistIsBounded(NSData *payload) {
   layout.offsetIntSize = layout.bytes[trailer + 6];
   layout.objectRefSize = layout.bytes[trailer + 7];
   uint64_t topObject = 0;
-  if (layout.offsetIntSize == 0 || layout.offsetIntSize > 8 || layout.objectRefSize == 0 ||
-      layout.objectRefSize > 8 ||
+  // Writers use 1-, 2- or 4-byte offsets and references for anything under
+  // 4 GiB, and GNUstep's reader raises on any other size.
+  BOOL offsetSizeValid = layout.offsetIntSize == 1 || layout.offsetIntSize == 2 || layout.offsetIntSize == 4;
+  BOOL refSizeValid = layout.objectRefSize == 1 || layout.objectRefSize == 2 || layout.objectRefSize == 4;
+  if (!offsetSizeValid || !refSizeValid ||
       !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 8, 8, &layout.objectCount) ||
       !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 16, 8, &topObject) ||
       !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 24, 8, &layout.offsetTableOffset)) {
@@ -2837,10 +2840,20 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
   }
   NSError *parseError = nil;
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
-  id parsed = [NSPropertyListSerialization propertyListWithData:payload
-                                                        options:NSPropertyListImmutable
-                                                         format:&format
-                                                          error:&parseError];
+  id parsed = nil;
+  @try {
+    parsed = [NSPropertyListSerialization propertyListWithData:payload
+                                                       options:NSPropertyListImmutable
+                                                        format:&format
+                                                         error:&parseError];
+  } @catch (NSException *exception) {
+    // GNUstep's binary plist reader raises on some malformed input instead of
+    // returning an error; never let a cache reply throw into the caller.
+    if (error != NULL) {
+      *error = ALNRedisClientError(2235, @"redis cache payload is not a bounded binary property list", nil);
+    }
+    return nil;
+  }
   if (![parsed isKindOfClass:[NSDictionary class]] || format != NSPropertyListBinaryFormat_v1_0) {
     if (error != NULL) {
       *error = ALNRedisClientError(2226, @"redis cache payload is malformed", parseError);
