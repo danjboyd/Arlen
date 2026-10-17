@@ -4106,9 +4106,15 @@
                                                           error:&chmodError]);
     XCTAssertNil(chmodError);
 
+#if defined(_WIN32)
+    // A C:/ entry would split at the drive colon in MSYS2's ':'-separated PATH.
+    NSString *fakeBinPathEntry = [NSString stringWithFormat:@"\"$(cygpath -u %@)\"", [self shellQuoted:fakeBin]];
+#else
+    NSString *fakeBinPathEntry = [self shellQuoted:fakeBin];
+#endif
     NSString *command = [NSString
         stringWithFormat:@"PATH=%@:$PATH ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ --prepare-only 2>&1",
-                         [self shellQuoted:fakeBin],
+                         fakeBinPathEntry,
                          [self shellQuoted:repoRoot],
                          [self shellQuoted:appRoot],
                          [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]]];
