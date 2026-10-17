@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Request-path performance and robustness (#218, #247, #265, #270):
+  - Multipart parsing is about 20x faster. Header-name and boundary checks use
+    precomputed tables instead of rebuilding a GNUstep `NSCharacterSet` and
+    its `-invertedSet` for every header line, and quoted parameter values are
+    no longer built with `appendFormat:` per character. A 128-part form went
+    from about 19 ms to under 1 ms to parse.
+  - File responses format `Last-Modified` and `Date` with `gmtime` and fixed
+    tables, and parse `If-Modified-Since` / `If-Unmodified-Since` /
+    `If-Range` IMF-fixdates without building an `NSDateFormatter`. Two ICU
+    formatters per static response were about 40% of static-file CPU. The
+    obsolete RFC 850 and asctime forms are still accepted.
+  - MSSQL text columns use the length the ODBC driver reports, so a value
+    with an embedded NUL is no longer truncated.
+  - The framework's demo `boomhauer` JSON endpoints (`/api/echo/:name` and
+    others) escape route parameters. A quote or backslash in the path used
+    to break out of the JSON string.
+
 - `tools/deploy/smoke_release.sh --port 0` picks a free port right before each
   health probe and, if propane's workers cannot bind it, retries on a new port
   (up to three attempts). The health probe's `curl` now times out after two

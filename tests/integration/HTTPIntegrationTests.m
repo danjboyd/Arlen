@@ -2056,6 +2056,52 @@
   XCTAssertTrue([body containsString:@"hank"]);
 }
 
+// Issue 270: the demo server's JSON string helper fell back to raw bytes for
+// any value with a quote, backslash or non-ASCII character, so a route
+// parameter could break out of the string and inject keys.
+- (void)testEchoEndpointEscapesRouteParametersInJSON_Issue270 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import json, socket\n"
+        @"PORT=%d\n"
+        @"def echo(raw):\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.sendall(b'GET /api/echo/' + raw + b' HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"    data = b''\n"
+        @"    while True:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    sock.close()\n"
+        @"    head, _, body = data.partition(b'\\r\\n\\r\\n')\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    return json.loads(body)\n"
+        @"injected = echo(b'a\",\"injected\":true,\"x\":\"b')\n"
+        @"assert 'injected' not in injected, injected\n"
+        @"assert injected['name'] == 'a\",\"injected\":true,\"x\":\"b', injected\n"
+        @"backslash = echo(b'a\\\\')\n"
+        @"assert backslash['name'] == 'a\\\\', backslash\n"
+        @"print('echo escaping passed')\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testPhase3EServiceRoutesCacheAndI18n {
   NSString *cacheBody = [self simpleRequestPath:@"/services/cache?value=ok"];
   XCTAssertTrue([cacheBody containsString:@"\"ok\""]);
