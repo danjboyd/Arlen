@@ -235,6 +235,10 @@ for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
 preference validation (GitHub issue 227).
 `mcp` moved to `1.0.5` to filter `tools/list` by role and scope, and `auth` to
 `1.5.2` to equalize unknown-email login timing (GitHub issue 228).
+`admin-ui` and `ops` moved to `1.0.3`, `auth` to `1.5.3`, `jobs` to `1.1.1`,
+`notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
+numbers given as strings (query parameters, old-style plists) are read on Apple
+too (GitHub issue 264).
 
 ## MCP tools
 

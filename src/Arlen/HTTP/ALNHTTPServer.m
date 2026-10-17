@@ -3945,6 +3945,13 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     // Pipelined bytes are already buffered: serve them on this worker.
     return NO;
   }
+  if ([self hasQueuedHTTPClients]) {
+    // Other connections are waiting for a worker. Yield this one to the watcher
+    // even if its next request is already here: it goes back in line behind
+    // them when readable. Otherwise a handful of busy keep-alive clients held
+    // every worker and new clients got no service at all (PERF-07 on #187).
+    return [self parkIdleConnection:clientFd];
+  }
   struct pollfd pfd;
   pfd.fd = (int)clientFd;
   pfd.events = POLLIN;
