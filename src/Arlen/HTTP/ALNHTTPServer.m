@@ -3653,11 +3653,16 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
   }
 }
 
+// Under idleConnectionLock, as the watcher's teardown closes the channel under
+// it: a wake racing shutdown must not write to a closed, reused handle number
+// (Windows reuses SOCKET values quickly). The signal never blocks.
 - (void)wakeIdleConnectionWatcher {
+  [self.idleConnectionLock lock];
   ALNSocketHandle wakeEnd = self.idleConnectionWakeWriteFD;
   if (wakeEnd != ALNInvalidSocketHandle) {
     ALNWakeChannelSignal(wakeEnd);
   }
+  [self.idleConnectionLock unlock];
 }
 
 - (BOOL)parkIdleConnection:(ALNSocketHandle)clientFd {
@@ -3783,9 +3788,13 @@ static BOOL ALNSendSSEHeaders(ALNSocketHandle clientFd, ALNResponse *response) {
     }
     free(pollFDs);
     self.idleConnectionWatcherRunning = NO;
-    ALNWakeChannelClose(self.idleConnectionWakeReadFD, self.idleConnectionWakeWriteFD);
+    [self.idleConnectionLock lock];
+    ALNSocketHandle wakeRead = self.idleConnectionWakeReadFD;
+    ALNSocketHandle wakeWrite = self.idleConnectionWakeWriteFD;
     self.idleConnectionWakeReadFD = ALNInvalidSocketHandle;
     self.idleConnectionWakeWriteFD = ALNInvalidSocketHandle;
+    ALNWakeChannelClose(wakeRead, wakeWrite);
+    [self.idleConnectionLock unlock];
   }
 }
 
