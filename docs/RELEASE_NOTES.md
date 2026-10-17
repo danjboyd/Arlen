@@ -14,6 +14,24 @@
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
 
+- `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
+  GNUstep.sh. On Linux it and `smoke_release.sh` source
+  `tools/source_gnustep_env.sh` before they build and run binaries. Before,
+  the freshly built `eocc` couldn't load `libgnustep-base` and the build
+  stopped. `build_release.sh` also uses the same test as `propane` to decide
+  whether an app has sources, so an app with sources but no `src/main.m` now
+  ships its binary. Before, `propane` tried to rebuild that app from the
+  release, which it can't do. Together these kept the `release-certification`
+  workflow from ever passing (#181).
+
+- `arlen typescript-codegen --target client,react` works for apps that
+  don't use the ORM. Before, it always read `--orm-input` and required at
+  least one ORM descriptor, even though the client and React targets only
+  use the OpenAPI document. Now a missing default manifest is skipped for
+  `client`, `react` and `meta`, and the package is generated from
+  `--openapi-input` alone. `models`, `validators`, `query` and `all` still
+  require descriptors, and an explicit `--orm-input` path must exist (#183).
+
 - Idle keep-alive connections no longer hold HTTP workers. Before, each open
   keep-alive connection held one of the 8 default workers until its next
   request or the 30-second `connectionTimeoutSeconds`. A browser holds about

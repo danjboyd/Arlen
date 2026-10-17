@@ -30,6 +30,13 @@ NS_ASSUME_NONNULL_BEGIN
                                                                   targets:(NSArray<NSString *> *)targets
                                                                     error:(NSError *_Nullable *_Nullable)error;
 
+/**
+ Whether the requested targets need at least one ORM descriptor. Only
+ `models`, `validators`, `query` and `all` (or no targets, which means `all`)
+ do; `client`, `react` and `meta` can render from an OpenAPI document alone.
+ */
++ (BOOL)targetsRequireModelDescriptors:(NSArray<NSString *> *)targets;
+
 /** Render TypeScript artifacts from already-materialized ORM model descriptors. */
 + (nullable NSDictionary<NSString *, id> *)renderArtifactsFromModelDescriptors:
     (NSArray<ALNORMModelDescriptor *> *)descriptors
