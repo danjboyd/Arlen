@@ -239,6 +239,8 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
+`search` moved to `1.0.5` so an unscoped query from a caller who may query no
+registered resource returns no results.
 
 ## MCP tools
 

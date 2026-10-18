@@ -490,6 +490,34 @@ NSString *Phase27SearchFixturesPath(NSString *filename) {
 
 @end
 
+@interface Phase27SearchRoleGatedProductsResource : Phase27SearchProductsResource
+@end
+
+@implementation Phase27SearchRoleGatedProductsResource
+
+- (NSDictionary *)searchModuleResourceMetadata {
+  NSMutableDictionary *metadata = [[super searchModuleResourceMetadata] mutableCopy];
+  metadata[@"queryPolicy"] = @"role_gated";
+  metadata[@"queryRoles"] = @[ @"auditor" ];
+  return metadata;
+}
+
+@end
+
+@implementation Phase27SearchRoleGatedProvider
+
+- (NSArray<id<ALNSearchResourceDefinition>> *)searchModuleResourcesForRuntime:(ALNSearchModuleRuntime *)runtime
+                                                                        error:(NSError **)error {
+  (void)runtime;
+  (void)error;
+  return @[
+    [[Phase27SearchRoleGatedProductsResource alloc] init],
+    [[Phase27SearchFinanceResource alloc] init],
+  ];
+}
+
+@end
+
 @interface Phase27SearchContextMiddleware () <ALNMiddleware>
 @end
 

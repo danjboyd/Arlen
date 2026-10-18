@@ -249,6 +249,9 @@ query can cost:
 - query routes are public by default
 - per-resource `queryPolicy` metadata can require authentication, roles, or an
   app callback/predicate
+- an unscoped query (`GET /search` or `GET /search/api/query`) searches only
+  the resources the caller may query; when that is none, it returns no results
+  (`total = 0`), including no autocomplete, suggestions or facets
 - resource drilldown and reindex routes require the shared operator/admin policy:
   - authenticated session
   - either `operator` or `admin` role

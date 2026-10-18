@@ -5954,7 +5954,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSString *resource = STLowerTrimmedString(resourceIdentifier);
-  NSSet *allowedSet = ([allowedResourceIdentifiers count] > 0) ? [NSSet setWithArray:allowedResourceIdentifiers] : nil;
+  // nil means the caller applies no resource restriction. A non-nil array is
+  // the complete set of resources the caller may query, so an empty array
+  // matches nothing.
+  NSSet *allowedSet = (allowedResourceIdentifiers != nil) ? [NSSet setWithArray:allowedResourceIdentifiers] : nil;
   NSArray *candidateMetadata = nil;
   if ([resource length] > 0) {
     NSDictionary *metadata = [self resourceMetadataForIdentifier:resource];
@@ -6900,6 +6903,39 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   return filters;
 }
 
+- (NSDictionary *)emptySearchResultForQuery:(NSString *)query
+                                 parameters:(NSDictionary *)parameters
+                           visibleResources:(NSArray<NSDictionary *> *)visibleResources
+                                      limit:(NSUInteger)limit
+                                     offset:(NSUInteger)offset {
+  return @{
+    @"query" : query ?: @"",
+    @"mode" : STLowerTrimmedString(parameters[@"mode"]).length > 0 ? STLowerTrimmedString(parameters[@"mode"]) : @"search",
+    @"availableModes" : @[],
+    @"resource" : @"",
+    @"resources" : [self.runtime resourceIdentifiersFromMetadataArray:visibleResources] ?: @[],
+    @"resourceMetadata" : @{},
+    @"results" : @[],
+    @"promotedResults" : @[],
+    @"autocomplete" : @[],
+    @"suggestions" : @[],
+    @"facets" : @[],
+    @"total" : @0,
+    @"matchedCount" : @0,
+    @"limit" : @(limit),
+    @"offset" : @(offset),
+    @"pagination" : @{
+      @"limit" : @(limit),
+      @"offset" : @(offset),
+      @"returned" : @0,
+      @"total" : @0,
+    },
+    @"engine" : self.runtime.engineIdentifier ?: @"ALNDefaultSearchEngine",
+    @"engineCapabilities" : [self.runtime.engine searchModuleCapabilities] ?: @{},
+    @"cursor" : @{ @"requested" : @"", @"next" : @"", @"supported" : @NO },
+  };
+}
+
 - (NSDictionary *)searchResultFromParameters:(NSDictionary *)parameters
                            resourceIdentifier:(NSString *)resourceIdentifier
                                       context:(ALNContext *)ctx
@@ -6912,33 +6948,22 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSUInteger offset = ALNUnsignedIntegerValueOrDefault(parameters[@"offset"], 0);
   NSDictionary *explicitFilters = [self searchFiltersFromParameters:parameters] ?: @{};
   NSString *query = STTrimmedString(parameters[@"q"]);
-  if ([query length] == 0 && [STLowerTrimmedString(resourceIdentifier) length] == 0 && [explicitFilters count] == 0) {
-    return @{
-      @"query" : @"",
-      @"mode" : STLowerTrimmedString(parameters[@"mode"]).length > 0 ? STLowerTrimmedString(parameters[@"mode"]) : @"search",
-      @"availableModes" : @[],
-      @"resource" : @"",
-      @"resources" : [self.runtime resourceIdentifiersFromMetadataArray:visibleResources] ?: @[],
-      @"resourceMetadata" : @{},
-      @"results" : @[],
-      @"promotedResults" : @[],
-      @"autocomplete" : @[],
-      @"suggestions" : @[],
-      @"facets" : @[],
-      @"total" : @0,
-      @"matchedCount" : @0,
-      @"limit" : @(limit),
-      @"offset" : @(offset),
-      @"pagination" : @{
-        @"limit" : @(limit),
-        @"offset" : @(offset),
-        @"returned" : @0,
-        @"total" : @0,
-      },
-      @"engine" : self.runtime.engineIdentifier ?: @"ALNDefaultSearchEngine",
-      @"engineCapabilities" : [self.runtime.engine searchModuleCapabilities] ?: @{},
-      @"cursor" : @{ @"requested" : @"", @"next" : @"", @"supported" : @NO },
-    };
+  BOOL unscoped = ([STLowerTrimmedString(resourceIdentifier) length] == 0);
+  if (unscoped && [query length] == 0 && [explicitFilters count] == 0) {
+    return [self emptySearchResultForQuery:@""
+                                parameters:parameters
+                          visibleResources:visibleResources
+                                     limit:limit
+                                    offset:offset];
+  }
+  if (unscoped && [visibleResources count] == 0 && [query length] <= ALNSearchMaxQueryLength) {
+    // The caller may not query any registered resource, so an unscoped query
+    // has nothing to search.
+    return [self emptySearchResultForQuery:query
+                                parameters:parameters
+                          visibleResources:visibleResources
+                                     limit:limit
+                                    offset:offset];
   }
   NSMutableDictionary *resourceFilters = [NSMutableDictionary dictionary];
   for (NSDictionary *metadata in visibleResources) {

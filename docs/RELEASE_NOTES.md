@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `search` (`1.0.5`): an unscoped query (`GET /search`, `GET /search/api/query`)
+  from a caller who may not query any registered resource now returns no
+  results, autocomplete, suggestions or facets, with `total = 0`. It used to
+  search every resource.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
