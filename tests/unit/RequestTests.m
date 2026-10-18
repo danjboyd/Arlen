@@ -581,6 +581,68 @@
   XCTAssertEqual([remainder length], secondConsumedLength);
 }
 
+// The server parses from its connection buffer without copying and then shifts
+// the next pipelined request to the front of that buffer. Headers read after
+// the shift must still be the ones this request sent.
+- (void)testBufferedLLHTTPHeadersSurviveThePipelinedBufferBeingReused {
+  if (![ALNRequest isLLHTTPAvailable]) {
+    return;
+  }
+
+  NSArray<NSString *> *raws = @[
+    @"GET /one HTTP/1.1\r\nHost: first.example\r\nX-User: alice\r\nAuthorization: Bearer AAAAAAAAAAAA\r\n\r\n",
+    @"GET /two HTTP/1.1\r\nHost: second.example\r\nX-User: mallory-padding\r\n"
+    @"Authorization: Bearer BBBBBBBBBBBB\r\nUser-Agent: second-agent\r\n\r\n",
+    @"GET /three HTTP/1.1\r\nHost: third.example\r\nX-User: carol\r\nConnection: close\r\n\r\n",
+  ];
+  NSMutableData *buffer = [NSMutableData data];
+  for (NSString *raw in raws) {
+    [buffer appendData:[raw dataUsingEncoding:NSUTF8StringEncoding]];
+  }
+
+  NSMutableArray<ALNRequest *> *requests = [NSMutableArray array];
+  while ([buffer length] > 0) {
+    NSData *view = [NSData dataWithBytesNoCopy:[buffer mutableBytes] length:[buffer length] freeWhenDone:NO];
+    NSUInteger consumedLength = 0;
+    BOOL headersComplete = NO;
+    NSInteger contentLength = -1;
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromBufferedData:view
+                                                      backend:ALNHTTPParserBackendLLHTTP
+                                               consumedLength:&consumedLength
+                                              headersComplete:&headersComplete
+                                                contentLength:&contentLength
+                                                        error:&error];
+    XCTAssertNil(error);
+    XCTAssertNotNil(request);
+    if (request == nil || consumedLength == 0) {
+      break;
+    }
+    [requests addObject:request];
+    // Shift the rest to the front, overwriting this request's bytes.
+    NSUInteger remaining = [buffer length] - consumedLength;
+    memmove([buffer mutableBytes], (char *)[buffer mutableBytes] + consumedLength, remaining);
+    memset((char *)[buffer mutableBytes] + remaining, 'Z', consumedLength);
+    [buffer setLength:remaining];
+  }
+
+  XCTAssertEqual((NSUInteger)3, [requests count]);
+  if ([requests count] != 3) {
+    return;
+  }
+  XCTAssertEqualObjects(@"first.example", [requests[0] headerValueForName:@"host"]);
+  XCTAssertEqualObjects(@"alice", [requests[0] headerValueForName:@"x-user"]);
+  XCTAssertEqualObjects(@"Bearer AAAAAAAAAAAA", [requests[0] headerValueForName:@"authorization"]);
+  XCTAssertEqual((NSUInteger)0, [[requests[0] headerValueForName:@"user-agent"] length]);
+  XCTAssertEqualObjects(@"second.example", [requests[1] headerValueForName:@"host"]);
+  XCTAssertEqualObjects(@"mallory-padding", [requests[1] headerValueForName:@"x-user"]);
+  XCTAssertEqualObjects(@"Bearer BBBBBBBBBBBB", [requests[1] headerValueForName:@"authorization"]);
+  XCTAssertEqualObjects(@"second-agent", [requests[1] headerValueForName:@"user-agent"]);
+  XCTAssertEqualObjects(@"third.example", [requests[2] headerValueForName:@"host"]);
+  XCTAssertEqualObjects(@"carol", [requests[2] headerValueForName:@"x-user"]);
+  XCTAssertEqual((NSUInteger)0, [[requests[2] headerValueForName:@"authorization"] length]);
+}
+
 
 // A handler exception leaks the request (ARC frames unwind without releasing
 // them), so the server's explicit removeTemporaryFiles must not depend on the

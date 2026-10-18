@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Pipelined HTTP/1.1 requests on one connection each keep their own headers.
+  On the llhttp parser, headers outside the small set copied at parse time
+  (Host, Authorization, Origin, Content-Type, User-Agent and others) were read
+  lazily from the connection buffer, which by then held the next pipelined
+  request, so they came back truncated, empty or from that next request. A
+  request now keeps its own copy of the header bytes, which also ends its
+  dependence on the connection buffer's lifetime.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
