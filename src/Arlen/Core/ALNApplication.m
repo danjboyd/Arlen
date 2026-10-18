@@ -1923,7 +1923,25 @@ static NSError *ALNSecurityConfigValidationError(NSInteger code,
   return [NSError errorWithDomain:ALNApplicationErrorDomain code:code userInfo:userInfo];
 }
 
-static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
+static NSString *const ALNSecretGenerationHint = @"generate one with `openssl rand -hex 32`";
+
+static NSError *ALNInsecureSigningSecretError(NSInteger code,
+                                              NSString *configKey,
+                                              NSString *envVar,
+                                              NSString *reason,
+                                              NSString *environment,
+                                              NSString *securityProfile) {
+  NSString *kind = [reason isEqualToString:@"published_example_secret"]
+                       ? @"is an example value published in the Arlen repository"
+                       : @"looks like a placeholder value";
+  NSString *message = [NSString stringWithFormat:
+      @"Invalid security configuration: %@ (%@) %@ and is refused in the %@ environment; %@",
+      configKey, envVar, kind, ([environment length] > 0) ? environment : @"current", ALNSecretGenerationHint];
+  return ALNSecurityConfigValidationError(code, message, configKey, reason, securityProfile);
+}
+
+static NSError *ALNValidateSecurityConfiguration(NSDictionary *config, NSString *environment) {
+  BOOL allowsInsecureSecrets = ALNEnvironmentAllowsInsecureSigningSecrets(environment);
   NSDictionary *session = ALNDictionaryConfigValue(config, @"session");
   NSDictionary *csrf = ALNDictionaryConfigValue(config, @"csrf");
   NSDictionary *auth = ALNDictionaryConfigValue(config, @"auth");
@@ -1942,10 +1960,16 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
   if (sessionEnabled && !ALNSessionSecretMeetsMinimumStrength(sessionSecret)) {
     return ALNSecurityConfigValidationError(
         337,
-        @"Invalid security configuration: session.secret must be at least 32 characters when session.enabled is YES",
+        @"Invalid security configuration: session.secret must be at least 32 characters when session.enabled is YES "
+        @"(ARLEN_SESSION_SECRET); generate one with `openssl rand -hex 32`",
         @"session.secret",
         @"weak_secret",
         securityProfile);
+  }
+  NSString *sessionSecretProblem = ALNInsecureSigningSecretReason(sessionSecret);
+  if (sessionEnabled && !allowsInsecureSecrets && sessionSecretProblem != nil) {
+    return ALNInsecureSigningSecretError(337, @"session.secret", @"ARLEN_SESSION_SECRET", sessionSecretProblem,
+                                         environment, securityProfile);
   }
 
   BOOL csrfEnabled = ALNBoolConfigValue(csrf[@"enabled"], sessionEnabled);
@@ -1981,10 +2005,16 @@ static NSError *ALNValidateSecurityConfiguration(NSDictionary *config) {
   if (authEnabled && !ALNAuthBearerSecretMeetsMinimumStrength(authBearerSecret)) {
     return ALNSecurityConfigValidationError(
         338,
-        @"Invalid security configuration: auth.bearerSecret must be at least 32 characters when auth.enabled is YES",
+        @"Invalid security configuration: auth.bearerSecret must be at least 32 characters when auth.enabled is YES "
+        @"(ARLEN_AUTH_BEARER_SECRET); generate one with `openssl rand -hex 32`",
         @"auth.bearerSecret",
         @"weak_secret",
         securityProfile);
+  }
+  NSString *authBearerSecretProblem = ALNInsecureSigningSecretReason(authBearerSecret);
+  if (authEnabled && !allowsInsecureSecrets && authBearerSecretProblem != nil) {
+    return ALNInsecureSigningSecretError(338, @"auth.bearerSecret", @"ARLEN_AUTH_BEARER_SECRET",
+                                         authBearerSecretProblem, environment, securityProfile);
   }
 
   return nil;
@@ -3065,10 +3095,11 @@ static BOOL ALNOperabilityAddressIsLoopback(NSString *address) {
          [candidate hasPrefix:@"::ffff:127."];
 }
 
-// /metrics and /clusterz stay anonymous by default. When
-// observability.operabilityToken is set they require
+// When observability.operabilityToken is set, /metrics and /clusterz require
 // `Authorization: Bearer <token>`; when observability.operabilityLoopbackOnly
-// is YES they only answer direct loopback requests. Both apply when both are set.
+// is YES they only answer direct loopback requests. Both apply when both are
+// set. With neither, they are anonymous outside production and answer 404 in
+// production unless observability.operabilityAnonymous = YES.
 static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
                                                 ALNRequest *request,
                                                 ALNResponse *response) {
@@ -3078,6 +3109,14 @@ static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
                               stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
                         : @"";
   BOOL loopbackOnly = ALNBoolConfigValue(observability[@"operabilityLoopbackOnly"], NO);
+  if ([token length] == 0 && !loopbackOnly && [application.environment isEqualToString:@"production"] &&
+      !ALNBoolConfigValue(observability[@"operabilityAnonymous"], NO)) {
+    response.statusCode = 404;
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [response setTextBody:@"not found\n"];
+    response.committed = YES;
+    return NO;
+  }
   if (loopbackOnly) {
     BOOL loopback = ALNOperabilityAddressIsLoopback(request.remoteAddress) &&
                     ([request.effectiveRemoteAddress length] == 0 ||
@@ -5220,7 +5259,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     return YES;
   }
 
-  NSError *securityConfigError = ALNValidateSecurityConfiguration(self.config);
+  NSError *securityConfigError = ALNValidateSecurityConfiguration(self.config, self.environment);
   if (securityConfigError != nil) {
     if (error != NULL) {
       *error = securityConfigError;
@@ -5452,6 +5491,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
       [self.logger warn:@"session middleware disabled"
                  fields:@{
                    @"reason" : @"session.secret must be at least 32 characters",
+                 }];
+    } else if (!ALNEnvironmentAllowsInsecureSigningSecrets(self.environment) &&
+               ALNInsecureSigningSecretReason(secret) != nil) {
+      [self.logger warn:@"session middleware disabled"
+                 fields:@{
+                   @"reason" : @"session.secret is a placeholder or published example value",
                  }];
     } else {
       NSString *cookieName = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");

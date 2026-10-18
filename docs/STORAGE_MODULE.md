@@ -59,6 +59,12 @@ Each collection definition supplies metadata such as:
 - `retentionDays`
 - `variants`
 
+`acceptedContentTypes` entries are exact types (`image/png`) or wildcards
+(`image/*`, `*/*`). A collection without `acceptedContentTypes` accepts
+`*/*`. Wildcards never match `text/html`, `image/svg+xml` or
+`application/xhtml+xml`; a collection that should store those must list them
+exactly.
+
 Definitions may also implement the optional validation hook `storageModuleValidateObjectNamed:contentType:sizeBytes:metadata:runtime:error:` for app-specific policy checks.
 Definitions may implement `storageModuleVariantRepresentationForObject:variantDefinition:originalData:originalMetadata:runtime:error:` to generate first-party transformed variants rather than copy-only derivatives.
 
@@ -102,6 +108,29 @@ The management JSON routes are included in module OpenAPI output.
 - `POST /storage/api/collections/:collection/objects/:objectID/download-token` issues a signed download token
 - `GET /storage/api/download/:token` streams the stored object if the token is valid and unexpired
 
+### Download Headers
+
+The download response uses the content type recorded at upload, which the
+uploader declared; the bytes are not checked against it. The declared type
+must be exactly one media type (`type/subtype` with optional token
+parameters); lists, quoted strings and control characters are rejected at
+upload. It is stored normalized (lowercase `type/subtype`, plus a `charset`
+parameter if one was given), and the download sends only that normalized
+type. To keep stored files from running as pages on the app's origin, the
+download sets:
+
+- `Content-Disposition: attachment; filename="..."` by default. The quoted
+  filename is the object name reduced to ASCII letters, digits and `._-`, with
+  the original name in `filename*` when it differs.
+- `Content-Disposition: inline` only for `image/png`, `image/jpeg`,
+  `image/gif`, `image/webp`, `image/avif`, `application/pdf`, `audio/*` and
+  `video/*`. HTML, SVG, XML, JavaScript and every other type download as
+  attachments.
+- `Content-Security-Policy: sandbox` on every download except inline PDF
+  (browser PDF viewers do not run in a sandboxed document; PDF keeps the app's
+  normal policy).
+- `X-Content-Type-Options: nosniff`.
+
 Config knobs:
 
 - `storageModule.uploadSessionTTLSeconds`
@@ -117,7 +146,11 @@ Upload and download tokens are HMAC-SHA256 signed with
 - Set the secret with `ARLEN_STORAGE_SIGNING_SECRET` in the process
   environment, or `storageModule.signingSecret` in untracked config. The
   environment value wins.
-- The secret must be at least 32 characters in every environment.
+- The secret must be at least 32 characters in every environment. Generate
+  one with `openssl rand -hex 32`.
+- Outside `development` and `test`, placeholder and published example values
+  are refused (`reason = placeholder_secret` or `published_example_secret`);
+  see [Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets).
 - Outside `development` and `test`, the module refuses to configure when no
   secret is set (`ALNStorageModuleErrorInvalidConfiguration`,
   `config_key = storageModule.signingSecret`).

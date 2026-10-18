@@ -239,6 +239,14 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
+`storage` moved to `1.2.0` to refuse placeholder and published example
+`storageModule.signingSecret` values outside development and test.
+`storage` moved to `1.3.0` so downloads are attachments with a sandbox policy
+unless the type is a passive image, PDF, audio or video type, and so wildcard
+accepted types no longer match HTML or SVG (a security fix).
+`search` moved to `1.1.0` to encode engine URL path segments with only
+unreserved characters and reject empty, `.` and `..` record identifiers and
+index names (a security fix).
 
 ## MCP tools
 

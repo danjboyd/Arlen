@@ -22,6 +22,13 @@ typedef NS_ENUM(NSInteger, ALNSearchModuleErrorCode) {
   ALNSearchModuleErrorForbidden = 6,
 };
 
+// Percent-encodes `value` (whitespace-trimmed) as one URL path segment for a
+// search engine request, leaving only RFC 3986 unreserved characters
+// (A-Z a-z 0-9 - . _ ~) unescaped. Returns nil and sets `error`
+// (ALNSearchModuleErrorValidationFailed) when the value is empty, "." or "..".
+FOUNDATION_EXPORT NSString *_Nullable ALNSearchEnginePathComponent(NSString *_Nullable value,
+                                                                   NSError *_Nullable *_Nullable error);
+
 typedef BOOL (^ALNSearchResourceBatchConsumer)(NSArray<NSDictionary *> *records,
                                                NSError *_Nullable *_Nullable error);
 

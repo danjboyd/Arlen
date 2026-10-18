@@ -114,3 +114,56 @@ jobs:
           name: linux-thread-race-nightly-${{ github.run_id }}
           path: build/sanitizers/phase10m_thread_race/**
           if-no-files-found: warn
+
+  # Issue 271: the integration suite under ASAN+UBSan. Nightly only (one
+  # self-hosted runner can't take a sanitized integration run on every PR),
+  # and not a required check. A finding here becomes a release-blocking issue.
+  integration-sanitizers-nightly:
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    continue-on-error: true
+    timeout-minutes: 180
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # iep-apt's /tmp is a small shared tmpfs, and GNUstep's NSTemporaryDirectory()
+      # reads TEMP/TMP (not TMPDIR). Give each job its own on-disk temp directory,
+      # which the runner empties between jobs, so leaked test files can't fill /tmp.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
+      - name: Install build dependencies
+        env:
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      - name: Run nightly integration sanitizer lane
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          bash ./tools/ci/run_linux_integration_sanitizers_nightly.sh
+
+      - name: Summarize XCTest results
+        if: always()
+        run: |
+          python3 ./tools/ci/junit_report.py test-results --title "integration sanitizers (nightly) XCTest results"
+
+      - name: Upload integration sanitizer artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-integration-sanitizers-nightly-${{ github.run_id }}
+          path: |
+            build/sanitizers/integration_nightly/**
+            test-results/**
+          if-no-files-found: warn

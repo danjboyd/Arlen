@@ -699,6 +699,90 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   }
 }
 
+- (void)testAppendYieldEscapesUnfilledNamedSlotContextFallback {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    NSMutableString *out = [NSMutableString string];
+    NSError *error = nil;
+    NSDictionary *ctx = @{ @"title" : @"</title><script>alert(1)</script>" };
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    ctx,
+                                    @"title",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
+- (void)testAppendYieldKeepsFilledNamedSlotRawOverContextValue {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    NSError *error = nil;
+    XCTAssertTrue(ALNEOCSetSlot(nil,
+                                @"title",
+                                @"<b>Rendered</b>",
+                                @"pages/show.html.eoc",
+                                3,
+                                1,
+                                &error));
+    NSMutableString *out = [NSMutableString string];
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    @{ @"title" : @"<i>context</i>" },
+                                    @"title",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"<b>Rendered</b>", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
+- (void)testAppendYieldMissingNamedSlotAndContextValueRendersEmpty {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    NSMutableString *out = [NSMutableString string];
+    NSError *error = nil;
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    @{},
+                                    @"sidebar",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
+- (void)testAppendYieldUnnamedContentContextFallbackStaysRaw {
+  NSDictionary *token = ALNEOCPushCompositionState();
+  @try {
+    NSMutableString *out = [NSMutableString string];
+    NSError *error = nil;
+    XCTAssertTrue(ALNEOCAppendYield(out,
+                                    @{ @"content" : @"<p>body</p>" },
+                                    @"",
+                                    @"layouts/application.html.eoc",
+                                    2,
+                                    1,
+                                    &error));
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(@"<p>body</p>", out);
+  } @finally {
+    ALNEOCPopCompositionState(token);
+  }
+}
+
 - (void)testTemplateRegistryDoesNotAcquireNSThreadClassMonitor {
   RuntimeClassMonitorState state = {
     dispatch_semaphore_create(0), dispatch_semaphore_create(0), -1

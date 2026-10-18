@@ -127,6 +127,9 @@ static NSData *MetadataCurlRequest(NSURLRequest *request, NSUInteger maxBytes, N
   if (!headers) goto cleanup;
 #define METADATA_OPTION(option, value) do { result = curl_easy_setopt(curl, option, value); if (result != CURLE_OK) goto cleanup; } while (0)
   METADATA_OPTION(CURLOPT_URL, request.URL.absoluteString.UTF8String);
+#if LIBCURL_VERSION_NUM >= 0x072a00
+  METADATA_OPTION(CURLOPT_PATH_AS_IS, 1L);
+#endif
   if ([request.HTTPMethod isEqual:@"POST"]) {
     struct curl_slist *next = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
     if (!next) goto cleanup;
@@ -349,6 +352,12 @@ static CURLcode ALNSynchronousConfigure(CURL *curl, NSString *urlString, NSStrin
   CURLcode result = CURLE_OK;
 #define SYNC_OPTION(option, value) do { result = curl_easy_setopt(curl, option, value); if (result != CURLE_OK) return result; } while (0)
   SYNC_OPTION(CURLOPT_URL, urlString.UTF8String);
+#if LIBCURL_VERSION_NUM >= 0x072a00
+  // Send the path exactly as given: never collapse "/./" or "/../" segments,
+  // which would turn a request for an item into one for its parent.
+  // CURLOPT_PATH_AS_IS is an enum value (libcurl 7.42.0+), not a macro.
+  SYNC_OPTION(CURLOPT_PATH_AS_IS, 1L);
+#endif
   SYNC_OPTION(CURLOPT_ERRORBUFFER, message);
   SYNC_OPTION(CURLOPT_NOSIGNAL, 1L);
   SYNC_OPTION(CURLOPT_SSL_VERIFYPEER, 1L);

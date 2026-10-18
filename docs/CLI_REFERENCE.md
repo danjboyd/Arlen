@@ -127,10 +127,12 @@ Run bootstrap environment diagnostics without requiring a framework build.
  `vendor/tools-xctest` is present; otherwise it looks for `xctest` on `PATH`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
  managed toolchains without libdispatch headers fail early
-- with `--env production`, warns (`operability_endpoints`) when `/metrics` and
- `/clusterz` are anonymous, i.e. neither `observability.operabilityToken` /
- `ARLEN_OPERABILITY_TOKEN` nor `observability.operabilityLoopbackOnly` /
- `ARLEN_OPERABILITY_LOOPBACK_ONLY` is set
+- with `--env production`, warns (`operability_endpoints`) when neither
+ `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` nor
+ `observability.operabilityLoopbackOnly` / `ARLEN_OPERABILITY_LOOPBACK_ONLY` is
+ set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
+ requests when `observability.operabilityAnonymous` /
+ `ARLEN_OPERABILITY_ANONYMOUS` is set
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -257,7 +259,11 @@ Named targets:
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
- - generated env example under `build/deploy/targets/<target>/env/`
+ - generated env example under `build/deploy/targets/<target>/env/`, mode
+ `0600`, with a freshly generated 64-hex `ARLEN_SESSION_SECRET` (and a
+ commented `ARLEN_STORAGE_SIGNING_SECRET`); required `*_SECRET` keys get their
+ own random value and other required keys get `CHANGE_ME`. Each run generates
+ new values.
  - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
  - generated README with operator follow-up steps
 - honors target runtime metadata:
@@ -266,7 +272,8 @@ Named targets:
  - for SSH targets, remote `release`/`status`/`doctor`/`logs`/`rollback` also
  source `runtime.gnustepScript` before running the packaged `arlen` when
  `runtime.requiresEnvWrapper` is on
-- does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
+- does not install secrets on the host or provision PostgreSQL, reverse
+ proxies, TLS, or DNS
 
 `arlen deploy target sample`
 
@@ -1124,6 +1131,10 @@ Behavior:
  - missing `session.secret` when `session.enabled=YES`
  - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
  - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
+ - outside `development`/`test`, placeholder or published example values for
+ `session.secret` or `auth.bearerSecret` (containing `replace-with`,
+ `change-me`, `changeme`, `change_me` or `0123456789ab`, or a secret committed
+ in the Arlen repository); generate one with `openssl rand -hex 32`
  - `csrf.enabled=YES` without session middleware
  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
@@ -1223,6 +1234,7 @@ Environment:
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_OPERABILITY_TOKEN` (unset by default; when set, `/metrics` and `/clusterz` require `Authorization: Bearer <token>`; overrides `observability.operabilityToken`)
 - `ARLEN_OPERABILITY_LOOPBACK_ONLY` (default `0`; when `1`, `/metrics` and `/clusterz` answer only direct loopback requests; overrides `observability.operabilityLoopbackOnly`)
+- `ARLEN_OPERABILITY_ANONYMOUS` (default `0`; when `1`, production serves `/metrics` and `/clusterz` to anonymous requests instead of `404` while neither of the two settings above is set; overrides `observability.operabilityAnonymous`)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
 - `ARLEN_CLUSTER_OBSERVED_NODES` (defaults to expected nodes; legacy `MOJOOBJC_CLUSTER_OBSERVED_NODES` also accepted)
