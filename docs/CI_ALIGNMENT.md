@@ -98,6 +98,7 @@ statement is raised:
 - Apple baseline confidence
 - Windows preview confidence
 - scheduled thread-race / experimental sanitizer follow-up lanes
+- scheduled integration-suite ASAN+UBSan lane (`integration-sanitizers-nightly`)
 
 ## Progress
 
@@ -135,6 +136,7 @@ stays below the authoritative Linux production baseline:
 - `apple-baseline`
 - `windows-preview`
 - nightly thread-race / experimental follow-up lanes
+- nightly integration sanitizers (`linux-sanitizers / integration-sanitizers-nightly`)
 
 ## Platform Lane Policy
 
@@ -344,6 +346,7 @@ Do not require by default:
   bundles, but stays nonblocking)
 - Windows preview
 - nightly thread-race / experimental lanes
+- nightly integration sanitizers (`integration-sanitizers-nightly`)
 - release certification
 - release assets
 - linux public toolchain
@@ -534,6 +537,30 @@ request parser's multipart source dependency. Keep that standalone compile
 representative when adding request-parser dependencies; do not remove the
 feature-toggle check to address link failures. No additional required lane is
 introduced for these regressions.
+
+## Nightly integration sanitizers
+
+`linux-sanitizers / integration-sanitizers-nightly` (issue 271) runs the
+integration bundle against an ASAN+UBSan build on the schedule and on
+`workflow_dispatch`, never on pull requests, and is not a required check: one
+self-hosted runner can't take a sanitized integration run on every PR. A
+finding in Arlen code becomes a release-blocking issue.
+
+`tools/ci/run_linux_integration_sanitizers_nightly.sh` builds with clang's
+shared sanitizer runtime (`-shared-libsan`), preloads that runtime into the
+xctest runner, and collects every process's reports through `log_path` under
+`build/sanitizers/integration_nightly/` (`summary.json` classifies them).
+Reports in Arlen code, or that can't be attributed, fail the lane; reports
+raised inside `/usr/bin` tools that inherited the preload (make, dd) don't.
+
+Tests that build app roots through `bin/boomhauer`/`bin/arlen`, run `make`,
+propane or `tools/ci` scripts are skipped: `bin/boomhauer` refuses a
+sanitizer-instrumented framework and `make clean`s it. The list is
+`tests/fixtures/sanitizers/integration_nightly_skips.txt`. Its generated
+section comes from `tools/ci/classify_sanitizer_integration_skips.py`; the lane
+fails when it is stale (regenerate with `--write`) and when the instrumented
+framework archive is replaced during the run, which means a test that rebuilds
+it isn't listed.
 
 ## TSAN reliability and retained evidence
 
