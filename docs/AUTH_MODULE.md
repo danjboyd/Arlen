@@ -74,6 +74,12 @@ Mode behavior:
 - `generated-app-ui` keeps the same backend routes but resolves HTML from
   app-owned templates under `templates/auth/...` by default.
 
+Login (password, provider, or trusted email claim) and MFA step-up start a
+fresh session: other keys stored before, including the CSRF token, are dropped,
+and only `return_to` is kept. The JSON login, registration and verify responses
+return the new `csrf_token` (also at `GET /auth/api/session`); use it for the
+next unsafe request. See [Session and CSRF](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+
 Local-password login answers `Invalid email or password` for both an unknown
 email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether

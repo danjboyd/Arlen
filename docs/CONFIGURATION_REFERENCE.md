@@ -290,6 +290,18 @@ then is a session started and a session cookie sent. Requests that never read a
 token, including cookieless `GET`/`HEAD` for static-ish routes, get no
 `Set-Cookie`, so they cannot replace a signed-in browser's session.
 
+Signing in and completing step-up start a fresh session
+(`ALNAuthSession` establish/elevate, which the auth module and
+`-[ALNController startAuthenticatedSessionForSubject:...]` /
+`completeStepUpWithMethod:...` use). Keys stored before, including
+`_csrf_token`, are dropped, and a new CSRF token is minted the next time one is
+read. The one key kept is `return_to`, for apps that remember where to send the
+user after signing in. A token fetched before login, or before step-up, is
+rejected afterwards: clients should take the new `csrf_token` from the auth
+module's login and verify responses (or from `GET /auth/api/session`), and
+pages rendered after login carry the new token. Store other app data in the
+session after login, or keep it elsewhere if it must survive step-up.
+
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.

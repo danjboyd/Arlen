@@ -13,6 +13,14 @@
   `arlen module migrate` to apply the new auth migration
   `004_auth_totp_limits`; until it is applied, verification works as before and
   the module logs one warning.
+- Signing in and completing step-up (`ALNAuthSession`
+  establish/elevate, used by the auth module and the `ALNController` helpers)
+  now start a fresh session. Keys stored before, including `_csrf_token`, are
+  dropped, so a CSRF token issued before login no longer works after it; a new
+  token is minted when next read and is returned by the auth module's login,
+  registration and verify responses. Only `return_to` is kept. Apps that keep
+  data in the session across login or step-up need to store it again
+  afterwards.
 - `ALNTOTP` adds `matchedTimeStepForCode:...`, which returns the time step a
   code matched (or `NSNotFound`), so callers can refuse reused codes.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
