@@ -105,7 +105,7 @@ static BOOL ALNORMCodegenPropertyIsReserved(NSString *name) {
   dispatch_once(&onceToken, ^{
     NSArray *names = [@"state descriptor context fieldValues relationValues dirtyFieldNames "
         "loadedRelationNames cleanFieldValues relationAccessStrategies relationPivotRows fieldConverters "
-        "markClean markDetached primaryKeyValues changedFieldValues dictionaryRepresentation "
+        "markClean markDetached primaryKeyValues persistedPrimaryKeyValues changedFieldValues dictionaryRepresentation "
         "class superclass description debugDescription hash self zone retain release autorelease "
         "className classForArchiver classForCoder classForKeyedArchiver replacementObjectForPortCoder "
         "supportsSecureCoding version beginContentAccess discardContentIfPossible endContentAccess isContentDiscarded "

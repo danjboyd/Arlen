@@ -107,6 +107,23 @@ static id ALNORMDataversePublicValue(id value) {
     }
     return NO;
   }
+  // The primary ID of a persisted record names the record PATCH and DELETE
+  // target; changing it would retarget them at another record.
+  if (_persisted && [field.logicalName isEqualToString:self.descriptor.primaryIDAttribute ?: @""]) {
+    id persistedID = _cleanFieldValues[field.logicalName];
+    if (persistedID != nil && persistedID != [NSNull null] &&
+        ![persistedID isEqual:ALNORMDataverseStoredValue(value)]) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorReadOnlyMutation,
+                                 @"the primary ID of a persisted Dataverse record cannot change",
+                                 @{
+                                   @"field_name" : field.logicalName ?: @"",
+                                   @"entity_name" : self.descriptor.logicalName ?: @"",
+                                 });
+      }
+      return NO;
+    }
+  }
   if ((value == nil || value == [NSNull null]) && !field.isNullable) {
     if (error != NULL) {
       *error = ALNORMMakeError(ALNORMErrorMissingField,

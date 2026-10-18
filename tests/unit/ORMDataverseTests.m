@@ -171,6 +171,29 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   XCTAssertEqualObjects([relatedAccounts[0] objectForFieldName:@"name"], @"Acme");
 }
 
+// PATCH and DELETE target the model's primary ID, so a persisted record's ID
+// must not be writable from input.
+- (void)testPersistedDataverseRecordKeepsItsPrimaryID {
+  NSError *error = nil;
+  ALNDataverseRecord *record =
+      [ALNDataverseRecord recordWithDictionary:@{ @"accountid" : @"account-2", @"name" : @"Beta" } error:&error];
+  XCTAssertNotNil(record, @"%@", error);
+  ALNORMDVAccount *account = [[ALNORMDVAccount alloc] init];
+  XCTAssertTrue([account applyRecord:record error:&error], @"%@", error);
+  XCTAssertEqualObjects(@"account-2", [account primaryIDValue]);
+
+  error = nil;
+  XCTAssertFalse([account setObject:@"account-9" forFieldName:@"accountid" error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+  XCTAssertEqualObjects(@"account-2", [account primaryIDValue]);
+
+  ALNORMDataverseChangeset *changeset = [ALNORMDataverseChangeset changesetWithModel:account];
+  NSDictionary *payload = @{ @"accountid" : @"account-9", @"name" : @"Defaced" };
+  BOOL moved = [changeset applyInputValues:payload error:&error] && [changeset applyToModel:&error];
+  XCTAssertFalse(moved, @"a changeset must not move a persisted record to another ID");
+  XCTAssertEqualObjects(@"account-2", [account primaryIDValue]);
+}
+
 - (void)testDataverseChangesetsSaveUpsertDeleteAndBatchThroughClientContracts {
   ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
   ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];

@@ -41,6 +41,18 @@
     off, naming `csrf.enabled` in the error; `authModule.allowWithoutCSRF = YES`
     opts out. `arlen module doctor` reports the same case as
     `module_csrf_disabled`.
+- ORM: a persisted model's primary key can no longer change. A changeset or
+  `setObject:forFieldName:error:` that writes a different key fails with
+  `ALNORMErrorReadOnlyMutation`; an unchanged key is still accepted. `UPDATE`
+  and `DELETE` target the key as it was loaded or last saved. Before, a request
+  payload with another row's `id` passed through
+  `applyInputValues:error:` and `saveModel:changeset:` updated that row. The
+  Dataverse ORM applies the same rule to a persisted record's primary ID.
+  - New `-[ALNORMChangeset applyInputValues:permittedFields:error:]` casts only
+    the listed fields and drops other input keys. Use it for request payloads
+    so clients can't mass-assign foreign keys or role fields;
+    `docs/ARLEN_ORM.md` now shows it.
+  - `persistedPrimaryKeyValues` is now a reserved generated-property name.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

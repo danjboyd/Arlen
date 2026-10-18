@@ -1196,9 +1196,11 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
     return NO;
   }
   ALNSQLBuilder *builder = [ALNSQLBuilder updateTable:self.descriptor.qualifiedTableName values:values];
+  // Target the row that was loaded, not whatever the primary key holds now.
+  NSDictionary<NSString *, id> *persistedKeys = [model persistedPrimaryKeyValues];
   for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
     ALNORMFieldDescriptor *field = [self.descriptor fieldNamed:fieldName];
-    [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:[model objectForFieldName:field.name]];
+    [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:persistedKeys[field.name]];
   }
   if ([options.optimisticLockFieldName length] > 0) {
     ALNORMFieldDescriptor *lockField = [self.descriptor fieldNamed:options.optimisticLockFieldName];
@@ -1326,9 +1328,10 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   return [self.context withTransactionUsingBlock:^BOOL(NSError **blockError) {
            __strong typeof(self) strongSelf = weakSelf;
            ALNSQLBuilder *builder = [ALNSQLBuilder deleteFrom:strongSelf.descriptor.qualifiedTableName];
+           NSDictionary<NSString *, id> *persistedKeys = [model persistedPrimaryKeyValues];
            for (NSString *fieldName in strongSelf.descriptor.primaryKeyFieldNames ?: @[]) {
              ALNORMFieldDescriptor *field = [strongSelf.descriptor fieldNamed:fieldName];
-             [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:[model objectForFieldName:field.name]];
+             [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:persistedKeys[field.name]];
            }
            if ([resolvedOptions.optimisticLockFieldName length] > 0) {
              ALNORMFieldDescriptor *lockField =

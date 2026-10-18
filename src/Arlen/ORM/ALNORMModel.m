@@ -277,6 +277,17 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
   }
 
   id storedValue = ALNORMStoredValue(value);
+  if (field.isPrimaryKey && ![self allowsPrimaryKeyValue:storedValue forField:field]) {
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorReadOnlyMutation,
+                               @"the primary key of a persisted model cannot change",
+                               @{
+                                 @"field_name" : field.name ?: @"",
+                                 @"entity_name" : self.descriptor.entityName ?: @"",
+                               });
+    }
+    return NO;
+  }
   if (![self validateValue:storedValue forField:field error:error]) {
     return NO;
   }
@@ -519,6 +530,38 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
   NSMutableDictionary *values = [NSMutableDictionary dictionary];
   for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
     id value = [self objectForFieldName:fieldName];
+    if (value != nil) {
+      values[fieldName] = value;
+    }
+  }
+  return values;
+}
+
+// A primary key that was loaded or saved names the row; writing a different
+// value would retarget UPDATE/DELETE at another row. Unchanged writes (a
+// client echoing its id) are fine.
+- (BOOL)allowsPrimaryKeyValue:(id)storedValue forField:(ALNORMFieldDescriptor *)field {
+  id persisted = self.cleanFieldValues[field.name];
+  if (persisted == nil || persisted == [NSNull null]) {
+    return YES;
+  }
+  return [persisted isEqual:ALNORMStoredValue(storedValue)];
+}
+
+- (BOOL)allowsPrimaryKeyValue:(id)value forFieldName:(NSString *)fieldName {
+  ALNORMFieldDescriptor *field = [self resolvedFieldDescriptorForName:fieldName];
+  if (field == nil || !field.isPrimaryKey) {
+    return YES;
+  }
+  return [self allowsPrimaryKeyValue:value forField:field];
+}
+
+- (NSDictionary<NSString *, id> *)persistedPrimaryKeyValues {
+  NSMutableDictionary *values = [NSMutableDictionary dictionary];
+  for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
+    id persisted = self.cleanFieldValues[fieldName];
+    id value = (persisted != nil && persisted != [NSNull null]) ? ALNORMPublicValue(persisted)
+                                                               : [self objectForFieldName:fieldName];
     if (value != nil) {
       values[fieldName] = value;
     }

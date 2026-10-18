@@ -138,6 +138,18 @@ static id ALNORMChangesetPublicValue(id value) {
     }
     return NO;
   }
+  if (field.isPrimaryKey && self.model != nil && ![self.model allowsPrimaryKeyValue:value forFieldName:field.name]) {
+    [self addError:@"cannot change the primary key of a persisted record" forFieldName:field.name];
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorReadOnlyMutation,
+                               @"changeset cannot change the primary key of a persisted model",
+                               @{
+                                 @"field_name" : field.name ?: @"",
+                                 @"entity_name" : self.descriptor.entityName ?: @"",
+                               });
+    }
+    return NO;
+  }
 
   NSMutableDictionary *values = [NSMutableDictionary dictionaryWithDictionary:self.values ?: @{}];
   values[field.name] = ALNORMChangesetStoredValue(value);
@@ -185,6 +197,48 @@ static id ALNORMChangesetPublicValue(id value) {
 
   for (NSString *fieldName in values) {
     if (![self castInputValue:values[fieldName] forFieldName:fieldName error:error]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
+         permittedFields:(NSArray<NSString *> *)permittedFields
+                   error:(NSError **)error {
+  if (![values isKindOfClass:[NSDictionary class]] || ![permittedFields isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
+                               @"changeset input must be a dictionary and permitted fields an array",
+                               nil);
+    }
+    return NO;
+  }
+
+  NSMutableSet<NSString *> *permitted = [NSMutableSet set];
+  for (NSString *fieldName in permittedFields) {
+    ALNORMFieldDescriptor *field =
+        [fieldName isKindOfClass:[NSString class]] ? [self resolvedFieldDescriptorForName:fieldName] : nil;
+    if (field == nil) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
+                                 @"permitted fields name an unknown field",
+                                 @{
+                                   @"field_name" : [fieldName isKindOfClass:[NSString class]] ? fieldName : @"",
+                                 });
+      }
+      return NO;
+    }
+    [permitted addObject:field.name];
+  }
+
+  // Input keys outside the permit list are dropped, like unknown form fields.
+  for (NSString *inputName in values) {
+    ALNORMFieldDescriptor *field = [self resolvedFieldDescriptorForName:inputName];
+    if (field == nil || ![permitted containsObject:field.name]) {
+      continue;
+    }
+    if (![self castInputValue:values[inputName] forFieldName:field.name error:error]) {
       return NO;
     }
   }
