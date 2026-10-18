@@ -39,6 +39,54 @@ prints the gnustep-cli managed-toolchain command.
 Release archives are produced by `tools/release/package_framework.sh` (see
 `docs/RELEASE_PROCESS.md`).
 
+## Windows installer (`tools/install.ps1`)
+
+```powershell
+irm https://github.com/danjboyd/Arlen/releases/latest/download/install.ps1 | iex
+```
+
+The Windows counterpart of `install.sh`, for Windows PowerShell 5.1. It
+downloads the prebuilt `arlen-X.Y.Z-windows-x64.zip` and checks it against the
+release's `SHA256SUMS`. It unpacks the zip to `<Prefix>\<version>`, points the
+`<Prefix>\current` junction at it, and writes an `arlen.cmd` launcher to the
+bin dir. Nothing in the framework is compiled at install time.
+
+Before installing, it checks the gnustep-cli managed MSYS2 `CLANG64` toolchain.
+It looks for the toolchain in `-MsysRoot`, then `ARLEN_MSYS_ROOT`, then the root
+that `GNUSTEP_MAKEFILES` points into, then `%LOCALAPPDATA%\gnustep-cli`, then
+`%ProgramFiles%\gnustep-cli`. It exits with an error when:
+
+- no toolchain root is found (the message gives the gnustep-cli bootstrap
+  command);
+- libcurl is missing from the toolchain, which means the toolchain is older
+  than gnustep-cli `v0.1.1` (the message gives the bootstrap command);
+- the toolchain's `toolchain_version` in `state\cli-state.json` differs from
+  the `toolchain=` the zip was built against.
+
+It warns, without failing, when the toolchain's artifact checksum differs from
+the zip's `toolchain_sha256=`, or when the root has no gnustep-cli state file.
+
+`arlen.cmd` works from cmd.exe and PowerShell under any execution policy. It
+runs `bin\arlen-clang64.ps1`, which enters `CLANG64` the same way
+`scripts\run_clang64.ps1` does, exports `ARLEN_FRAMEWORK_ROOT` (unless already
+set), passes the toolchain root it chose on as `ARLEN_MSYS_ROOT`, and passes
+the arguments to `bin/arlen`. Ctrl-C or closing the window stops the command
+and everything it started. Set `ARLEN_HOME` to run a
+different installed version, and `ARLEN_MSYS_ROOT` to use a different
+toolchain root.
+
+Options:
+
+- `-Version X.Y.Z`: release to install (default: latest)
+- `-Prefix DIR`: install root (default `%LOCALAPPDATA%\Arlen`)
+- `-BinDir DIR`: launcher directory (default `<Prefix>\bin`)
+- `-Archive FILE`: install a local `arlen-X.Y.Z-windows-x64.zip` instead of downloading
+- `-MsysRoot DIR`: toolchain root, overriding the search
+
+Under `irm | iex` the installer takes no options. To pass them, use
+`& ([scriptblock]::Create((irm <url>))) -Version 0.3.0`, or download the script
+and run `powershell -ExecutionPolicy Bypass -File install.ps1 ...`.
+
 ## `arlen`
 
 Usage:
@@ -786,6 +834,7 @@ Build and run `boomhauer` for the current app root.
 - transpile/compile failures in watch mode do not terminate supervisor; diagnostics are served until next successful rebuild
 - while the fallback diagnostic server is active, `boomhauer` retries failed builds on a short backoff and the HTML error page advertises that recovery behavior
 - server args are passed through (`--watch`, `--no-watch`, `--prepare-only`, `--port`, `--host`, `--env`, `--once`, `--print-routes`)
+- on Windows, runs inside the gnustep-cli `CLANG64` environment (the installed `arlen.cmd` and `scripts\run_clang64.ps1` both enter it) and builds `.boomhauer\build\boomhauer-app.exe`; watch mode and the build-error page work as on Linux. Run it from an app root: repository-root `boomhauer` is not supported on Windows yet
 
 ### `arlen jobs worker [worker args...]`
 
@@ -800,6 +849,7 @@ Build and run the first-party jobs worker loop for the current app root.
  startup (`ARLEN-BUG-018`)
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
+- Windows: not supported for production until 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
 
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
 before jobs module configuration and apply
@@ -823,6 +873,7 @@ Run production manager (`propane`) for the current app root.
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
+- Windows: not supported for production until 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
 
 ### `arlen routes`
 

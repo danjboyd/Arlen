@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-10-13
+Last updated: 2026-10-16
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -12,11 +12,15 @@ make test-unit
 make test-integration
 ```
 
-Windows preview entry path:
+Windows development entry path (gnustep-cli managed MSYS2 `CLANG64`
+toolchain; see `docs/GETTING_STARTED_WINDOWS.md`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make arlen"
 ```
+
+Windows is supported for development from 0.3.0. Production (`propane`,
+`jobs-worker`, service deploys) is planned for 0.4.0.
 
 ## Known-Good Baseline (2026-02-20)
 
