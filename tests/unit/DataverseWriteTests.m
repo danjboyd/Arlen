@@ -422,4 +422,44 @@
   XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
 }
 
+- (void)testRequestMethodsMustBeTokensBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *smuggled = @"GET /api/data/v9.2/WhoAmI HTTP/1.1\r\nHost: crm.example\r\nContent-Length: 0\r\n\r\nDELETE";
+  NSArray<NSString *> *methods = @[ smuggled, @"GET\nX", @"GE T", @"PATCH(" ];
+  for (NSString *method in methods) {
+    error = nil;
+    XCTAssertNil([client performRequestWithMethod:method
+                                             path:@"accounts(00000000-0000-0000-0000-00000000000b)"
+                                            query:nil
+                                          headers:nil
+                                       bodyObject:nil
+                           includeFormattedValues:NO
+                             returnRepresentation:NO
+                                 consistencyCount:NO
+                                            error:&error],
+                 @"%@", method);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", method);
+  }
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+  XCTAssertEqual((NSUInteger)0, tokenProvider.requestCount);
+
+  ALNDataverseCurlTransport *curl = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:1];
+  ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:smuggled
+                                                                   URLString:@"http://127.0.0.1:9/api/data/v9.2/WhoAmI"
+                                                                     headers:@{}
+                                                                    bodyData:nil];
+  error = nil;
+  XCTAssertNil([curl executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+}
+
 @end

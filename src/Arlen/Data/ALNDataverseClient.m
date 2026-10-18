@@ -1208,7 +1208,15 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
-  // curl writes an embedded CR/LF from --header onto the wire as another line.
+  // curl writes an embedded CR/LF from --request or --header onto the wire.
+  if (!ALNDataverseHeaderNameIsValid(request.method)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
+                                     nil);
+    }
+    return nil;
+  }
   if (!ALNDataverseValidateHeaders(request.headers, error)) {
     return nil;
   }
@@ -1791,6 +1799,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
+  // The method becomes curl's --request and the request line; a CR/LF in it
+  // would end the request and start another one with the app's token.
+  if (!ALNDataverseHeaderNameIsValid(normalizedMethod)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
+                                     nil);
+    }
+    return nil;
+  }
 
   NSError *serializationError = nil;
   id serializedObject = ALNDataverseSerializedObject(bodyObject, &serializationError);
@@ -1880,6 +1898,14 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     if (error != NULL) {
       *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
                                      @"Dataverse authorized request requires a method and URL",
+                                     nil);
+    }
+    return nil;
+  }
+  if (!ALNDataverseHeaderNameIsValid(normalizedMethod)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
                                      nil);
     }
     return nil;

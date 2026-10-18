@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Dataverse: the request method must be an HTTP token. A method with
+  whitespace or control characters fails with
+  `ALNDataverseErrorInvalidArgument` in `performRequestWithMethod:` before a
+  token is requested or anything is sent, and `ALNDataverseCurlTransport`
+  rejects it too.
 - Route policies: `pathPrefixes` and `sourceIPAllowlist` given as one string
   now mean a one-element list. Before, a string turned into an empty list, and
   that silently switched the policy's check off. A list that is present but
