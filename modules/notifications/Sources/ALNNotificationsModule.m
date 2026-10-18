@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNNotificationsModule.h"
 
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
@@ -88,7 +89,7 @@ static NSString *NMResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = NMLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:

@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNSearchModule.h"
 
 #import "ALNDataCompat.h"
@@ -509,7 +510,7 @@ static NSString *STResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = STLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:

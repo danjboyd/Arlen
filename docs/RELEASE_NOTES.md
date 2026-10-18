@@ -17,7 +17,7 @@
   It prints each distinct startup error once (`worker startup failed (same
   error) xN` for repeats), backs off exponentially from `respawnDelayMs` up to
   the new `respawnBackoffMaxMs` propane accessory (default 30 s), and after
-  `startupFailureLimit` consecutive identical failures (propane accessory,
+  `startupFailureLimit` consecutive startup failures (propane accessory,
   default 5) exits with status `3` so the service manager reports a failed
   unit. Workers report startup errors through `ARLEN_STARTUP_FAILURE_FILE`,
   which propane sets (#294).
@@ -26,8 +26,16 @@
 - Environment names are classified once, ignoring case and surrounding
   whitespace: `ALNEnvironmentKindForName()` and
   `ALNEnvironmentIsDevelopmentLike()` in `ALNConfig.h`. Core uses them for the
-  module-load startup check and the detailed error page, so `--env
-  Development` behaves like `development` there.
+  module-load startup check and the detailed error page, and the `auth`
+  (OIDC loopback redirects), `jobs`, `notifications`, `search` and `storage`
+  modules use them for their development/test checks (`auth` 1.5.4, `jobs`
+  1.1.2, `notifications` 1.1.4, `search` 1.0.5, `storage` 1.1.3).
+- Config loading normalizes the environment name (trimmed, lowercased) before
+  choosing `config/environments/<name>.plist`. Before, `--env PRODUCTION`
+  counted as production but skipped `production.plist`, so its overrides
+  silently did not apply. `application.environment` and
+  `config[@"environment"]` hold the normalized name
+  (`ALNNormalizedEnvironmentName()` in `ALNConfig.h`).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

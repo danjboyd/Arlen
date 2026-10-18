@@ -956,4 +956,37 @@
   XCTAssertEqualObjects(@"json", config[@"logFormat"]);
 }
 
+
+- (void)testEnvironmentNameIsNormalizedBeforeChoosingTheOverlay {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  port = 4100;\n}\n"]);
+    for (NSString *spelling in @[ @"production", @"PRODUCTION", @" Production\n" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:spelling error:&error];
+      XCTAssertNil(error, @"%@", spelling);
+      XCTAssertEqual((NSInteger)4100, [config[@"port"] integerValue], @"%@", spelling);
+      XCTAssertEqualObjects(@"production", config[@"environment"], @"%@", spelling);
+      ALNApplication *application = [[ALNApplication alloc] initWithEnvironment:spelling configRoot:root error:&error];
+      XCTAssertEqualObjects(@"production", application.environment, @"%@", spelling);
+    }
+    XCTAssertEqualObjects(@"development", ALNNormalizedEnvironmentName(nil));
+    XCTAssertEqualObjects(@"development", ALNNormalizedEnvironmentName(@"  "));
+    XCTAssertEqualObjects(@"staging", ALNNormalizedEnvironmentName(@"Staging"));
+
+    ALNApplication *fromConfig = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @" Staging " }];
+    XCTAssertEqualObjects(@"staging", fromConfig.environment);
+    XCTAssertEqualObjects(@"staging", fromConfig.config[@"environment"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
 @end

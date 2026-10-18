@@ -18,6 +18,11 @@ FOUNDATION_EXPORT ALNEnvironmentKind ALNEnvironmentKindForName(NSString *_Nullab
 // YES for development and test, the environments that get developer-facing
 // behaviour (detailed error pages, tolerating a module that fails to load).
 FOUNDATION_EXPORT BOOL ALNEnvironmentIsDevelopmentLike(NSString *_Nullable name);
+// The canonical spelling of an environment name: trimmed and lowercased, with
+// an empty name meaning "development". Config loading uses it to pick
+// config/environments/<name>.plist, and it is what application.environment
+// and config[@"environment"] hold.
+FOUNDATION_EXPORT NSString *ALNNormalizedEnvironmentName(NSString *_Nullable name);
 
 @interface ALNConfig : NSObject
 

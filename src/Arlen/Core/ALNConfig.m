@@ -391,6 +391,14 @@ BOOL ALNEnvironmentIsDevelopmentLike(NSString *name) {
   return ALNEnvironmentKindForName(name) != ALNEnvironmentKindProduction;
 }
 
+NSString *ALNNormalizedEnvironmentName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  return ([trimmed length] > 0) ? trimmed : @"development";
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
@@ -403,7 +411,8 @@ BOOL ALNEnvironmentIsDevelopmentLike(NSString *name) {
                        environment:(NSString *)environment
                     includeModules:(BOOL)includeModules
                              error:(NSError **)error {
-  NSString *env = ([environment length] > 0) ? environment : @"development";
+  // `--env PRODUCTION` must load environments/production.plist.
+  NSString *env = ALNNormalizedEnvironmentName(environment);
   NSString *configRoot = [rootPath stringByAppendingPathComponent:@"config"];
   NSString *basePath = [configRoot stringByAppendingPathComponent:@"app.plist"];
   NSString *envPath =

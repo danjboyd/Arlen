@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNJobsModule.h"
 #import "ALNPostgresJobAdapter.h"
 
@@ -410,7 +411,7 @@ static NSString *JMResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = JMLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:

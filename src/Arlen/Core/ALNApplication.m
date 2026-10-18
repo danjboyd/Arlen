@@ -1085,8 +1085,13 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 - (instancetype)initWithConfig:(NSDictionary *)config {
   self = [super init];
   if (self) {
+    _environment = [ALNNormalizedEnvironmentName(config[@"environment"]) copy];
+    if (![config[@"environment"] isEqual:_environment]) {
+      NSMutableDictionary *normalized = [NSMutableDictionary dictionaryWithDictionary:config ?: @{}];
+      normalized[@"environment"] = _environment;
+      config = normalized;
+    }
     _config = [config copy] ?: @{};
-    _environment = [_config[@"environment"] copy] ?: @"development";
     _router = [[ALNRouter alloc] init];
     _logger = [[ALNLogger alloc] initWithFormat:_config[@"logFormat"] ?: @"text"];
     _metrics = [[ALNMetricsRegistry alloc] init];
