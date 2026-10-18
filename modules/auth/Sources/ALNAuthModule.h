@@ -236,6 +236,9 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 - (BOOL)signOutOtherSessionsForContext:(ALNContext *)context
                                  error:(NSError *_Nullable *_Nullable)error;
 /// Ends every session of the signed-in user, including the request's own.
+// NO until the session stamp migration has been applied; sign-out-everywhere
+// can then end only the current session.
+- (BOOL)canEndOtherSessions;
 - (BOOL)signOutAllSessionsForContext:(ALNContext *)context
                                error:(NSError *_Nullable *_Nullable)error;
 @end

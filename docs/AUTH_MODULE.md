@@ -268,7 +268,11 @@ Ending sessions:
   from application code.
 - Sign out everywhere (`POST /auth/logout/all`, `POST /auth/api/logout/all`, or
   `signOutAllSessionsForContext:error:`) bumps the user's session stamp and
-  signs out the current session, ending every session the user has.
+  signs out the current session, ending every session the user has. The JSON
+  reply is `{"status":"ok","scope":"all_sessions"}`. Until migration
+  `002_auth_session_stamp.sql` is applied it can end only the current session
+  and replies `{"status":"partial","scope":"current_session",...}`;
+  `-[ALNAuthModuleRuntime canEndOtherSessions]` reports which applies.
 - Changing the password (`/auth/password/change`) bumps the stamp in the same
   transaction as the new password, so every other session ends; the session
   that made the change records the new stamp and stays signed in. A reset by
@@ -282,7 +286,8 @@ Ending sessions:
   the same as the default `session.maxAgeSeconds`) limits how long a module or
   OIDC sign-in lasts. The session cookie renews on use, but once this much time
   has passed since sign-in (`auth_time`, which step-up does not change) the
-  session is signed out and the user signs in again.
+  session is signed out and the user signs in again. A session with no
+  recorded sign-in time is treated as expired.
 
 These apply to module sign-ins (local password, email link, stub). Sessions
 from a configured OIDC provider are subject to the absolute lifetime; whether

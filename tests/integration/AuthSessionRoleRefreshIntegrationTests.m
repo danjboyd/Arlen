@@ -407,6 +407,15 @@
     XCTAssertEqual((NSInteger)200, change.statusCode, @"%@", [change bodyText]);
     XCTAssertEqualObjects(@YES, [self sessionState:targetClient][@"authenticated"]);
 
+    // Sign-out-everywhere says it could end only this session.
+    XCTAssertFalse([[ALNAuthModuleRuntime sharedRuntime] canEndOtherSessions]);
+    ALNResponse *logoutAll = [operatorClient post:@"/auth/api/logout/all" JSON:@{}];
+    XCTAssertEqual((NSInteger)200, logoutAll.statusCode, @"%@", [logoutAll bodyText]);
+    NSDictionary *logoutAllBody = [[logoutAll JSONObject] isKindOfClass:[NSDictionary class]] ? [logoutAll JSONObject] : @{};
+    XCTAssertEqualObjects(@"partial", logoutAllBody[@"status"]);
+    XCTAssertEqualObjects(@"current_session", logoutAllBody[@"scope"]);
+    XCTAssertEqualObjects(@NO, [self sessionState:operatorClient][@"authenticated"]);
+
     // A deleted user is still signed out.
     [self execute:@"DELETE FROM auth_users WHERE subject = $1 RETURNING id" parameters:@[ targetSubject ]];
     XCTAssertEqualObjects(@NO, [self sessionState:targetClient][@"authenticated"]);
@@ -465,8 +474,10 @@
                                                             email:email
                                                          password:@"role-refresh-password"];
 
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] canEndOtherSessions]);
   ALNResponse *logoutAll = [client post:@"/auth/api/logout/all" JSON:@{}];
   XCTAssertEqual((NSInteger)200, logoutAll.statusCode, @"%@", [logoutAll bodyText]);
+  XCTAssertEqualObjects(@"all_sessions", [logoutAll JSONObject][@"scope"]);
   XCTAssertEqualObjects(@NO, [self sessionState:client][@"authenticated"]);
   XCTAssertEqualObjects(@NO, [self sessionState:otherDevice][@"authenticated"]);
   XCTAssertEqualObjects(@NO, [self replayedSessionState:saved application:client.application][@"authenticated"]);
@@ -570,6 +581,21 @@
   // Renewed on every request, but older than the lifetime: signed out.
   [self shiftAuthenticationTime:client bySeconds:-3600];
   XCTAssertEqualObjects(@NO, [self sessionState:client][@"authenticated"]);
+
+  // A session without a recorded sign-in time is treated as expired.
+  ALNTestClient *untimed = [self clientWithDSN:dsn
+                               bootstrapAdmins:@[]
+                                    authConfig:@{ @"session" : @{ @"absoluteLifetimeSeconds" : @3600 } }
+                                        search:NO];
+  [self registerUser:untimed email:[self uniqueEmail:@"untimed"]];
+  XCTAssertEqualObjects(@YES, [self sessionState:untimed][@"authenticated"]);
+  NSError *error = nil;
+  XCTAssertTrue([untimed updateSession:^(NSMutableDictionary *session) {
+    NSMutableDictionary *state = [session[@"_auth"] mutableCopy];
+    [state removeObjectForKey:@"auth_time"];
+    session[@"_auth"] = state;
+  } error:&error], @"%@", error);
+  XCTAssertEqualObjects(@NO, [self sessionState:untimed][@"authenticated"]);
 }
 
 // Before migration 003 is applied, signing out still clears the session and

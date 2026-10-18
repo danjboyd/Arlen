@@ -527,6 +527,14 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
   return [self recordCurrentSessionStampForContext:context error:error];
 }
 
+- (BOOL)canEndOtherSessions {
+  if ([self database] == nil) {
+    return NO;
+  }
+  ARAuthSchemaFeatures *features = [self authSchemaFeaturesWithLogger:nil error:NULL];
+  return features != nil && features.sessionStamp;
+}
+
 - (BOOL)signOutAllSessionsForContext:(ALNContext *)context error:(NSError **)error {
   NSString *subject = ARTrimmedString([ALNAuthSession subjectFromContext:context]);
   if ([subject length] == 0) {
@@ -545,9 +553,14 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
 
 - (BOOL)sessionIsWithinAbsoluteLifetime:(ALNContext *)context {
   NSUInteger lifetime = self.absoluteSessionLifetimeSeconds;
-  NSDate *authenticatedAt = [ALNAuthSession primaryAuthenticatedAtFromContext:context];
-  if (lifetime == 0 || authenticatedAt == nil) {
+  if (lifetime == 0) {
     return YES;
+  }
+  NSDate *authenticatedAt = [ALNAuthSession primaryAuthenticatedAtFromContext:context];
+  if (authenticatedAt == nil) {
+    // Every sign-in records its time; a session without one is treated as
+    // expired rather than as unlimited.
+    return NO;
   }
   return -[authenticatedAt timeIntervalSinceNow] <= (NSTimeInterval)lifetime;
 }

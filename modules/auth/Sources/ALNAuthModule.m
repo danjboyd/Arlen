@@ -210,7 +210,9 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
     }
     BOOL pathValid = YES;
     for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
-      if ([segment isEqualToString:@"."] || [segment isEqualToString:@".."]) {
+      // Compare the decoded segment so %2e forms are caught too.
+      NSString *decoded = [segment stringByRemovingPercentEncoding];
+      if (decoded == nil || [decoded isEqualToString:@"."] || [decoded isEqualToString:@".."]) {
         pathValid = NO;
       }
     }
@@ -3953,12 +3955,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return @{ @"status" : @"error", @"message" : @"Authentication required" };
   }
   NSError *error = nil;
+  BOOL endsOtherSessions = [self.runtime canEndOtherSessions];
   if (![self.runtime signOutAllSessionsForContext:ctx error:&error]) {
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Failed to sign out other sessions" };
   }
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
-    return @{ @"status" : @"ok" };
+    if (!endsOtherSessions) {
+      return @{
+        @"status" : @"partial",
+        @"scope" : @"current_session",
+        @"message" : @"Signed out of this session only. Other sessions can be ended after the auth module "
+                     @"migrations are applied (arlen module migrate).",
+      };
+    }
+    return @{ @"status" : @"ok", @"scope" : @"all_sessions" };
   }
   [self redirectTo:self.runtime.loginPath status:302];
   return nil;
