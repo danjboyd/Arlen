@@ -326,9 +326,10 @@ files, 404s and built-in endpoints, not only routed ones (see
 
 Operability endpoints:
 
-`/metrics` and `/clusterz` answer anonymous requests by default. `/clusterz`
-reports the node ID (hostname) and worker layout, so production apps that are
-reachable from untrusted networks should restrict them:
+`/clusterz` reports the node ID (hostname) and worker layout, so in the
+`production` environment `/metrics` and `/clusterz` answer `404` until one of
+these settings gives access. In other environments they answer anonymous
+requests unless restricted:
 
 - `observability.operabilityToken` (env `ARLEN_OPERABILITY_TOKEN`): require
   `Authorization: Bearer <token>`. Other requests get `401`.
@@ -336,6 +337,10 @@ reachable from untrusted networks should restrict them:
   `ARLEN_OPERABILITY_LOOPBACK_ONLY`, default `NO`): answer only requests whose
   peer is a loopback address and that carry no `Forwarded`,
   `X-Forwarded-For` or `X-Real-IP` header. Other requests get `403`.
+- `observability.operabilityAnonymous` (env `ARLEN_OPERABILITY_ANONYMOUS`,
+  default `NO`): in production, serve both endpoints to anonymous requests
+  anyway (the earlier default). Use it only when the reverse proxy
+  already blocks them from untrusted networks.
 
 When both are set, a request must pass both. `/healthz`, `/readyz` and
 `/livez` are not affected. `arlen doctor --env production` warns when neither
