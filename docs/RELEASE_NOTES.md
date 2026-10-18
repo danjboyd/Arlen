@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- EOC: when no page fills a named slot, `<%@ yield "name" %>` falls back to
+  the context value with the same name. That value is now HTML-escaped like
+  `<%= %>` output; it used to be written raw, so a controller value such as
+  `title` could add markup to the layout. Slot content filled with
+  `slot`/`endslot` and the plain `<%@ yield %>` page body are still emitted
+  as-is.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

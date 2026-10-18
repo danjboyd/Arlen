@@ -768,14 +768,26 @@ BOOL ALNEOCAppendYield(NSMutableString *out,
   NSString *resolvedSlot = ([slotName length] > 0) ? slotName : @"content";
   NSMutableDictionary *slots = ALNEOCCurrentSlotMap();
   id value = slots[resolvedSlot];
-  if (value == nil) {
-    BOOL found = NO;
-    value = ALNEOCLookupValueOnObject(ctx, resolvedSlot, &found);
-    if (!found) {
-      value = @"";
-    }
+  if (value != nil) {
+    // Slot content was captured from rendered template output, so it is
+    // already HTML and is emitted as-is.
+    return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
   }
-  return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
+
+  BOOL found = NO;
+  value = ALNEOCLookupValueOnObject(ctx, resolvedSlot, &found);
+  if (!found) {
+    return YES;
+  }
+  if ([resolvedSlot isEqualToString:@"content"]) {
+    // The `content` context value is the rendered page body supplied by the
+    // layout renderer, so it keeps raw output like the content slot itself.
+    return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
+  }
+  // A named slot that no template filled falls back to the context value of
+  // the same name. That value is ordinary data, so it is HTML-escaped like a
+  // `<%= %>` expression.
+  return ALNEOCAppendEscapedChecked(out, value, templatePath, line, column, error);
 }
 
 void ALNEOCClearTemplateRegistry(void) {
