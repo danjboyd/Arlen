@@ -7112,11 +7112,23 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                     offset:offset];
   }
   NSMutableDictionary *resourceFilters = [NSMutableDictionary dictionary];
+  NSMutableArray<NSDictionary *> *searchableResources = [NSMutableArray array];
   for (NSDictionary *metadata in visibleResources) {
-    NSDictionary *extra = [self.runtime additionalQueryFiltersForResourceMetadata:metadata context:ctx error:error];
-    if (extra == nil && error != NULL && *error != nil) {
+    NSError *filterError = nil;
+    NSDictionary *extra = [self.runtime additionalQueryFiltersForResourceMetadata:metadata context:ctx error:&filterError];
+    if (extra == nil && filterError != nil) {
+      // An unscoped query skips resources that need a tenant the caller does
+      // not have, instead of failing the whole query; a scoped query reports it.
+      BOOL tenantRequired = ([filterError.userInfo[@"tenantField"] length] > 0);
+      if (unscoped && tenantRequired) {
+        continue;
+      }
+      if (error != NULL) {
+        *error = filterError;
+      }
       return nil;
     }
+    [searchableResources addObject:metadata];
     if ([extra count] > 0) {
       resourceFilters[STLowerTrimmedString(metadata[@"identifier"])] = extra;
     }
@@ -7127,7 +7139,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
   return [self.runtime searchQuery:parameters[@"q"]
                 resourceIdentifier:resourceIdentifier
-          allowedResourceIdentifiers:[self.runtime resourceIdentifiersFromMetadataArray:visibleResources]
+          allowedResourceIdentifiers:[self.runtime resourceIdentifiersFromMetadataArray:searchableResources]
                            filters:explicitFilters
                               sort:parameters[@"sort"]
                              limit:limit

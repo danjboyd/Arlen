@@ -156,8 +156,18 @@ static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *
   return expanded;
 }
 
+static BOOL AMHostCharactersValid(NSString *host, BOOL bracketed) {
+  NSCharacterSet *allowed = bracketed
+                                ? [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF:."]
+                                : [NSCharacterSet characterSetWithCharactersInString:
+                                                      @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
+  return [host length] > 0 && [host rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound;
+}
+
 // `authModule.publicBaseURL`: the origin (plus optional path prefix) used for
 // links in auth emails. Returns "" when unset, nil (with an error) when invalid.
+// Parsed from the raw string rather than through NSURLComponents, whose port
+// handling and host round-trip differ between Foundation implementations.
 static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
   if (value == nil || value == [NSNull null]) {
     return @"";
@@ -166,26 +176,62 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
   if (trimmed != nil && [trimmed length] == 0) {
     return @"";
   }
-  NSURLComponents *components = (trimmed != nil) ? [NSURLComponents componentsWithString:trimmed] : nil;
-  NSString *scheme = [components.scheme lowercaseString];
-  NSInteger port = (components.port != nil) ? [components.port integerValue] : 0;
-  BOOL valid = (components != nil) && ([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) &&
-               [components.host length] > 0 && components.user == nil && components.password == nil &&
-               components.query == nil && components.fragment == nil &&
-               (components.port == nil || (port >= 1 && port <= 65535));
-  if (!valid) {
+  NSString *normalized = nil;
+  NSRange separator = (trimmed != nil) ? [trimmed rangeOfString:@"://"] : NSMakeRange(NSNotFound, 0);
+  if (separator.location != NSNotFound) {
+    NSString *scheme = [[trimmed substringToIndex:separator.location] lowercaseString];
+    NSString *rest = [trimmed substringFromIndex:NSMaxRange(separator)];
+    BOOL noQueryOrFragment = [rest rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"?#"]]
+                                 .location == NSNotFound;
+    NSRange slash = [rest rangeOfString:@"/"];
+    NSString *authority = (slash.location == NSNotFound) ? rest : [rest substringToIndex:slash.location];
+    NSString *path = (slash.location == NSNotFound) ? @"" : [rest substringFromIndex:slash.location];
+    NSString *host = nil;
+    NSString *portText = nil;
+    BOOL bracketed = [authority hasPrefix:@"["];
+    BOOL authorityValid = ([authority rangeOfString:@"@"].location == NSNotFound);
+    if (bracketed) {
+      NSRange close = [authority rangeOfString:@"]"];
+      if (close.location == NSNotFound) {
+        authorityValid = NO;
+      } else {
+        host = [authority substringWithRange:NSMakeRange(1, close.location - 1)];
+        NSString *after = [authority substringFromIndex:NSMaxRange(close)];
+        if ([after hasPrefix:@":"]) {
+          portText = [after substringFromIndex:1];
+        } else if ([after length] > 0) {
+          authorityValid = NO;
+        }
+      }
+    } else {
+      NSRange colon = [authority rangeOfString:@":"];
+      host = (colon.location == NSNotFound) ? authority : [authority substringToIndex:colon.location];
+      portText = (colon.location == NSNotFound) ? nil : [authority substringFromIndex:NSMaxRange(colon)];
+    }
+    BOOL portValid = YES;
+    if (portText != nil) {
+      NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+      portValid = [portText length] >= 1 && [portText length] <= 5 &&
+                  [portText rangeOfCharacterFromSet:nonDigits].location == NSNotFound &&
+                  [portText integerValue] >= 1 && [portText integerValue] <= 65535;
+    }
+    if (([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) && noQueryOrFragment &&
+        authorityValid && portValid && AMHostCharactersValid(host, bracketed)) {
+      NSString *lowerHost = [host lowercaseString];
+      NSString *hostPart = bracketed ? [NSString stringWithFormat:@"[%@]", lowerHost] : lowerHost;
+      NSString *portPart = (portText != nil) ? [NSString stringWithFormat:@":%ld", (long)[portText integerValue]] : @"";
+      normalized = [NSString stringWithFormat:@"%@://%@%@%@", scheme, hostPart, portPart, path];
+    }
+  }
+  if (normalized == nil) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
-                       @"authModule.publicBaseURL must be an absolute http(s) URL with a valid port and no query "
-                       @"or fragment, for example \"https://app.example.com\"",
+                       @"authModule.publicBaseURL must be an absolute http(s) URL with a valid host and port and no "
+                       @"user info, query or fragment, for example \"https://app.example.com\"",
                        @{ @"key_path" : @"authModule.publicBaseURL" });
     }
     return nil;
   }
-  // Scheme and host are case-insensitive; store them lowercased.
-  components.scheme = scheme;
-  components.host = [components.host lowercaseString];
-  NSString *normalized = components.string ?: trimmed;
   while ([normalized hasSuffix:@"/"]) {
     normalized = [normalized substringToIndex:[normalized length] - 1];
   }

@@ -377,6 +377,38 @@
   XCTAssertTrue([auditorBody containsString:@"gen "]);
 }
 
+- (void)testUnscopedQuerySkipsTenantScopedResourcesWithoutATenant {
+  ALNEOCClearTemplateRegistry();
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSDictionary *headers = @{ @"Accept" : @"application/json", @"X-Search-User" : @"member-user" };
+  ALNResponse *unscoped = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                  path:@"/search/api/query"
+                                                           queryString:@"q=priority&mode=search"
+                                                               headers:headers
+                                                                  body:nil]];
+  XCTAssertEqual((NSInteger)200, unscoped.statusCode);
+  NSDictionary *payload = [[self JSONObjectFromResponse:unscoped][@"data"] isKindOfClass:[NSDictionary class]]
+                              ? [self JSONObjectFromResponse:unscoped][@"data"]
+                              : @{};
+  NSArray *resources = [payload[@"resources"] isKindOfClass:[NSArray class]] ? payload[@"resources"] : @[];
+  XCTAssertTrue([resources containsObject:@"products"]);
+  XCTAssertFalse([resources containsObject:@"tenant_orders"]);
+  for (NSDictionary *entry in [payload[@"results"] isKindOfClass:[NSArray class]] ? payload[@"results"] : @[]) {
+    XCTAssertNotEqualObjects(@"tenant_orders", entry[@"resource"], @"%@", entry);
+  }
+
+  ALNResponse *scoped = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                path:@"/search/api/resources/tenant_orders/query"
+                                                         queryString:@"q=priority"
+                                                             headers:headers
+                                                                body:nil]];
+  XCTAssertEqual((NSInteger)403, scoped.statusCode);
+}
+
 - (void)testMixedResourceQueriesScopePolicyFiltersPerResourceForAPIAndHTML {
   ALNEOCClearTemplateRegistry();
   ALNApplication *app = [self application];

@@ -1158,7 +1158,10 @@ static ALNContext *ALNTestStandInContext(void) {
 - (void)testPublicBaseURLIsValidatedAndNormalized {
   for (NSString *invalid in @[ @"app.example.test", @"ftp://app.example.test", @"https://app.example.test/?next=1",
                                @"https://app.example.test/#frag", @"https://user@app.example.test", @"https://",
-                               @"https://app.example.test:99999", @"https://app.example.test:0" ]) {
+                               @"https://app.example.test:99999", @"https://app.example.test:0",
+                               @"https://app.example.test:70000", @"https://app.example.test:", @"https://app.example.test:8x",
+                               @"https://[::1", @"https://[::1]x", @"https://app example.test",
+                               @"https://user:pw@app.example.test" ]) {
     NSError *error = nil;
     XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
                                                                   environment:@"production"
@@ -1175,6 +1178,14 @@ static ALNContext *ALNTestStandInContext(void) {
                                             environment:@"production"
                                                   error:NULL]);
   XCTAssertEqualObjects(@"https://app.example.test:8443/Accounts", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://[::1]:8443/x/" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://[::1]:8443/x", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"http://[FE80::1]" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"http://[fe80::1]", runtime.publicBaseURL);
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
   XCTAssertEqualObjects(@"", runtime.publicBaseURL);
 }
