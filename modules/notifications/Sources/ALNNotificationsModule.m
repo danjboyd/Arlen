@@ -3080,13 +3080,80 @@ notificationIdentifier:(NSString *)identifier
   return nil;
 }
 
+// Payload keys that choose who a notification goes to.
+static BOOL NMPayloadTargetsOnlySubject(NSDictionary *payload, NSString *subject) {
+  for (NSString *key in @[ @"recipient", @"recipientSubject" ]) {
+    NSString *value = NMTrimmedString(payload[key]);
+    if ([value length] > 0 && ![value isEqualToString:subject]) {
+      return NO;
+    }
+  }
+  id recipients = payload[@"recipients"];
+  if (recipients != nil && ![recipients isKindOfClass:[NSArray class]] && ![recipients isKindOfClass:[NSNull class]]) {
+    return NO;
+  }
+  for (id value in [recipients isKindOfClass:[NSArray class]] ? recipients : @[]) {
+    if (![NMTrimmedString(value) isEqualToString:subject]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+// The HTTP queue route lets a signed-in user queue notifications only for
+// themselves: `recipient` is forced to their subject and `email` to their own
+// address. Naming anyone else (`recipient`, `recipientSubject`, `recipients`
+// or `email`) needs the admin role at AAL2, like test-send. Returns nil after
+// rendering an error response.
+- (NSDictionary *)queuePayloadForContext:(ALNContext *)ctx payload:(NSDictionary *)rawPayload {
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:rawPayload ?: @{}];
+  if ([[ctx authRoles] containsObject:@"admin"] && [ctx authAssuranceLevel] >= 2) {
+    return payload;
+  }
+  NSString *subject = NMTrimmedString([ctx authSubject]);
+  if ([subject length] == 0) {
+    [self setStatus:401];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : @"authentication required" } error:NULL];
+    return nil;
+  }
+  NSDictionary *user = [self.authRuntime currentUserForContext:ctx error:NULL];
+  NSString *ownEmail = NMTrimmedString(user[@"email"]);
+  NSString *requestedEmail = NMTrimmedString(payload[@"email"]);
+  BOOL emailIsOwn = ([requestedEmail length] == 0) ||
+                    ([ownEmail length] > 0 && [requestedEmail caseInsensitiveCompare:ownEmail] == NSOrderedSame);
+  if (!NMPayloadTargetsOnlySubject(payload, subject) || !emailIsOwn) {
+    [self setStatus:403];
+    [self renderJSONEnvelopeWithData:nil
+                                meta:@{
+                                  @"error" : @"queueing a notification for another recipient or email address "
+                                             "requires the admin role and AAL2",
+                                }
+                               error:NULL];
+    return nil;
+  }
+  [payload removeObjectForKey:@"recipients"];
+  payload[@"recipient"] = subject;
+  if ([payload[@"recipientSubject"] isKindOfClass:[NSString class]]) {
+    payload[@"recipientSubject"] = subject;
+  }
+  if ([ownEmail length] > 0) {
+    payload[@"email"] = ownEmail;
+  } else {
+    [payload removeObjectForKey:@"email"];
+  }
+  return payload;
+}
+
 - (id)apiQueue:(ALNContext *)ctx {
-  (void)ctx;
   NSDictionary *parameters = [self requestParameters];
+  NSDictionary *payload = [self queuePayloadForContext:ctx payload:NMNormalizeDictionary(parameters[@"payload"])];
+  if (payload == nil) {
+    return nil;
+  }
   NSError *error = nil;
   NSDictionary *summary =
       [self.runtime queueNotificationSummaryForIdentifier:NMTrimmedString(parameters[@"notification"])
-                                                  payload:NMNormalizeDictionary(parameters[@"payload"])
+                                                  payload:payload
                                                  channels:NMNormalizeArray(parameters[@"channels"])
                                                     error:&error];
   if (summary == nil) {

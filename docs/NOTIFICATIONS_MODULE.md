@@ -74,6 +74,30 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
 
 Requested channels are validated against the notification definition before queueing or previewing.
 
+## Queueing over HTTP
+
+`POST /notifications/api/queue` takes `notification`, `payload` and optional
+`channels`. A signed-in user can queue notifications only for themselves:
+
+- the module sets `payload.recipient` to the caller's auth subject, and
+  `payload.email` to their auth module account email (or removes it when the
+  module has no email for them)
+- a payload that names anyone else is refused with `403` and
+  `meta.error` = `queueing a notification for another recipient or email
+  address requires the admin role and AAL2`. That covers a `recipient` or
+  `recipientSubject` other than the caller, any `recipients` entry other than
+  the caller, and an `email` other than their own
+- callers with the `admin` role at AAL2 (the test-send policy) can queue for
+  any recipient or address; their payload is passed through unchanged
+
+The rest of the payload reaches your definition as the caller sent it, so
+treat it as user input. In particular, do not take webhook URLs or
+other delivery targets from it for notifications users can queue.
+
+App code that calls `ALNNotificationsModuleRuntime`
+(`queueNotificationIdentifier:...`) is not affected: it addresses whoever the
+app chooses.
+
 ## Retention limits
 
 The module keeps its outbox and inboxes in memory (and in the state file when
@@ -358,7 +382,7 @@ The notifications API is included in module OpenAPI output.
   - `admin` role
   - AAL2 step-up
 
-That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, preferences, and the `push/*` routes require AAL1; outbox, preview, and test-send require `admin` plus AAL2. Push subscription routes act only on the signed-in user's own subscriptions, and their `POST` requests go through the app's CSRF policy.
+That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, preferences, and the `push/*` routes require AAL1; outbox, preview, and test-send require `admin` plus AAL2. Queueing at AAL1 is limited to the signed-in user's own notifications; queueing for anyone else requires `admin` plus AAL2 (see [Queueing over HTTP](#queueing-over-http)). Push subscription routes act only on the signed-in user's own subscriptions, and their `POST` requests go through the app's CSRF policy.
 
 ## Admin UI Integration
 

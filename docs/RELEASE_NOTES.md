@@ -13,6 +13,13 @@
   `arlen module migrate` to apply the new auth migration
   `004_auth_totp_limits`; until it is applied, verification works as before and
   the module logs one warning.
+- `notifications` 1.2.0: `POST /notifications/api/queue` queues only for the
+  signed-in user. It sets the payload's `recipient` to the caller's subject and
+  `email` to their own address, and answers `403` when the payload names
+  another `recipient`, `recipientSubject`, `recipients` entry or `email`.
+  Queueing for others over HTTP needs the `admin` role at AAL2, like
+  test-send. `ALNNotificationsModuleRuntime` calls from app code are
+  unchanged.
 - Signing in and completing step-up (`ALNAuthSession`
   establish/elevate, used by the auth module and the `ALNController` helpers)
   now start a fresh session. Keys stored before, including `_csrf_token`, are
