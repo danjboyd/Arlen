@@ -216,6 +216,57 @@ The intended reuse target is app-owned account/security pages and other
 server-rendered auth surfaces that want to embed framework-provided MFA/auth UI
 without forking the full-page templates.
 
+## Sessions and Roles
+
+Sessions are signed cookies. The roles written into the session at sign-in are
+not what authorization uses on later requests. On every request that carries a
+session identity, the module's middleware resolves that identity again and
+replaces the session's roles for the request with the current ones, so
+`[ctx authRoles]`, route contracts (`requiredRoles`, minimum assurance level),
+and the admin-ui, jobs, ops and other module API guards all see the user's
+current roles:
+
+- Module sign-ins (local password, email link, the stub provider) are looked up
+  in `auth_users` by subject: one indexed query per request, with no cache
+  between requests. Roles come from `roles_json`, passed through the session
+  policy hook's `authModuleSessionDescriptorForUser:defaultDescriptor:` when one
+  is configured, exactly as at sign-in. A role granted or revoked in the
+  database takes effect on the user's next request, with no new sign-in.
+- If the user row no longer exists, the session is signed out.
+- Each user has a session stamp (`auth_users.session_stamp`, added by migration
+  `002_auth_session_stamp.sql`). Sign-in records the current stamp in the
+  session; a session whose stamp no longer matches is signed out.
+  `-[ALNAuthModuleRuntime bumpSessionStampForSubject:error:]` increments the
+  stamp, which ends every existing session for that user. Revoking the admin
+  role through the admin-ui users resource does this. Sessions issued before
+  the stamp existed count as stamp `0`.
+- Sessions from a configured OIDC provider belong to the application resolver.
+  When the resolver implements `refreshSessionDescriptorForSubject:provider:error:`
+  (see [Application Identity Resolver](#application-identity-resolver)), its
+  `roles` apply on every request and a nil result signs the session out.
+  Without it, the roles the resolver returned at sign-in stay in force until the
+  session ends.
+- Sessions that application code establishes itself, for providers the module
+  does not own, are left as they are. To have the module manage one for an
+  `auth_users` subject, call `recordSessionStampForContext:error:` after
+  establishing it.
+
+Running `arlen module migrate` after upgrading is recommended: it applies
+`002_auth_session_stamp.sql`, which enables ending sessions by stamp. Until it
+runs, roles are still read live and deleted users are still signed out; only
+the stamp is skipped. The stamp comparison is not made, sign-ins do not record
+a stamp, `bumpSessionStampForSubject:error:` returns success without changing
+anything (so admin-ui revocation still succeeds and the revoked role is still
+denied), and the module logs one warning per process naming the migration.
+
+Any other lookup failure (for example the database is unreachable, or the
+`auth_users` table is missing) fails the request instead of continuing with the
+stored roles.
+
+The auth module always requires `database.connectionString`. Applications that
+do not install it and establish sessions with `ALNAuthSession` directly keep the
+roles they store in the session.
+
 ## Customization Hooks
 
 Use `authModule.hooks` for auth behavior and policy seams:
@@ -543,6 +594,23 @@ under `identity["claims"]`. Normal OIDC `sub` validation still applies when usin
 `oid` as the application principal. The resolver owns membership, roles, and any
 explicit account-linking decision; nil rejects login. Arlen does not infer MFA
 assurance from the fact that a provider was used.
+
+To keep roles current for the life of a session, also implement the optional
+`refreshSessionDescriptorForSubject:provider:error:`. The module calls it on
+every request for a session from that provider, with the local subject the
+resolver returned at sign-in. Return a descriptor whose `roles` apply to the
+request, nil to sign the session out (for example a suspended person), or nil
+with an error to fail the request. Keep it to one indexed lookup; results are
+not cached. See [Sessions and Roles](#sessions-and-roles).
+
+```objc
+- (NSDictionary *)refreshSessionDescriptorForSubject:(NSString *)subject
+                                            provider:(NSString *)provider
+                                               error:(NSError **)error {
+  NSDictionary *person = [CompanyPeople activePersonForIdentifier:subject error:error];
+  return person ? @{ @"subject": subject, @"roles": person[@"roles"] ?: @[] } : nil;
+}
+```
 
 ### Provider assurance from amr and acr
 

@@ -10,6 +10,7 @@
 #import "ALNAuthModuleOIDC.h"
 #import "ALNApplication.h"
 #import "ALNContext.h"
+#import "ALNController.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNLogger.h"
@@ -162,6 +163,38 @@ static BOOL AdmissionResolverRejects;
     return nil;
   }
   return @{ @"subject": [@"person-" stringByAppendingString:identity[@"provider_subject"] ?: @""] };
+}
+@end
+
+// Resolver that also re-resolves established sessions on each request.
+@interface RefreshingOIDCResolver : NSObject <ALNAuthProviderSessionResolver>
+@end
+static NSArray *RefreshingResolverRoles;
+static BOOL RefreshingResolverSignsOut;
+static BOOL RefreshingResolverFails;
+static NSUInteger RefreshingResolverCalls;
+@implementation RefreshingOIDCResolver
+- (NSDictionary *)resolveSessionDescriptorForNormalizedIdentity:(NSDictionary *)identity
+                                         providerConfiguration:(NSDictionary *)config error:(NSError **)error {
+  return @{ @"subject": @"person-refreshing", @"roles": @[ @"staff" ] };
+}
+- (NSDictionary *)refreshSessionDescriptorForSubject:(NSString *)subject provider:(NSString *)provider
+                                               error:(NSError **)error {
+  RefreshingResolverCalls++;
+  if (RefreshingResolverFails) {
+    if (error) *error = [NSError errorWithDomain:@"App" code:9 userInfo:@{ NSLocalizedDescriptionKey: @"directory down" }];
+    return nil;
+  }
+  if (RefreshingResolverSignsOut || ![subject isEqual:@"person-refreshing"] || ![provider isEqual:@"google"]) return nil;
+  return @{ @"subject": subject, @"roles": RefreshingResolverRoles ?: @[] };
+}
+@end
+
+@interface OIDCRefreshProbeController : ALNController
+@end
+@implementation OIDCRefreshProbeController
+- (id)roles:(ALNContext *)ctx {
+  return @{ @"roles": [ctx authRoles] ?: @[] };
 }
 @end
 
@@ -906,5 +939,59 @@ static void RegisterOIDCLoginTemplates(void) {
   NSDictionary *textLevels = @{ @"amr": @{ @"mfa": @"2" }, @"acr": @{ @"urn:x": @3 } };
   ALNAuthModuleOIDC *provider = [self providerWithAssurance:textLevels resolver:[ModuleOIDCResolver new] error:&error];
   XCTAssertNotNil(provider, @"%@", error);
+}
+#pragma mark - Session refresh through the application resolver
+
+- (void)testProviderSessionRolesFollowTheResolverOnEachRequest {
+  NSMutableDictionary *hooks = [[self googleHooks] mutableCopy];
+  hooks[@"providerSessionResolverClass"] = @"RefreshingOIDCResolver";
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment": @"test", @"csrf": @{ @"enabled": @NO },
+    @"database": @{ @"connectionString": @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule": @{ @"paths": @{ @"prefix": @"/context/auth" }, @"providers": @{ @"google": [self googleProvider] },
+      @"hooks": hooks }
+  }];
+  [app addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:@"test-oidc-session-secret-long-enough-for-signing"
+      cookieName:@"oidc_session" maxAgeSeconds:3600 secure:NO sameSite:@"Lax"]];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  [app registerRouteMethod:@"GET" path:@"/staff" name:@"oidc_refresh_staff"
+           controllerClass:[OIDCRefreshProbeController class] action:@"roles"];
+  XCTAssertTrue([app configureRouteNamed:@"oidc_refresh_staff" requestSchema:nil responseSchema:nil summary:nil
+                             operationID:nil tags:nil requiredScopes:nil requiredRoles:@[ @"staff" ]
+                        includeInOpenAPI:NO error:&error], @"%@", error);
+  [self useGoogleDiscovery];
+  RefreshingResolverRoles = @[ @"staff" ];
+  RefreshingResolverSignsOut = NO;
+  RefreshingResolverFails = NO;
+  NSDictionary *login = [self beginGoogleLogin:app];
+  ALNResponse *callback = [self request:app method:@"GET" path:@"/context/auth/provider/google/callback"
+      query:[NSString stringWithFormat:@"code=refresh&state=%@", login[@"state"]] cookie:login[@"cookie"]];
+  XCTAssertEqual((NSInteger)200, callback.statusCode, @"%@", [self json:callback]);
+  NSString *cookie = [self cookie:callback];
+  XCTAssertNotNil(cookie);
+
+  RefreshingResolverCalls = 0;
+  ALNResponse *allowed = [self request:app method:@"GET" path:@"/staff" query:@"" cookie:cookie];
+  XCTAssertEqual((NSInteger)200, allowed.statusCode, @"%@", ALNTestBody(allowed));
+  XCTAssertEqualObjects(@[ @"staff" ], [self json:allowed][@"roles"]);
+  XCTAssertEqual((NSUInteger)1, RefreshingResolverCalls);
+
+  RefreshingResolverRoles = @[ @"viewer" ];
+  XCTAssertEqual((NSInteger)403, [self request:app method:@"GET" path:@"/staff" query:@"" cookie:cookie].statusCode);
+
+  RefreshingResolverFails = YES;
+  XCTAssertEqual((NSInteger)500, [self request:app method:@"GET" path:@"/staff" query:@"" cookie:cookie].statusCode);
+  RefreshingResolverFails = NO;
+
+  RefreshingResolverSignsOut = YES;
+  ALNResponse *signedOut = [self request:app method:@"GET" path:@"/staff" query:@"" cookie:cookie];
+  XCTAssertEqual((NSInteger)401, signedOut.statusCode, @"%@", ALNTestBody(signedOut));
+  NSString *clearedCookie = [self cookie:signedOut];
+  XCTAssertNotNil(clearedCookie);
+  RefreshingResolverSignsOut = NO;
+  ALNResponse *session = [self request:app method:@"GET" path:@"/context/auth/api/session" query:@""
+                                cookie:clearedCookie];
+  XCTAssertEqualObjects(@NO, [self json:session][@"authenticated"]);
 }
 @end

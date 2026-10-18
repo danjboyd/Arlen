@@ -549,7 +549,8 @@ there, and update that section and the repository settings in the same change.
 The existing `linux-quality / quality-gate` runs
 `tools/ci/run_postgres_regressions.sh` before the general quality suite. This
 mandatory isolated-cluster step covers PostgreSQL generated clients, module
-migration JSON stdout, word-based fuzzy search, and repeated auth server cleanup.
+migration JSON stdout, word-based fuzzy search, repeated auth server cleanup,
+and auth session role refresh across the admin-ui, jobs, and ops APIs.
 It supplies a non-default `GNUSTEP_SH` to exercise portable bootstrap. Existing
 required check names and branch-protection contexts stay the same; a missing
 PostgreSQL server or extension is a failure, not a skipped live test.

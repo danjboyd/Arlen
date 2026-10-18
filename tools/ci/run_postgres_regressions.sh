@@ -28,7 +28,7 @@ rm -rf "$ARLEN_TEST_RESULTS_DIR"
 for test_class in GNUstepResolutionTests TestSupportTests Phase27SearchTests; do
   make test-unit-filter TEST="$test_class" 2>&1 | tee "build/release_confidence/postgres_regressions/$test_class.log"
 done
-for test_class in PostgresIntegrationTests Phase13ModulePostgresIntegrationTests Phase13AuthAdminIntegrationTests; do
+for test_class in PostgresIntegrationTests Phase13ModulePostgresIntegrationTests Phase13AuthAdminIntegrationTests AuthSessionRoleRefreshIntegrationTests; do
   make test-integration-filter TEST="$test_class" 2>&1 | tee "build/release_confidence/postgres_regressions/$test_class.log"
 done
 # A second auth run detects accumulation of child servers and their DB sessions.

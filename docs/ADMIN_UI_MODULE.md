@@ -149,6 +149,12 @@ The module protects both HTML and JSON surfaces with the same defaults:
 - admin role required
 - AAL2 / step-up required
 
+The admin role is checked against the user's current roles on every request,
+not the roles stored in the session at sign-in (see
+[Auth Module](AUTH_MODULE.md#sessions-and-roles)). Revoking admin through the
+users resource also ends that user's existing sessions once the auth module's
+`002_auth_session_stamp.sql` migration is applied.
+
 Apps can add per-resource policy checks through the optional
 `adminUIResourceAllowsOperation:identifier:context:error:` hook.
 

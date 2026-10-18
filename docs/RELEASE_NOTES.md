@@ -31,6 +31,23 @@
   returned. Search resources can set the new `queryMinimumAuthAssuranceLevel`
   metadata, and `ALNAdminUIModuleRuntime` reports `accessRoles` and
   `minimumAuthAssuranceLevel`.
+- Auth module (`1.5.4`): authorization now uses each user's current roles.
+  The module resolves the session's user against `auth_users` on every request
+  (one indexed query, nothing cached), so route contracts and the admin-ui,
+  jobs and ops APIs see a role grant or revocation on the user's next request.
+  Before, they used the roles stored in the session cookie at sign-in until the
+  cookie expired, while only the HTML admin pages read the current roles. A
+  session whose user was deleted is signed out. Running `arlen module migrate`
+  after upgrading is recommended: the new `002_auth_session_stamp.sql` adds a
+  per-user session stamp, and `bumpSessionStampForSubject:error:` ends every
+  existing session for a user. Without it, roles are still read live and
+  nothing fails; the stamp is skipped and one warning names the migration. OIDC resolvers can implement the optional
+  `refreshSessionDescriptorForSubject:provider:error:` to keep provider
+  sessions' roles current the same way. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- admin-ui (`1.0.4`, requires auth `1.5.4`): revoking the admin role through
+  the users resource also ends that user's existing sessions (once the auth
+  stamp migration is applied).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

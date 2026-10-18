@@ -141,6 +141,9 @@ The operator surfaces are protected by the shared auth/admin contracts:
 - `admin` role required
 - AAL2 step-up required
 
+With the auth module installed, the role is checked against the user's current
+roles on every request (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
+
 That keeps the jobs dashboard aligned with the first-party auth and admin model without requiring the `admin-ui` module to render it.
 
 ## Defaults

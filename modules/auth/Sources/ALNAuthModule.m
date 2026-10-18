@@ -2121,6 +2121,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (!ok) {
     return nil;
   }
+  if (![self recordSessionStampForContext:context error:error]) {
+    [ALNAuthSession clearAuthenticatedSessionForContext:context];
+    return nil;
+  }
   return [self sessionPayloadForContext:context includeUser:YES error:error];
 }
 
@@ -4802,6 +4806,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![runtime configureWithApplication:application error:error]) {
     return NO;
   }
+  ALNAuthModuleInstallSessionRefresh(application);
 
   if (![runtime isHeadlessUIMode] &&
       ![[runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
