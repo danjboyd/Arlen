@@ -275,7 +275,10 @@ Session config:
 
 CSRF config:
 
-- `csrf.enabled`
+- `csrf.enabled` (default: follows `session.enabled`, so turning sessions on
+  turns CSRF protection on. Only the `strict` security profile pins it on
+  regardless. Generated apps leave it unset; set it to `NO` only for apps
+  that never accept browser form posts on a session cookie.)
 - `csrf.headerName`
 - `csrf.queryParamName`
 - `csrf.exemptPathPrefixes`: optional array of literal absolute paths (not `/`).

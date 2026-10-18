@@ -941,6 +941,43 @@
   XCTAssertEqualObjects(@(YES), fallbackSecurityHeaders[@"enabled"]);
 }
 
+- (void)testUnsetCSRFFollowsSessionInEveryProfile {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  NSString *appPlist = [root stringByAppendingPathComponent:@"config/app.plist"];
+  XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/development.plist"]
+                        content:@"{\n}\n"]);
+
+  // Sessions on and csrf.enabled unset: CSRF turns on, whatever the profile.
+  XCTAssertTrue([self writeFile:appPlist
+                        content:@"{\n"
+                                 "  session = { enabled = YES; secret = \"0123456789abcdef0123456789abcdef\"; };\n"
+                                 "  csrf = { headerName = \"x-csrf-token\"; };\n"
+                                 "}\n"]);
+  for (NSString *profile in @[ @"balanced", @"edge", @"strict" ]) {
+    setenv("ARLEN_SECURITY_PROFILE", [profile UTF8String], 1);
+    NSError *error = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+    unsetenv("ARLEN_SECURITY_PROFILE");
+    XCTAssertNil(error, @"%@", profile);
+    XCTAssertEqualObjects(@(YES), config[@"csrf"][@"enabled"], @"%@", profile);
+  }
+
+  // An explicit csrf.enabled = NO still wins.
+  XCTAssertTrue([self writeFile:appPlist
+                        content:@"{\n"
+                                 "  session = { enabled = YES; secret = \"0123456789abcdef0123456789abcdef\"; };\n"
+                                 "  csrf = { enabled = NO; };\n"
+                                 "}\n"]);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@(NO), config[@"csrf"][@"enabled"]);
+}
+
 - (void)testAPIOnlyDefaultsDisableStaticAndUseJSONLogs {
   NSString *root = [self createTempAppRoot];
   XCTAssertNotNil(root);

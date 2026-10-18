@@ -1353,6 +1353,33 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
+  // The module's forms and JSON endpoints rely on CSRF protection whenever
+  // they run on a session cookie. An explicit csrf.enabled = NO (older
+  // generated app.plist files wrote one) would leave them open to cross-site
+  // posts, so refuse it unless the app opts out deliberately.
+  NSDictionary *session = [application.config[@"session"] isKindOfClass:[NSDictionary class]]
+                              ? application.config[@"session"]
+                              : @{};
+  NSDictionary *csrf = [application.config[@"csrf"] isKindOfClass:[NSDictionary class]]
+                           ? application.config[@"csrf"]
+                           : @{};
+  BOOL sessionEnabled = [session[@"enabled"] respondsToSelector:@selector(boolValue)] &&
+                        [session[@"enabled"] boolValue];
+  BOOL csrfEnabled = [csrf[@"enabled"] respondsToSelector:@selector(boolValue)]
+                         ? [csrf[@"enabled"] boolValue]
+                         : sessionEnabled;
+  BOOL allowWithoutCSRF = [moduleConfig[@"allowWithoutCSRF"] respondsToSelector:@selector(boolValue)] &&
+                          [moduleConfig[@"allowWithoutCSRF"] boolValue];
+  if (sessionEnabled && !csrfEnabled && !allowWithoutCSRF) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"auth module requires csrf.enabled when session.enabled is YES; remove "
+                       @"csrf.enabled = NO from config/app.plist (CSRF then follows session.enabled), "
+                       @"or set authModule.allowWithoutCSRF = YES to opt out",
+                       @{ @"key_path" : @"csrf.enabled" });
+    }
+    return NO;
+  }
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};

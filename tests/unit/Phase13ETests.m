@@ -747,8 +747,11 @@ static ALNContext *ALNTestStandInContext(void) {
 
 - (void)testTrustedEmailClaimCreatesSessionAndDeliversReusableSignInEmail {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  // The test posts to its own claim route without a token, so it opts out of
+  // the auth module's CSRF requirement explicitly.
   ALNApplication *app = [self applicationWithConfig:@{
     @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : @{ @"allowWithoutCSRF" : @YES },
   }];
   ALNInMemoryMailAdapter *mailAdapter =
       [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_claim_mail"];

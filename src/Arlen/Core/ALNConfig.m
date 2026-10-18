@@ -375,15 +375,15 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @"trustedProxy" : @(YES),
       @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
       @"sessionEnabled" : @(NO),
-      @"csrfEnabled" : @(NO),
       @"securityHeadersEnabled" : @(YES),
     };
   }
+  // Only strict pins csrf.enabled; elsewhere an unset csrf.enabled follows
+  // session.enabled, so turning sessions on turns CSRF protection on too.
   return @{
     @"trustedProxy" : @(NO),
     @"trustedProxyCIDRs" : @[],
     @"sessionEnabled" : @(NO),
-    @"csrfEnabled" : @(NO),
     @"securityHeadersEnabled" : @(YES),
   };
 }

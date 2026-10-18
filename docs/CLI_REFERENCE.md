@@ -546,6 +546,9 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- reports `module_csrf_disabled` (an error; a warning with
+  `authModule.allowWithoutCSRF = YES`) when a module that expects CSRF, such as
+  `auth`, is installed while `session.enabled = YES` and `csrf.enabled = NO`
 - warns (without failing) about vendored module content:
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
@@ -1125,6 +1128,7 @@ Behavior:
  - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
  - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
  - `csrf.enabled=YES` without session middleware
+ - the `auth` module with `session.enabled=YES` and `csrf.enabled=NO` (unless `authModule.allowWithoutCSRF=YES`); an unset `csrf.enabled` follows `session.enabled`
  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests

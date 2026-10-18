@@ -1069,6 +1069,40 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     }
   }
 
+  // A module that asks for CSRF protection (auth does) is open to cross-site
+  // posts when the app turns sessions on but pins csrf.enabled = NO.
+  NSDictionary *mergedSession = [merged[@"session"] isKindOfClass:[NSDictionary class]] ? merged[@"session"] : @{};
+  NSDictionary *mergedCSRF = [merged[@"csrf"] isKindOfClass:[NSDictionary class]] ? merged[@"csrf"] : @{};
+  BOOL sessionEnabled = [mergedSession[@"enabled"] respondsToSelector:@selector(boolValue)] &&
+                        [mergedSession[@"enabled"] boolValue];
+  BOOL csrfEnabled = [mergedCSRF[@"enabled"] respondsToSelector:@selector(boolValue)]
+                         ? [mergedCSRF[@"enabled"] boolValue]
+                         : sessionEnabled;
+  if (sessionEnabled && !csrfEnabled) {
+    NSDictionary *authModuleConfig =
+        [merged[@"authModule"] isKindOfClass:[NSDictionary class]] ? merged[@"authModule"] : @{};
+    for (ALNModuleDefinition *definition in [self sortedModuleDefinitionsAtAppRoot:appRoot error:NULL] ?: @[]) {
+      NSDictionary *moduleCSRF = [definition.configDefaults[@"csrf"] isKindOfClass:[NSDictionary class]]
+                                     ? definition.configDefaults[@"csrf"]
+                                     : @{};
+      if (![moduleCSRF[@"enabled"] respondsToSelector:@selector(boolValue)] || ![moduleCSRF[@"enabled"] boolValue]) {
+        continue;
+      }
+      BOOL optedOut = [definition.identifier isEqualToString:@"auth"] &&
+                      [authModuleConfig[@"allowWithoutCSRF"] respondsToSelector:@selector(boolValue)] &&
+                      [authModuleConfig[@"allowWithoutCSRF"] boolValue];
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          optedOut ? @"warning" : @"error",
+          @"module_csrf_disabled",
+          definition.identifier,
+          [NSString stringWithFormat:@"module %@ expects CSRF protection, but csrf.enabled = NO while session.enabled = YES",
+                                     definition.identifier],
+          @"Remove csrf.enabled = NO from config/app.plist; an unset csrf.enabled follows session.enabled.",
+          @"csrf.enabled");
+    }
+  }
+
   ALNModuleAppendDiagnostic(diagnostics,
                             @"pass",
                             @"modules_loaded",

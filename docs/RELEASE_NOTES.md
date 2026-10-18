@@ -27,7 +27,20 @@
   - **Upgrade:** with more than one proxy in front of Arlen (for example a load
     balancer and then nginx), list every proxy in `security.trustedProxies` and
     `trustedProxyCIDRs`.
-
+- CSRF protection now follows sessions. When `csrf.enabled` is unset, it is on
+  whenever `session.enabled = YES`, in every security profile. Before, the
+  `balanced` and `edge` profiles filled in `NO`, and `arlen new` wrote
+  `csrf.enabled = NO` into `config/app.plist`, so an app that turned sessions
+  on (as the `auth` module needs) accepted cross-site form posts. New apps no
+  longer pin it.
+  - **Action for existing apps:** delete `enabled = NO;` from the `csrf` block in
+    `config/app.plist` if the app uses sessions. Browser forms then need the
+    token: `-[ALNContext csrfToken]` in a hidden `csrf_token` field or the
+    `x-csrf-token` header.
+  - The `auth` module refuses to start when sessions are on and CSRF is pinned
+    off, naming `csrf.enabled` in the error; `authModule.allowWithoutCSRF = YES`
+    opts out. `arlen module doctor` reports the same case as
+    `module_csrf_disabled`.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
