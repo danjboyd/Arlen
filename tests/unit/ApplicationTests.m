@@ -1817,6 +1817,41 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   }
 }
 
+- (void)testOperabilityEndpointsAreDisabledInProductionUntilAccessIsConfigured {
+  ALNApplication *closed = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"production", @"logFormat" : @"json" }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    XCTAssertEqual((NSInteger)404, [closed dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+  XCTAssertEqual((NSInteger)200, [closed dispatchRequest:[self requestForPath:@"/healthz"]].statusCode);
+
+  ALNApplication *tokenApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityToken" : @"scrape-secret" },
+  }];
+  ALNApplication *loopbackApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityLoopbackOnly" : @YES },
+  }];
+  ALNApplication *anonymousApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"logFormat" : @"json",
+    @"observability" : @{ @"operabilityAnonymous" : @YES },
+  }];
+  for (NSString *path in @[ @"/metrics", @"/clusterz" ]) {
+    XCTAssertEqual((NSInteger)401, [tokenApp dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+    ALNResponse *right = [tokenApp dispatchRequest:[self requestForPath:path
+                                                            queryString:@""
+                                                                headers:@{ @"authorization" : @"Bearer scrape-secret" }]];
+    XCTAssertEqual((NSInteger)200, right.statusCode, @"%@", path);
+    ALNRequest *local = [self requestForPath:path];
+    local.remoteAddress = @"127.0.0.1";
+    XCTAssertEqual((NSInteger)200, [loopbackApp dispatchRequest:local].statusCode, @"%@", path);
+    XCTAssertEqual((NSInteger)200, [anonymousApp dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+}
+
 - (void)testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",

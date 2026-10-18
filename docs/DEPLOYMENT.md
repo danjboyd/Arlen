@@ -401,20 +401,25 @@ Arlen reserves its built-in operability endpoints ahead of app route dispatch:
 - `GET /healthz` -> `200 ok\n`
 - `GET /readyz` -> `200 ready\n`
 - `GET /livez` -> `200 live\n`
-- `GET /metrics` -> `200` Prometheus text exposition payload
-- `GET /clusterz` -> `200` JSON cluster/runtime contract payload
+- `GET /metrics` -> `200` Prometheus text exposition payload (in production,
+  only once access is configured; see below)
+- `GET /clusterz` -> `200` JSON cluster/runtime contract payload (same)
 
 Use these for LB probes and deployment readiness checks.
 
-`/metrics` and `/clusterz` are anonymous by default, and `/clusterz` reports the
-hostname and worker layout. In production, set
+`/clusterz` reports the hostname and worker layout, so in production
+`/metrics` and `/clusterz` answer `404` until you configure access. Set
 `observability.operabilityToken` (or `ARLEN_OPERABILITY_TOKEN`) so scrapers
-must send `Authorization: Bearer <token>`, set
+must send `Authorization: Bearer <token>`, or set
 `observability.operabilityLoopbackOnly = YES` (or
-`ARLEN_OPERABILITY_LOOPBACK_ONLY=1`) for same-host scrapers, or block both
-paths at the reverse proxy. Behind a same-host proxy, loopback-only mode
-refuses requests that carry `Forwarded`, `X-Forwarded-For` or `X-Real-IP`.
-`arlen doctor --env production` warns while both endpoints are anonymous.
+`ARLEN_OPERABILITY_LOOPBACK_ONLY=1`) for same-host scrapers. Behind a same-host
+proxy, loopback-only mode refuses requests that carry `Forwarded`,
+`X-Forwarded-For` or `X-Real-IP`. `observability.operabilityAnonymous = YES`
+(or `ARLEN_OPERABILITY_ANONYMOUS=1`) restores anonymous access when the
+reverse proxy already blocks both paths. `arlen doctor --env production` warns
+while both endpoints are disabled or anonymous. `validate_operability.sh` sends
+`ARLEN_OPERABILITY_TOKEN` when set, and skips the `/metrics` contract when the
+endpoint is disabled.
 
 JSON signal payloads are available for health/readiness when requested:
 

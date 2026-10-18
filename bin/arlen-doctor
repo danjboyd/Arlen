@@ -202,9 +202,17 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
     add_check "operability_endpoints" "pass" \
       "/metrics and /clusterz are restricted ($phase39_operability_restricted)"
   else
-    add_check "operability_endpoints" "warn" \
-      "/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)" \
-      "Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy."
+    phase39_operability_anonymous="$(printf '%s' "${ARLEN_OPERABILITY_ANONYMOUS:-}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$phase39_operability_anonymous" =~ ^(1|yes|true)$ ]] ||
+       phase39_config_blob | grep -Eq 'operabilityAnonymous[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+      add_check "operability_endpoints" "warn" \
+        "/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)" \
+        "Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy."
+    else
+      add_check "operability_endpoints" "warn" \
+        "/metrics and /clusterz are disabled (they answer 404 in production until access is configured)" \
+        "To scrape them, set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) or observability.operabilityLoopbackOnly = YES; observability.operabilityAnonymous = YES restores anonymous access."
+    fi
   fi
 fi
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Breaking (production):** `/metrics` and `/clusterz` answer `404` in the
+  `production` environment until access is configured with
+  `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` or
+  `observability.operabilityLoopbackOnly` / `ARLEN_OPERABILITY_LOOPBACK_ONLY`.
+  Before, both were anonymous by default, and `/clusterz` reports the hostname
+  and worker layout. To keep the old behaviour behind a proxy that already
+  blocks them, set `observability.operabilityAnonymous = YES` (or
+  `ARLEN_OPERABILITY_ANONYMOUS=1`). `arlen doctor --env production` reports
+  which mode is active, and `validate_operability.sh` sends
+  `ARLEN_OPERABILITY_TOKEN` when set (#215).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

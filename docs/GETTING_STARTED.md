@@ -157,7 +157,8 @@ curl -i http://127.0.0.1:3000/openapi
 `boomhauer` watches app files by default and rebuilds when inputs change.
 Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
 for built-in operability, so app routes should not reuse those paths.
-`/metrics` and `/clusterz` are anonymous by default; before production, see
+`/metrics` and `/clusterz` answer `404` in production until you configure
+access; see
 [Configuration Reference](CONFIGURATION_REFERENCE.md#6-rate-limits-and-security-headers)
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).

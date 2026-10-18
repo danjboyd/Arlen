@@ -8554,13 +8554,23 @@ static int CommandDoctor(NSArray *args) {
                                                         : (loopbackOnly ? @"loopback only" : @"bearer token")],
                          @"");
           passCount += 1;
-        } else {
+        } else if ([observability[@"operabilityAnonymous"] respondsToSelector:@selector(boolValue)] &&
+                   [observability[@"operabilityAnonymous"] boolValue]) {
           AddDoctorCheck(checks,
                          @"operability_endpoints",
                          @"warn",
                          @"/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)",
                          @"Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, "
                          "or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy.");
+          warnCount += 1;
+        } else {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"warn",
+                         @"/metrics and /clusterz are disabled (they answer 404 in production until access is configured)",
+                         @"To scrape them, set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) or "
+                         "observability.operabilityLoopbackOnly = YES; observability.operabilityAnonymous = YES "
+                         "restores anonymous access.");
           warnCount += 1;
         }
       }

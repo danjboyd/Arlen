@@ -3065,10 +3065,11 @@ static BOOL ALNOperabilityAddressIsLoopback(NSString *address) {
          [candidate hasPrefix:@"::ffff:127."];
 }
 
-// /metrics and /clusterz stay anonymous by default. When
-// observability.operabilityToken is set they require
+// When observability.operabilityToken is set, /metrics and /clusterz require
 // `Authorization: Bearer <token>`; when observability.operabilityLoopbackOnly
-// is YES they only answer direct loopback requests. Both apply when both are set.
+// is YES they only answer direct loopback requests. Both apply when both are
+// set. With neither, they are anonymous outside production and answer 404 in
+// production unless observability.operabilityAnonymous = YES.
 static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
                                                 ALNRequest *request,
                                                 ALNResponse *response) {
@@ -3078,6 +3079,14 @@ static BOOL ALNOperabilityEndpointAccessAllowed(ALNApplication *application,
                               stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
                         : @"";
   BOOL loopbackOnly = ALNBoolConfigValue(observability[@"operabilityLoopbackOnly"], NO);
+  if ([token length] == 0 && !loopbackOnly && [application.environment isEqualToString:@"production"] &&
+      !ALNBoolConfigValue(observability[@"operabilityAnonymous"], NO)) {
+    response.statusCode = 404;
+    [response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [response setTextBody:@"not found\n"];
+    response.committed = YES;
+    return NO;
+  }
   if (loopbackOnly) {
     BOOL loopback = ALNOperabilityAddressIsLoopback(request.remoteAddress) &&
                     ([request.effectiveRemoteAddress length] == 0 ||

@@ -127,10 +127,12 @@ Run bootstrap environment diagnostics without requiring a framework build.
  `vendor/tools-xctest` is present; otherwise it looks for `xctest` on `PATH`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
  managed toolchains without libdispatch headers fail early
-- with `--env production`, warns (`operability_endpoints`) when `/metrics` and
- `/clusterz` are anonymous, i.e. neither `observability.operabilityToken` /
- `ARLEN_OPERABILITY_TOKEN` nor `observability.operabilityLoopbackOnly` /
- `ARLEN_OPERABILITY_LOOPBACK_ONLY` is set
+- with `--env production`, warns (`operability_endpoints`) when neither
+ `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` nor
+ `observability.operabilityLoopbackOnly` / `ARLEN_OPERABILITY_LOOPBACK_ONLY` is
+ set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
+ requests when `observability.operabilityAnonymous` /
+ `ARLEN_OPERABILITY_ANONYMOUS` is set
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -1223,6 +1225,7 @@ Environment:
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
 - `ARLEN_OPERABILITY_TOKEN` (unset by default; when set, `/metrics` and `/clusterz` require `Authorization: Bearer <token>`; overrides `observability.operabilityToken`)
 - `ARLEN_OPERABILITY_LOOPBACK_ONLY` (default `0`; when `1`, `/metrics` and `/clusterz` answer only direct loopback requests; overrides `observability.operabilityLoopbackOnly`)
+- `ARLEN_OPERABILITY_ANONYMOUS` (default `0`; when `1`, production serves `/metrics` and `/clusterz` to anonymous requests instead of `404` while neither of the two settings above is set; overrides `observability.operabilityAnonymous`)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
 - `ARLEN_CLUSTER_OBSERVED_NODES` (defaults to expected nodes; legacy `MOJOOBJC_CLUSTER_OBSERVED_NODES` also accepted)

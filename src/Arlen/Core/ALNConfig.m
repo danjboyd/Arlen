@@ -928,6 +928,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (operabilityLoopbackOnlyValue != nil) {
     observability[@"operabilityLoopbackOnly"] = operabilityLoopbackOnlyValue;
   }
+  NSNumber *operabilityAnonymousValue = ALNParseBooleanString(ALNEnvValue("ARLEN_OPERABILITY_ANONYMOUS"));
+  if (operabilityAnonymousValue != nil) {
+    observability[@"operabilityAnonymous"] = operabilityAnonymousValue;
+  }
   config[@"observability"] = observability;
 
   NSMutableDictionary *cluster =
