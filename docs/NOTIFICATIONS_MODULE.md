@@ -79,26 +79,34 @@ Requested channels are validated against the notification definition before queu
 `POST /notifications/api/queue` takes `notification`, `payload` and optional
 `channels`. A signed-in user can queue notifications only for themselves:
 
-- the module sets `payload.recipient` to the caller's auth subject, and
-  `payload.email` to their auth module account email (or removes it when the
-  module has no email for them)
 - a payload that names anyone else is refused with `403` and
   `meta.error` = `queueing a notification for another recipient or email
   address requires the admin role and AAL2`. That covers a `recipient` or
   `recipientSubject` other than the caller, any `recipients` entry other than
   the caller, and an `email` other than their own
-- keys that commonly name a delivery target are removed from the payload at
-  every depth before it reaches your definition: `to`, `cc`, `bcc`,
-  `address`, `addresses`, `phone`, `webhookURL`, `url`, `target`,
-  `recipient`, `recipients`, `recipientSubject`, and any key ending in
-  `Email` or `Emails` (case-insensitive). The module then sets `recipient`
-  (and `recipientSubject` when the caller sent one) and `email` as above
+- otherwise the notification is queued for the caller only. Your definition
+  receives the payload with `recipient` set to the caller's auth subject and
+  `email` set to their account email (the auth module account, or a verified
+  `email` claim for bearer-token apps; removed when there is none), and
+  `recipients` removed
+- whatever the definition returns, the module then replaces every delivery
+  target with the caller's own: the email goes only to the caller's address
+  (`to` replaced, `cc`, `bcc` and `To`/`Cc`/`Bcc` headers dropped), the
+  in-app entry and web push go only to the caller's subject. No payload key,
+  at any depth and under any name, can choose who or where it is delivered
+- a webhook target cannot be replaced, so the `webhook` channel is left out
+  of these notifications unless the definition implements
+  `notificationsModuleAllowsWebhookForSelfQueuedNotifications` and returns
+  `YES` (promising its webhook URL never depends on the payload). If only
+  `webhook` was requested, the queue answers `403`
+- the `email` channel needs an email address for the caller; without one the
+  queue answers `422`
 - callers with the `admin` role at AAL2 (the test-send policy) can queue for
-  any recipient or address; their payload is passed through unchanged
+  any recipient or address; their payload and the definition's targets are
+  used unchanged
 
 The rest of the payload reaches your definition as the caller sent it, so
-treat it as user input. Do not take delivery targets for notifications users
-can queue from keys outside that list.
+treat it as user input for message content.
 
 App code that calls `ALNNotificationsModuleRuntime`
 (`queueNotificationIdentifier:...`) is not affected: it addresses whoever the

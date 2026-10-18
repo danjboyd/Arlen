@@ -34,10 +34,12 @@
   `email` to their own address, and answers `403` when the payload names
   another `recipient`, `recipientSubject`, `recipients` entry or `email`.
   Queueing for others over HTTP needs the `admin` role at AAL2, like
-  test-send. Below that, other payload keys that look like delivery targets
-  (`to`, `cc`, `bcc`, `address`, `phone`, `webhookURL`, `url`, `target`, keys
-  ending in `Email`, and so on) are removed at every depth. `ALNNotificationsModuleRuntime` calls from app code are
-  unchanged.
+  test-send. Below that, after the definition runs the module replaces every
+  channel's target with the caller's own (email to their account address,
+  in-app and web push to their subject), so no payload key can choose who or
+  where a notification goes; the `webhook` channel is left out unless the
+  definition implements `notificationsModuleAllowsWebhookForSelfQueuedNotifications`.
+  `ALNNotificationsModuleRuntime` calls from app code are unchanged.
 - Signing in and completing step-up (`ALNAuthSession`
   establish/elevate, used by the auth module and the `ALNController` helpers)
   now start a fresh session. Keys stored before, including `_csrf_token`, are

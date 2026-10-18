@@ -21,8 +21,6 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
 static NSString *gPhase14IntegrationSubject = @"user-77";
 static NSArray<NSString *> *gPhase14IntegrationRoles = nil;
 static NSInteger gPhase14IntegrationAAL = 2;
-// Last payload the in-app-only definition received.
-static NSDictionary *gPhase14IntegrationInboxPayload = nil;
 
 @interface Phase14IntegrationAuthMiddleware : NSObject <ALNMiddleware>
 @end
@@ -42,6 +40,8 @@ static NSDictionary *gPhase14IntegrationInboxPayload = nil;
     @"amr" : (gPhase14IntegrationAAL >= 2) ? @[ @"otp" ] : @[ @"pwd" ],
     @"iat" : @((NSInteger)now),
     @"auth_time" : @((NSInteger)now),
+    @"email" : [gPhase14IntegrationSubject stringByAppendingString:@"@self.example.test"],
+    @"email_verified" : @YES,
   };
   return YES;
 }
@@ -209,12 +209,87 @@ static NSDictionary *gPhase14IntegrationInboxPayload = nil;
                                                     error:(NSError **)error {
   (void)runtime;
   (void)error;
-  gPhase14IntegrationInboxPayload = [payload copy];
   return @{
     @"recipient" : payload[@"recipient"] ?: @"",
     @"title" : @"Integration Inbox",
     @"body" : @"Queued over HTTP.",
   };
+}
+
+@end
+
+// Reads delivery targets from many payload keys, as a careless definition might.
+static NSArray *Phase14SneakyValues(NSDictionary *payload, NSArray *keys) {
+  NSMutableArray *values = [NSMutableArray array];
+  NSDictionary *nested = [payload[@"nested"] isKindOfClass:[NSDictionary class]] ? payload[@"nested"] : @{};
+  for (NSDictionary *source in @[ payload, nested ]) {
+    for (NSString *key in keys) {
+      if ([source[key] isKindOfClass:[NSString class]]) {
+        [values addObject:source[key]];
+      }
+    }
+  }
+  return values;
+}
+
+@interface Phase14IntegrationSneakyNotification : NSObject <ALNNotificationDefinition>
+@end
+
+@implementation Phase14IntegrationSneakyNotification
+
+- (NSString *)notificationsModuleIdentifier {
+  return @"phase14integration.sneaky";
+}
+
+- (NSDictionary *)notificationsModuleMetadata {
+  return @{ @"title" : @"Integration Sneaky", @"channels" : @[ @"email", @"in_app", @"webhook" ] };
+}
+
+- (BOOL)notificationsModuleValidatePayload:(NSDictionary *)payload error:(NSError **)error {
+  (void)payload;
+  (void)error;
+  return YES;
+}
+
+- (ALNMailMessage *)notificationsModuleMailMessageForPayload:(NSDictionary *)payload
+                                                     runtime:(ALNNotificationsModuleRuntime *)runtime
+                                                       error:(NSError **)error {
+  (void)runtime;
+  (void)error;
+  NSMutableArray *to = [NSMutableArray arrayWithArray:Phase14SneakyValues(payload, @[ @"emailAddress", @"email_address", @"mail", @"destination" ])];
+  if ([payload[@"email"] isKindOfClass:[NSString class]]) {
+    [to addObject:payload[@"email"]];
+  }
+  return [[ALNMailMessage alloc] initWithFrom:@"hello@example.test"
+                                           to:to
+                                           cc:Phase14SneakyValues(payload, @[ @"phoneNumber" ])
+                                          bcc:Phase14SneakyValues(payload, @[ @"mail" ])
+                                      subject:@"Integration Sneaky"
+                                     textBody:@"Hello."
+                                     htmlBody:nil
+                                      headers:@{ @"Bcc" : @"hidden@outside.example.test", @"X-Kind" : @"sneaky" }
+                                     metadata:nil];
+}
+
+- (NSDictionary *)notificationsModuleInAppEntryForPayload:(NSDictionary *)payload
+                                                  runtime:(ALNNotificationsModuleRuntime *)runtime
+                                                    error:(NSError **)error {
+  (void)runtime;
+  (void)error;
+  NSMutableArray *recipients = [NSMutableArray arrayWithArray:Phase14SneakyValues(payload, @[ @"user", @"destination" ])];
+  if ([payload[@"recipient"] isKindOfClass:[NSString class]]) {
+    [recipients addObject:payload[@"recipient"]];
+  }
+  return @{ @"recipients" : recipients, @"recipientSubject" : [recipients firstObject] ?: @"", @"title" : @"Sneaky", @"body" : @"Hi." };
+}
+
+- (NSDictionary *)notificationsModuleWebhookRequestForPayload:(NSDictionary *)payload
+                                                      runtime:(ALNNotificationsModuleRuntime *)runtime
+                                                        error:(NSError **)error {
+  (void)runtime;
+  (void)error;
+  NSString *url = [Phase14SneakyValues(payload, @[ @"webhook_url", @"callbackUrl", @"endpoint" ]) firstObject];
+  return @{ @"url" : url ?: @"https://fixed.example.test/hook", @"method" : @"POST", @"body" : @{} };
 }
 
 @end
@@ -230,7 +305,11 @@ static NSDictionary *gPhase14IntegrationInboxPayload = nil;
                                                                               (NSError **)error {
   (void)runtime;
   (void)error;
-  return @[ [[Phase14IntegrationNotification alloc] init], [[Phase14IntegrationInboxNotification alloc] init] ];
+  return @[
+    [[Phase14IntegrationNotification alloc] init],
+    [[Phase14IntegrationInboxNotification alloc] init],
+    [[Phase14IntegrationSneakyNotification alloc] init],
+  ];
 }
 
 @end
@@ -436,43 +515,96 @@ static NSDictionary *gPhase14IntegrationInboxPayload = nil;
   XCTAssertEqualObjects((@[ @"member@external.test" ]), message[@"to"]);
 }
 
-- (void)testQueueRouteDropsDeliveryTargetKeysBelowAdminAAL2 {
+- (ALNResponse *)queueNotification:(NSString *)identifier
+                           payload:(NSDictionary *)payload
+                          channels:(NSArray *)channels
+                               app:(ALNApplication *)app {
+  NSData *body = [NSJSONSerialization dataWithJSONObject:@{
+    @"notification" : identifier,
+    @"payload" : payload ?: @{},
+    @"channels" : channels ?: @[],
+  }
+                                                 options:0
+                                                   error:NULL];
+  return [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                 path:@"/notifications/api/queue"
+                                              headers:@{ @"Content-Type" : @"application/json" }
+                                                 body:body]];
+}
+
+- (NSDictionary *)sneakyPayloadForVictim:(NSString *)victim {
+  NSDictionary *targets = @{
+    @"emailAddress" : @"a@outside.example.test",
+    @"email_address" : @"b@outside.example.test",
+    @"mail" : @"c@outside.example.test",
+    @"destination" : @"d@outside.example.test",
+    @"user" : victim,
+    @"phoneNumber" : @"+15550100",
+    @"webhook_url" : @"https://outside.example.test/hook",
+    @"callbackUrl" : @"https://outside.example.test/callback",
+    @"endpoint" : @"https://outside.example.test/endpoint",
+  };
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:targets];
+  payload[@"nested"] = targets;
+  return payload;
+}
+
+- (void)testUserQueuedNotificationsDeliverOnlyToTheCaller {
   ALNApplication *app = [self registeredNotificationsApplication];
   NSString *subject = [NSString stringWithFormat:@"user-%@", [[NSUUID UUID] UUIDString]];
+  NSString *victim = [NSString stringWithFormat:@"victim-%@", [[NSUUID UUID] UUIDString]];
+  NSString *ownEmail = [subject stringByAppendingString:@"@self.example.test"];
   gPhase14IntegrationSubject = subject;
   gPhase14IntegrationRoles = @[];
   gPhase14IntegrationAAL = 1;
-  NSDictionary *payload = @{
-    @"recipient" : subject,
-    @"to" : @"someone@external.test",
-    @"workEmail" : @"someone@external.test",
-    @"url" : @"https://external.test/",
-    @"target" : @{ @"email" : @"someone@external.test" },
-    @"details" : @{ @"webhookURL" : @"https://external.test/hook", @"phone" : @"+15550100", @"label" : @"kept" },
-    @"items" : @[ @{ @"cc" : @"someone@external.test", @"name" : @"kept" } ],
-    @"name" : @"kept",
-  };
-  gPhase14IntegrationInboxPayload = nil;
-  XCTAssertEqual((NSInteger)200, [self queueNotification:@"phase14integration.inbox" payload:payload app:app].statusCode);
+  NSUInteger mailBefore = [[app.mailAdapter deliveriesSnapshot] count];
+
+  ALNResponse *response = [self queueNotification:@"phase14integration.sneaky"
+                                          payload:[self sneakyPayloadForVictim:victim]
+                                         channels:@[ @"email", @"in_app", @"webhook" ]
+                                              app:app];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSArray *channelJobs = [self JSONObjectFromResponse:response][@"data"][@"channelJobs"];
+  XCTAssertEqualObjects((@[ @"email", @"in_app" ]), [channelJobs valueForKey:@"channel"]);
   NSError *error = nil;
   XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:20 error:&error]);
-  NSDictionary *received = gPhase14IntegrationInboxPayload;
-  XCTAssertNotNil(received);
-  NSDictionary *expected = @{
-    @"recipient" : subject,
-    @"details" : @{ @"label" : @"kept" },
-    @"items" : @[ @{ @"name" : @"kept" } ],
-    @"name" : @"kept",
-  };
-  XCTAssertEqualObjects(expected, received);
 
-  // Admins at AAL2 are passed through unchanged.
+  NSArray *deliveries = [app.mailAdapter deliveriesSnapshot];
+  XCTAssertEqual(mailBefore + 1, [deliveries count]);
+  NSDictionary *message = [deliveries lastObject][@"message"];
+  XCTAssertEqualObjects((@[ ownEmail ]), message[@"to"]);
+  XCTAssertEqual((NSUInteger)0, [message[@"cc"] count]);
+  XCTAssertEqual((NSUInteger)0, [message[@"bcc"] count]);
+  NSDictionary *headers = [message[@"headers"] isKindOfClass:[NSDictionary class]] ? message[@"headers"] : @{};
+  XCTAssertNil(headers[@"Bcc"]);
+  XCTAssertEqualObjects(@"sneaky", headers[@"X-Kind"]);
+  XCTAssertEqual((NSUInteger)1, [self inboxCountForRecipient:subject]);
+  XCTAssertEqual((NSUInteger)0, [self inboxCountForRecipient:victim]);
+
+  // Only a webhook channel left: refused rather than sent to a payload URL.
+  ALNResponse *webhookOnly = [self queueNotification:@"phase14integration.sneaky"
+                                             payload:[self sneakyPayloadForVictim:victim]
+                                            channels:@[ @"webhook" ]
+                                                 app:app];
+  XCTAssertEqual((NSInteger)403, webhookOnly.statusCode);
+}
+
+- (void)testAdminAtAAL2QueuedNotificationsKeepTheDefinitionTargets {
+  ALNApplication *app = [self registeredNotificationsApplication];
+  NSString *victim = [NSString stringWithFormat:@"member-%@", [[NSUUID UUID] UUIDString]];
+  gPhase14IntegrationSubject = @"operator-2";
   gPhase14IntegrationRoles = @[ @"admin" ];
   gPhase14IntegrationAAL = 2;
-  gPhase14IntegrationInboxPayload = nil;
-  XCTAssertEqual((NSInteger)200, [self queueNotification:@"phase14integration.inbox" payload:payload app:app].statusCode);
+  ALNResponse *response = [self queueNotification:@"phase14integration.sneaky"
+                                          payload:[self sneakyPayloadForVictim:victim]
+                                         channels:@[ @"email", @"in_app" ]
+                                              app:app];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSError *error = nil;
   XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:20 error:&error]);
-  XCTAssertEqualObjects(payload, gPhase14IntegrationInboxPayload);
+  NSDictionary *message = [[app.mailAdapter deliveriesSnapshot] lastObject][@"message"];
+  XCTAssertTrue([message[@"to"] containsObject:@"a@outside.example.test"]);
+  XCTAssertEqual((NSUInteger)1, [self inboxCountForRecipient:victim]);
 }
 
 @end

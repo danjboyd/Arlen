@@ -787,6 +787,14 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                                       payload:(NSDictionary *)payload
                                                      channels:(NSArray<NSString *> *)channels
                                                         error:(NSError **)error;
+// `deliveryScope` (@{ recipient, email }) marks a notification a user queued
+// for themselves over HTTP: every channel's target is replaced with those
+// values after the definition runs, whatever the payload or definition chose.
+- (nullable NSDictionary *)artifactsForNotificationIdentifier:(NSString *)identifier
+                                                      payload:(NSDictionary *)payload
+                                                     channels:(NSArray<NSString *> *)channels
+                                                deliveryScope:(nullable NSDictionary *)deliveryScope
+                                                        error:(NSError **)error;
 - (BOOL)channel:(NSString *)channel
     enabledForRecipient:(NSString *)recipient
  notificationIdentifier:(NSString *)identifier
@@ -808,6 +816,11 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 - (nullable NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
                                                          payload:(NSDictionary *)payload
                                                         channels:(NSArray<NSString *> *)channels
+                                                           error:(NSError **)error;
+- (nullable NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                         payload:(NSDictionary *)payload
+                                                        channels:(NSArray<NSString *> *)channels
+                                                   deliveryScope:(nullable NSDictionary *)deliveryScope
                                                            error:(NSError **)error;
 - (NSDictionary *)inboxSummaryLockedForRecipient:(NSString *)recipient;
 - (nullable NSDictionary *)deliverWebPushMessage:(NSDictionary *)message
@@ -1325,6 +1338,22 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                               payload:(NSDictionary *)payload
                                              channels:(NSArray<NSString *> *)channels
                                                 error:(NSError **)error {
+  return [self artifactsForNotificationIdentifier:identifier
+                                          payload:payload
+                                         channels:channels
+                                    deliveryScope:nil
+                                            error:error];
+}
+
+- (NSDictionary *)artifactsForNotificationIdentifier:(NSString *)identifier
+                                              payload:(NSDictionary *)payload
+                                             channels:(NSArray<NSString *> *)channels
+                                        deliveryScope:(NSDictionary *)deliveryScope
+                                                error:(NSError **)error {
+  NSDictionary *scope = NMNormalizeDictionary(deliveryScope);
+  BOOL scoped = ([NMTrimmedString(scope[@"recipient"]) length] > 0);
+  NSString *scopeRecipient = NMTrimmedString(scope[@"recipient"]);
+  NSString *scopeEmail = NMTrimmedString(scope[@"email"]);
   NSString *notificationID = NMTrimmedString(identifier);
   if ([notificationID length] == 0) {
     if (error != NULL) {
@@ -1349,6 +1378,20 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   }
 
   NSDictionary *normalizedPayload = NMNormalizeDictionary(payload);
+  if (scoped) {
+    NSMutableDictionary *forced = [NSMutableDictionary dictionaryWithDictionary:normalizedPayload];
+    forced[@"recipient"] = scopeRecipient;
+    if ([forced[@"recipientSubject"] isKindOfClass:[NSString class]]) {
+      forced[@"recipientSubject"] = scopeRecipient;
+    }
+    [forced removeObjectForKey:@"recipients"];
+    if ([scopeEmail length] > 0) {
+      forced[@"email"] = scopeEmail;
+    } else {
+      [forced removeObjectForKey:@"email"];
+    }
+    normalizedPayload = forced;
+  }
   NSError *validationError = nil;
   if (![definition notificationsModuleValidatePayload:normalizedPayload error:&validationError]) {
     if (error != NULL) {
@@ -1376,6 +1419,34 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
       *error = NMError(ALNNotificationsModuleErrorValidationFailed,
                        @"requested notification channel is not supported",
                        @{ @"identifier" : notificationID, @"channels" : normalizedChannels });
+    }
+    return nil;
+  }
+  if (scoped && [normalizedChannels containsObject:@"webhook"]) {
+    // A webhook target is chosen by the definition, so the module cannot
+    // point it at the caller. It is left out unless the definition says its
+    // webhook target does not depend on the payload.
+    BOOL allowed = [definition respondsToSelector:@selector(notificationsModuleAllowsWebhookForSelfQueuedNotifications)] &&
+                   [definition notificationsModuleAllowsWebhookForSelfQueuedNotifications];
+    if (!allowed) {
+      NSMutableArray *withoutWebhook = [NSMutableArray arrayWithArray:normalizedChannels];
+      [withoutWebhook removeObject:@"webhook"];
+      if ([withoutWebhook count] == 0) {
+        if (error != NULL) {
+          *error = NMError(ALNNotificationsModuleErrorPolicyRejected,
+                           @"the webhook channel is not available for notifications users queue for themselves",
+                           @{ @"identifier" : notificationID });
+        }
+        return nil;
+      }
+      normalizedChannels = withoutWebhook;
+    }
+  }
+  if (scoped && [normalizedChannels containsObject:@"email"] && [scopeEmail length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"the email channel needs an email address on the signed-in account",
+                       @{ @"identifier" : notificationID });
     }
     return nil;
   }
@@ -1462,6 +1533,40 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     }
   }
 
+  if (scoped) {
+    // Replace every target the definition produced with the caller's own.
+    if (message != nil) {
+      NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+      for (id key in message.headers ?: @{}) {
+        NSString *lower = [[key description] lowercaseString];
+        if (![@[ @"to", @"cc", @"bcc" ] containsObject:lower]) {
+          headers[key] = message.headers[key];
+        }
+      }
+      message = [[ALNMailMessage alloc] initWithFrom:message.from
+                                                  to:@[ scopeEmail ]
+                                                  cc:nil
+                                                 bcc:nil
+                                             subject:message.subject
+                                            textBody:message.textBody
+                                            htmlBody:message.htmlBody
+                                             headers:headers
+                                            metadata:message.metadata];
+    }
+    if (inAppEntry != nil) {
+      NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:inAppEntry];
+      [entry removeObjectForKey:@"recipients"];
+      [entry removeObjectForKey:@"recipientSubject"];
+      entry[@"recipient"] = scopeRecipient;
+      inAppEntry = entry;
+    }
+    if (webPushMessage != nil) {
+      NSMutableDictionary *push = [NSMutableDictionary dictionaryWithDictionary:webPushMessage];
+      push[@"recipients"] = @[ scopeRecipient ];
+      webPushMessage = push;
+    }
+  }
+
   return @{
     @"identifier" : notificationID,
     @"metadata" : metadata ?: @{},
@@ -1478,7 +1583,23 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                                  payload:(NSDictionary *)payload
                                                 channels:(NSArray<NSString *> *)channels
                                                    error:(NSError **)error {
-  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier payload:payload channels:channels error:error];
+  return [self queueNotificationSummaryForIdentifier:identifier
+                                             payload:payload
+                                            channels:channels
+                                       deliveryScope:nil
+                                               error:error];
+}
+
+- (NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                 payload:(NSDictionary *)payload
+                                                channels:(NSArray<NSString *> *)channels
+                                           deliveryScope:(NSDictionary *)deliveryScope
+                                                   error:(NSError **)error {
+  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier
+                                                             payload:payload
+                                                            channels:channels
+                                                       deliveryScope:deliveryScope
+                                                               error:error];
   if (artifacts == nil) {
     return nil;
   }
@@ -1501,11 +1622,14 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
                                  ? [policy[@"maxAttempts"] unsignedIntegerValue]
                                  : 0;
-    NSDictionary *jobPayload = @{
+    NSMutableDictionary *jobPayload = [@{
       @"identifier" : artifacts[@"identifier"] ?: @"",
       @"payload" : normalizedPayload,
       @"channels" : @[ channel ],
-    };
+    } mutableCopy];
+    if ([NMTrimmedString(NMNormalizeDictionary(deliveryScope)[@"recipient"]) length] > 0) {
+      jobPayload[@"deliveryScope"] = NMNormalizeDictionary(deliveryScope);
+    }
     NSMutableDictionary *options = [@{
       @"queue" : queue,
       @"source" : @"notification",
@@ -1685,6 +1809,7 @@ notificationIdentifier:(NSString *)identifier
       [self artifactsForNotificationIdentifier:jobPayload[@"identifier"]
                                        payload:NMNormalizeDictionary(jobPayload[@"payload"])
                                       channels:NMNormalizedChannelArray(jobPayload[@"channels"])
+                                 deliveryScope:NMNormalizeDictionary(jobPayload[@"deliveryScope"])
                                          error:error];
   if (artifacts == nil) {
     return nil;
@@ -3100,46 +3225,20 @@ static BOOL NMPayloadTargetsOnlySubject(NSDictionary *payload, NSString *subject
   return YES;
 }
 
-// Keys that commonly name a delivery target. Below admin + AAL2 they are
-// removed from the queued payload at every depth, so a definition that reads
-// one cannot be pointed somewhere else over HTTP.
-static BOOL NMIsDeliveryTargetKey(NSString *key) {
-  NSString *lower = [key lowercaseString];
-  NSArray *names = @[
-    @"to", @"cc", @"bcc", @"address", @"addresses", @"phone", @"webhookurl", @"url", @"target",
-    @"recipient", @"recipients", @"recipientsubject",
-  ];
-  return [names containsObject:lower] || [lower hasSuffix:@"email"] || [lower hasSuffix:@"emails"];
-}
-
-static id NMWithoutDeliveryTargets(id value) {
-  if ([value isKindOfClass:[NSDictionary class]]) {
-    NSMutableDictionary *kept = [NSMutableDictionary dictionary];
-    for (id key in (NSDictionary *)value) {
-      if ([key isKindOfClass:[NSString class]] && NMIsDeliveryTargetKey(key)) {
-        continue;
-      }
-      kept[key] = NMWithoutDeliveryTargets(((NSDictionary *)value)[key]);
-    }
-    return kept;
-  }
-  if ([value isKindOfClass:[NSArray class]]) {
-    NSMutableArray *kept = [NSMutableArray array];
-    for (id entry in (NSArray *)value) {
-      [kept addObject:NMWithoutDeliveryTargets(entry)];
-    }
-    return kept;
-  }
-  return value;
-}
-
 // The HTTP queue route lets a signed-in user queue notifications only for
-// themselves: `recipient` is forced to their subject and `email` to their own
-// address. Naming anyone else (`recipient`, `recipientSubject`, `recipients`
-// or `email`) needs the admin role at AAL2, like test-send; other
-// delivery-target keys are dropped (NMIsDeliveryTargetKey). Returns nil after
-// rendering an error response.
-- (NSDictionary *)queuePayloadForContext:(ALNContext *)ctx payload:(NSDictionary *)rawPayload {
+// themselves. Below the admin role at AAL2 the payload may not name anyone else
+// (`recipient`, `recipientSubject`, `recipients` or `email`; 403), and the
+// notification is queued with a delivery scope of the caller's subject and own
+// email address: after the definition runs, every channel's target is replaced
+// with those values, so no other payload key can choose who or where it goes.
+// Returns nil after rendering an error response. *deliveryScope is nil for
+// admins at AAL2.
+- (NSDictionary *)queuePayloadForContext:(ALNContext *)ctx
+                                 payload:(NSDictionary *)rawPayload
+                           deliveryScope:(NSDictionary **)deliveryScope {
+  if (deliveryScope != NULL) {
+    *deliveryScope = nil;
+  }
   NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:rawPayload ?: @{}];
   if ([[ctx authRoles] containsObject:@"admin"] && [ctx authAssuranceLevel] >= 2) {
     return payload;
@@ -3152,6 +3251,13 @@ static id NMWithoutDeliveryTargets(id value) {
   }
   NSDictionary *user = [self.authRuntime currentUserForContext:ctx error:NULL];
   NSString *ownEmail = NMTrimmedString(user[@"email"]);
+  if ([ownEmail length] == 0) {
+    // Apps that sign users in with bearer tokens: a verified email claim.
+    NSDictionary *claims = NMNormalizeDictionary(ctx.stash[ALNContextAuthClaimsStashKey]);
+    if ([claims[@"email_verified"] respondsToSelector:@selector(boolValue)] && [claims[@"email_verified"] boolValue]) {
+      ownEmail = NMTrimmedString(claims[@"email"]);
+    }
+  }
   NSString *requestedEmail = NMTrimmedString(payload[@"email"]);
   BOOL emailIsOwn = ([requestedEmail length] == 0) ||
                     ([ownEmail length] > 0 && [requestedEmail caseInsensitiveCompare:ownEmail] == NSOrderedSame);
@@ -3165,21 +3271,18 @@ static id NMWithoutDeliveryTargets(id value) {
                                error:NULL];
     return nil;
   }
-  BOOL namedRecipientSubject = [payload[@"recipientSubject"] isKindOfClass:[NSString class]];
-  payload = NMWithoutDeliveryTargets(payload);
-  payload[@"recipient"] = subject;
-  if (namedRecipientSubject) {
-    payload[@"recipientSubject"] = subject;
-  }
-  if ([ownEmail length] > 0) {
-    payload[@"email"] = ownEmail;
+  if (deliveryScope != NULL) {
+    *deliveryScope = @{ @"recipient" : subject, @"email" : ownEmail ?: @"" };
   }
   return payload;
 }
 
 - (id)apiQueue:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
-  NSDictionary *payload = [self queuePayloadForContext:ctx payload:NMNormalizeDictionary(parameters[@"payload"])];
+  NSDictionary *deliveryScope = nil;
+  NSDictionary *payload = [self queuePayloadForContext:ctx
+                                               payload:NMNormalizeDictionary(parameters[@"payload"])
+                                         deliveryScope:&deliveryScope];
   if (payload == nil) {
     return nil;
   }
@@ -3188,9 +3291,10 @@ static id NMWithoutDeliveryTargets(id value) {
       [self.runtime queueNotificationSummaryForIdentifier:NMTrimmedString(parameters[@"notification"])
                                                   payload:payload
                                                  channels:NMNormalizeArray(parameters[@"channels"])
+                                            deliveryScope:deliveryScope
                                                     error:&error];
   if (summary == nil) {
-    [self setStatus:422];
+    [self setStatus:(error.code == ALNNotificationsModuleErrorPolicyRejected) ? 403 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"queue failed" } error:NULL];
     return nil;
   }
