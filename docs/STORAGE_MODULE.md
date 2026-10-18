@@ -59,6 +59,12 @@ Each collection definition supplies metadata such as:
 - `retentionDays`
 - `variants`
 
+`acceptedContentTypes` entries are exact types (`image/png`) or wildcards
+(`image/*`, `*/*`). A collection without `acceptedContentTypes` accepts
+`*/*`. Wildcards never match `text/html`, `image/svg+xml` or
+`application/xhtml+xml`; a collection that should store those must list them
+exactly.
+
 Definitions may also implement the optional validation hook `storageModuleValidateObjectNamed:contentType:sizeBytes:metadata:runtime:error:` for app-specific policy checks.
 Definitions may implement `storageModuleVariantRepresentationForObject:variantDefinition:originalData:originalMetadata:runtime:error:` to generate first-party transformed variants rather than copy-only derivatives.
 
@@ -101,6 +107,24 @@ The management JSON routes are included in module OpenAPI output.
 - `POST /storage/api/upload-sessions/:sessionID/upload` persists the object through the configured attachment adapter and durable module state
 - `POST /storage/api/collections/:collection/objects/:objectID/download-token` issues a signed download token
 - `GET /storage/api/download/:token` streams the stored object if the token is valid and unexpired
+
+### Download Headers
+
+The download response uses the content type recorded at upload, which the
+uploader declared; the bytes are not checked against it. To keep stored files
+from running as pages on the app's origin, the download sets:
+
+- `Content-Disposition: attachment; filename="..."` by default. The quoted
+  filename is the object name reduced to ASCII letters, digits and `._-`, with
+  the original name in `filename*` when it differs.
+- `Content-Disposition: inline` only for `image/png`, `image/jpeg`,
+  `image/gif`, `image/webp`, `image/avif`, `application/pdf`, `audio/*` and
+  `video/*`. HTML, SVG, XML, JavaScript and every other type download as
+  attachments.
+- `Content-Security-Policy: sandbox` on every download except inline PDF
+  (browser PDF viewers do not run in a sandboxed document; PDF keeps the app's
+  normal policy).
+- `X-Content-Type-Options: nosniff`.
 
 Config knobs:
 

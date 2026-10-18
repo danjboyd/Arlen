@@ -29,6 +29,29 @@
   apps keep their session/bearer secrets in
   `config/environments/development.plist`. The `storage` module is now `1.2.0`.
   Generate secrets with `openssl rand -hex 32`.
+- Search module `1.1.0`: the Meilisearch and OpenSearch adapters encode
+  record identifiers and index names in request URLs with only unreserved
+  characters, and reject an identifier or index name that is empty, `.` or
+  `..` with a validation error instead of sending the request. A record whose
+  identifier was `..` used to turn a live-sync document delete into a request
+  for the whole index (`DELETE /<index>/`). Arlen's libcurl HTTP transport
+  (GNUstep) now sets `CURLOPT_PATH_AS_IS`, so it never collapses `.`/`..`
+  path segments.
+- Storage module `1.3.0`: `GET /storage/api/download/:token` now sends
+  `Content-Disposition: attachment` with a sanitized filename,
+  `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+  Only PNG, JPEG, GIF, WebP, AVIF, PDF, audio and video objects are served
+  inline. Downloads used to be served inline with whatever content type the
+  uploader declared, so an HTML or SVG object opened as a page on the app's
+  origin. Wildcard `acceptedContentTypes` (`*/*`, the default, and `image/*`)
+  no longer match `text/html`, `image/svg+xml` or `application/xhtml+xml`;
+  collections that store them must list them exactly.
+- EOC: when no page fills a named slot, `<%@ yield "name" %>` falls back to
+  the context value with the same name. That value is now HTML-escaped like
+  `<%= %>` output; it used to be written raw, so a controller value such as
+  `title` could add markup to the layout. Slot content filled with
+  `slot`/`endslot` and the plain `<%@ yield %>` page body are still emitted
+  as-is.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
