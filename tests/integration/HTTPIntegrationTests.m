@@ -945,8 +945,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
   [server launch];
 
   @try {
@@ -1000,7 +1000,7 @@
     XCTAssertTrue([output containsString:@"ok"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }

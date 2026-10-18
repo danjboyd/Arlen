@@ -368,6 +368,69 @@ static const char *ALNInetNtop(int family,
   }
   return result;
 }
+
+typedef WSAPOLLFD ALNPollEntry;
+
+static void ALNPollEntrySet(ALNPollEntry *entry, ALNSocketHandle handle) {
+  entry->fd = ALNNativeSocketHandle(handle);
+  entry->events = POLLIN;
+  entry->revents = 0;
+}
+
+static int ALNSocketPoll(ALNPollEntry *entries, size_t count, int timeoutMilliseconds) {
+  int rc = WSAPoll(entries, (ULONG)count, timeoutMilliseconds);
+  if (rc == SOCKET_ERROR) {
+    ALNSyncErrnoFromWSA();
+    return -1;
+  }
+  return rc;
+}
+
+// WSAPoll only takes sockets, so the idle-connection watcher's wake channel is
+// a non-blocking loopback UDP socket connected to itself; both ends are that
+// one socket.
+static BOOL ALNWakeChannelOpen(ALNSocketHandle *readEnd, ALNSocketHandle *writeEnd) {
+  SOCKET handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (handle == INVALID_SOCKET) {
+    return NO;
+  }
+  struct sockaddr_in address;
+  memset(&address, 0, sizeof(address));
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = 0;
+  int addressLength = (int)sizeof(address);
+  u_long nonBlocking = 1;
+  if (bind(handle, (struct sockaddr *)&address, addressLength) != 0 ||
+      getsockname(handle, (struct sockaddr *)&address, &addressLength) != 0 ||
+      connect(handle, (struct sockaddr *)&address, addressLength) != 0 ||
+      ioctlsocket(handle, FIONBIO, &nonBlocking) != 0) {
+    closesocket(handle);
+    return NO;
+  }
+  (void)SetHandleInformation((HANDLE)handle, HANDLE_FLAG_INHERIT, 0);
+  *readEnd = ALNSocketHandleFromNative(handle);
+  *writeEnd = *readEnd;
+  return YES;
+}
+
+static void ALNWakeChannelSignal(ALNSocketHandle writeEnd) {
+  char byte = 1;
+  (void)send(ALNNativeSocketHandle(writeEnd), &byte, 1, 0);
+}
+
+static void ALNWakeChannelDrain(ALNSocketHandle readEnd) {
+  char drain[64];
+  while (recv(ALNNativeSocketHandle(readEnd), drain, (int)sizeof(drain), 0) > 0) {
+  }
+}
+
+static void ALNWakeChannelClose(ALNSocketHandle readEnd, ALNSocketHandle writeEnd) {
+  ALNSocketClose(readEnd);
+  if (writeEnd != readEnd) {
+    ALNSocketClose(writeEnd);
+  }
+}
 #else
 static BOOL ALNInitializeSocketLayer(void) {
   return YES;
@@ -433,6 +496,49 @@ static const char *ALNInetNtop(int family,
                                char *textBuffer,
                                size_t textBufferLength) {
   return inet_ntop(family, addressBuffer, textBuffer, textBufferLength);
+}
+
+typedef struct pollfd ALNPollEntry;
+
+static void ALNPollEntrySet(ALNPollEntry *entry, ALNSocketHandle handle) {
+  entry->fd = (int)handle;
+  entry->events = POLLIN;
+  entry->revents = 0;
+}
+
+static int ALNSocketPoll(ALNPollEntry *entries, size_t count, int timeoutMilliseconds) {
+  return poll(entries, (nfds_t)count, timeoutMilliseconds);
+}
+
+static BOOL ALNWakeChannelOpen(ALNSocketHandle *readEnd, ALNSocketHandle *writeEnd) {
+  int fds[2];
+  if (pipe(fds) != 0) {
+    return NO;
+  }
+  for (int idx = 0; idx < 2; idx++) {
+    int flags = fcntl(fds[idx], F_GETFL, 0);
+    (void)fcntl(fds[idx], F_SETFL, flags | O_NONBLOCK);
+    (void)fcntl(fds[idx], F_SETFD, FD_CLOEXEC);
+  }
+  *readEnd = (ALNSocketHandle)fds[0];
+  *writeEnd = (ALNSocketHandle)fds[1];
+  return YES;
+}
+
+static void ALNWakeChannelSignal(ALNSocketHandle writeEnd) {
+  uint8_t byte = 1;
+  (void)write((int)writeEnd, &byte, 1);
+}
+
+static void ALNWakeChannelDrain(ALNSocketHandle readEnd) {
+  uint8_t drain[64];
+  while (read((int)readEnd, drain, sizeof(drain)) > 0) {
+  }
+}
+
+static void ALNWakeChannelClose(ALNSocketHandle readEnd, ALNSocketHandle writeEnd) {
+  close((int)readEnd);
+  close((int)writeEnd);
 }
 #endif
 
@@ -3575,8 +3681,8 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 @property(nonatomic, strong) NSLock *idleConnectionLock;
 @property(nonatomic, strong) NSMutableDictionary *idleConnectionDeadlines;
 @property(atomic, assign) BOOL idleConnectionWatcherRunning;
-@property(nonatomic, assign) int idleConnectionWakeReadFD;
-@property(nonatomic, assign) int idleConnectionWakeWriteFD;
+@property(nonatomic, assign) ALNSocketHandle idleConnectionWakeReadFD;
+@property(nonatomic, assign) ALNSocketHandle idleConnectionWakeWriteFD;
 @property(atomic, assign) ALNSocketHandle serverSocketFD;
 @property(nonatomic, strong) NSLock *staticMountCacheLock;
 @property(nonatomic, copy) NSArray *cachedStaticMounts;
@@ -3615,8 +3721,8 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     _idleConnectionLock = [[NSLock alloc] init];
     _idleConnectionDeadlines = [NSMutableDictionary dictionary];
     _idleConnectionWatcherRunning = NO;
-    _idleConnectionWakeReadFD = -1;
-    _idleConnectionWakeWriteFD = -1;
+    _idleConnectionWakeReadFD = ALNInvalidSocketHandle;
+    _idleConnectionWakeWriteFD = ALNInvalidSocketHandle;
     _serverSocketFD = ALNInvalidSocketHandle;
     _staticMountCacheLock = [[NSLock alloc] init];
     _cachedStaticMounts = nil;
@@ -3878,43 +3984,38 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 // longer pin the fixed worker pool. Parked connections keep their HTTP session
 // reservation and are closed after connectionTimeoutSeconds, as before.
 - (void)startIdleConnectionWatcher {
-#if !defined(_WIN32)
   if (self.idleConnectionWatcherRunning) {
     return;
   }
-  int fds[2];
-  if (pipe(fds) != 0) {
+  ALNSocketHandle readEnd = ALNInvalidSocketHandle;
+  ALNSocketHandle writeEnd = ALNInvalidSocketHandle;
+  if (!ALNWakeChannelOpen(&readEnd, &writeEnd)) {
     return;
   }
-  for (int idx = 0; idx < 2; idx++) {
-    int flags = fcntl(fds[idx], F_GETFL, 0);
-    (void)fcntl(fds[idx], F_SETFL, flags | O_NONBLOCK);
-    (void)fcntl(fds[idx], F_SETFD, FD_CLOEXEC);
-  }
-  self.idleConnectionWakeReadFD = fds[0];
-  self.idleConnectionWakeWriteFD = fds[1];
+  self.idleConnectionWakeReadFD = readEnd;
+  self.idleConnectionWakeWriteFD = writeEnd;
   self.idleConnectionWatcherRunning = YES;
   @try {
     [NSThread detachNewThreadSelector:@selector(runIdleConnectionWatcher:) toTarget:self withObject:nil];
   } @catch (NSException *exception) {
     (void)exception;
     self.idleConnectionWatcherRunning = NO;
-    close(fds[0]);
-    close(fds[1]);
-    self.idleConnectionWakeReadFD = -1;
-    self.idleConnectionWakeWriteFD = -1;
+    ALNWakeChannelClose(readEnd, writeEnd);
+    self.idleConnectionWakeReadFD = ALNInvalidSocketHandle;
+    self.idleConnectionWakeWriteFD = ALNInvalidSocketHandle;
   }
-#endif
 }
 
+// Under idleConnectionLock, as the watcher's teardown closes the channel under
+// it: a wake racing shutdown must not write to a closed, reused handle number
+// (Windows reuses SOCKET values quickly). The signal never blocks.
 - (void)wakeIdleConnectionWatcher {
-#if !defined(_WIN32)
-  int wakeFD = self.idleConnectionWakeWriteFD;
-  if (wakeFD >= 0) {
-    uint8_t byte = 1;
-    (void)write(wakeFD, &byte, 1);
+  [self.idleConnectionLock lock];
+  ALNSocketHandle wakeEnd = self.idleConnectionWakeWriteFD;
+  if (wakeEnd != ALNInvalidSocketHandle) {
+    ALNWakeChannelSignal(wakeEnd);
   }
-#endif
+  [self.idleConnectionLock unlock];
 }
 
 - (BOOL)parkIdleConnection:(ALNSocketHandle)clientFd {
@@ -3935,12 +4036,6 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 - (BOOL)parkIfIdleConnection:(ALNSocketHandle)clientFd
                    readState:(ALNConnectionReadState *)readState
                    allowPark:(BOOL)allowPark {
-#if defined(_WIN32)
-  (void)clientFd;
-  (void)readState;
-  (void)allowPark;
-  return NO;
-#else
   if (!allowPark || !self.idleConnectionWatcherRunning || readState == NULL || readState->length > 0) {
     // Pipelined bytes are already buffered: serve them on this worker.
     return NO;
@@ -3952,30 +4047,26 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     // every worker and new clients got no service at all (PERF-07 on #187).
     return [self parkIdleConnection:clientFd];
   }
-  struct pollfd pfd;
-  pfd.fd = (int)clientFd;
-  pfd.events = POLLIN;
-  pfd.revents = 0;
+  ALNPollEntry entry;
+  ALNPollEntrySet(&entry, clientFd);
   int graceMilliseconds = (int)MIN(self.keepAliveParkAfterMilliseconds, (NSUInteger)1000);
   int rc = 0;
   do {
-    rc = poll(&pfd, 1, graceMilliseconds);
+    rc = ALNSocketPoll(&entry, 1, graceMilliseconds);
   } while (rc < 0 && errno == EINTR);
   if (rc != 0) {
     // The next request (or EOF) is already here, or poll failed: keep reading here.
     return NO;
   }
   return [self parkIdleConnection:clientFd];
-#endif
 }
 
 - (void)runIdleConnectionWatcher:(id)unused {
   (void)unused;
-#if !defined(_WIN32)
   @autoreleasepool {
     size_t pollCapacity = 64;
-    struct pollfd *pollFDs = calloc(pollCapacity, sizeof(struct pollfd));
-    int wakeFD = self.idleConnectionWakeReadFD;
+    ALNPollEntry *pollFDs = calloc(pollCapacity, sizeof(ALNPollEntry));
+    ALNSocketHandle wakeFD = self.idleConnectionWakeReadFD;
     while (pollFDs != NULL && [self shouldContinueRunning]) {
       @autoreleasepool {
         [self.idleConnectionLock lock];
@@ -3986,36 +4077,30 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
         size_t count = [parkedFDs count] + 1;
         if (count > pollCapacity) {
           size_t grownCapacity = MAX(count, pollCapacity * 2);
-          struct pollfd *grown = realloc(pollFDs, grownCapacity * sizeof(struct pollfd));
+          ALNPollEntry *grown = realloc(pollFDs, grownCapacity * sizeof(ALNPollEntry));
           if (grown == NULL) {
             break;
           }
           pollFDs = grown;
           pollCapacity = grownCapacity;
         }
-        pollFDs[0].fd = wakeFD;
-        pollFDs[0].events = POLLIN;
-        pollFDs[0].revents = 0;
+        ALNPollEntrySet(&pollFDs[0], wakeFD);
         double now = ALNNowMilliseconds();
         double timeoutMilliseconds = 250.0;
         for (NSUInteger idx = 0; idx < [parkedFDs count]; idx++) {
-          pollFDs[idx + 1].fd = (int)ALNSocketHandleFromNumber(parkedFDs[idx]);
-          pollFDs[idx + 1].events = POLLIN;
-          pollFDs[idx + 1].revents = 0;
+          ALNPollEntrySet(&pollFDs[idx + 1], ALNSocketHandleFromNumber(parkedFDs[idx]));
           double deadline = [deadlines[parkedFDs[idx]] doubleValue];
           if (deadline > 0.0) {
             timeoutMilliseconds = MIN(timeoutMilliseconds, MAX(0.0, deadline - now));
           }
         }
 
-        int rc = poll(pollFDs, (nfds_t)count, (int)ceil(timeoutMilliseconds));
+        int rc = ALNSocketPoll(pollFDs, count, (int)ceil(timeoutMilliseconds));
         if (rc < 0 && errno != EINTR) {
           break;
         }
         if (pollFDs[0].revents & POLLIN) {
-          uint8_t drain[64];
-          while (read(wakeFD, drain, sizeof(drain)) > 0) {
-          }
+          ALNWakeChannelDrain(wakeFD);
         }
 
         now = ALNNowMilliseconds();
@@ -4063,12 +4148,14 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     }
     free(pollFDs);
     self.idleConnectionWatcherRunning = NO;
-    close(self.idleConnectionWakeReadFD);
-    close(self.idleConnectionWakeWriteFD);
-    self.idleConnectionWakeReadFD = -1;
-    self.idleConnectionWakeWriteFD = -1;
+    [self.idleConnectionLock lock];
+    ALNSocketHandle wakeRead = self.idleConnectionWakeReadFD;
+    ALNSocketHandle wakeWrite = self.idleConnectionWakeWriteFD;
+    self.idleConnectionWakeReadFD = ALNInvalidSocketHandle;
+    self.idleConnectionWakeWriteFD = ALNInvalidSocketHandle;
+    ALNWakeChannelClose(wakeRead, wakeWrite);
+    [self.idleConnectionLock unlock];
   }
-#endif
 }
 
 - (void)resetHTTPWorkerPoolState {

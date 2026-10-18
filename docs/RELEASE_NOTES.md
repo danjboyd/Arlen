@@ -346,7 +346,9 @@
   `runtimeLimits.keepAliveParkAfterMilliseconds` (default 5), and picks it up
   again when the next request arrives. `docs/CONFIGURATION_REFERENCE.md` now
   documents `runtimeLimits` and notes that server-sent event and WebSocket
-  sessions still hold a worker while open (#187).
+  sessions still hold a worker while open (#187). Windows parks idle
+  connections too: its watcher polls with `WSAPoll` and wakes on a loopback
+  socket instead of a pipe (#200).
 
 - `arlen typescript-codegen` output compiles in two more cases (#184):
   - Inferred ORM relations no longer reuse a column name on the same model. A
