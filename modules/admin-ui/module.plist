@@ -1,9 +1,9 @@
 {
   identifier = "admin-ui";
-  version = "1.0.3";
+  version = "1.0.4";
   principalClass = "ALNAdminUIModule";
   dependencies = (
-    { identifier = "auth"; version = ">= 1.0.0"; }
+    { identifier = "auth"; version = ">= 1.5.4"; }
   );
   compatibility = {
     arlenVersion = ">= 0.1.0";

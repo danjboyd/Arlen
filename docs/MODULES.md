@@ -239,6 +239,10 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
+`auth` moved to `1.5.4` to resolve session roles from the current user record
+on every request (new migration `002_auth_session_stamp.sql`; run
+`arlen module migrate`), and `admin-ui` to `1.0.4`, which requires it, to end a
+user's sessions when the admin role is revoked.
 
 ## MCP tools
 

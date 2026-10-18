@@ -621,6 +621,10 @@ Example first-party bootstrap:
 Run `arlen module migrate --env <env>` before the first local `auth`
 registration or login attempt. If the auth module tables are missing, Arlen
 surfaces that setup guidance directly instead of a generic database error.
+Run it again after `arlen module upgrade auth`: signed-in requests read the
+user's current roles and session stamp from `auth_users`, and fail with the
+same guidance until the module's newer migrations are applied (see
+[Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
 First-party module surfaces after install:
 

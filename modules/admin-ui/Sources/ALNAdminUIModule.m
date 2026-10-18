@@ -1024,6 +1024,12 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   if (updated == nil && error != NULL && *error == NULL) {
     *error = AUError(ALNAdminUIModuleErrorNotFound, @"user not found", nil);
   }
+  // Sessions already resolve roles from the user record on every request; a
+  // revocation also ends the user's existing sessions so they sign in again.
+  if (updated != nil && [normalizedAction isEqualToString:@"revoke_admin"] &&
+      ![[ALNAuthModuleRuntime sharedRuntime] bumpSessionStampForSubject:updated[@"subject"] error:error]) {
+    return nil;
+  }
   return (updated != nil) ? @{ @"record" : updated, @"message" : message ?: @"" } : nil;
 }
 

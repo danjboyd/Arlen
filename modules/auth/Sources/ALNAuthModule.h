@@ -186,6 +186,33 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 
 @end
 
+/// Session resolution against the current user record (see docs/AUTH_MODULE.md).
+@interface ALNAuthModuleRuntime (ALNAuthModuleSessionRefresh)
+/// Resolves the request's session identity against its current source of truth:
+/// the `auth_users` row for module sign-ins (roles, session stamp, existence), or
+/// the provider resolver's `refreshSessionDescriptorForSubject:provider:error:`
+/// for configured OIDC providers. Live roles replace the session's roles for the
+/// request; a missing user, a resolver that returns nil, or a stale session
+/// stamp signs the session out. Returns NO with `error` when the lookup fails.
+/// The module installs a middleware that calls this on every request.
+- (BOOL)refreshAuthenticatedSessionForContext:(ALNContext *)context
+                                        error:(NSError *_Nullable *_Nullable)error;
+/// Stores the signed-in user's current session stamp in the session. Module
+/// sign-ins call this; call it after establishing a session for an `auth_users`
+/// subject yourself.
+- (BOOL)recordSessionStampForContext:(ALNContext *)context
+                               error:(NSError *_Nullable *_Nullable)error;
+/// Increments the user's session stamp, which signs out every existing session
+/// for `subject` on its next request.
+- (BOOL)bumpSessionStampForSubject:(NSString *)subject
+                             error:(NSError *_Nullable *_Nullable)error;
+@end
+
+/// Adds the per-request middleware that calls
+/// `refreshAuthenticatedSessionForContext:error:` once per application. Module
+/// registration calls this.
+FOUNDATION_EXPORT void ALNAuthModuleInstallSessionRefresh(ALNApplication *application);
+
 @interface ALNAuthModule : NSObject <ALNModule>
 @end
 

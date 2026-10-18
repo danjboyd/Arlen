@@ -26,6 +26,20 @@ typedef NS_ENUM(NSInteger, ALNAuthProviderSessionBridgeErrorCode) {
                                                    providerConfiguration:(NSDictionary *)providerConfiguration
                                                                    error:(NSError *_Nullable *_Nullable)error;
 
+/// Called after the bridge establishes the session for a resolved descriptor.
+/// Returning NO signs the session out again and fails the login with `error`.
+- (BOOL)providerSessionEstablishedForDescriptor:(NSDictionary *)sessionDescriptor
+                                        context:(ALNContext *)context
+                                          error:(NSError *_Nullable *_Nullable)error;
+
+/// Re-resolves an established session for `subject` on later requests, so roles
+/// follow the application's directory instead of the values stored at sign-in.
+/// Return a descriptor whose `roles` replace the session's roles for the request,
+/// or nil to sign the session out (nil with `error` fails the request instead).
+- (nullable NSDictionary *)refreshSessionDescriptorForSubject:(NSString *)subject
+                                                     provider:(NSString *)provider
+                                                        error:(NSError *_Nullable *_Nullable)error;
+
 @end
 
 @interface ALNAuthProviderSessionBridge : NSObject
