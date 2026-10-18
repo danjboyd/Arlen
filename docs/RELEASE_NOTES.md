@@ -20,6 +20,9 @@
     `security.forwardedClientIPHeader = "Forwarded"` is set. They used to
     prefer it over `X-Forwarded-For`.
   - `trustedProxyCIDRs` and `ARLEN_TRUSTED_PROXY_CIDRS` accept IPv6 ranges.
+    IPv4-mapped addresses (`::ffff:10.1.1.1`, which a dual-stack listener
+    reports for IPv4 peers) count as the IPv4 address, for proxy matching,
+    allowlists and the rate limiter's key.
   - The rate limiter tracks at most 65,536 clients at once.
   - **Upgrade:** with more than one proxy in front of Arlen (for example a load
     balancer and then nginx), list every proxy in `security.trustedProxies` and

@@ -248,6 +248,10 @@ static NSString *ALNNormalizeTrustedProxyCIDREntry(id rawValue) {
     NSArray *parts = [trimmed componentsSeparatedByString:@"/"];
     NSString *address = ALNClientAddressCanonicalIP(parts[0]);
     NSInteger prefix = ([parts count] == 2) ? [parts[1] integerValue] : 128;
+    if ([address rangeOfString:@":"].location == NSNotFound) {
+      // IPv4-mapped (::ffff:a.b.c.d/96..128): the IPv4 range it maps.
+      prefix -= 96;
+    }
     return [NSString stringWithFormat:@"%@/%ld", address, (long)prefix];
   }
 

@@ -871,13 +871,15 @@
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
 
-  setenv("ARLEN_TRUSTED_PROXY_CIDRS", "127.0.0.1/32, ::1, 2001:DB8::/32, 2001:db8::/129, junk", 1);
+  setenv("ARLEN_TRUSTED_PROXY_CIDRS",
+         "127.0.0.1/32, ::1, 2001:DB8::/32, 2001:db8::/129, junk, ::ffff:10.0.0.0/104", 1);
   NSError *error = nil;
   NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
   unsetenv("ARLEN_TRUSTED_PROXY_CIDRS");
 
   XCTAssertNil(error);
-  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"::1/128", @"2001:db8::/32" ]), config[@"trustedProxyCIDRs"]);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"::1/128", @"2001:db8::/32", @"10.0.0.0/8" ]),
+                        config[@"trustedProxyCIDRs"]);
 }
 
 - (void)testSecurityProfilePresetsApplyDeterministicDefaults {

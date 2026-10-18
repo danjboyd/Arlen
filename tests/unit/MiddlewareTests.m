@@ -398,6 +398,35 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   ALNAssertResponseStatus(denied, 403);
 }
 
+// A dual-stack listener reports the IPv4 proxy as ::ffff:127.0.0.1.
+- (void)testRoutePolicyTreatsIPv4MappedPeerAndHopsAsIPv4 {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"::ffff:127.0.0.1"
+                                                   headers:@{ @"X-Forwarded-For" : @"::FFFF:10.1.1.1" }];
+  ALNAssertResponseStatus(allowed, 200);
+
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/admin"
+                                            remoteAddress:@"::ffff:127.0.0.1"
+                                                  headers:@{ @"X-Forwarded-For" : @"10.1.1.1, ::ffff:203.0.113.9" }];
+  ALNAssertResponseStatus(denied, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [denied headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
 - (void)testRoutePolicyRejectsUnsupportedForwardedClientIPHeader {
   NSError *error = [ALNRoutePolicyMiddleware validateSecurityConfiguration:@{
     @"security" : @{ @"forwardedClientIPHeader" : @"X-Real-IP" }

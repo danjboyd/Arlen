@@ -107,6 +107,35 @@
   XCTAssertFalse(unresolved);
 }
 
+// A dual-stack listener reports IPv4 peers as ::ffff:a.b.c.d.
+- (void)testIPv4MappedIPv6CanonicalizesToIPv4 {
+  for (NSString *spelling in @[ @"::ffff:10.1.1.1", @"::FFFF:10.1.1.1", @"[::ffff:10.1.1.1]",
+                                @"[::ffff:10.1.1.1]:4711", @"0:0:0:0:0:ffff:0a01:0101", @"10.1.1.1" ]) {
+    XCTAssertEqualObjects(@"10.1.1.1", ALNClientAddressCanonicalIP(spelling), @"%@", spelling);
+  }
+  // Not mapped: IPv4-compatible and NAT64 forms stay IPv6.
+  XCTAssertEqualObjects(@"64:ff9b::a01:101", ALNClientAddressCanonicalIP(@"64:ff9b::10.1.1.1"));
+}
+
+- (void)testIPv4MappedPeersAndHopsMatchIPv4Ranges {
+  NSArray *trusted = @[ @"127.0.0.1/32" ];
+  XCTAssertTrue(ALNClientAddressMatchesAnyCIDR(@"::ffff:127.0.0.1", trusted));
+  XCTAssertTrue(ALNClientAddressMatchesAnyCIDR(@"::ffff:10.1.1.1", @[ @"10.0.0.0/8" ]));
+  XCTAssertTrue(ALNClientAddressMatchesAnyCIDR(@"10.1.1.1", @[ @"::ffff:10.0.0.0/104" ]));
+  XCTAssertFalse(ALNClientAddressMatchesAnyCIDR(@"::ffff:11.1.1.1", @[ @"10.0.0.0/8" ]));
+  XCTAssertFalse(ALNClientAddressCIDRIsValid(@"::ffff:10.0.0.0/95"));
+
+  // Mapped direct peer is a trusted proxy; a mapped hop is skipped as trusted
+  // and the result has the same spelling as the plain IPv4 form.
+  NSArray *chain = @[ @"127.0.0.1/32", @"10.0.0.0/8" ];
+  XCTAssertEqualObjects(@"203.0.113.9",
+                        [self clientFromPeer:@"::ffff:127.0.0.1"
+                               xForwardedFor:@"::ffff:203.0.113.9, [::FFFF:10.1.1.1]:80"
+                                     trusted:chain]);
+  XCTAssertEqualObjects([self clientFromPeer:@"127.0.0.1" xForwardedFor:@"203.0.113.9" trusted:trusted],
+                        [self clientFromPeer:@"::ffff:127.0.0.1" xForwardedFor:@"::ffff:203.0.113.9" trusted:trusted]);
+}
+
 - (void)testForwardedHeaderHopsAreReadInOrder {
   NSArray *hops = ALNClientAddressForwardedHops(
       @"for=10.1.1.1;proto=https, proto=http, for=\"[2001:db8::9]:4711\";by=10.0.0.1, For=203.0.113.9");

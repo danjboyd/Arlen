@@ -54,9 +54,22 @@ static NSString *ALNClientAddressCandidate(NSString *value) {
   return trimmed;
 }
 
-static BOOL ALNClientAddressParseBytes(NSString *value, int *familyOut, uint8_t bytesOut[16]) {
+// An IPv4-mapped IPv6 address (::ffff:a.b.c.d) is the IPv4 address; a
+// dual-stack listener reports IPv4 peers that way.
+static BOOL ALNClientAddressIsIPv4Mapped(const uint8_t bytes[16]) {
+  static const uint8_t prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+  return memcmp(bytes, prefix, sizeof(prefix)) == 0;
+}
+
+static BOOL ALNClientAddressParseBytesMapped(NSString *value,
+                                             int *familyOut,
+                                             uint8_t bytesOut[16],
+                                             BOOL *mappedOut) {
   *familyOut = 0;
   memset(bytesOut, 0, 16);
+  if (mappedOut != NULL) {
+    *mappedOut = NO;
+  }
   NSString *candidate = ALNClientAddressCandidate(value);
   const char *raw = [candidate UTF8String];
   if ([candidate length] == 0 || raw == NULL) {
@@ -74,9 +87,21 @@ static BOOL ALNClientAddressParseBytes(NSString *value, int *familyOut, uint8_t 
   if (inet_pton(AF_INET6, raw, &ipv6) == 1) {
     memcpy(bytesOut, &ipv6, 16);
     *familyOut = AF_INET6;
+    if (ALNClientAddressIsIPv4Mapped(bytesOut)) {
+      memmove(bytesOut, bytesOut + 12, 4);
+      memset(bytesOut + 4, 0, 12);
+      *familyOut = AF_INET;
+      if (mappedOut != NULL) {
+        *mappedOut = YES;
+      }
+    }
     return YES;
   }
   return NO;
+}
+
+static BOOL ALNClientAddressParseBytes(NSString *value, int *familyOut, uint8_t bytesOut[16]) {
+  return ALNClientAddressParseBytesMapped(value, familyOut, bytesOut, NULL);
 }
 
 static BOOL ALNClientAddressParsePrefix(NSString *value, NSUInteger maxPrefix, NSUInteger *prefixOut) {
@@ -95,14 +120,24 @@ static BOOL ALNClientAddressParsePrefix(NSString *value, NSUInteger maxPrefix, N
   return YES;
 }
 
-// Parses "address[/prefix]"; a bare address is a full-length prefix.
+// Parses "address[/prefix]"; a bare address is a full-length prefix. An
+// IPv4-mapped range (::ffff:a.b.c.d/96..128) is the IPv4 range it maps.
 static BOOL ALNClientAddressParseCIDR(NSString *cidr, int *familyOut, uint8_t bytesOut[16], NSUInteger *prefixOut) {
   NSArray *parts = [ALNClientAddressTrimmed(cidr) componentsSeparatedByString:@"/"];
   if ([parts count] == 0 || [parts count] > 2) {
     return NO;
   }
-  if (!ALNClientAddressParseBytes(parts[0], familyOut, bytesOut)) {
+  BOOL mapped = NO;
+  if (!ALNClientAddressParseBytesMapped(parts[0], familyOut, bytesOut, &mapped)) {
     return NO;
+  }
+  if (mapped) {
+    NSUInteger prefix = 128;
+    if ([parts count] == 2 && (!ALNClientAddressParsePrefix(parts[1], 128, &prefix) || prefix < 96)) {
+      return NO;
+    }
+    *prefixOut = prefix - 96;
+    return YES;
   }
   NSUInteger maxPrefix = (*familyOut == AF_INET) ? 32 : 128;
   *prefixOut = maxPrefix;
