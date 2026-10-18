@@ -105,12 +105,15 @@ Generated apps start with:
 - `maxBodyBytes`
 - `requestHeadTimeoutSeconds` (default `15`; env
   `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`): the total time a client has to finish
-  sending a request head (request line and headers), counted from its first
-  byte. A head that takes longer gets `408` and the connection closes.
-  `connectionTimeoutSeconds` only bounds each individual read, so without this
-  a client sending one byte every few seconds could hold an HTTP worker
-  indefinitely. Idle keep-alive time before a request's first byte is not
-  counted. `0` turns the limit off.
+  sending a request head (request line and headers). For a connection's first
+  request it is counted from when the connection was accepted, so it also
+  covers a client that never sends a byte and the time a connection waited for
+  a free HTTP worker. For later requests on a keep-alive connection it is
+  counted from the head's first byte; idle time between requests stays bounded
+  by `connectionTimeoutSeconds`. A head that takes longer gets `408` and the
+  connection closes. `connectionTimeoutSeconds` only bounds each individual
+  read, so without this a client sending one byte every few seconds could hold
+  an HTTP worker indefinitely. `0` turns the limit off.
 - `requestBodyTimeoutSeconds` (default `300`; env
   `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`): the total time a client has to send
   the request body, counted from the end of the head. It covers `Content-Length`

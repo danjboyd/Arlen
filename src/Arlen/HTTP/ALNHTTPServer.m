@@ -71,6 +71,10 @@ typedef struct {
   // Overall time allowed for a request head once its first byte has arrived
   // (0 = no limit). connectionTimeoutSeconds bounds each read, not the head.
   NSUInteger headTimeoutMilliseconds;
+  // For a connection's first request: the head deadline measured from accept
+  // (monotonic ms), so it also covers a client that never sends a byte and the
+  // time the connection waited for a worker. 0 for later requests.
+  uint64_t firstRequestHeadDeadline;
   // Body transfer bounds, counted from the end of the head (0 = off): a total
   // time, and after a grace period an average rate the client must sustain.
   NSUInteger bodyTimeoutMilliseconds;
@@ -612,6 +616,7 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   out.routeBodyLimitsActive = NO;
   NSUInteger headTimeoutSeconds = ALNConfigUInt(limits, @"requestHeadTimeoutSeconds", 15);
   out.headTimeoutMilliseconds = (headTimeoutSeconds > 86400) ? 86400000 : headTimeoutSeconds * 1000;
+  out.firstRequestHeadDeadline = 0;
   NSUInteger bodyTimeoutSeconds = ALNConfigUInt(limits, @"requestBodyTimeoutSeconds", 300);
   out.bodyTimeoutMilliseconds = (bodyTimeoutSeconds > 86400) ? 86400000 : bodyTimeoutSeconds * 1000;
   out.bodyMinBytesPerSecond = ALNConfigUInt(limits, @"requestBodyMinBytesPerSecond", 1024);
@@ -2061,15 +2066,17 @@ static uint64_t ALNMonotonicMilliseconds(void) {
 #endif
 }
 
-// Waits for the rest of a request head. The deadline starts when the head's
-// first byte is buffered, so idle keep-alive time is not counted. Returns NO
-// (and sets 408) once the head has taken longer than limits.headTimeout.
+// Waits for the rest of a request head. On a connection's first request the
+// deadline was set from accept (limits.firstRequestHeadDeadline), so it also
+// covers a client that sends nothing; on later requests it starts when the
+// head's first byte is buffered, so idle keep-alive time is not counted.
+// Returns NO (and sets 408) once the deadline has passed.
 static BOOL ALNAwaitRequestHeadBytes(ALNSocketHandle clientFd,
                                      ALNRequestLimits limits,
                                      size_t bufferedLength,
                                      uint64_t *deadline,
                                      NSInteger *statusCode) {
-  if (limits.headTimeoutMilliseconds == 0 || bufferedLength == 0 || deadline == NULL) {
+  if (limits.headTimeoutMilliseconds == 0 || deadline == NULL || (bufferedLength == 0 && *deadline == 0)) {
     return YES;
   }
   uint64_t now = ALNMonotonicMilliseconds();
@@ -2078,6 +2085,11 @@ static BOOL ALNAwaitRequestHeadBytes(ALNSocketHandle clientFd,
   }
   while (1) {
     if (now >= *deadline) {
+      // Past the deadline, still take bytes that have already arrived: a
+      // connection that waited in the queue may hold a complete head.
+      if (ALNWebSocketWaitReadable(clientFd, 0) == 1) {
+        return YES;
+      }
       break;
     }
     int ready = ALNWebSocketWaitReadable(clientFd, (NSUInteger)(*deadline - now));
@@ -2098,16 +2110,19 @@ typedef struct {
   size_t startBytes;
 } ALNRequestBodyClock;
 
-// Waits for more of a request body. The clock starts at the first call, when
-// the head is complete; `receivedBytes` is any count that grows with the body.
-// Fails (408) once limits.bodyTimeout has passed, or once the average rate
-// since the start has fallen below limits.bodyMinBytesPerSecond after the
-// grace period. While the client is silent the rate is rechecked every second.
+// Checks a request body's progress before each read. The clock starts at the
+// first call, when the head is complete; `receivedBytes` is any count that
+// grows with the body. Fails (408) once limits.bodyTimeout has passed, or once
+// the average rate since the start has fallen below
+// limits.bodyMinBytesPerSecond after the grace period. A silent client is
+// still bounded by connectionTimeoutSeconds on the read itself; a client that
+// trickles bytes makes every read return, so this check runs between them.
 static BOOL ALNAwaitRequestBodyBytes(ALNSocketHandle clientFd,
                                      ALNRequestLimits limits,
                                      ALNRequestBodyClock *clock,
                                      size_t receivedBytes,
                                      NSInteger *statusCode) {
+  (void)clientFd;
   if (clock == NULL || (limits.bodyTimeoutMilliseconds == 0 && limits.bodyMinBytesPerSecond == 0)) {
     return YES;
   }
@@ -2115,29 +2130,15 @@ static BOOL ALNAwaitRequestBodyBytes(ALNSocketHandle clientFd,
   if (clock->start == 0) {
     clock->start = now;
     clock->startBytes = receivedBytes;
+    return YES;
   }
   uint64_t received = (receivedBytes > clock->startBytes) ? (uint64_t)(receivedBytes - clock->startBytes) : 0;
-  while (1) {
-    uint64_t elapsed = now - clock->start;
-    if (limits.bodyTimeoutMilliseconds > 0 && elapsed >= limits.bodyTimeoutMilliseconds) {
-      break;
-    }
-    if (limits.bodyMinBytesPerSecond > 0 && elapsed > limits.bodyMinRateGraceMilliseconds &&
-        received * 1000u < (uint64_t)limits.bodyMinBytesPerSecond * elapsed) {
-      break;
-    }
-    uint64_t wait = 1000;
-    if (limits.bodyTimeoutMilliseconds > 0) {
-      wait = MIN(wait, limits.bodyTimeoutMilliseconds - elapsed);
-    }
-    if (limits.bodyMinBytesPerSecond == 0 && limits.bodyTimeoutMilliseconds > 0) {
-      wait = limits.bodyTimeoutMilliseconds - elapsed;
-    }
-    int ready = ALNWebSocketWaitReadable(clientFd, (NSUInteger)wait);
-    if (ready != 0) {
-      return YES;
-    }
-    now = ALNMonotonicMilliseconds();
+  uint64_t elapsed = now - clock->start;
+  BOOL tooSlow = (limits.bodyTimeoutMilliseconds > 0 && elapsed >= limits.bodyTimeoutMilliseconds) ||
+                 (limits.bodyMinBytesPerSecond > 0 && elapsed > limits.bodyMinRateGraceMilliseconds &&
+                  received * 1000u < (uint64_t)limits.bodyMinBytesPerSecond * elapsed);
+  if (!tooSlow) {
+    return YES;
   }
   if (statusCode != NULL) {
     *statusCode = 408;
@@ -2440,7 +2441,7 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
   }
 
   BOOL continueAnswered = NO;
-  uint64_t headDeadline = 0;
+  uint64_t headDeadline = limits.firstRequestHeadDeadline;
   ALNRequestBodyClock bodyClock = {0, 0};
   while (1) {
     if (!readState->metadataReady) {
@@ -2583,7 +2584,7 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
   }
 
   BOOL continueAnswered = NO;
-  uint64_t headDeadline = 0;
+  uint64_t headDeadline = limits.firstRequestHeadDeadline;
   ALNRequestBodyClock bodyClock = {0, 0};
   while (1) {
     NSUInteger consumedLength = 0;
@@ -3809,6 +3810,9 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 @property(nonatomic, assign) NSUInteger pendingHTTPClientFDHeadIndex;
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
 @property(nonatomic, strong) NSMutableSet *resumedHTTPClientFDs;
+// Monotonic accept time (ms) of each queued new connection, keyed like
+// pendingHTTPClientFDs; taken by serveClient for the first head deadline.
+@property(nonatomic, strong) NSMutableDictionary *httpClientAcceptTimes;
 @property(nonatomic, assign) NSUInteger keepAliveParkAfterMilliseconds;
 @property(nonatomic, assign) NSUInteger webSocketPingIntervalSeconds;
 @property(nonatomic, assign) NSUInteger idleConnectionTimeoutSeconds;
@@ -3849,6 +3853,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     _pendingHTTPClientFDHeadIndex = 0;
     _httpWorkerPoolStarted = NO;
     _resumedHTTPClientFDs = [NSMutableSet set];
+    _httpClientAcceptTimes = [NSMutableDictionary dictionary];
     _keepAliveParkAfterMilliseconds = 5;
     _webSocketPingIntervalSeconds = 25;
     _idleConnectionTimeoutSeconds = 30;
@@ -4002,7 +4007,9 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
   [self.httpWorkerQueueCondition lock];
   BOOL accepted = ([self queuedHTTPClientCountLocked] < self.maxQueuedHTTPConnections);
   if (accepted) {
-    [self.pendingHTTPClientFDs addObject:ALNBoxSocketHandle(clientFd)];
+    NSNumber *boxed = ALNBoxSocketHandle(clientFd);
+    [self.pendingHTTPClientFDs addObject:boxed];
+    self.httpClientAcceptTimes[boxed] = @(ALNMonotonicMilliseconds());
     [self.httpWorkerQueueCondition signal];
   }
   [self.httpWorkerQueueCondition unlock];
@@ -4020,6 +4027,16 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
   }
   [self.httpWorkerQueueCondition unlock];
   return accepted;
+}
+
+// The accept time recorded when clientFd was queued, or now.
+- (uint64_t)takeAcceptTimeForHTTPClient:(ALNSocketHandle)clientFd {
+  [self.httpWorkerQueueCondition lock];
+  NSNumber *boxed = ALNBoxSocketHandle(clientFd);
+  NSNumber *acceptTime = self.httpClientAcceptTimes[boxed];
+  [self.httpClientAcceptTimes removeObjectForKey:boxed];
+  [self.httpWorkerQueueCondition unlock];
+  return (acceptTime != nil) ? [acceptTime unsignedLongLongValue] : ALNMonotonicMilliseconds();
 }
 
 - (ALNSocketHandle)dequeueHTTPClientForWorker:(BOOL *)resumed {
@@ -4698,6 +4715,9 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
   NSString *connectionRemoteAddress = ALNRemoteAddressForClient(clientFd) ?: @"";
   ALNConnectionReadState readState;
   ALNConnectionReadStateInit(&readState);
+  uint64_t acceptTime = [self takeAcceptTimeForHTTPClient:clientFd];
+  uint64_t firstHeadDeadline =
+      (!resumed && limits.headTimeoutMilliseconds > 0) ? acceptTime + limits.headTimeoutMilliseconds : 0;
 
   @try {
     // A resumed connection has already served requests, so a timeout closes it quietly.
@@ -4708,6 +4728,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
         NSInteger readStatus = 0;
         double parseStartMs = ALNNowMilliseconds();
+        limits.firstRequestHeadDeadline = (requestsHandled == 0) ? firstHeadDeadline : 0;
         ALNRequest *request = ALNReadHTTPRequest(clientFd,
                                                  limits,
                                                  self.requestParserBackend,

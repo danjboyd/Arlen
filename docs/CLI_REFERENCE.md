@@ -1203,7 +1203,7 @@ Environment:
 - `ARLEN_TRUSTED_PROXY` (legacy compatibility toggle for forwarded-header handling; when set to `1` with no explicit CIDRs, Arlen falls back to `127.0.0.1/32`; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
 - `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
-- `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS` (default `15`; total seconds to finish sending a request head after its first byte, else `408`; `0` disables; overrides `requestLimits.requestHeadTimeoutSeconds`)
+- `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS` (default `15`; total seconds to finish sending a request head, counted from accept for a connection's first request and from the first byte afterwards, else `408`; `0` disables; overrides `requestLimits.requestHeadTimeoutSeconds`)
 - `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS` (default `300`; total seconds to send a request body after its head, else `408`; `0` disables; overrides `requestLimits.requestBodyTimeoutSeconds`)
 - `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND` (default `1024`; minimum average body rate after the grace period, else `408`; `0` disables; overrides `requestLimits.requestBodyMinBytesPerSecond`)
 - `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS` (default `10`; seconds before the minimum body rate applies; overrides `requestLimits.requestBodyMinRateGraceSeconds`)
