@@ -498,6 +498,21 @@
                               "-MMD -MP -MF %s -MT$@ -c %s -o %s\\n\\n'"]);
 }
 
+// arlen doctor on Windows CLANG64: the dispatch.h probe needs the GNUmakefile's
+// Windows flags (it was a false FAIL without them), and libpq is found where
+// ALNDefaultLibpqCandidatePaths loads it, not through ldconfig.
+- (void)testArlenDoctorChecksTheWindowsCLANG64Toolchain {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *doctor = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
+  XCTAssertTrue([doctor containsString:@"if aln_platform_is_msys; then"]);
+  XCTAssertTrue([doctor containsString:@"probe_flags=\"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1\""]);
+  XCTAssertTrue([doctor containsString:@"clang \\$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only -"]);
+  XCTAssertTrue([doctor containsString:@"\"$framework_root/build/dll/libpq.dll\""]);
+  XCTAssertTrue([doctor containsString:@"/clang64/bin/libpq.dll"]);
+  XCTAssertTrue([doctor containsString:@"add_check \"libcurl\""]);
+  XCTAssertTrue([doctor containsString:@"toolchain_state=\"/state/cli-state.json\""]);
+}
+
 - (void)testDoctorAndCLIUseResolvedGNUstepContract {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *doctorScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
@@ -611,7 +626,9 @@
   XCTAssertTrue([script containsString:@"ARLEN_ENABLE_LLHTTP must be 0 or 1"]);
   XCTAssertTrue([script containsString:@"framework_lib=\"$framework_root/build/lib/libArlenFramework.a\""]);
   XCTAssertTrue([script containsString:@"framework_artifacts_are_current() {"]);
-  XCTAssertTrue([script containsString:@"make -q -C \"$framework_root\" \"$framework_eocc_target\" \"$framework_lib\""]);
+  XCTAssertTrue([script containsString:@"framework_make -q \"$framework_eocc_target\" \"$framework_lib\""]);
+  // ROOT_DIR is pinned: make -C resolves a space-free alias back into CURDIR.
+  XCTAssertTrue([script containsString:@"make -C \"$framework_root\" ROOT_DIR=\"$framework_root\" \"$@\""]);
   XCTAssertTrue([script containsString:@"framework_eocc_target=\"$framework_root/build/eocc\""]);
   XCTAssertTrue([script containsString:@"find \"$framework_root/modules\" -mindepth 2 -maxdepth 2 -type d -name 'Sources'"],
                 @"boomhauer app build must include first-party framework module headers");
@@ -636,7 +653,7 @@
   XCTAssertTrue([script containsString:
                              @"boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"]);
   XCTAssertTrue([script containsString:
-                             @"make -C \"$framework_root\" clean &&"]);
+                             @"framework_make clean &&"]);
   XCTAssertTrue([script containsString:
                              @"boomhauer: selected framework root contains sanitizer-instrumented framework artifacts:"]);
   XCTAssertTrue([script containsString:@"app-root builds link libArlenFramework.a without sanitizer runtimes"]);

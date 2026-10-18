@@ -60,6 +60,14 @@ NSData *_Nullable ALNPlatformMappedFileData(NSString *path, NSError *_Nullable *
 // a mapped file, so whatever cannot go yet is removed when its last mapped view
 // is released.
 void ALNPlatformRemoveItemWhenUnmapped(NSString *path);
+// Windows only: what struct stat lacks to tell file versions apart there
+// (st_ino is 0, times are whole seconds, st_ctime is the creation time). Fills
+// the NTFS file index and the 100 ns last-write and change times. NO on other
+// platforms or when the file cannot be opened.
+BOOL ALNPlatformFileVersion(NSString *path,
+                            unsigned long long *fileIndex,
+                            unsigned long long *writeTime,
+                            unsigned long long *changeTime);
 // Opens (creating, 0600) the lock file at path and blocks until this process
 // holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
 // on Windows. Returns the descriptor, or -1 with errno set.

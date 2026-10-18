@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
+  stop with "--build-tests currently supports GNUstep on Linux only"; the app
+  test bundle is now `AppTests.dll`, built against the framework's vendored
+  tools-xctest.
+- A spooled request body (`request.body` above `requestLimits.spoolThresholdBytes`)
+  reads as empty once the handler returns. On Windows its spool file used to
+  stay on disk after a handler exception, because the leaked request kept the
+  file mapped. Also on Windows, static and `renderFileAtPath:` ETags now use
+  the NTFS file index and 100 ns write/change times: a same-size rewrite within
+  a second used to keep its ETag, so a changed file could answer 304.
+- On Windows, `arlen boomhauer`, `arlen propane`, `arlen jobs worker` and the
+  other commands that run a shell step (`arlen build`, `check`, `test`,
+  `perf`) work from a console window. They used to exit 1 at once with
+  "echo: write error: Bad file descriptor": `arlen` started `bash` through
+  `NSTask`, which gives the child no console, while passing it the console's
+  handles. They worked only when output went to a pipe or file (CI, `| tee`).
+  `arlen` now starts `bash` on its own console and returns its exit code.
+  Ctrl-C stops the whole command (`bash`, the server and the app) and `arlen`
+  exits 130; closing the window or ending `arlen` stops it too, so nothing is
+  left holding the port.
 - Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
   managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
   toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming
@@ -55,7 +75,6 @@
   workers take turns. A new request behind 16 busy keep-alive clients went
   from no response (10 s timeout) to about 1 ms. Single-client throughput is
   unchanged.
-
 - Response headers are serialized into a byte buffer instead of an
   `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
   check on each of about 80 appends per response. Serializing a typical
@@ -316,9 +335,23 @@
   minutes before propane started and never checked the second probe port, so
   CI occasionally failed with `bind: Address already in use` (#170).
 
+
+- Releases now include `arlen-X.Y.Z-windows-x64.zip`, a prebuilt Windows
+  archive for the gnustep-cli managed MSYS2 `CLANG64` toolchain. It bundles
+  `libpq.dll`, which the toolchain does not ship, and records the toolchain
+  version it was built against. `SHA256SUMS` covers it and `install.ps1`. A
+  new `release-certification / windows` job installs the zip with
+  `install.ps1` and checks `arlen new`, the app build and `boomhauer` through
+  the installed launcher (#200).
+
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
+- `tools/install.ps1`: a PowerShell installer for Windows that mirrors
+  `install.sh`. It downloads `arlen-X.Y.Z-windows-x64.zip`, checks it against
+  `SHA256SUMS`, and refuses a gnustep-cli managed CLANG64 toolchain whose
+  version differs from the one the zip was built against. It installs to
+  `%LOCALAPPDATA%\Arlen` and adds an `arlen.cmd` launcher (#200).
 
 - `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
   GNUstep.sh. On Linux it and `smoke_release.sh` source

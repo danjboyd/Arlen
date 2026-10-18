@@ -1726,11 +1726,15 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 
 - (void)removeTemporaryFiles {
   [self removeMultipartSpool];
-  // `body` may still map the file: POSIX unlink keeps the mapping valid, and on
-  // Windows the removal finishes when the mapping is released.
+  // A spooled body ends with the handler, so release the request's mapping
+  // too. A handler exception leaks the request (ARC frames unwind without
+  // releasing), and on Windows the file cannot be deleted while it is mapped.
+  // Other holders of the data keep it readable; POSIX unlink keeps the mapping
+  // valid, and on Windows the removal finishes when the last one is released.
   NSString *bodyPath = self.bodySpoolPath;
   if (bodyPath != nil) {
     self.bodySpoolPath = nil;
+    _body = [NSData data];
     ALNPlatformRemoveItemWhenUnmapped(bodyPath);
   }
 }

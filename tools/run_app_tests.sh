@@ -111,7 +111,15 @@ export GNUSTEP_USER_DIR="$test_home/GNUstep"
 export GNUSTEP_USER_ROOT="$test_home/GNUstep"
 export GNUSTEP_USER_DEFAULTS_DIR="$test_home/GNUstep/Defaults"
 if [[ -n "$runner_lib_dir" ]]; then
-  export LD_LIBRARY_PATH="$runner_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # Windows resolves the vendored XCTest-0.dll through PATH.
+      export PATH="$runner_lib_dir:$PATH"
+      ;;
+    *)
+      export LD_LIBRARY_PATH="$runner_lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      ;;
+  esac
 fi
 export ARLEN_APP_ROOT="$app_root"
 cd "$app_root"
