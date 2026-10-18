@@ -353,9 +353,12 @@ NSString *ALNTestRunShellCapture(NSString *command, int *exitCode) {
 
 NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     NSDictionary<NSString *, NSString *> *environment) {
-  // Strip only TSAN preloads before exec: clearing them inside bash is too late.
-  // Instrumented executables load their linked sanitizer runtime themselves.
-  // Keep TSAN_OPTIONS so those children retain the lane's diagnostic policy.
+  // Strip TSAN preloads, and clang's shared ASan runtime (the nightly
+  // integration sanitizer lane, which links children with -shared-libsan),
+  // before exec: clearing them inside bash is too late. Instrumented
+  // executables load their linked sanitizer runtime themselves, and
+  // uninstrumented tools (make, gnustep-config, dd) must not run under it.
+  // Keep TSAN_OPTIONS/ASAN_OPTIONS so those children retain the lane's policy.
   NSMutableDictionary *child = [environment mutableCopy];
   NSCharacterSet *separators = [NSCharacterSet characterSetWithCharactersInString:@" :\t\n"];
   for (NSString *name in @[ @"LD_PRELOAD", @"XCTEST_LD_PRELOAD" ]) {
@@ -367,7 +370,8 @@ NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
     for (NSString *library in [value componentsSeparatedByCharactersInSet:separators]) {
       NSString *filename = [library lastPathComponent];
       BOOL isTSAN = [filename hasPrefix:@"libtsan.so"] || [filename hasPrefix:@"libclang_rt.tsan"];
-      if ([library length] > 0 && !isTSAN) {
+      BOOL isSharedClangASAN = [filename hasPrefix:@"libclang_rt.asan"];
+      if ([library length] > 0 && !isTSAN && !isSharedClangASAN) {
         [retained addObject:library];
       }
     }

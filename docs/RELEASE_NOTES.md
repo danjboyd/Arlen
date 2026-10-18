@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- CI: a nightly `linux-sanitizers / integration-sanitizers-nightly` job runs
+  the integration suite against an ASAN+UBSan build (clang's shared runtime,
+  per-process reports under `build/sanitizers/integration_nightly/`). It skips
+  the app-root tests listed in
+  `tests/fixtures/sanitizers/integration_nightly_skips.txt`, which
+  `tools/ci/classify_sanitizer_integration_skips.py` maintains, and is not a
+  required check (#271).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

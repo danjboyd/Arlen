@@ -918,9 +918,9 @@
   XCTAssertTrue([script containsString:@"second_deadlock_stack=1"]);
 }
 
-- (void)testShellEnvironmentRemovesOnlyTSANPreloadBeforeLaunch {
+- (void)testShellEnvironmentRemovesTSANAndSharedClangASanPreloadBeforeLaunch {
   NSDictionary *parent = @{
-    @"LD_PRELOAD": @"/tmp/libtsan.so:/tmp/libkeep.so /tmp/libclang_rt.tsan-x86_64.so",
+    @"LD_PRELOAD": @"/tmp/libtsan.so:/tmp/libkeep.so /tmp/libclang_rt.tsan-x86_64.so:/tmp/libclang_rt.asan-x86_64.so",
     @"XCTEST_LD_PRELOAD": @"/tmp/libtsan.so",
     @"TSAN_OPTIONS": @"halt_on_error=1",
     @"PATH": @"/usr/bin:/bin",
@@ -1553,6 +1553,36 @@
 
   XCTAssertTrue([workflow containsString:@"Run linux sanitizer matrix gate"]);
   XCTAssertTrue([workflow containsString:@"ARLEN_PERF_RETRY_COUNT: \"3\""]);
+}
+
+- (void)testIntegrationSanitizerLaneIsNightlyAndKeepsItsSkipListCurrent {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workflow = [self
+      readFile:[repoRoot stringByAppendingPathComponent:@".github/workflows/linux-sanitizers.yml"]];
+  NSRange job = [workflow rangeOfString:@"  integration-sanitizers-nightly:\n"];
+  XCTAssertNotEqual(NSNotFound, job.location);
+  if (job.location == NSNotFound) {
+    return;
+  }
+  NSString *jobText = [workflow substringFromIndex:job.location];
+  XCTAssertTrue([jobText containsString:
+                             @"if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"]);
+  XCTAssertTrue([jobText containsString:@"continue-on-error: true"]);
+  XCTAssertTrue([jobText containsString:@"bash ./tools/ci/run_linux_integration_sanitizers_nightly.sh"]);
+
+  NSString *script = [self readFile:[repoRoot stringByAppendingPathComponent:
+                                                  @"tools/ci/run_linux_integration_sanitizers_nightly.sh"]];
+  XCTAssertTrue([script containsString:@"classify_sanitizer_integration_skips.py --check"]);
+  XCTAssertTrue([script containsString:@"-shared-libsan"]);
+
+  // A new integration test that builds an app root must be added to the skip
+  // list, or the nightly lane wipes build/ under itself.
+  int exitCode = -1;
+  NSString *output = [self runShellCapture:[NSString stringWithFormat:
+                                                  @"cd %@ && python3 -I tools/ci/classify_sanitizer_integration_skips.py --check 2>&1",
+                                                  repoRoot]
+                                  exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", output);
 }
 
 - (void)testBackendParityArtifactsRebuildPerFeatureCombo {

@@ -561,6 +561,15 @@ Both regressions also run in the existing Linux integration suite.
 
 ## TSAN reliability and retained evidence
 
+The nightly integration sanitizer lane
+(`bash tools/ci/run_linux_integration_sanitizers_nightly.sh`, workflow job
+`linux-sanitizers / integration-sanitizers-nightly`) runs the integration
+bundle against an ASAN+UBSan build, skipping the app-root tests listed in
+`tests/fixtures/sanitizers/integration_nightly_skips.txt`. It is informational,
+like the thread-race lane; see `docs/CI_ALIGNMENT.md`. After adding an
+integration test that builds an app root, run
+`python3 tools/ci/classify_sanitizer_integration_skips.py --write`.
+
 The nightly thread-race lane remains informational. Its library-wide
 suppressions and 14 TSAN-only test returns were retired on 2026-09-21;
 previous green runs are not promotion evidence for the new configuration.
