@@ -318,6 +318,28 @@ Other clients get the plain-text `csrf verification failed` body. SPA clients
 can match on `error.code == "csrf_invalid"` to refresh their token and retry.
 Tokens are compared in constant time.
 
+Auth module sign-in limits (`authModule.attemptLimits`, auth 1.6.0 with
+migration `004_auth_totp_limits`) are separate from the `rateLimit`
+middleware below:
+
+- `attemptLimits.mfa.maxFailures` (default `5`), `lockoutSeconds` (`30`),
+  `maxLockoutSeconds` (`900`): per-account lock for failed TOTP and
+  recovery-code checks.
+- `attemptLimits.password.maxFailures` (default `5`), `delaySeconds` (`30`),
+  `maxDelaySeconds` (`900`): failed password sign-ins per pair of submitted
+  email and client address (`ALNRequest.effectiveRemoteAddress`). After
+  `maxFailures`, that pair waits, doubling per further failure.
+- `attemptLimits.password.accountMaxFailures` (default `50`),
+  `accountWindowSeconds` (`3600`), `accountDelaySeconds` (`30`): an
+  account-wide ceiling against distributed guessing across all addresses.
+- `attemptLimits.password.maxTrackedEntries` (default `100000`): cap on stored
+  password counter rows.
+- `maxFailures = 0` turns a limit off (for `password`, both the per-address
+  delay and the ceiling); `accountMaxFailures = 0` turns off only the ceiling.
+
+See [Auth Module](AUTH_MODULE.md#totp-replay-protection-and-attempt-limits)
+for the full behaviour.
+
 ## 6. Rate Limits and Security Headers
 
 Rate limiting:

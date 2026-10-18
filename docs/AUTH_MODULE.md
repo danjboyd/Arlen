@@ -122,40 +122,68 @@ These need auth module migration `004_auth_totp_limits` (run
   Each recovery code works once. The session records the method as
   `recovery_code` instead of `totp`.
 - TOTP and recovery-code checks share one failure counter per account
-  (`auth_attempt_limits`, scope `mfa`). Local password sign-in has its own
-  counter per account (scope `password`), which also covers the current
-  password check when a signed-in user changes their password.
-- when an account reaches `maxFailures` consecutive failures it is locked for
-  `lockoutSeconds`. Each further failure after a lock ends doubles the lock, up
-  to `maxLockoutSeconds`. A successful check resets the counter, and failures
+  (`auth_attempt_limits`, scope `mfa`). When an account reaches
+  `mfa.maxFailures` consecutive failures it is locked for `lockoutSeconds`.
+  Each further failure after a lock ends doubles the lock, up to
+  `maxLockoutSeconds`. A successful check resets the counter, and failures
   older than 24 hours start over.
-- while locked, the route answers `429` with a `Retry-After` header (seconds)
-  and the error `Too many failed attempts. Try again in N seconds.`, without
-  checking the submitted code or password. HTML routes render the same error on
-  the form.
+- local password sign-in (and the current-password check when a signed-in user
+  changes their password) is slowed down rather than locked:
+  - failures are counted per pair of submitted email and client address. After
+    `password.maxFailures` failures from one address, that pair waits
+    `delaySeconds` before its next attempt, and each further failure doubles
+    the wait, up to `maxDelaySeconds`. Other addresses are not affected, and a
+    successful sign-in clears only its own pair.
+  - an account-wide ceiling against distributed guessing counts failures for
+    the email across all addresses. Beyond `accountMaxFailures` failures within
+    `accountWindowSeconds`, every further failure adds a wait for that email
+    (`accountDelaySeconds`, doubling, up to `maxDelaySeconds`). The wait ends
+    on its own; nothing needs to be unlocked.
+  - the client address is the server's proxy-aware address
+    (`ALNRequest.effectiveRemoteAddress`), never a raw `X-Forwarded-For` or
+    `Forwarded` header.
+  - counters are keyed by a SHA-256 of the normalized submitted email
+    (`auth_password_attempts`), not by the account, and are checked before the
+    account is looked up. Known and unknown emails get the same counters,
+    delays, response bodies and one Argon2 verification each, so the limiter
+    does not reveal whether an account exists.
+  - the table stays bounded: once a minute a sign-in removes rows with no
+    active wait that have not changed for 24 hours (or `accountWindowSeconds`,
+    if longer), and keeps at most `maxTrackedEntries` rows, dropping rows
+    without an active wait first, oldest first.
+- while a lock or wait is active, the route answers `429` with a `Retry-After`
+  header (seconds) and the error `Too many failed attempts. Try again in N
+  seconds.`, without checking the submitted code or password. HTML routes
+  render the same error on the form.
 - an attempt is counted before the code or password is checked, so parallel
   requests cannot run more checks than the limit allows.
 
-Defaults (`maxFailures = 0` turns a counter off):
+Defaults (`maxFailures = 0` turns a counter off; for `password` it turns off
+both the per-address delay and the account-wide ceiling, and
+`accountMaxFailures = 0` turns off only the ceiling):
 
 ```plist
 authModule = {
   attemptLimits = {
     mfa = { maxFailures = 5; lockoutSeconds = 30; maxLockoutSeconds = 900; };
-    password = { maxFailures = 10; lockoutSeconds = 30; maxLockoutSeconds = 900; };
+    password = {
+      maxFailures = 5;
+      delaySeconds = 30;
+      maxDelaySeconds = 900;
+      accountMaxFailures = 50;
+      accountWindowSeconds = 3600;
+      accountDelaySeconds = 30;
+      maxTrackedEntries = 100000;
+    };
   };
 };
 ```
 
-The password counter is per account, so repeated wrong passwords for an email
-address lock that account's password sign-in for everyone until the lock
-expires. A locked account answers `429` where an unknown email answers `401`.
-Registration already reports whether an email is registered, so this does not
-reveal anything new. Raise `password.maxFailures`, or set it to `0`, if that
-trade-off does not suit your app. Provider (OIDC) sign-in is not counted.
+While the account-wide ceiling is in effect, sign-in for that email waits from
+every address, including the owner's. Provider (OIDC) sign-in is not counted.
 
 If migration 004 has not been applied, TOTP and password verification keep
-working without replay protection or counters. The module logs one warning
+working without replay protection, counters or delays. The module logs one warning
 naming `arlen module migrate` and never fails the request because of the
 missing schema.
 

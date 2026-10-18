@@ -38,16 +38,22 @@
           };
         };
         attemptLimits = {
-          /* Per-account failure counters (migration 004). maxFailures = 0 turns a limit off. */
+          /* Failure counters (migration 004). maxFailures = 0 turns a limit off. */
           mfa = {
             maxFailures = 5;
             lockoutSeconds = 30;
             maxLockoutSeconds = 900;
           };
           password = {
-            maxFailures = 10;
-            lockoutSeconds = 30;
-            maxLockoutSeconds = 900;
+            /* Per (email, client address) pair: delay after maxFailures, doubling. */
+            maxFailures = 5;
+            delaySeconds = 30;
+            maxDelaySeconds = 900;
+            /* Account-wide ceiling against distributed guessing (0 turns it off). */
+            accountMaxFailures = 50;
+            accountWindowSeconds = 3600;
+            accountDelaySeconds = 30;
+            maxTrackedEntries = 100000;
           };
         };
         paths = {

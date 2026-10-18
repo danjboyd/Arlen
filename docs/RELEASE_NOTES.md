@@ -3,11 +3,17 @@
 ## Unreleased
 
 - `auth` 1.6.0 refuses a TOTP code whose time step was already accepted for the
-  enrollment, even in another session, and limits failed verification attempts
-  per account. Five consecutive failed TOTP or recovery-code checks (or ten
-  failed passwords) lock that check for 30 seconds, doubling with each further
-  failure up to 15 minutes; a success resets the count. Locked requests answer
-  `429` with `Retry-After`. Limits are set under `authModule.attemptLimits`. A
+  enrollment, even in another session, and limits failed verification
+  attempts. Five consecutive failed TOTP or recovery-code checks lock MFA for
+  that account for 30 seconds, doubling with each further failure up to 15
+  minutes; a success resets the count. Failed password sign-ins are counted per
+  submitted email and client address: after five, that pair waits 30 seconds,
+  doubling up to 15 minutes, and a success clears only that pair. An
+  account-wide ceiling against distributed guessing adds a wait for an email
+  after 50 failures in an hour from all addresses. Password counters are keyed
+  by the submitted email, so known and unknown emails behave the same. Waiting
+  requests answer `429` with `Retry-After`. Limits are set under
+  `authModule.attemptLimits`. A
   verified enrollment now also accepts one of its recovery codes at the TOTP
   challenge, once each; they were issued but could not be used before. Run
   `arlen module migrate` to apply the new auth migration

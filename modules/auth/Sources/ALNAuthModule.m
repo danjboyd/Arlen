@@ -27,7 +27,8 @@ NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 NSString *const ALNAuthModuleRetryAfterSecondsKey = @"retry_after_seconds";
 
 static NSString *const AMAttemptScopeMFA = @"mfa";
-static NSString *const AMAttemptScopePassword = @"password";
+// auth_password_attempts.client_ip value for the account-wide row.
+static NSString *const AMPasswordAccountRowAddress = @"*";
 // Failure counts older than this start over at the next failure.
 static const NSTimeInterval AMAttemptFailureWindowSeconds = 86400.0;
 
@@ -224,6 +225,24 @@ static NSError *AMRateLimitedError(NSUInteger retryAfterSeconds, NSString *messa
   return AMError(ALNAuthModuleErrorRateLimited,
                  message,
                  @{ ALNAuthModuleRetryAfterSecondsKey : @(MAX(retryAfterSeconds, (NSUInteger)1)) });
+}
+
+static NSString *AMPasswordAttemptKeyForEmail(NSString *normalizedEmail) {
+  NSData *digest = ALNSHA256([(normalizedEmail ?: @"") dataUsingEncoding:NSUTF8StringEncoding]);
+  return ALNLowercaseHexStringFromData(digest) ?: @"";
+}
+
+static NSString *AMPasswordAttemptAddress(NSString *clientAddress) {
+  NSString *address = AMLowerTrimmedString(clientAddress);
+  if ([address length] == 0 || [address isEqualToString:AMPasswordAccountRowAddress]) {
+    return @"unknown";
+  }
+  return ([address length] > 128) ? [address substringToIndex:128] : address;
+}
+
+static NSUInteger AMDoublingDelay(NSUInteger baseSeconds, NSUInteger exponent, NSUInteger maxSeconds) {
+  double scaled = (double)baseSeconds * pow(2.0, (double)MIN(exponent, (NSUInteger)20U));
+  return (NSUInteger)MIN(scaled, (double)maxSeconds);
 }
 
 static BOOL AMLooksLikeTOTPCode(NSString *code) {
@@ -810,8 +829,14 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, assign) NSUInteger mfaLockoutSeconds;
 @property(nonatomic, assign) NSUInteger mfaMaxLockoutSeconds;
 @property(nonatomic, assign) NSUInteger passwordMaxFailures;
-@property(nonatomic, assign) NSUInteger passwordLockoutSeconds;
-@property(nonatomic, assign) NSUInteger passwordMaxLockoutSeconds;
+@property(nonatomic, assign) NSUInteger passwordDelaySeconds;
+@property(nonatomic, assign) NSUInteger passwordMaxDelaySeconds;
+@property(nonatomic, assign) NSUInteger passwordAccountMaxFailures;
+@property(nonatomic, assign) NSUInteger passwordAccountWindowSeconds;
+@property(nonatomic, assign) NSUInteger passwordAccountDelaySeconds;
+@property(nonatomic, assign) NSUInteger passwordMaxTrackedEntries;
+@property(nonatomic, assign) NSTimeInterval passwordAttemptsLastPrunedAt;
+@property(nonatomic, strong) id attemptLimitSchemaDatabase;
 @property(nonatomic, strong) ALNLogger *logger;
 @property(nonatomic, assign) BOOL attemptLimitSchemaAvailable;
 @property(nonatomic, assign) BOOL attemptLimitSchemaWarningLogged;
@@ -859,6 +884,11 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email
                                          password:(NSString *)password
                                             error:(NSError **)error;
+- (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email
+                                         password:(NSString *)password
+                                    clientAddress:(nullable NSString *)clientAddress
+                                            error:(NSError **)error;
+- (NSInteger)prunePasswordAttempts;
 - (NSUInteger)dummyPasswordVerificationCount;
 - (nullable NSDictionary *)startSessionForUser:(NSDictionary *)user
                                       provider:(NSString *)provider
@@ -1168,9 +1198,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _mfaMaxFailures = 5U;
     _mfaLockoutSeconds = 30U;
     _mfaMaxLockoutSeconds = 900U;
-    _passwordMaxFailures = 10U;
-    _passwordLockoutSeconds = 30U;
-    _passwordMaxLockoutSeconds = 900U;
+    _passwordMaxFailures = 5U;
+    _passwordDelaySeconds = 30U;
+    _passwordMaxDelaySeconds = 900U;
+    _passwordAccountMaxFailures = 50U;
+    _passwordAccountWindowSeconds = 3600U;
+    _passwordAccountDelaySeconds = 30U;
+    _passwordMaxTrackedEntries = 100000U;
   }
   return self;
 }
@@ -1261,10 +1295,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.mfaMaxFailures = ALNUnsignedIntegerValueOrDefault(mfaLimits[@"maxFailures"], 5U);
   self.mfaLockoutSeconds = AMConfigUnsignedInteger(mfaLimits[@"lockoutSeconds"], 30U);
   self.mfaMaxLockoutSeconds = MAX(self.mfaLockoutSeconds, AMConfigUnsignedInteger(mfaLimits[@"maxLockoutSeconds"], 900U));
-  self.passwordMaxFailures = ALNUnsignedIntegerValueOrDefault(passwordLimits[@"maxFailures"], 10U);
-  self.passwordLockoutSeconds = AMConfigUnsignedInteger(passwordLimits[@"lockoutSeconds"], 30U);
-  self.passwordMaxLockoutSeconds =
-      MAX(self.passwordLockoutSeconds, AMConfigUnsignedInteger(passwordLimits[@"maxLockoutSeconds"], 900U));
+  // Password failures are counted per (submitted email, client address) pair
+  // and per email across all addresses (accountMaxFailures = 0 turns only the
+  // latter off; maxFailures = 0 turns both off).
+  self.passwordMaxFailures = ALNUnsignedIntegerValueOrDefault(passwordLimits[@"maxFailures"], 5U);
+  self.passwordDelaySeconds = AMConfigUnsignedInteger(passwordLimits[@"delaySeconds"], 30U);
+  self.passwordMaxDelaySeconds =
+      MAX(self.passwordDelaySeconds, AMConfigUnsignedInteger(passwordLimits[@"maxDelaySeconds"], 900U));
+  self.passwordAccountMaxFailures = ALNUnsignedIntegerValueOrDefault(passwordLimits[@"accountMaxFailures"], 50U);
+  self.passwordAccountWindowSeconds = AMConfigUnsignedInteger(passwordLimits[@"accountWindowSeconds"], 3600U);
+  self.passwordAccountDelaySeconds = AMConfigUnsignedInteger(passwordLimits[@"accountDelaySeconds"], 30U);
+  self.passwordMaxTrackedEntries = AMConfigUnsignedInteger(passwordLimits[@"maxTrackedEntries"], 100000U);
   self.smsVerifyClient.accountSID = AMTrimmedString(smsConfig[@"accountSID"]) ?: @"";
   self.smsVerifyClient.authToken = AMTrimmedString(smsConfig[@"authToken"]) ?: @"";
   self.smsVerifyClient.apiKeySID = AMTrimmedString(smsConfig[@"apiKeySID"]) ?: @"";
@@ -1497,8 +1538,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     },
     @"password" : @{
       @"maxFailures" : @(self.passwordMaxFailures),
-      @"lockoutSeconds" : @(self.passwordLockoutSeconds),
-      @"maxLockoutSeconds" : @(self.passwordMaxLockoutSeconds),
+      @"delaySeconds" : @(self.passwordDelaySeconds),
+      @"maxDelaySeconds" : @(self.passwordMaxDelaySeconds),
+      @"accountMaxFailures" : @(self.passwordAccountMaxFailures),
+      @"accountWindowSeconds" : @(self.passwordAccountWindowSeconds),
+      @"accountDelaySeconds" : @(self.passwordAccountDelaySeconds),
+      @"maxTrackedEntries" : @(self.passwordMaxTrackedEntries),
     },
   };
   return summary;
@@ -2062,7 +2107,22 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (NSDictionary *)authenticateLocalEmail:(NSString *)email
                                 password:(NSString *)password
                                    error:(NSError **)error {
-  NSString *normalizedEmail = AMLowerTrimmedString(email);
+  return [self authenticateLocalEmail:email password:password clientAddress:nil error:error];
+}
+
+// Known and unknown emails take the same path: the limiter is keyed by the
+// submitted email, runs before the account lookup, and both outcomes spend
+// one Argon2 verification and return the same error.
+- (NSDictionary *)authenticateLocalEmail:(NSString *)email
+                                password:(NSString *)password
+                           clientAddress:(NSString *)clientAddress
+                                   error:(NSError **)error {
+  NSString *normalizedEmail = AMLowerTrimmedString(email) ?: @"";
+  NSString *emailKey = AMPasswordAttemptKeyForEmail(normalizedEmail);
+  NSString *address = AMPasswordAttemptAddress(clientAddress);
+  if (![self reservePasswordAttemptForEmailKey:emailKey clientAddress:address error:error]) {
+    return nil;
+  }
   NSDictionary *row = [[self.database executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
                                                  "COALESCE(u.display_name, '') AS display_name, "
                                                  "COALESCE(u.roles_json, '[]') AS roles_json, "
@@ -2074,33 +2134,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                        parameters:@[ normalizedEmail ]
                                             error:error] firstObject];
   NSString *encodedHash = AMTrimmedString(row[@"password_hash"]);
+  BOOL verified = NO;
   if ([encodedHash length] == 0) {
     AMSpendDummyPasswordVerification(password);
+  } else {
+    verified = [ALNPasswordHash verifyPasswordString:(password ?: @"")
+                                  againstEncodedHash:encodedHash
+                                               error:NULL];
+  }
+  if (!verified) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil);
     }
     return nil;
   }
-  NSString *userID = AMTrimmedString(row[@"id"]);
-  if (![self reserveAttemptForUserID:userID
-                               scope:AMAttemptScopePassword
-                         maxFailures:self.passwordMaxFailures
-                      lockoutSeconds:self.passwordLockoutSeconds
-                   maxLockoutSeconds:self.passwordMaxLockoutSeconds
-                               error:error]) {
-    return nil;
-  }
-  NSError *verifyError = nil;
-  BOOL verified = [ALNPasswordHash verifyPasswordString:(password ?: @"")
-                                     againstEncodedHash:encodedHash
-                                                  error:&verifyError];
-  if (!verified) {
-    if (error != NULL) {
-      *error = verifyError ?: AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil);
-    }
-    return nil;
-  }
-  [self clearAttemptFailuresForUserID:userID scope:AMAttemptScopePassword];
+  [self recordPasswordSuccessForEmailKey:emailKey clientAddress:address];
   return AMUserDictionaryFromRow(row);
 }
 
@@ -2332,12 +2380,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (BOOL)attemptLimitSchemaIsAvailable {
   [self.attemptLimitSchemaLock lock];
-  BOOL known = self.attemptLimitSchemaAvailable;
+  BOOL known = self.attemptLimitSchemaAvailable && self.attemptLimitSchemaDatabase == self.database;
   [self.attemptLimitSchemaLock unlock];
   if (known) {
     return YES;
   }
   NSArray *rows = [self.database executeQuery:@"SELECT CASE WHEN to_regclass('auth_attempt_limits') IS NOT NULL "
+                                         "AND to_regclass('auth_password_attempts') IS NOT NULL "
                                          "AND EXISTS (SELECT 1 FROM pg_attribute "
                                          "WHERE attrelid = to_regclass('auth_mfa_enrollments') "
                                          "AND attname = 'last_used_step' AND NOT attisdropped) "
@@ -2349,6 +2398,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   [self.attemptLimitSchemaLock lock];
   if (available) {
     self.attemptLimitSchemaAvailable = YES;
+    self.attemptLimitSchemaDatabase = self.database;
   } else if (!self.attemptLimitSchemaWarningLogged) {
     self.attemptLimitSchemaWarningLogged = YES;
     shouldWarn = YES;
@@ -2567,6 +2617,209 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid authenticator or recovery code", nil);
   }
   return consumed;
+}
+
+#pragma mark - Password attempt delays
+
+// Removes rows with no active delay that have not changed within the
+// retention window, then keeps at most passwordMaxTrackedEntries rows
+// (dropping rows without an active delay, oldest first). Returns rows removed,
+// or -1 when the table is unavailable.
+- (NSInteger)prunePasswordAttempts {
+  if (self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
+    return -1;
+  }
+  NSUInteger retention = MAX((NSUInteger)86400U, self.passwordAccountWindowSeconds);
+  NSError *dbError = nil;
+  NSInteger expired = [self.database executeCommand:@"DELETE FROM auth_password_attempts "
+                                                    "WHERE (delayed_until IS NULL OR delayed_until <= NOW()) "
+                                                    "AND updated_at < NOW() - ($1::integer * INTERVAL '1 second')"
+                                         parameters:@[ [NSString stringWithFormat:@"%lu", (unsigned long)retention] ]
+                                              error:&dbError];
+  if (expired < 0) {
+    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+      [self markAttemptLimitSchemaUnavailable];
+    }
+    return -1;
+  }
+  NSInteger overflow = [self.database executeCommand:@"DELETE FROM auth_password_attempts WHERE ctid IN ("
+                                                     "SELECT ctid FROM auth_password_attempts "
+                                                     "ORDER BY (delayed_until IS NOT NULL AND delayed_until > NOW()) DESC, "
+                                                     "updated_at DESC OFFSET $1::bigint)"
+                                          parameters:@[ [NSString stringWithFormat:@"%lu",
+                                                                                   (unsigned long)self.passwordMaxTrackedEntries] ]
+                                               error:NULL];
+  return expired + MAX(overflow, (NSInteger)0);
+}
+
+- (void)prunePasswordAttemptsIfDue {
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  BOOL due = NO;
+  [self.attemptLimitSchemaLock lock];
+  if (now - self.passwordAttemptsLastPrunedAt >= 60.0) {
+    self.passwordAttemptsLastPrunedAt = now;
+    due = YES;
+  }
+  [self.attemptLimitSchemaLock unlock];
+  if (due) {
+    (void)[self prunePasswordAttempts];
+  }
+}
+
+// Counts the attempt for the (email, address) pair and, unless turned off, for
+// the email across all addresses, before the password is checked. Returns NO
+// with an ALNAuthModuleErrorRateLimited error while either has a delay.
+- (BOOL)reservePasswordAttemptForEmailKey:(NSString *)emailKey
+                            clientAddress:(NSString *)address
+                                    error:(NSError **)error {
+  if (self.passwordMaxFailures == 0 || self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
+    return YES;
+  }
+  [self prunePasswordAttemptsIfDue];
+  BOOL trackAccount = (self.passwordAccountMaxFailures > 0);
+  NSUInteger pairMax = self.passwordMaxFailures;
+  NSUInteger accountMax = self.passwordAccountMaxFailures;
+  NSUInteger accountWindow = self.passwordAccountWindowSeconds;
+  NSUInteger delayBase = self.passwordDelaySeconds;
+  NSUInteger accountDelayBase = self.passwordAccountDelaySeconds;
+  NSUInteger maxDelay = self.passwordMaxDelaySeconds;
+  NSArray *addresses = trackAccount ? @[ address, AMPasswordAccountRowAddress ] : @[ address ];
+  __block NSUInteger retryAfter = 0;
+  NSError *dbError = nil;
+  BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    for (NSString *rowAddress in addresses) {
+      if ([connection executeCommand:@"INSERT INTO auth_password_attempts (key_hash, client_ip) VALUES ($1, $2) "
+                                     "ON CONFLICT (key_hash, client_ip) DO NOTHING"
+                          parameters:@[ emailKey, rowAddress ]
+                               error:txError] < 0) {
+        return NO;
+      }
+    }
+    NSArray *rows = [connection executeQuery:@"SELECT client_ip, failure_count::text AS failure_count, "
+                                             "COALESCE(CEIL(EXTRACT(EPOCH FROM (delayed_until - NOW()))), 0)::bigint::text "
+                                             "AS delay_remaining, "
+                                             "COALESCE(EXTRACT(EPOCH FROM (NOW() - last_failure_at)), -1)::float8::text "
+                                             "AS since_failure, "
+                                             "COALESCE(EXTRACT(EPOCH FROM (NOW() - window_started_at)), -1)::float8::text "
+                                             "AS window_age "
+                                             "FROM auth_password_attempts WHERE key_hash = $1 AND client_ip IN ($2, $3) "
+                                             "ORDER BY client_ip FOR UPDATE"
+                                  parameters:@[ emailKey, address, trackAccount ? AMPasswordAccountRowAddress : address ]
+                                       error:txError];
+    if ([rows count] != [addresses count]) {
+      return NO;
+    }
+    NSDictionary *pairRow = nil;
+    NSDictionary *accountRow = nil;
+    for (NSDictionary *row in rows) {
+      long long remaining = [AMTrimmedString(row[@"delay_remaining"]) longLongValue];
+      if (remaining > 0 && (NSUInteger)remaining > retryAfter) {
+        retryAfter = (NSUInteger)remaining;
+      }
+      if ([AMTrimmedString(row[@"client_ip"]) isEqualToString:AMPasswordAccountRowAddress]) {
+        accountRow = row;
+      } else {
+        pairRow = row;
+      }
+    }
+    if (retryAfter > 0) {
+      return YES;
+    }
+
+    double sinceFailure = [AMTrimmedString(pairRow[@"since_failure"]) doubleValue];
+    long long pairStored = [AMTrimmedString(pairRow[@"failure_count"]) longLongValue];
+    NSUInteger pairCount = (sinceFailure < 0.0 || sinceFailure > AMAttemptFailureWindowSeconds || pairStored < 0)
+                               ? 0U
+                               : (NSUInteger)pairStored;
+    NSUInteger pairNext = pairCount + 1U;
+    NSUInteger pairDelay = (pairNext >= pairMax) ? AMDoublingDelay(delayBase, pairNext - pairMax, maxDelay) : 0U;
+    if ([connection executeCommand:@"UPDATE auth_password_attempts SET failure_count = $3::integer, "
+                                   "last_failure_at = NOW(), "
+                                   "delayed_until = CASE WHEN $4::integer > 0 "
+                                   "THEN NOW() + ($4::integer * INTERVAL '1 second') ELSE NULL END, "
+                                   "updated_at = NOW() WHERE key_hash = $1 AND client_ip = $2"
+                        parameters:@[
+                          emailKey,
+                          address,
+                          [NSString stringWithFormat:@"%lu", (unsigned long)pairNext],
+                          [NSString stringWithFormat:@"%lu", (unsigned long)pairDelay],
+                        ]
+                             error:txError] < 0) {
+      return NO;
+    }
+    if (accountRow == nil) {
+      return YES;
+    }
+    double windowAge = [AMTrimmedString(accountRow[@"window_age"]) doubleValue];
+    long long accountStored = [AMTrimmedString(accountRow[@"failure_count"]) longLongValue];
+    BOOL newWindow = (windowAge < 0.0 || windowAge > (double)accountWindow || accountStored < 0);
+    NSUInteger accountNext = (newWindow ? 0U : (NSUInteger)accountStored) + 1U;
+    NSUInteger accountDelay =
+        (accountNext > accountMax) ? AMDoublingDelay(accountDelayBase, accountNext - accountMax - 1U, maxDelay) : 0U;
+    return [connection executeCommand:@"UPDATE auth_password_attempts SET failure_count = $2::integer, "
+                                      "window_started_at = CASE WHEN $4::boolean THEN NOW() ELSE window_started_at END, "
+                                      "last_failure_at = NOW(), "
+                                      "delayed_until = CASE WHEN $3::integer > 0 "
+                                      "THEN NOW() + ($3::integer * INTERVAL '1 second') ELSE NULL END, "
+                                      "updated_at = NOW() WHERE key_hash = $1 AND client_ip = '*'"
+                           parameters:@[
+                             emailKey,
+                             [NSString stringWithFormat:@"%lu", (unsigned long)accountNext],
+                             [NSString stringWithFormat:@"%lu", (unsigned long)accountDelay],
+                             newWindow ? @"true" : @"false",
+                           ]
+                                error:txError] >= 0;
+  } error:&dbError];
+  if (!ok) {
+    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+      [self markAttemptLimitSchemaUnavailable];
+      (void)[self attemptLimitSchemaIsAvailable];
+      return YES;
+    }
+    if (error != NULL) {
+      *error = dbError ?: AMError(ALNAuthModuleErrorDatabaseUnavailable, @"Failed to record the sign-in attempt", nil);
+    }
+    return NO;
+  }
+  if (retryAfter > 0) {
+    if (error != NULL) {
+      *error = AMRateLimitedError(retryAfter,
+                                  [NSString stringWithFormat:@"Too many failed attempts. Try again in %lu seconds.",
+                                                             (unsigned long)retryAfter]);
+    }
+    return NO;
+  }
+  return YES;
+}
+
+// A successful sign-in clears its own pair and takes back the account-wide
+// count it reserved; other addresses keep their counts.
+- (void)recordPasswordSuccessForEmailKey:(NSString *)emailKey clientAddress:(NSString *)address {
+  if (self.passwordMaxFailures == 0 || self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
+    return;
+  }
+  NSError *dbError = nil;
+  NSInteger updated = [self.database executeCommand:@"UPDATE auth_password_attempts SET failure_count = 0, "
+                                                    "last_failure_at = NULL, delayed_until = NULL, updated_at = NOW() "
+                                                    "WHERE key_hash = $1 AND client_ip = $2"
+                                         parameters:@[ emailKey, address ]
+                                              error:&dbError];
+  if (updated < 0) {
+    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+      [self markAttemptLimitSchemaUnavailable];
+    }
+    return;
+  }
+  (void)[self.database executeCommand:@"UPDATE auth_password_attempts SET "
+                                      "failure_count = GREATEST(failure_count - 1, 0), "
+                                      "delayed_until = CASE WHEN GREATEST(failure_count - 1, 0) <= $2::integer "
+                                      "THEN NULL ELSE delayed_until END, updated_at = NOW() "
+                                      "WHERE key_hash = $1 AND client_ip = '*'"
+                           parameters:@[
+                             emailKey,
+                             [NSString stringWithFormat:@"%lu", (unsigned long)self.passwordAccountMaxFailures],
+                           ]
+                                error:NULL];
 }
 
 - (NSDictionary *)totpEnrollmentForUserID:(NSString *)userID
@@ -3887,6 +4140,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return [self renderTemplate:templateName context:context layout:layoutName error:error];
 }
 
+// The server's proxy-aware client address (never a raw forwarding header).
+- (NSString *)clientAddressForContext:(ALNContext *)ctx {
+  NSString *address = AMTrimmedString(ctx.request.effectiveRemoteAddress);
+  return ([address length] > 0) ? address : (AMTrimmedString(ctx.request.remoteAddress) ?: @"");
+}
+
 // 429 with Retry-After for a locked account; otherwise `fallbackStatus`.
 - (void)setStatusForAuthError:(NSError *)error fallbackStatus:(NSInteger)fallbackStatus {
   if ([error.domain isEqualToString:ALNAuthModuleErrorDomain] && error.code == ALNAuthModuleErrorRateLimited) {
@@ -3989,7 +4248,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *password = AMTrimmedString(parameters[@"password"]);
   NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
-  NSDictionary *user = [self.runtime authenticateLocalEmail:email password:password error:&error];
+  NSDictionary *user = [self.runtime authenticateLocalEmail:email
+                                                   password:password
+                                              clientAddress:[self clientAddressForContext:ctx]
+                                                      error:&error];
   if (user == nil) {
     [self setStatusForAuthError:error fallbackStatus:401];
     NSArray *errors = [self errorEntriesForError:(error ?: AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil))
@@ -4399,7 +4661,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   NSDictionary *parameters = [self requestParameters];
   NSError *authError = nil;
-  NSDictionary *authenticated = [self.runtime authenticateLocalEmail:user[@"email"] password:parameters[@"current_password"] error:&authError];
+  NSDictionary *authenticated = [self.runtime authenticateLocalEmail:user[@"email"]
+                                                            password:parameters[@"current_password"]
+                                                       clientAddress:[self clientAddressForContext:ctx]
+                                                               error:&authError];
   if (authenticated == nil) {
     [self setStatusForAuthError:authError fallbackStatus:401];
     return @{ @"status" : @"error", @"message" : authError.localizedDescription ?: @"Current password is invalid" };
