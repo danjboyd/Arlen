@@ -1164,7 +1164,8 @@ static ALNContext *ALNTestStandInContext(void) {
                                @"https://user:pw@app.example.test", @"https://app.example.test/../x",
                                @"https://app.example.test/a/./b", @"https://app.example.test/..",
                                @"https://app.example.test/%2e%2e/x", @"https://app.example.test/%2E./x",
-                               @"https://app.example.test/a/%2e/b", @"https://app.example.test/%zz" ]) {
+                               @"https://app.example.test/a/%2e/b", @"https://app.example.test/%zz",
+                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%" ]) {
     NSError *error = nil;
     XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
                                                                   environment:@"production"
@@ -1181,6 +1182,10 @@ static ALNContext *ALNTestStandInContext(void) {
                                             environment:@"production"
                                                   error:NULL]);
   XCTAssertEqualObjects(@"https://app.example.test:8443/Accounts", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://app.example.test/my%20app" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://app.example.test/my%20app", runtime.publicBaseURL);
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://[::1]:8443/x/" }
                                             environment:@"production"
                                                   error:NULL]);
