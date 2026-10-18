@@ -80,6 +80,34 @@ static BOOL ALNDataverseLooksLikeGUID(NSString *value) {
   return YES;
 }
 
+// A record ID names one row by its primary key, so it must be a GUID (an
+// NSUUID or its canonical 36-character string). Anything else would be spliced
+// into the URL path, where `)`, `/`, `..`, `?` or `#` change what is requested.
+static NSString *ALNDataverseRecordIdentifierString(id recordID) {
+  if ([recordID isKindOfClass:[NSUUID class]]) {
+    return [(NSUUID *)recordID UUIDString];
+  }
+  if (![recordID isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *identifier = ALNDataverseTrimmedString(recordID);
+  return ALNDataverseLooksLikeGUID(identifier) ? identifier : nil;
+}
+
+// Percent-encodes a key-predicate literal for the URL path. OData quoting
+// (doubled `'`) keeps the value inside its literal; encoding keeps `/`, `?`,
+// `#`, `%` and the predicate's own `(`, `)`, `,` and `=` from being read as URL
+// or predicate structure.
+static NSString *ALNDataversePathEncodedLiteral(NSString *literal) {
+  static NSCharacterSet *allowed = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    allowed = [NSCharacterSet
+        characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~':@"];
+  });
+  return [literal stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+}
+
 static NSString *ALNDataverseEscapeODataStringLiteral(NSString *value) {
   return [ALNDataverseTrimmedString(value) stringByReplacingOccurrencesOfString:@"'"
                                                                      withString:@"''"];
@@ -1116,6 +1144,8 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     @"--show-error",
     @"--no-progress-meter",
     @"--globoff",
+    // Record paths are built and encoded here; curl must not collapse `..`.
+    @"--path-as-is",
     @"--request",
     request.method ?: @"GET",
     @"--dump-header",
@@ -1529,8 +1559,7 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     *error = nil;
   }
   NSString *entitySet = ALNDataverseTrimmedString(entitySetName);
-  NSString *identifier = ALNDataverseTrimmedString(recordID);
-  if (!ALNDataverseIdentifierIsSafe(entitySet) || [identifier length] == 0) {
+  if (!ALNDataverseIdentifierIsSafe(entitySet) || recordID == nil) {
     if (error != NULL) {
       *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
                                      @"Dataverse entity set and record identifier are required",
@@ -1538,11 +1567,15 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
-  if ([identifier hasPrefix:@"("] && [identifier hasSuffix:@")"]) {
-    return [NSString stringWithFormat:@"%@%@", entitySet, identifier];
-  }
-  if ([identifier containsString:@"="]) {
-    return [NSString stringWithFormat:@"%@(%@)", entitySet, identifier];
+  NSString *identifier = ALNDataverseRecordIdentifierString(recordID);
+  if (identifier == nil) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(
+          ALNDataverseErrorInvalidArgument,
+          @"Dataverse record identifier must be a GUID; use the alternateKeyValues: methods for alternate keys",
+          @{ @"recordID" : [recordID description] ?: @"" });
+    }
+    return nil;
   }
   return [NSString stringWithFormat:@"%@(%@)", entitySet, identifier];
 }
@@ -1583,7 +1616,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       }
       return nil;
     }
-    [parts addObject:[NSString stringWithFormat:@"%@=%@", key, literal]];
+    NSString *encoded = ALNDataversePathEncodedLiteral(literal);
+    if ([encoded length] == 0) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse alternate-key value could not be encoded",
+                                       @{ @"key" : key ?: @"" });
+      }
+      return nil;
+    }
+    [parts addObject:[NSString stringWithFormat:@"%@=%@", key, encoded]];
   }
   return [NSString stringWithFormat:@"%@(%@)", entitySet, [parts componentsJoinedByString:@","]];
 }

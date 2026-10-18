@@ -142,6 +142,12 @@ Controllers and contexts expose the same named-client seam:
 }
 ```
 
+`recordID:` takes the row's primary key: a GUID string or an `NSUUID`. Any
+other value fails with `ALNDataverseErrorInvalidArgument` before a request is
+sent. To address a row by an alternate key, use the `alternateKeyValues:`
+methods. They quote and percent-encode each key value.
+
+
 If an app never calls these helpers, Dataverse stays dormant and does not add
 startup work.
 

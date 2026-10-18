@@ -340,7 +340,7 @@
   }
                 countAsQuery:YES];
   NSDictionary *updated = [self.context.client updateRecordInEntitySet:self.descriptor.entitySetName
-                                                              recordID:[primaryID description]
+                                                              recordID:primaryID
                                                                 values:encodedValues
                                                                ifMatch:([model.etag length] > 0 ? model.etag : nil)
                                                    returnRepresentation:YES
@@ -430,7 +430,7 @@
   }
                 countAsQuery:YES];
   return [self.context.client deleteRecordInEntitySet:self.descriptor.entitySetName
-                                             recordID:[primaryID description]
+                                             recordID:primaryID
                                               ifMatch:([model.etag length] > 0 ? model.etag : nil)
                                                 error:error];
 }
@@ -457,7 +457,7 @@
     if (primaryID != nil && primaryID != [NSNull null] && model.isPersisted) {
       method = @"PATCH";
       NSString *path = [ALNDataverseClient recordPathForEntitySet:self.descriptor.entitySetName
-                                                         recordID:[primaryID description]
+                                                         recordID:primaryID
                                                             error:error];
       if (path == nil) {
         return NO;

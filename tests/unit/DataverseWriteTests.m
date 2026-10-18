@@ -187,4 +187,92 @@
   XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
 }
 
+- (void)testRecordPathsAcceptOnlyGUIDRecordIDs {
+  NSError *error = nil;
+  XCTAssertEqualObjects([ALNDataverseClient recordPathForEntitySet:@"accounts"
+                                                          recordID:@"00000000-0000-0000-0000-000000000010"
+                                                             error:&error],
+                        @"accounts(00000000-0000-0000-0000-000000000010)");
+  XCTAssertNil(error);
+
+  NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:@"00000000-0000-0000-0000-0000000000AB"];
+  NSString *uuidPath = [ALNDataverseClient recordPathForEntitySet:@"accounts" recordID:(NSString *)uuid error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(uuidPath, @"accounts(00000000-0000-0000-0000-0000000000AB)");
+
+  NSArray<NSString *> *rejected = @[
+    @"00000000-0000-0000-0000-000000000001)/../../systemusers?$select=internalemailaddress&x=(",
+    @"(accountnumber='A-100')",
+    @"accountnumber='A-100'",
+    @"00000000-0000-0000-0000-00000000000g",
+    @"ord-100",
+    @"",
+  ];
+  for (NSString *recordID in rejected) {
+    error = nil;
+    NSString *path = [ALNDataverseClient recordPathForEntitySet:@"accounts" recordID:recordID error:&error];
+    XCTAssertNil(path, @"%@", recordID);
+    XCTAssertEqualObjects(error.domain, ALNDataverseErrorDomain, @"%@", recordID);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", recordID);
+  }
+}
+
+- (void)testNonGUIDRecordIDsFailBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *probe = @"00000000-0000-0000-0000-000000000001)/../../systemusers?$select=internalemailaddress&x=(";
+
+  XCTAssertNil([client retrieveRecordInEntitySet:@"accounts"
+                                        recordID:probe
+                                    selectFields:nil
+                                          expand:nil
+                          includeFormattedValues:NO
+                                           error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client updateRecordInEntitySet:@"accounts"
+                                      recordID:probe
+                                        values:@{ @"name" : @"x" }
+                                       ifMatch:nil
+                           returnRepresentation:NO
+                                         error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertFalse([client deleteRecordInEntitySet:@"accounts" recordID:probe ifMatch:nil error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+}
+
+- (void)testAlternateKeyValuesArePercentEncodedInsideTheirLiteral {
+  NSError *error = nil;
+  NSString *path = [ALNDataverseClient
+      recordPathForEntitySet:@"contacts"
+          alternateKeyValues:@{ @"emailaddress1" : @"x/../../systemusers(00000000-0000-0000-0000-0000000000aa)#" }
+                       error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(emailaddress1='x%2F..%2F..%2Fsystemusers%2800000000-0000-0000-0000-0000000000aa%29%23')");
+  XCTAssertFalse([path containsString:@"/"]);
+  XCTAssertFalse([path containsString:@"#"]);
+
+  path = [ALNDataverseClient recordPathForEntitySet:@"contacts"
+                                 alternateKeyValues:@{ @"name" : @"O'Brien & Co, a=b? 100% ü" }
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(name='O''Brien%20%26%20Co%2C%20a%3Db%3F%20100%25%20%C3%BC')");
+
+  path = [ALNDataverseClient recordPathForEntitySet:@"contacts"
+                                 alternateKeyValues:@{ @"externalid" : @42, @"active" : @YES }
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(active=true,externalid=42)");
+}
+
 @end

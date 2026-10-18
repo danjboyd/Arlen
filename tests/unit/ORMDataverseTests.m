@@ -85,17 +85,17 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
                                            JSONObject:@{
                                              @"value" : @[
                                                @{
-                                                 @"accountid" : @"account-1",
+                                                 @"accountid" : @"00000000-0000-0000-0000-0000000000a1",
                                                  @"name" : @"Acme",
                                                  @"accountnumber" : @"A-1",
-                                                 @"_primarycontactid_value" : @"contact-1",
+                                                 @"_primarycontactid_value" : @"00000000-0000-0000-0000-0000000000c1",
                                                },
                                              ],
                                            }]];
   [transport enqueueResponse:[self responseWithStatus:200
                                               headers:@{ @"Content-Type" : @"application/json" }
                                            JSONObject:@{
-                                             @"contactid" : @"contact-1",
+                                             @"contactid" : @"00000000-0000-0000-0000-0000000000c1",
                                              @"fullname" : @"Chris Contact",
                                            }]];
 
@@ -113,7 +113,7 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   NSArray<ALNORMDVAccount *> *models = [accounts all:&error];
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [models count]);
-  XCTAssertEqualObjects([models[0] objectForFieldName:@"primarycontactid"], @"contact-1");
+  XCTAssertEqualObjects([models[0] objectForFieldName:@"primarycontactid"], @"00000000-0000-0000-0000-0000000000c1");
 
   XCTAssertTrue([accounts loadRelationNamed:@"primarycontactid" fromModel:models[0] error:&error], @"%@", error);
   XCTAssertNil(error);
@@ -131,7 +131,7 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
                                            JSONObject:@{
                                              @"value" : @[
                                                @{
-                                                 @"contactid" : @"contact-1",
+                                                 @"contactid" : @"00000000-0000-0000-0000-0000000000c1",
                                                  @"fullname" : @"Chris Contact",
                                                },
                                              ],
@@ -141,10 +141,10 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
                                            JSONObject:@{
                                              @"value" : @[
                                                @{
-                                                 @"accountid" : @"account-1",
+                                                 @"accountid" : @"00000000-0000-0000-0000-0000000000a1",
                                                  @"name" : @"Acme",
                                                  @"accountnumber" : @"A-1",
-                                                 @"_primarycontactid_value" : @"contact-1",
+                                                 @"_primarycontactid_value" : @"00000000-0000-0000-0000-0000000000c1",
                                                },
                                              ],
                                            }]];
@@ -177,14 +177,14 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   [transport enqueueResponse:[self responseWithStatus:201
                                               headers:@{ @"Content-Type" : @"application/json" }
                                            JSONObject:@{
-                                             @"accountid" : @"account-2",
+                                             @"accountid" : @"00000000-0000-0000-0000-0000000000a2",
                                              @"name" : @"Beta",
                                              @"accountnumber" : @"A-200",
                                            }]];
   [transport enqueueResponse:[self responseWithStatus:200
                                               headers:@{ @"Content-Type" : @"application/json" }
                                            JSONObject:@{
-                                             @"accountid" : @"account-2",
+                                             @"accountid" : @"00000000-0000-0000-0000-0000000000a2",
                                              @"name" : @"Beta Updated",
                                              @"accountnumber" : @"A-200",
                                              @"@odata.etag" : @"W/\"2\"",
@@ -192,7 +192,7 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   [transport enqueueResponse:[self responseWithStatus:200
                                               headers:@{ @"Content-Type" : @"application/json" }
                                            JSONObject:@{
-                                             @"accountid" : @"account-2",
+                                             @"accountid" : @"00000000-0000-0000-0000-0000000000a2",
                                              @"name" : @"Beta Upserted",
                                              @"accountnumber" : @"A-200",
                                            }]];
@@ -240,7 +240,7 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   XCTAssertTrue(createApplied, @"%@", error);
   XCTAssertTrue([accounts saveModel:account changeset:createChangeset error:&error], @"%@", error);
   XCTAssertNil(error);
-  XCTAssertEqualObjects([account objectForFieldName:@"accountid"], @"account-2");
+  XCTAssertEqualObjects([account objectForFieldName:@"accountid"], @"00000000-0000-0000-0000-0000000000a2");
   XCTAssertEqualObjects([account objectForFieldName:@"name"], @"Beta");
 
   ALNORMDataverseChangeset *updateChangeset = [ALNORMDataverseChangeset changesetWithModel:account];

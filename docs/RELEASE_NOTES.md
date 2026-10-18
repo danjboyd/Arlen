@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Dataverse: `recordID:` accepts only a GUID (a canonical GUID string or an
+  `NSUUID`). Any other value, including the `(key=value)` and `key=value`
+  forms, now fails with `ALNDataverseErrorInvalidArgument` before a request is
+  sent; use the `alternateKeyValues:` methods for alternate keys. Alternate-key
+  values are percent-encoded inside their OData literal. The curl transport
+  passes `--path-as-is`.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
