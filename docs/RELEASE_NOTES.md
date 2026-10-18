@@ -11,10 +11,14 @@
   doubling up to 15 minutes, and a success clears only that pair. An
   account-wide ceiling against distributed guessing adds a wait for an email
   after 50 failures in an hour from all addresses. Password counters are keyed
-  by the submitted email, so known and unknown emails behave the same. Waiting
-  requests answer `429` with `Retry-After`. Limits are set under
-  `authModule.attemptLimits`. A
-  verified enrollment now also accepts one of its recovery codes at the TOTP
+  by the submitted email, so known and unknown emails behave the same. A pair
+  that signed in successfully in the last 30 days skips the account-wide
+  ceiling (`trustedPairDays`). Waiting requests answer `429` with
+  `Retry-After`. Forgot-password is never held back by these delays; it has
+  its own send limit (5 per email and 20 per address per hour by default,
+  under `authModule.attemptLimits.mail`), beyond which it replies as usual but
+  sends nothing. Limits are set under `authModule.attemptLimits`. A verified
+  enrollment now also accepts one of its recovery codes at the TOTP
   challenge, once each; they were issued but could not be used before. Run
   `arlen module migrate` to apply the new auth migration
   `004_auth_totp_limits`; until it is applied, verification works as before and

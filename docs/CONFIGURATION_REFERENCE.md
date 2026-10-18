@@ -332,8 +332,16 @@ middleware below:
 - `attemptLimits.password.accountMaxFailures` (default `50`),
   `accountWindowSeconds` (`3600`), `accountDelaySeconds` (`30`): an
   account-wide ceiling against distributed guessing across all addresses.
-- `attemptLimits.password.maxTrackedEntries` (default `100000`): cap on stored
-  password counter rows.
+- `attemptLimits.password.trustedPairDays` (default `30`, `0` = off): an
+  email/address pair that signed in within this many days skips the
+  account-wide ceiling (its own pair delay still applies).
+- `attemptLimits.password.maxTrackedEntries` (default `100000`) and
+  `pruneBatchSize` (`1000`): cap on stored counter rows, and the most rows one
+  background prune deletes.
+- `attemptLimits.mail.maxPerEmail` (default `5`), `maxPerAddress` (`20`),
+  `windowSeconds` (`3600`): forgot-password mail per hashed email and per
+  client address. Beyond them the reply is unchanged but no mail is sent.
+  `0` turns a mail limit off.
 - `maxFailures = 0` turns a limit off (for `password`, both the per-address
   delay and the ceiling); `accountMaxFailures = 0` turns off only the ceiling.
 

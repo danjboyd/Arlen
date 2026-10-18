@@ -59,6 +59,15 @@
             accountWindowSeconds = 3600;
             accountDelaySeconds = 30;
             maxTrackedEntries = 100000;
+            pruneBatchSize = 1000;
+            /* Pairs that signed in within this many days skip the account-wide ceiling (0 = off). */
+            trustedPairDays = 30;
+          };
+          mail = {
+            /* Forgot-password sends per hashed email / client address per window (0 = off). */
+            maxPerEmail = 5;
+            maxPerAddress = 20;
+            windowSeconds = 3600;
           };
         };
         paths = {

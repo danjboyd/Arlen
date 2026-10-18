@@ -162,6 +162,12 @@ These need auth module migration `004_auth_totp_limits` (run
     `accountWindowSeconds`, every further failure adds a wait for that email
     (`accountDelaySeconds`, doubling, up to `maxDelaySeconds`). The wait ends
     on its own; nothing needs to be unlocked.
+  - known devices: an (email, address) pair that signed in successfully within
+    the last `trustedPairDays` days (default 30; `0` turns this off) is not
+    subject to the account-wide ceiling, and its failures do not count toward
+    it. Its own pair delay still applies. The time of the last successful
+    sign-in is stored on the pair row only. An email with no account never
+    has a successful sign-in, so it never gets the exemption.
   - the client address is the server's proxy-aware address
     (`ALNRequest.effectiveRemoteAddress`), never a raw `X-Forwarded-For` or
     `Forwarded` header.
@@ -170,10 +176,23 @@ These need auth module migration `004_auth_totp_limits` (run
     account is looked up. Known and unknown emails get the same counters,
     delays, response bodies and one Argon2 verification each, so the limiter
     does not reveal whether an account exists.
-  - the table stays bounded: once a minute a sign-in removes rows with no
-    active wait that have not changed for 24 hours (or `accountWindowSeconds`,
-    if longer), and keeps at most `maxTrackedEntries` rows, dropping rows
-    without an active wait first, oldest first.
+  - the tables stay bounded: at most once a minute a sign-in starts a prune
+    on a background queue, so the request does not wait for it. Each prune
+    deletes at most `pruneBatchSize` rows (default 1000): rows with no active
+    wait that have not changed for 24 hours (or `accountWindowSeconds`, if
+    longer), then, above `maxTrackedEntries` rows, the oldest rows without an
+    active wait, and only then the oldest waiting rows. Every statement is
+    limited and walks the `updated_at` index; the only count reads at most
+    `maxTrackedEntries + pruneBatchSize` rows.
+- forgot-password is not subject to the password delays or the account-wide
+  ceiling, so the owner can always ask for a reset. It has its own limit
+  against sending lots of mail (`auth_mail_sends`): per hashed submitted email
+  (`mail.maxPerEmail`, default 5) and per hashed client address
+  (`mail.maxPerAddress`, default 20) within `mail.windowSeconds` (3600).
+  Requests are counted alike for known and unknown emails. Beyond a limit the
+  route still answers exactly as usual (the same `200` and generic reply), but
+  sends nothing and logs a warning. The module has no separate route for
+  resending the verification email; registration sends it once.
 - while a lock or wait is active, the route answers `429` with a `Retry-After`
   header (seconds) and the error `Too many failed attempts. Try again in N
   seconds.`, without checking the submitted code or password. HTML routes
@@ -197,13 +216,20 @@ authModule = {
       accountWindowSeconds = 3600;
       accountDelaySeconds = 30;
       maxTrackedEntries = 100000;
+      pruneBatchSize = 1000;
+      trustedPairDays = 30;
+    };
+    mail = {
+      maxPerEmail = 5;
+      maxPerAddress = 20;
+      windowSeconds = 3600;
     };
   };
 };
 ```
 
 While the account-wide ceiling is in effect, sign-in for that email waits from
-every address, including the owner's. Provider (OIDC) sign-in is not counted.
+every address that has not signed in successfully within `trustedPairDays`. Provider (OIDC) sign-in is not counted.
 
 If migration 004 has not been applied, TOTP and password verification keep
 working without replay protection, counters or delays. The module logs one warning

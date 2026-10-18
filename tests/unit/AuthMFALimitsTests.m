@@ -8,6 +8,7 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNSecurityPrimitives.h"
+#import "ALNServices.h"
 #import "ALNTOTP.h"
 #import "ALNTestClient.h"
 
@@ -85,6 +86,12 @@
 }
 
 - (ALNApplication *)applicationWithAttemptLimits:(NSDictionary *)attemptLimits csrfEnabled:(BOOL)csrfEnabled {
+  return [self applicationWithAttemptLimits:attemptLimits csrfEnabled:csrfEnabled mailAdapter:nil];
+}
+
+- (ALNApplication *)applicationWithAttemptLimits:(NSDictionary *)attemptLimits
+                                     csrfEnabled:(BOOL)csrfEnabled
+                                     mailAdapter:(id<ALNMailAdapter>)mailAdapter {
   [self applyAuthMigrations];
   NSMutableDictionary *authModule = [NSMutableDictionary dictionary];
   if (attemptLimits != nil) {
@@ -106,6 +113,9 @@
     },
     @"authModule" : authModule,
   }];
+  if (mailAdapter != nil) {
+    [app setMailAdapter:mailAdapter];
+  }
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   return app;
@@ -515,6 +525,179 @@
   XCTAssertTrue(ABS(knownDelay - unknownDelay) <= 1, @"%ld vs %ld", (long)knownDelay, (long)unknownDelay);
 }
 
+
+- (void)testKnownDeviceSkipsTheAccountCeilingButKeepsItsPairDelay {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"password" : @{
+      @"maxFailures" : @3,
+      @"delaySeconds" : @40,
+      @"accountMaxFailures" : @2,
+      @"accountDelaySeconds" : @50,
+    },
+  }
+                                               csrfEnabled:NO];
+  NSString *password = @"mfa-limits-password-123";
+  NSString *email = [self registeredEmailWithPassword:password app:app];
+  NSString *known = @"198.51.100.40";
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:known app:app].statusCode);
+
+  for (NSString *address in @[ @"203.0.113.1", @"203.0.113.2", @"203.0.113.3" ]) {
+    XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:address app:app].statusCode);
+  }
+  // The ceiling holds back a new address, but not the pair that signed in before.
+  XCTAssertEqual((NSInteger)429, [self loginEmail:email password:password fromAddress:@"203.0.113.9" app:app].statusCode);
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:known app:app].statusCode);
+  XCTAssertEqualObjects(@"3", [self passwordRowForEmail:email address:@"*"][@"failure_count"]);
+
+  // The known pair's own failures still delay it, and do not count account-wide.
+  for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+    XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:known app:app].statusCode);
+  }
+  ALNResponse *delayed = [self loginEmail:email password:password fromAddress:known app:app];
+  XCTAssertEqual((NSInteger)429, delayed.statusCode);
+  NSInteger retryAfter = [[delayed headerForName:@"Retry-After"] integerValue];
+  XCTAssertTrue(retryAfter > 30 && retryAfter <= 40, @"Retry-After %ld", (long)retryAfter);
+  XCTAssertEqualObjects(@"3", [self passwordRowForEmail:email address:@"*"][@"failure_count"]);
+}
+
+- (void)testKnownDeviceExemptionCanBeTurnedOff {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"password" : @{ @"maxFailures" : @5, @"accountMaxFailures" : @2, @"trustedPairDays" : @0 },
+  }
+                                               csrfEnabled:NO];
+  NSString *password = @"mfa-limits-password-123";
+  NSString *email = [self registeredEmailWithPassword:password app:app];
+  NSString *known = @"198.51.100.41";
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:known app:app].statusCode);
+  for (NSString *address in @[ @"203.0.113.11", @"203.0.113.12", @"203.0.113.13" ]) {
+    XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:address app:app].statusCode);
+  }
+  XCTAssertEqual((NSInteger)429, [self loginEmail:email password:password fromAddress:known app:app].statusCode);
+}
+
+- (ALNResponse *)forgotPasswordForEmail:(NSString *)email fromAddress:(NSString *)address app:(ALNApplication *)app {
+  NSData *body = [NSJSONSerialization dataWithJSONObject:@{ @"email" : email } options:0 error:NULL];
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"POST"
+                                                      path:@"/auth/api/password/forgot"
+                                               queryString:@""
+                                                   headers:@{ @"content-type" : @"application/json", @"accept" : @"application/json" }
+                                                      body:body];
+  request.remoteAddress = @"10.255.0.1";
+  request.effectiveRemoteAddress = address;
+  return [app dispatchRequest:request];
+}
+
+- (NSUInteger)resetMailCountIn:(ALNInMemoryMailAdapter *)adapter {
+  NSUInteger count = 0;
+  for (NSDictionary *delivery in [adapter deliveriesSnapshot]) {
+    NSDictionary *message = [delivery[@"message"] isKindOfClass:[NSDictionary class]] ? delivery[@"message"] : @{};
+    if ([message[@"subject"] isEqualToString:@"Reset your password"]) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+- (void)testForgotPasswordMailLimitStopsSendingWithoutChangingTheReply {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"auth_mail_limit"];
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"mail" : @{ @"maxPerEmail" : @2, @"maxPerAddress" : @100 },
+  }
+                                               csrfEnabled:NO
+                                               mailAdapter:mail];
+  NSString *known = [self registeredEmailWithPassword:@"mfa-limits-password-123" app:app];
+  NSString *unknown = [self uniqueEmail];
+  NSString *address = @"198.51.100.60";
+
+  NSString *reply = nil;
+  for (NSUInteger attempt = 0; attempt < 4; attempt++) {
+    ALNResponse *knownResponse = [self forgotPasswordForEmail:known fromAddress:address app:app];
+    ALNResponse *unknownResponse = [self forgotPasswordForEmail:unknown fromAddress:address app:app];
+    XCTAssertEqual((NSInteger)200, knownResponse.statusCode);
+    XCTAssertEqual((NSInteger)200, unknownResponse.statusCode);
+    XCTAssertEqualObjects([knownResponse bodyText], [unknownResponse bodyText]);
+    if (reply == nil) {
+      reply = [knownResponse bodyText];
+    }
+    XCTAssertEqualObjects(reply, [knownResponse bodyText]);
+  }
+  XCTAssertTrue([reply containsString:@"If the account exists"], @"%@", reply);
+  XCTAssertEqual((NSUInteger)2, [self resetMailCountIn:mail]);
+}
+
+- (void)testForgotPasswordMailLimitPerAddress {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"auth_mail_address_limit"];
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"mail" : @{ @"maxPerEmail" : @100, @"maxPerAddress" : @2 },
+  }
+                                               csrfEnabled:NO
+                                               mailAdapter:mail];
+  NSString *address = [NSString stringWithFormat:@"198.51.100.%u", 100U + (unsigned)arc4random_uniform(100)];
+  NSMutableArray *emails = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 3; index++) {
+    [emails addObject:[self registeredEmailWithPassword:@"mfa-limits-password-123" app:app]];
+  }
+  for (NSString *email in emails) {
+    XCTAssertEqual((NSInteger)200, [self forgotPasswordForEmail:email fromAddress:address app:app].statusCode);
+  }
+  XCTAssertEqual((NSUInteger)2, [self resetMailCountIn:mail]);
+  // Another address is not affected.
+  XCTAssertEqual((NSInteger)200, [self forgotPasswordForEmail:emails[2] fromAddress:@"192.0.2.200" app:app].statusCode);
+  XCTAssertEqual((NSUInteger)3, [self resetMailCountIn:mail]);
+}
+
+- (void)testForgotPasswordIsNotBlockedByPasswordDelays {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"auth_mail_recovery"];
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"password" : @{ @"maxFailures" : @2, @"accountMaxFailures" : @2 },
+  }
+                                               csrfEnabled:NO
+                                               mailAdapter:mail];
+  NSString *password = @"mfa-limits-password-123";
+  NSString *email = [self registeredEmailWithPassword:password app:app];
+  NSString *address = @"198.51.100.70";
+  for (NSString *from in @[ address, address, @"203.0.113.70" ]) {
+    (void)[self loginEmail:email password:@"wrong-password" fromAddress:from app:app];
+  }
+  // Both the pair delay and the account-wide ceiling are in effect...
+  XCTAssertEqual((NSInteger)429, [self loginEmail:email password:password fromAddress:address app:app].statusCode);
+  XCTAssertTrue([[self passwordRowForEmail:email address:@"*"][@"delay_remaining"] integerValue] > 0);
+  // ...and the owner can still ask for a reset from the same address.
+  XCTAssertEqual((NSInteger)200, [self forgotPasswordForEmail:email fromAddress:address app:app].statusCode);
+  XCTAssertEqual((NSUInteger)1, [self resetMailCountIn:mail]);
+}
+
+- (void)testOnePruneCallDeletesAtMostOneBatch {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  (void)[self applicationWithAttemptLimits:@{ @"password" : @{ @"pruneBatchSize" : @3 } } csrfEnabled:NO];
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  // Keep the background prune from running during the test.
+  [runtime setValue:@([[NSDate date] timeIntervalSince1970]) forKey:@"passwordAttemptsLastPrunedAt"];
+  ALNPg *database = [self database];
+  NSString *prefix = [NSString stringWithFormat:@"batch-%@-", [[[NSUUID UUID] UUIDString] lowercaseString]];
+  for (NSUInteger index = 0; index < 8; index++) {
+    NSString *key = [prefix stringByAppendingFormat:@"%lu", (unsigned long)index];
+    NSInteger inserted = [database executeCommand:@"INSERT INTO auth_password_attempts "
+                                                  "(key_hash, client_ip, failure_count, updated_at) "
+                                                  "VALUES ($1, '192.0.2.1', 1, NOW() - INTERVAL '30 days')"
+                                       parameters:@[ key ]
+                                            error:NULL];
+    XCTAssertEqual((NSInteger)1, inserted);
+  }
+  NSString *countSQL = @"SELECT COUNT(*)::text AS total FROM auth_password_attempts WHERE key_hash LIKE $1";
+  NSArray *likeParameters = @[ [prefix stringByAppendingString:@"%"] ];
+  XCTAssertEqual((NSInteger)3, [runtime prunePasswordAttempts]);
+  XCTAssertEqualObjects(@"5", [[database executeQuery:countSQL parameters:likeParameters error:NULL] firstObject][@"total"]);
+  XCTAssertEqual((NSInteger)3, [runtime prunePasswordAttempts]);
+  XCTAssertTrue([runtime prunePasswordAttempts] <= 3);
+  XCTAssertEqualObjects(@"0", [[database executeQuery:countSQL parameters:likeParameters error:NULL] firstObject][@"total"]);
+}
+
 - (void)testPasswordAttemptPruningDropsExpiredRowsAndCapsGrowth {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithAttemptLimits:@{
@@ -534,7 +717,7 @@
   XCTAssertEqual((NSInteger)1,
                  [database executeCommand:@"INSERT INTO auth_password_attempts "
                                           "(key_hash, client_ip, failure_count, delayed_until, updated_at) "
-                                          "VALUES ($1, '192.0.2.1', 9, NOW() + INTERVAL '1 hour', NOW() - INTERVAL '3 days')"
+                                          "VALUES ($1, '192.0.2.1', 9, NOW() + INTERVAL '1 hour', NOW())"
                                parameters:@[ delayedKey ]
                                     error:NULL]);
 
@@ -551,7 +734,7 @@
   XCTAssertTrue([[countRows firstObject][@"total"] integerValue] <= 4, @"%@", countRows);
   NSString *existsSQL = @"SELECT COUNT(*)::text AS total FROM auth_password_attempts WHERE key_hash = $1";
   XCTAssertEqualObjects(@"0", [[database executeQuery:existsSQL parameters:@[ staleKey ] error:NULL] firstObject][@"total"]);
-  // Rows that are still delaying sign-in are kept.
+  // Rows that are still delaying sign-in go last.
   XCTAssertEqualObjects(@"1", [[database executeQuery:existsSQL parameters:@[ delayedKey ] error:NULL] firstObject][@"total"]);
   XCTAssertTrue([database executeCommand:@"DELETE FROM auth_password_attempts WHERE key_hash = $1"
                               parameters:@[ delayedKey ]
@@ -564,6 +747,7 @@
   ALNPg *database = [self database];
   XCTAssertTrue([database executeCommand:@"DROP TABLE IF EXISTS auth_attempt_limits" parameters:@[] error:NULL] >= 0);
   XCTAssertTrue([database executeCommand:@"DROP TABLE IF EXISTS auth_password_attempts" parameters:@[] error:NULL] >= 0);
+  XCTAssertTrue([database executeCommand:@"DROP TABLE IF EXISTS auth_mail_sends" parameters:@[] error:NULL] >= 0);
   XCTAssertTrue([database executeCommand:@"ALTER TABLE auth_mfa_enrollments DROP COLUMN IF EXISTS last_used_step"
                               parameters:@[]
                                    error:NULL] >= 0);
