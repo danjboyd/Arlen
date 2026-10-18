@@ -7,7 +7,6 @@
 
   session = {
     enabled = YES;
-    secret = "phase12-auth-primitives-session-secret-0123456789abcdef";
     cookieName = "auth_primitives_session";
     maxAgeSeconds = 1800;
     secure = NO;

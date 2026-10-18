@@ -239,6 +239,8 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
+`storage` moved to `1.2.0` to refuse placeholder and published example
+`storageModule.signingSecret` values outside development and test.
 
 ## MCP tools
 

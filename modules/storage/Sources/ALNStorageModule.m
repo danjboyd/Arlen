@@ -601,9 +601,25 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     if ([signingSecret length] < SMMinimumSigningSecretLength) {
       if (error != NULL) {
         *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
-                         [NSString stringWithFormat:@"storageModule.signingSecret must be at least %lu characters",
+                         [NSString stringWithFormat:@"storageModule.signingSecret (ARLEN_STORAGE_SIGNING_SECRET) must be "
+                                                    @"at least %lu characters; generate one with `openssl rand -hex 32`",
                                                     (unsigned long)SMMinimumSigningSecretLength],
                          @{ @"config_key" : @"storageModule.signingSecret", @"reason" : @"weak_secret" });
+      }
+      return NO;
+    }
+    NSString *insecureReason = ALNInsecureSigningSecretReason(signingSecret);
+    if (insecureReason != nil && !ALNEnvironmentAllowsInsecureSigningSecrets(application.environment)) {
+      if (error != NULL) {
+        NSString *kind = [insecureReason isEqualToString:@"published_example_secret"]
+                             ? @"is an example value published in the Arlen repository"
+                             : @"looks like a placeholder value";
+        *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"storageModule.signingSecret (ARLEN_STORAGE_SIGNING_SECRET) %@ and is "
+                                                    @"refused in the %@ environment; generate one with "
+                                                    @"`openssl rand -hex 32`",
+                                                    kind, application.environment ?: @"current"],
+                         @{ @"config_key" : @"storageModule.signingSecret", @"reason" : insecureReason });
       }
       return NO;
     }

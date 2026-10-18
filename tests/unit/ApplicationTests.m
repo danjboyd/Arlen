@@ -14,6 +14,7 @@
 #import "ALNResponse.h"
 #import "ALNRoute.h"
 #import "ALNRouter.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNAuthSession.h"
 #import "../shared/ALNTestWait.h"
 #import "../shared/ALNWebTestSupport.h"
@@ -2442,6 +2443,174 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqual((NSInteger)338, startError.code);
   XCTAssertTrue([startError.localizedDescription
       containsString:@"auth.bearerSecret must be at least 32 characters"]);
+}
+
+static NSString *ALNTestRandomSigningSecret(void) {
+  return ALNLowercaseHexStringFromData(ALNSecureRandomData(32));
+}
+
+static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
+  return @[
+    @"replace-with-32-plus-character-secret",
+    @"replace-with-distinct-32-plus-character-secret",
+    @"CHANGE_ME_A_VERY_LONG_PRODUCTION_TARGET_NAME",
+    @"please-change-me-before-going-live-in-production",
+    @"ChangeMe-ChangeMe-ChangeMe-ChangeMe-ChangeMe",
+    @"my-own-session-secret-value-0123456789ABCDEF",
+    @"auth-admin-demo-session-secret-0123456789abcdef",
+    @"api-reference-secret-0123456789ab",
+    @"ignored-fixture-secret-01234567890123456789",
+  ];
+}
+
+- (void)testInsecureSigningSecretReasonFlagsPlaceholdersAndPublishedExamples {
+  XCTAssertEqualObjects(@"placeholder_secret", ALNInsecureSigningSecretReason(@"replace-with-32-plus-character-secret"));
+  XCTAssertEqualObjects(@"placeholder_secret", ALNInsecureSigningSecretReason(@"  CHANGE_ME_PRODUCTION_TARGET_NAME_LONG  "));
+  XCTAssertEqualObjects(@"published_example_secret",
+                        ALNInsecureSigningSecretReason(@"ignored-fixture-secret-01234567890123456789"));
+  for (NSString *secret in ALNKnownPublishedSigningSecrets()) {
+    XCTAssertNotNil(ALNInsecureSigningSecretReason(secret), @"%@", secret);
+  }
+  for (NSString *secret in ALNTestPlaceholderSigningSecrets()) {
+    XCTAssertNotNil(ALNInsecureSigningSecretReason(secret), @"%@", secret);
+  }
+  NSString *random = ALNTestRandomSigningSecret();
+  XCTAssertEqual((NSUInteger)64, [random length]);
+  XCTAssertNil(ALNInsecureSigningSecretReason(random));
+  XCTAssertNil(ALNInsecureSigningSecretReason(@""));
+
+  XCTAssertTrue(ALNEnvironmentAllowsInsecureSigningSecrets(@"development"));
+  XCTAssertTrue(ALNEnvironmentAllowsInsecureSigningSecrets(@" Test "));
+  XCTAssertFalse(ALNEnvironmentAllowsInsecureSigningSecrets(@"production"));
+  XCTAssertFalse(ALNEnvironmentAllowsInsecureSigningSecrets(@"staging"));
+  XCTAssertFalse(ALNEnvironmentAllowsInsecureSigningSecrets(nil));
+}
+
+- (void)testStartRejectsPlaceholderSessionSecretOutsideDevelopmentAndTest {
+  for (NSString *environment in @[ @"production", @"staging" ]) {
+    for (NSString *secret in ALNTestPlaceholderSigningSecrets()) {
+      ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+        @"environment" : environment,
+        @"logFormat" : @"json",
+        @"session" : @{ @"enabled" : @(YES), @"secret" : secret },
+      }];
+      NSError *startError = nil;
+      XCTAssertFalse([app startWithError:&startError], @"%@ %@", environment, secret);
+      XCTAssertEqualObjects(@"Arlen.Application.Error", startError.domain);
+      XCTAssertEqual((NSInteger)337, startError.code, @"%@", secret);
+      XCTAssertEqualObjects(@"session.secret", startError.userInfo[@"config_key"]);
+      XCTAssertNotNil(ALNInsecureSigningSecretReason(secret));
+      XCTAssertEqualObjects(ALNInsecureSigningSecretReason(secret), startError.userInfo[@"reason"]);
+      NSString *message = startError.localizedDescription;
+      XCTAssertTrue([message containsString:@"session.secret"], @"%@", message);
+      XCTAssertTrue([message containsString:@"ARLEN_SESSION_SECRET"], @"%@", message);
+      XCTAssertTrue([message containsString:@"openssl rand -hex 32"], @"%@", message);
+      XCTAssertFalse([message containsString:secret], @"%@", message);
+    }
+  }
+}
+
+- (void)testStartAcceptsPlaceholderSessionSecretInDevelopmentAndTest {
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    for (NSString *secret in ALNTestPlaceholderSigningSecrets()) {
+      ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+        @"environment" : environment,
+        @"logFormat" : @"json",
+        @"session" : @{ @"enabled" : @(YES), @"secret" : secret },
+        @"csrf" : @{ @"enabled" : @(NO) },
+      }];
+      NSError *startError = nil;
+      XCTAssertTrue([app startWithError:&startError], @"%@ %@ %@", environment, secret, startError);
+      [app shutdown];
+    }
+  }
+}
+
+- (void)testStartAcceptsRandomSigningSecretsInProduction {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"logFormat" : @"json",
+    @"session" : @{ @"enabled" : @(YES), @"secret" : ALNTestRandomSigningSecret() },
+    @"csrf" : @{ @"enabled" : @(NO) },
+    @"auth" : @{ @"enabled" : @(YES), @"bearerSecret" : ALNTestRandomSigningSecret() },
+  }];
+  NSError *startError = nil;
+  XCTAssertTrue([app startWithError:&startError], @"%@", startError);
+  [app shutdown];
+}
+
+- (void)testStartRejectsPlaceholderAuthBearerSecretOutsideDevelopmentAndTest {
+  for (NSString *secret in ALNTestPlaceholderSigningSecrets()) {
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : @"production",
+      @"logFormat" : @"json",
+      @"auth" : @{ @"enabled" : @(YES), @"bearerSecret" : secret },
+    }];
+    NSError *startError = nil;
+    XCTAssertFalse([app startWithError:&startError], @"%@", secret);
+    XCTAssertEqual((NSInteger)338, startError.code, @"%@", secret);
+    XCTAssertEqualObjects(@"auth.bearerSecret", startError.userInfo[@"config_key"]);
+    XCTAssertTrue([startError.localizedDescription containsString:@"ARLEN_AUTH_BEARER_SECRET"], @"%@", startError);
+    XCTAssertTrue([startError.localizedDescription containsString:@"openssl rand -hex 32"], @"%@", startError);
+
+    ALNApplication *devApp = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : @"development",
+      @"logFormat" : @"json",
+      @"auth" : @{ @"enabled" : @(YES), @"bearerSecret" : secret },
+    }];
+    startError = nil;
+    XCTAssertTrue([devApp startWithError:&startError], @"%@ %@", secret, startError);
+    [devApp shutdown];
+  }
+}
+
+- (void)testExampleAppSigningSecretsStayOutOfBaseConfigAndAreRefusedInProduction {
+  NSString *examplesRoot =
+      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:@"examples"];
+  NSArray<NSString *> *entries = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:examplesRoot error:NULL];
+  XCTAssertTrue([entries count] > 0, @"%@", examplesRoot);
+  NSUInteger checked = 0;
+  for (NSString *entry in entries) {
+    NSString *configDir = [[examplesRoot stringByAppendingPathComponent:entry] stringByAppendingPathComponent:@"config"];
+    NSMutableArray<NSString *> *plists = [NSMutableArray array];
+    NSString *basePath = [configDir stringByAppendingPathComponent:@"app.plist"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:basePath]) {
+      [plists addObject:basePath];
+    }
+    NSString *envDir = [configDir stringByAppendingPathComponent:@"environments"];
+    for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:envDir error:NULL] ?: @[]) {
+      if ([name hasSuffix:@".plist"]) {
+        [plists addObject:[envDir stringByAppendingPathComponent:name]];
+      }
+    }
+    for (NSString *path in plists) {
+      NSDictionary *config = [NSPropertyListSerialization
+          propertyListWithData:[NSData dataWithContentsOfFile:path] ?: [NSData data]
+                       options:NSPropertyListImmutable
+                        format:NULL
+                         error:NULL];
+      XCTAssertTrue([config isKindOfClass:[NSDictionary class]], @"%@", path);
+      if (![config isKindOfClass:[NSDictionary class]]) {
+        continue;
+      }
+      BOOL isBase = [path isEqualToString:basePath];
+      NSString *environment = [[path lastPathComponent] stringByDeletingPathExtension];
+      NSArray *secrets = @[
+        [config[@"session"] isKindOfClass:[NSDictionary class]] ? (config[@"session"][@"secret"] ?: @"") : @"",
+        [config[@"auth"] isKindOfClass:[NSDictionary class]] ? (config[@"auth"][@"bearerSecret"] ?: @"") : @"",
+      ];
+      for (NSString *secret in secrets) {
+        if (![secret isKindOfClass:[NSString class]] || [secret length] == 0) {
+          continue;
+        }
+        checked++;
+        XCTAssertFalse(isBase, @"%@ commits a signing secret in base config", path);
+        XCTAssertTrue([environment isEqualToString:@"development"] || [environment isEqualToString:@"test"], @"%@", path);
+        XCTAssertNotNil(ALNInsecureSigningSecretReason(secret), @"%@: %@", path, secret);
+      }
+    }
+  }
+  XCTAssertTrue(checked > 0);
 }
 
 - (void)testStartSucceedsForStrictProfileWhenRequiredSecretsConfigured {

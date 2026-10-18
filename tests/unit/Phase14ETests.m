@@ -205,6 +205,27 @@
   }
 }
 
+- (void)testPlaceholderSigningSecretIsRejectedOutsideDevelopmentAndTest {
+  for (NSString *secret in @[ @"replace-with-distinct-32-plus-character-secret",
+                              @"CHANGE_ME_A_VERY_LONG_STORAGE_SIGNING_SECRET",
+                              @"phase28-reference-session-secret-0123456789abcdef" ]) {
+    NSError *error = [self storageRegistrationErrorForApplication:
+                               [self applicationWithEnvironment:@"production" signingSecret:secret]];
+    XCTAssertNotNil(error, @"%@", secret);
+    XCTAssertEqual((NSInteger)ALNStorageModuleErrorInvalidConfiguration, error.code);
+    XCTAssertEqualObjects(@"storageModule.signingSecret", error.userInfo[@"config_key"]);
+    XCTAssertEqualObjects(@"placeholder_secret", error.userInfo[@"reason"]);
+    XCTAssertTrue([error.localizedDescription containsString:@"ARLEN_STORAGE_SIGNING_SECRET"], @"%@", error);
+    XCTAssertTrue([error.localizedDescription containsString:@"openssl rand -hex 32"], @"%@", error);
+
+    for (NSString *environment in @[ @"development", @"test" ]) {
+      XCTAssertNil([self storageRegistrationErrorForApplication:
+                             [self applicationWithEnvironment:environment signingSecret:secret]],
+                   @"%@ %@", environment, secret);
+    }
+  }
+}
+
 - (void)testConfiguredSigningSecretIsUsedOutsideDevelopmentAndTest {
   NSString *secretA = @"phase14e-production-signing-secret-A-0123";
   NSString *secretB = @"phase14e-production-signing-secret-B-0123";

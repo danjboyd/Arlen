@@ -2148,8 +2148,22 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *generatedRoot = [appRoot stringByAppendingPathComponent:@"build/deploy/targets/production"];
     XCTAssertTrue([[NSFileManager defaultManager]
                       fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"systemd/arlen@myapp.service"]]);
-    XCTAssertTrue([[NSFileManager defaultManager]
-                      fileExistsAtPath:[generatedRoot stringByAppendingPathComponent:@"env/production.env.example"]]);
+    NSString *envExamplePath = [generatedRoot stringByAppendingPathComponent:@"env/production.env.example"];
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:envExamplePath]);
+    NSString *envExample = [NSString stringWithContentsOfFile:envExamplePath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    XCTAssertFalse([envExample containsString:@"replace-with"], @"%@", envExample);
+    NSString *generatedSessionSecret = nil;
+    for (NSString *line in [envExample componentsSeparatedByString:@"\n"]) {
+      if ([line hasPrefix:@"ARLEN_SESSION_SECRET="]) {
+        generatedSessionSecret = [line substringFromIndex:[@"ARLEN_SESSION_SECRET=" length]];
+      }
+    }
+    XCTAssertEqual((NSUInteger)64, [generatedSessionSecret length], @"%@", envExample);
+    NSCharacterSet *nonHex = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet];
+    XCTAssertEqual((NSUInteger)NSNotFound, [generatedSessionSecret rangeOfCharacterFromSet:nonHex].location,
+                   @"%@", generatedSessionSecret);
+    NSDictionary *envExampleAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:envExamplePath error:nil];
+    XCTAssertEqual((NSUInteger)0600, [envExampleAttributes[NSFilePosixPermissions] unsignedIntegerValue] & 0777);
     NSString *propaneWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/propane-wrapper"];
     NSString *jobsWrapper = [generatedRoot stringByAppendingPathComponent:@"bin/jobs-worker-wrapper"];
     XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:propaneWrapper], @"%@", propaneWrapper);

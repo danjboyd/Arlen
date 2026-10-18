@@ -19,6 +19,16 @@
   `tests/fixtures/sanitizers/integration_nightly_skips.txt`, which
   `tools/ci/classify_sanitizer_integration_skips.py` maintains, and is not a
   required check (#271).
+- Outside `development` and `test`, `session.secret`, `auth.bearerSecret` and
+  `storageModule.signingSecret` now refuse placeholder values (containing
+  `replace-with`, `change-me`, `changeme`, `change_me` or `0123456789ab`) and
+  secrets committed in the Arlen repository. They used to pass whenever they
+  were 32+ characters, including the `site.env.example` placeholder. The env
+  example now uses `CHANGE_ME`, `arlen deploy init` writes a freshly generated
+  64-hex `ARLEN_SESSION_SECRET` into its `0600` env example, and the example
+  apps keep their session/bearer secrets in
+  `config/environments/development.plist`. The `storage` module is now `1.2.0`.
+  Generate secrets with `openssl rand -hex 32`.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

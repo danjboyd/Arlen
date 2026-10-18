@@ -3,7 +3,6 @@
   port = 4110;
   session = {
     enabled = YES;
-    secret = "auth-admin-demo-session-secret-0123456789abcdef";
   };
   csrf = {
     enabled = YES;
