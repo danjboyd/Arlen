@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Route policies: `pathPrefixes` and `sourceIPAllowlist` given as one string
+  now mean a one-element list. Before, a string turned into an empty list, and
+  that silently switched the policy's check off. A list that is present but
+  empty fails startup with `empty_list`, and any other type fails with
+  `invalid_type`. The middleware denies a request (`invalid_policy_config`)
+  rather than skip the source-IP check for such a policy.
 - Dataverse: header names must be tokens, and header values must not contain
   control characters other than a tab. That covers caller headers, `ifMatch:`,
   and `$batch` part headers. In a `$batch` part, the method must be a token,

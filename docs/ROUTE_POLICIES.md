@@ -46,6 +46,13 @@ Supported policy fields:
   matches `security.trustedProxies`.
 - `requireAuth`: deny when the resolved context has no authenticated subject.
 
+`pathPrefixes` and `sourceIPAllowlist` are lists. A single string, such as
+`sourceIPAllowlist = "10.0.0.0/8";`, counts as a one-element list. A list that
+is present but empty, like `()` or `("")`, fails startup with `empty_list`.
+Any other type fails with `invalid_type`. If a policy with an empty or mistyped
+`sourceIPAllowlist` is reached anyway, the request is denied with
+`invalid_policy_config`. The source-IP check is never skipped.
+
 ## Proxy Resolution
 
 Default behavior is deterministic and fail-closed:

@@ -653,6 +653,86 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   XCTAssertTrue([details count] >= 3);
 }
 
+- (void)testRoutePolicyStringListValuesAreOneElementLists {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @"/admin",
+        @"sourceIPAllowlist" : @"10.0.0.0/8",
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  NSError *error = nil;
+  XCTAssertTrue([app startWithError:&error], @"%@", error);
+
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/admin"
+                                            remoteAddress:@"127.0.0.1"
+                                                  headers:@{}];
+  ALNAssertResponseStatus(denied, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [denied headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"10.1.2.3"
+                                                   headers:@{}];
+  ALNAssertResponseStatus(allowed, 200);
+}
+
+- (void)testRoutePolicyConfigRejectsEmptyAndMistypedLists {
+  NSArray<NSDictionary *> *cases = @[
+    @{ @"field" : @"sourceIPAllowlist", @"value" : @[], @"code" : @"empty_list" },
+    @{ @"field" : @"sourceIPAllowlist", @"value" : @[ @"  " ], @"code" : @"empty_list" },
+    @{ @"field" : @"sourceIPAllowlist", @"value" : @"", @"code" : @"empty_list" },
+    @{ @"field" : @"sourceIPAllowlist", @"value" : @{ @"cidr" : @"10.0.0.0/8" }, @"code" : @"invalid_type" },
+    @{ @"field" : @"pathPrefixes", @"value" : @[], @"code" : @"empty_list" },
+    @{ @"field" : @"pathPrefixes", @"value" : @(1), @"code" : @"invalid_type" },
+  ];
+  for (NSDictionary *testCase in cases) {
+    NSMutableDictionary *policy = [@{
+      @"pathPrefixes" : @[ @"/admin" ],
+      @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ],
+    } mutableCopy];
+    policy[testCase[@"field"]] = testCase[@"value"];
+    NSError *error = [ALNRoutePolicyMiddleware validateSecurityConfiguration:@{
+      @"security" : @{ @"routePolicies" : @{ @"admin" : policy } }
+    }];
+    XCTAssertNotNil(error, @"%@", testCase);
+    XCTAssertEqualObjects(@"invalid_route_policy_config", error.userInfo[@"reason"], @"%@", testCase);
+    NSString *field = [NSString stringWithFormat:@"security.routePolicies.admin.%@", testCase[@"field"]];
+    BOOL found = NO;
+    for (NSDictionary *detail in error.userInfo[@"details"]) {
+      found = found || ([detail[@"field"] isEqualToString:field] && [detail[@"code"] isEqualToString:testCase[@"code"]]);
+    }
+    XCTAssertTrue(found, @"%@ -> %@", testCase, error.userInfo[@"details"]);
+
+    ALNApplication *app = [self routePolicyApplicationWithSecurity:@{ @"routePolicies" : @{ @"admin" : policy } }
+                                                             route:@"/admin"
+                                                          policies:nil];
+    XCTAssertFalse([app startWithError:NULL], @"%@", testCase);
+  }
+}
+
+- (void)testRoutePolicyMiddlewareDeniesEmptyAllowlistEvenWithoutStartupValidation {
+  NSDictionary *security = @{
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"sourceIPAllowlist" : @[],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertFalse([app startWithError:NULL]);
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{}];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"invalid_policy_config", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
 - (void)testRoutePolicyStartRejectsUnknownRouteSidePolicy {
   NSDictionary *security = @{
     @"routePolicies" : @{

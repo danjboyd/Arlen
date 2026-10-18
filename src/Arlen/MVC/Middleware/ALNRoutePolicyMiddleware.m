@@ -42,8 +42,14 @@ static BOOL ALNRoutePolicyNameIsValid(NSString *name) {
   return YES;
 }
 
+// A list setting given as one string (`sourceIPAllowlist = "10.0.0.0/8";`)
+// means a one-element list. Other non-list values normalize to an empty list;
+// ALNPolicyListFieldProblem reports them at startup, and the middleware denies.
 static NSArray *ALNPolicyStringArray(id value) {
   NSMutableArray *strings = [NSMutableArray array];
+  if ([value isKindOfClass:[NSString class]]) {
+    value = @[ value ];
+  }
   if (![value isKindOfClass:[NSArray class]]) {
     return strings;
   }
@@ -54,6 +60,20 @@ static NSArray *ALNPolicyStringArray(id value) {
     }
   }
   return [NSArray arrayWithArray:strings];
+}
+
+// For a list field that is present in a policy: `invalid_type` when it is
+// neither a string nor a list, `empty_list` when it names nothing. A policy
+// field that is configured but empty must not silently turn the check off.
+static NSString *ALNPolicyListFieldProblem(NSDictionary *policy, NSString *key) {
+  id value = policy[key];
+  if (value == nil) {
+    return nil;
+  }
+  if (![value isKindOfClass:[NSString class]] && ![value isKindOfClass:[NSArray class]]) {
+    return @"invalid_type";
+  }
+  return ([ALNPolicyStringArray(value) count] == 0) ? @"empty_list" : nil;
 }
 
 static NSString *ALNNormalizePolicyPathPrefix(NSString *prefix) {
@@ -273,6 +293,15 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
         }];
       }
     }
+    for (NSString *key in @[ @"pathPrefixes", @"sourceIPAllowlist" ]) {
+      NSString *problem = ALNPolicyListFieldProblem(policy, key);
+      if (problem != nil) {
+        [details addObject:@{
+          @"field" : [NSString stringWithFormat:@"security.routePolicies.%@.%@", name, key],
+          @"code" : problem,
+        }];
+      }
+    }
     for (NSString *prefix in ALNPolicyStringArray(policy[@"pathPrefixes"])) {
       if ([ALNNormalizePolicyPathPrefix(prefix) length] == 0) {
         [details addObject:@{
@@ -337,6 +366,12 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
       return NO;
     }
 
+    if (ALNPolicyListFieldProblem(policy, @"sourceIPAllowlist") != nil) {
+      // Startup validation rejects this; if it is reached anyway, deny rather
+      // than skip the source-IP check.
+      [self applyDenial:ALNRoutePolicyDenial(name, @"invalid_policy_config", @"", @"") context:context];
+      return NO;
+    }
     NSArray *allowlist = ALNPolicyStringArray(policy[@"sourceIPAllowlist"]);
     if ([allowlist count] > 0) {
       BOOL trustForwarded = [policy[@"trustForwardedClientIP"] respondsToSelector:@selector(boolValue)]
