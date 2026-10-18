@@ -693,7 +693,7 @@ development and test convenience only:
   and the stub identity never creates or signs in a user.
 
 Production apps that use local passwords must set `authModule.publicBaseURL`
-when upgrading to auth 1.5.4; without it, password-reset and verification
+when upgrading to auth 1.6.0; without it, password-reset and verification
 emails are not sent outside `development` and `test`.
 
 Disabling local passwords removes registration, verification, password-login,

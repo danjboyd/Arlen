@@ -239,20 +239,21 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
-`auth` moved to `1.5.4` to resolve session roles from the current user record
-on every request (new migration `002_auth_session_stamp.sql`, recommended for ending sessions
-by stamp; roles are read live without it), and `admin-ui` to `1.0.4`, which requires it, to end a
-user's sessions when the admin role is revoked.
+`auth` moved to `1.6.0`, `search` to `1.1.0` and `admin-ui` to `1.1.0`
+(minor bumps: security fixes and new configuration):
 
-`auth` moved to `1.5.4` to make the stub provider development/test only,
-make password-reset and verification links single-use, and build those links
-from `authModule.publicBaseURL`.
-
-`search` moved to `1.0.5` so an unscoped query from a caller who may query no
-registered resource returns no results, and so auto-indexed `admin-ui`
-resources are searchable only by callers the `admin-ui` policy admits;
-`admin-ui` moved to `1.0.4` to report that policy (`accessRoles`,
-`minimumAuthAssuranceLevel`).
+- `auth`: the stub provider is development/test only; password-reset and
+  verification links are single-use; those links are built from the new
+  `authModule.publicBaseURL`; and session roles are resolved from the current
+  user record on every request (new migration `002_auth_session_stamp.sql`,
+  recommended for ending sessions by stamp; roles are read live without it).
+- `search`: an unscoped query from a caller who may query no registered
+  resource returns no results, and auto-indexed `admin-ui` resources are
+  searchable only by callers the `admin-ui` policy admits (new
+  `queryMinimumAuthAssuranceLevel` resource metadata).
+- `admin-ui`: reports its access policy (`accessRoles`,
+  `minimumAuthAssuranceLevel`) and ends a user's sessions when the admin role
+  is revoked; it requires `auth` `>= 1.6.0`.
 
 ## MCP tools
 

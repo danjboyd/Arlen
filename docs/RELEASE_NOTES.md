@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Auth module (`auth` 1.5.4): the stub OIDC provider is now available only in
+- Auth module (`auth` 1.6.0): the stub OIDC provider is now available only in
   the `development` and `test` environments. Elsewhere it defaults off, its
   routes are not registered, and setting `authModule.providers.stub.enabled =
   YES` makes the app refuse to start. Apps that relied on the stub outside
@@ -17,11 +17,11 @@
   request host; other environments send no link and log an error, so set
   `authModule.publicBaseURL` before upgrading a production app that uses local
   passwords.
-- `search` (`1.0.5`): an unscoped query (`GET /search`, `GET /search/api/query`)
+- `search` (`1.1.0`): an unscoped query (`GET /search`, `GET /search/api/query`)
   from a caller who may not query any registered resource now returns no
   results, autocomplete, suggestions or facets, with `total = 0`. It used to
   search every resource.
-- `search` (`1.0.5`) and `admin-ui` (`1.0.4`): resources the search module
+- `search` (`1.1.0`) and `admin-ui` (`1.1.0`): resources the search module
   auto-registers from `admin-ui` (`searchModule.adminUI.autoResources`,
   including the built-in `users` resource) now use `queryPolicy = role_gated`
   with `admin-ui`'s roles (`admin`), AAL2 and the resource's `list` operation
@@ -31,7 +31,7 @@
   returned. Search resources can set the new `queryMinimumAuthAssuranceLevel`
   metadata, and `ALNAdminUIModuleRuntime` reports `accessRoles` and
   `minimumAuthAssuranceLevel`.
-- Auth module (`1.5.4`): authorization now uses each user's current roles.
+- Auth module (`1.6.0`): authorization now uses each user's current roles.
   The module resolves the session's user against `auth_users` on every request
   (one indexed query, nothing cached), so route contracts and the admin-ui,
   jobs and ops APIs see a role grant or revocation on the user's next request.
@@ -45,7 +45,7 @@
   `refreshSessionDescriptorForSubject:provider:error:` to keep provider
   sessions' roles current the same way. See
   [Auth Module](AUTH_MODULE.md#sessions-and-roles).
-- admin-ui (`1.0.4`, requires auth `1.5.4`): revoking the admin role through
+- admin-ui (`1.1.0`, requires auth `1.6.0`): revoking the admin role through
   the users resource also ends that user's existing sessions (once the auth
   stamp migration is applied).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
