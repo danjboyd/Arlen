@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `ALNPg` refuses a string parameter containing U+0000 with
+  `ALNPgErrorInvalidArgument`. Before, libpq cut the value short at the NUL,
+  so the database matched a different value than the app had checked. Send
+  binary data as `NSData` (bound as `bytea`).
 - `auth` 1.6.0 refuses a TOTP code whose time step was already accepted for the
   enrollment, even in another session, and limits failed verification
   attempts. Five consecutive failed TOTP or recovery-code checks lock MFA for

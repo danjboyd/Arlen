@@ -713,6 +713,30 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqual((NSInteger)1, maxConcurrentWorkers);
 }
 
+- (void)testStringParameterContainingNULIsRejectedInsteadOfTruncated {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *withNUL = [NSString stringWithFormat:@"victim@evil.test%C@company.example", (unichar)0];
+  NSArray *rows = [database executeQuery:@"SELECT $1::text AS value" parameters:@[ withNUL ] error:&error];
+  XCTAssertNil(rows);
+  XCTAssertEqualObjects(ALNPgErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNPgErrorInvalidArgument, error.code);
+
+  // Binary data with zero bytes still goes through as bytea.
+  error = nil;
+  const unsigned char raw[] = { 'a', 0, 'b', 0 };
+  NSData *bytes = [NSData dataWithBytes:raw length:sizeof(raw)];
+  rows = [database executeQuery:@"SELECT length($1::bytea) AS n" parameters:@[ bytes ] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@4, rows.firstObject[@"n"]);
+}
+
 - (void)testConnectionAndPreparedStatements {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

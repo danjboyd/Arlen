@@ -1876,6 +1876,22 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
     }
 
     NSUInteger utf8Length = [utf8 length];
+    // libpq reads text parameters as C strings, so an embedded U+0000 would
+    // silently cut the value short (PostgreSQL text cannot hold it anyway).
+    // Refuse it; binary values go through NSData, which is sent as bytea hex.
+    if (utf8Length > 0 && memchr([utf8 bytes], 0, utf8Length) != NULL) {
+      if (error != NULL) {
+        NSString *detail = [NSString stringWithFormat:@"parameter %lu contains a NUL character (U+0000); "
+                                                      @"pass binary data as NSData",
+                                                      (unsigned long)(idx + 1)];
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"failed to encode query parameter",
+                                detail,
+                                sql);
+      }
+      ALNPgFreeExecParamsBuffer(buffer);
+      return NO;
+    }
     char *bytes = calloc(utf8Length + 1, sizeof(char));
     if (bytes == NULL) {
       if (error != NULL) {

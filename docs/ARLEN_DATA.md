@@ -686,3 +686,11 @@ other idle connections are closed first):
 `executeCommandBatch` and statements on a connection you acquired yourself
 are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.
+
+## Text parameters and NUL
+
+PostgreSQL `text` cannot hold U+0000, and libpq reads text parameters as C
+strings. `ALNPg` therefore refuses a string parameter that contains U+0000
+with `ALNPgErrorInvalidArgument` instead of letting it be cut short at the NUL
+(which would make the database see a different value than the one the app
+validated). Send binary data as `NSData`; it is bound as `bytea`.
