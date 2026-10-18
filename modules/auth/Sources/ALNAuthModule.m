@@ -11,6 +11,7 @@
 #import "ALNController.h"
 #import "ALNRequest.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLogger.h"
 #import "ALNPg.h"
 #import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
@@ -1379,6 +1380,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                        @{ @"key_path" : @"csrf.enabled" });
     }
     return NO;
+  }
+  NSString *environment = [application.environment lowercaseString] ?: @"";
+  if (sessionEnabled && !csrfEnabled && allowWithoutCSRF &&
+      ![environment isEqualToString:@"development"] && ![environment isEqualToString:@"test"]) {
+    [application.logger warn:@"auth module is running with CSRF protection off (authModule.allowWithoutCSRF = YES)"
+                      fields:@{ @"environment" : environment, @"key_path" : @"csrf.enabled" }];
   }
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
