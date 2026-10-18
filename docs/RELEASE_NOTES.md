@@ -19,6 +19,12 @@
   `arlen module migrate` to apply the new auth migration
   `004_auth_totp_limits`; until it is applied, verification works as before and
   the module logs one warning.
+- The auth module's connection pool size is now configurable
+  (`authModule.database.maxConnections`, default 8, was a fixed 4), and a busy
+  pool waits up to `authModule.database.acquireTimeoutSeconds` (default 2) for
+  a connection. When the database is busy or unreachable, auth routes answer
+  `503` with `Retry-After` instead of `401`, and the session is kept; password
+  sign-in answers `503` instead of `Invalid email or password`.
 - `notifications` 1.2.0: `POST /notifications/api/queue` queues only for the
   signed-in user. It sets the payload's `recipient` to the caller's subject and
   `email` to their own address, and answers `403` when the payload names

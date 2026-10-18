@@ -37,6 +37,11 @@
             testVerificationCode = "";
           };
         };
+        database = {
+          /* Auth module connection pool; busy requests wait up to acquireTimeoutSeconds, then answer 503. */
+          maxConnections = 8;
+          acquireTimeoutSeconds = 2;
+        };
         attemptLimits = {
           /* Failure counters (migration 004). maxFailures = 0 turns a limit off. */
           mfa = {

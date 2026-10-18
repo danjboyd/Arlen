@@ -108,6 +108,28 @@ Current MFA factor scope:
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
 
+### Database pool and unavailability
+
+The auth module keeps its own PostgreSQL connection pool:
+
+```plist
+authModule = {
+  database = {
+    maxConnections = 8;          /* default */
+    acquireTimeoutSeconds = 2;   /* default; how long a request waits for a free connection */
+  };
+};
+```
+
+When no connection becomes free within `acquireTimeoutSeconds`, or the
+database cannot be reached, auth routes answer `503` with `Retry-After: 2` and
+the message `The sign-in service is temporarily unavailable. Try again
+shortly.` They never answer `401` for that reason and never clear the session,
+so clients should keep the session and retry. A password sign-in that cannot
+reach the database also answers `503`, not `Invalid email or password`.
+Size `maxConnections` for the number of auth requests you expect at once,
+within the database's own connection limit.
+
 ### TOTP replay protection and attempt limits
 
 These need auth module migration `004_auth_totp_limits` (run

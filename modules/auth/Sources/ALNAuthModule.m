@@ -221,6 +221,33 @@ static BOOL AMErrorLooksLikeMissingAttemptLimitSchema(NSError *error) {
   return [sqlState isEqualToString:@"42P01"] || [sqlState isEqualToString:@"42703"];
 }
 
+// The database could not be reached or had no free connection, as opposed to
+// a query that ran and failed. Callers answer 503 instead of treating the user
+// as signed out.
+static BOOL AMErrorIsDatabaseUnavailable(NSError *error) {
+  NSError *current = error;
+  for (NSUInteger depth = 0; depth < 4 && [current isKindOfClass:[NSError class]]; depth++) {
+    if ([current.domain isEqualToString:ALNAuthModuleErrorDomain] &&
+        current.code == ALNAuthModuleErrorDatabaseUnavailable) {
+      return YES;
+    }
+    if ([current.domain isEqualToString:ALNPgErrorDomain]) {
+      if (current.code == ALNPgErrorConnectionFailed || current.code == ALNPgErrorPoolExhausted) {
+        return YES;
+      }
+      NSString *sqlState = AMTrimmedString(current.userInfo[ALNPgErrorSQLStateKey]);
+      if ([sqlState hasPrefix:@"08"] || [sqlState hasPrefix:@"57P"] || [sqlState isEqualToString:@"53300"]) {
+        return YES;
+      }
+    }
+    current = current.userInfo[NSUnderlyingErrorKey];
+  }
+  return NO;
+}
+
+static NSString *const AMDatabaseUnavailableMessage =
+    @"The sign-in service is temporarily unavailable. Try again shortly.";
+
 static NSError *AMRateLimitedError(NSUInteger retryAfterSeconds, NSString *message) {
   return AMError(ALNAuthModuleErrorRateLimited,
                  message,
@@ -1483,7 +1510,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   NSError *dbError = nil;
-  self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:4 error:&dbError];
+  NSDictionary *poolConfig = [moduleConfig[@"database"] isKindOfClass:[NSDictionary class]] ? moduleConfig[@"database"] : @{};
+  NSUInteger maxConnections = AMConfigUnsignedInteger(poolConfig[@"maxConnections"], 8U);
+  id rawAcquireTimeout = poolConfig[@"acquireTimeoutSeconds"];
+  NSTimeInterval acquireTimeout = [rawAcquireTimeout respondsToSelector:@selector(doubleValue)]
+                                      ? [rawAcquireTimeout doubleValue]
+                                      : 2.0;
+  self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:maxConnections error:&dbError];
+  // Wait briefly for a busy pool instead of failing at once; requests that
+  // still cannot get a connection answer 503 (see AMErrorIsDatabaseUnavailable).
+  self.database.acquireTimeout = (acquireTimeout >= 0.0) ? acquireTimeout : 2.0;
   if (self.database == nil) {
     if (error != NULL) {
       *error = dbError ?: AMError(ALNAuthModuleErrorDatabaseUnavailable, @"failed to initialize auth database adapter", nil);
@@ -2123,16 +2159,26 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self reservePasswordAttemptForEmailKey:emailKey clientAddress:address error:error]) {
     return nil;
   }
-  NSDictionary *row = [[self.database executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
-                                                 "COALESCE(u.display_name, '') AS display_name, "
-                                                 "COALESCE(u.roles_json, '[]') AS roles_json, "
-                                                 "CASE WHEN u.email_verified_at IS NULL THEN '' ELSE u.email_verified_at::text END AS email_verified_at, "
-                                                 "c.password_hash "
-                                                 "FROM auth_users u "
-                                                 "JOIN auth_local_credentials c ON c.user_id = u.id "
-                                                 "WHERE lower(u.email) = $1 LIMIT 1"
-                                       parameters:@[ normalizedEmail ]
-                                            error:error] firstObject];
+  NSError *lookupError = nil;
+  NSArray *rows = [self.database executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
+                                              "COALESCE(u.display_name, '') AS display_name, "
+                                              "COALESCE(u.roles_json, '[]') AS roles_json, "
+                                              "CASE WHEN u.email_verified_at IS NULL THEN '' ELSE u.email_verified_at::text END AS email_verified_at, "
+                                              "c.password_hash "
+                                              "FROM auth_users u "
+                                              "JOIN auth_local_credentials c ON c.user_id = u.id "
+                                              "WHERE lower(u.email) = $1 LIMIT 1"
+                                    parameters:@[ normalizedEmail ]
+                                         error:&lookupError];
+  if (rows == nil && lookupError != nil) {
+    // The lookup did not run (for example, the database is unavailable);
+    // report that rather than a wrong password.
+    if (error != NULL) {
+      *error = AMTranslateMissingAuthModuleTablesError(lookupError, self.environmentName);
+    }
+    return nil;
+  }
+  NSDictionary *row = [rows firstObject];
   NSString *encodedHash = AMTrimmedString(row[@"password_hash"]);
   BOOL verified = NO;
   if ([encodedHash length] == 0) {
@@ -2393,6 +2439,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                          "THEN 't' ELSE 'f' END AS available"
                                    parameters:@[]
                                         error:NULL];
+  if (rows == nil) {
+    // The check itself failed (for example, no free connection); the caller's
+    // next query reports that. Do not warn about the migration.
+    return NO;
+  }
   BOOL available = AMBoolFromDatabaseValue([rows firstObject][@"available"]);
   BOOL shouldWarn = NO;
   [self.attemptLimitSchemaLock lock];
@@ -4155,7 +4206,24 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                value:[NSString stringWithFormat:@"%lu", (unsigned long)MAX(retryAfter, (NSUInteger)1)]];
     return;
   }
+  if (AMErrorIsDatabaseUnavailable(error)) {
+    [self setStatus:503];
+    [self.context.response setHeader:@"Retry-After" value:@"2"];
+    return;
+  }
   [self setStatus:fallbackStatus];
+}
+
+// 503 with Retry-After when the user lookup failed because the database was
+// unavailable. The session is left alone: the user is not signed out.
+- (id)authStoreUnavailableResponse:(ALNContext *)ctx {
+  [self setStatus:503];
+  [self.context.response setHeader:@"Retry-After" value:@"2"];
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    return @{ @"status" : @"error", @"message" : AMDatabaseUnavailableMessage };
+  }
+  [self renderText:AMDatabaseUnavailableMessage];
+  return nil;
 }
 
 - (NSArray *)errorEntriesForError:(NSError *)error
@@ -4165,7 +4233,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   return @[ @{
     @"field" : field ?: @"",
-    @"message" : error.localizedDescription ?: @"Request failed",
+    @"message" : AMErrorIsDatabaseUnavailable(error) ? AMDatabaseUnavailableMessage
+                                                     : (error.localizedDescription ?: @"Request failed"),
   } ];
 }
 
@@ -4654,7 +4723,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)changePassword:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     [self setStatus:401];
     return @{ @"status" : @"error", @"message" : @"Authentication required" };
@@ -4694,7 +4767,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)mfaManage:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       [self setStatus:401];
@@ -4719,7 +4796,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)smsForm:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       [self setStatus:401];
@@ -4775,7 +4856,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)smsStart:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
@@ -4824,7 +4909,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)smsResend:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
@@ -4895,7 +4984,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)smsVerify:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
@@ -4968,7 +5061,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)smsRemove:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     [self setStatus:401];
     return [self shouldPreferJSONForHeadlessRequest:ctx] ? @{ @"status" : @"error", @"message" : @"Authentication required" } : nil;
@@ -5011,7 +5108,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)totpForm:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       [self setStatus:401];
@@ -5039,7 +5140,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)totpVerify:(ALNContext *)ctx {
-  NSDictionary *user = [self.runtime currentUserForContext:ctx error:NULL];
+  NSError *userError = nil;
+  NSDictionary *user = [self.runtime currentUserForContext:ctx error:&userError];
+  if (user == nil && [[ctx authSubject] length] > 0 && AMErrorIsDatabaseUnavailable(userError)) {
+    return [self authStoreUnavailableResponse:ctx];
+  }
   if (user == nil) {
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       [self setStatus:401];

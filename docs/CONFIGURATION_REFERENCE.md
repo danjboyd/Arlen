@@ -337,6 +337,12 @@ middleware below:
 - `maxFailures = 0` turns a limit off (for `password`, both the per-address
   delay and the ceiling); `accountMaxFailures = 0` turns off only the ceiling.
 
+The auth module's own connection pool is set with
+`authModule.database.maxConnections` (default `8`) and
+`authModule.database.acquireTimeoutSeconds` (default `2`). A request that gets
+no connection in time, or finds the database unreachable, answers `503` with
+`Retry-After` and keeps the session.
+
 See [Auth Module](AUTH_MODULE.md#totp-replay-protection-and-attempt-limits)
 for the full behaviour.
 
