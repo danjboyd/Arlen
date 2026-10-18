@@ -466,6 +466,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_MAX_HEADER_BYTES", "MOJOOBJC_MAX_HEADER_BYTES");
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
+  NSString *requestHeadTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS");
   NSString *maxHTTPSessions =
       ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
@@ -664,6 +665,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   ALNApplyLimitOverride(limits, maxRequestLineBytes, @"maxRequestLineBytes");
   ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
   ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
+  ALNApplyIntegerOverride(limits, requestHeadTimeoutSeconds, @"requestHeadTimeoutSeconds", 0);
   config[@"requestLimits"] = limits;
 
   NSMutableDictionary *runtimeLimits =
@@ -1014,6 +1016,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (finalLimits[@"maxBodyBytes"] == nil) {
     finalLimits[@"maxBodyBytes"] = @(1048576);
+  }
+  if (finalLimits[@"requestHeadTimeoutSeconds"] == nil) {
+    finalLimits[@"requestHeadTimeoutSeconds"] = @(15);
   }
   NSDictionary *multipartDefaults = @{ @"maxMultipartParts":@128,
       @"maxMultipartFieldBytes":@65536, @"maxMultipartFileBytes":@1048576,

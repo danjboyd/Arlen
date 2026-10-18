@@ -1143,6 +1143,74 @@
   }
 }
 
+// Clients that trickle an incomplete request head (one byte at a time, each
+// well inside connectionTimeoutSeconds) must not hold every HTTP worker.
+- (void)testSlowIncompleteRequestHeadsTimeOutAndDoNotStarveWorkers {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  environment[@"ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS"] = @"2";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"results = []\n"
+                                         @"def slow():\n"
+                                         @"    s = socket.create_connection(('127.0.0.1', PORT), timeout=20)\n"
+                                         @"    s.sendall(b'GET /healthz HTTP/1.1\\r\\nHost: x\\r\\n')\n"
+                                         @"    end = time.time() + 12\n"
+                                         @"    try:\n"
+                                         @"        s.settimeout(0.5)\n"
+                                         @"        while time.time() < end:\n"
+                                         @"            try:\n"
+                                         @"                data = s.recv(4096)\n"
+                                         @"                results.append(data[:12])\n"
+                                         @"                return\n"
+                                         @"            except socket.timeout:\n"
+                                         @"                s.sendall(b'X')\n"
+                                         @"        results.append(b'still-open')\n"
+                                         @"    except OSError:\n"
+                                         @"        results.append(b'closed')\n"
+                                         @"    finally:\n"
+                                         @"        s.close()\n"
+                                         @"threads = [threading.Thread(target=slow) for _ in range(12)]\n"
+                                         @"for t in threads: t.start()\n"
+                                         @"time.sleep(3.5)\n"
+                                         @"start = time.time()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=5).read()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"for t in threads: t.join()\n"
+                                         @"if body.strip() != b'ok':\n"
+                                         @"    raise RuntimeError(f'unexpected body {body!r}')\n"
+                                         @"if elapsed > 3:\n"
+                                         @"    raise RuntimeError(f'normal request waited {elapsed:.1f}s')\n"
+                                         @"if any(r == b'still-open' for r in results):\n"
+                                         @"    raise RuntimeError(f'slow heads were not timed out: {results}')\n"
+                                         @"print('ok', len(results))\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
 - (void)testKeepAliveRequestChurnDoesNotShowUnboundedRSSGrowth {
   const char *enabled = getenv("ARLEN_ENABLE_PHASE10J_RSS_CHURN");
   if (!(enabled != NULL && strcmp(enabled, "1") == 0)) {

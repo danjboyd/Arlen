@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New `requestLimits.requestHeadTimeoutSeconds` (default `15`, env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`) bounds the total time to receive a
+  request head once its first byte has arrived; a slower head gets `408`.
+  Before, only each read was bounded by `connectionTimeoutSeconds`, so a few
+  clients trickling one byte at a time could hold every HTTP worker. Both
+  parsers apply it; idle keep-alive time is not counted.
 - File responses (`renderFileAtPath:`, `ALNFileResponse`) and static mounts
   answer 404 for a path that contains a control character (U+0000-U+001F or
   DEL) instead of passing it to the filesystem. A C path ends at U+0000, which
