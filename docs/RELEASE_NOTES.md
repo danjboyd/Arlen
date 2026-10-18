@@ -132,7 +132,16 @@
     still busy.
   - Deletes remove an attachment only when its size and SHA-256 match the
     record.
-  - The state file is written `0600` whatever the umask.
+  - The state file is written `0600` whatever the umask, and startup removes
+    temporary state files left by a process killed mid-write.
+  - The state file is an XML property list. GNUstep's binary writer takes time
+    quadratic in the object count (about 12 s at 3,200 objects, past the lock
+    timeout); an XML write of 5,000 objects takes about 0.2 s. Binary files
+    from earlier releases still load.
+  - Downloads and other reads no longer take the state lock: they reload a
+    changed file without it, and serve the in-memory catalog while a writer
+    is busy.
+  - The 503 for a busy state lock carries `Retry-After: 1`.
   - With persistence off and `propaneAccessories.workerCount > 1`, startup
     (outside `test` and `development`), `propane` and `arlen module doctor`
     warn that each worker keeps its own catalog.
