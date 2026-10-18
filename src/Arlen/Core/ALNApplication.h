@@ -73,6 +73,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readonly) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readonly) id<ALNAttachmentAdapter> attachmentAdapter;
+// YES until setAttachmentAdapter: is called: the attachment adapter is still
+// the process-local in-memory default.
+@property(nonatomic, assign, readonly) BOOL usesDefaultAttachmentAdapter;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamStore> eventStreamStore;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamBroker> eventStreamBroker;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;

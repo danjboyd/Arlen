@@ -3643,6 +3643,9 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
     @"readOnly" : @NO,
     @"scoped" : @NO,
     @"mirroring" : @NO,
+    // Attachments live in this process's memory, so other processes
+    // (propane workers, the jobs worker) cannot read them.
+    @"processLocal" : @YES,
   };
 }
 

@@ -5,6 +5,8 @@
 
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
+#import "ALNPlatform.h"
+#import "ALNServices.h"
 #import "ALNStorageModule.h"
 #import "../shared/ALNTestSupport.h"
 
@@ -480,6 +482,156 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   NSDictionary *next = [self storeObjectNamed:@"next.png" body:@"next" inRuntime:upgraded];
   XCTAssertNotEqualObjects(@"obj-2", next[@"objectID"]);
   XCTAssertNotNil([upgraded objectRecordForIdentifier:@"obj-1" error:NULL]);
+}
+
+- (ALNApplication *)storageApplicationWithStatePath:(NSString *)statePath
+                                   attachmentAdapter:(id<ALNAttachmentAdapter>)attachmentAdapter
+                                         persistence:(NSDictionary *)persistence {
+  NSMutableDictionary *persistenceConfig = [@{ @"enabled" : @YES, @"path" : statePath ?: @"" } mutableCopy];
+  [persistenceConfig addEntriesFromDictionary:persistence ?: @{}];
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"jobsModule" : @{
+      @"providers" : @{ @"classes" : @[] },
+      @"worker" : @{ @"retryDelaySeconds" : @0 },
+    },
+    @"storageModule" : @{
+      @"collections" : @{ @"classes" : @[ @"Phase16CCollectionProvider" ] },
+      @"persistence" : persistenceConfig,
+      @"signingSecret" : @"phase16c-shared-worker-signing-secret-0123456789",
+    },
+  }];
+  if (attachmentAdapter != nil) {
+    [app setAttachmentAdapter:attachmentAdapter];
+  }
+  return app;
+}
+
+- (NSError *)configureRuntime:(ALNStorageModuleRuntime *)runtime withApplication:(ALNApplication *)app {
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  error = nil;
+  if (![runtime configureWithApplication:app error:&error]) {
+    XCTAssertNotNil(error);
+    return error ?: [NSError errorWithDomain:@"Phase16C" code:1 userInfo:nil];
+  }
+  return nil;
+}
+
+- (void)testPersistenceRefusesAProcessLocalAttachmentAdapter {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"storage-state.plist"];
+  // Each worker numbering its own in-memory attachments is what let one
+  // worker's catalog entry name another worker's bytes.
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                            attachmentAdapter:[[ALNInMemoryAttachmentAdapter alloc] init]
+                                                  persistence:nil];
+  NSError *error = [self configureRuntime:[[ALNStorageModuleRuntime alloc] init] withApplication:app];
+  XCTAssertNotNil(error);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorInvalidConfiguration, error.code);
+  XCTAssertEqualObjects(@"process_local_attachment_adapter", error.userInfo[@"reason"]);
+
+  // Without persistence each process keeps its own catalog, so the in-memory
+  // adapter stays allowed.
+  ALNApplication *ephemeral = [self storageApplicationWithStatePath:statePath
+                                                  attachmentAdapter:[[ALNInMemoryAttachmentAdapter alloc] init]
+                                                        persistence:@{ @"enabled" : @NO }];
+  XCTAssertNil([self configureRuntime:[[ALNStorageModuleRuntime alloc] init] withApplication:ephemeral]);
+}
+
+- (void)testPersistenceWithoutAnAdapterSharesFilesystemAttachmentsAcrossWorkers {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"storage-state.plist"];
+  ALNApplication *appA = [self storageApplicationWithStatePath:statePath attachmentAdapter:nil persistence:nil];
+  ALNApplication *appB = [self storageApplicationWithStatePath:statePath attachmentAdapter:nil persistence:nil];
+  XCTAssertTrue(appA.usesDefaultAttachmentAdapter);
+  ALNStorageModuleRuntime *workerA = [[ALNStorageModuleRuntime alloc] init];
+  ALNStorageModuleRuntime *workerB = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:workerA withApplication:appA]);
+  XCTAssertNil([self configureRuntime:workerB withApplication:appB]);
+  XCTAssertTrue([(id)appA.attachmentAdapter isKindOfClass:[ALNFileSystemAttachmentAdapter class]]);
+  XCTAssertTrue([(id)appB.attachmentAdapter isKindOfClass:[ALNFileSystemAttachmentAdapter class]]);
+  NSString *attachmentRoot = [[statePath stringByDeletingPathExtension] stringByAppendingString:@"-attachments"];
+  BOOL isDirectory = NO;
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:attachmentRoot isDirectory:&isDirectory]);
+  XCTAssertTrue(isDirectory);
+
+  // The original two-worker report: Alice stores on A, Bob on B, and Alice's
+  // token is served by B.
+  NSDictionary *alice = [self storeObjectNamed:@"alice-private.png" body:@"alice data" inRuntime:workerA];
+  NSDictionary *bob = [self storeObjectNamed:@"bob.png" body:@"bob data" inRuntime:workerB];
+  NSString *aliceToken = [workerA issueDownloadTokenForObjectID:alice[@"objectID"] expiresIn:60 error:NULL];
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerB]);
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerA]);
+
+  // Deleting Bob's object on B leaves Alice's bytes alone.
+  NSError *error = nil;
+  XCTAssertTrue([workerB deleteObjectIdentifier:bob[@"objectID"] error:&error]);
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerA]);
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerB]);
+}
+
+- (void)testDownloadRefusesAttachmentBytesThatDoNotMatchTheRecord {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *worker = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:NO];
+  NSDictionary *alice = [self storeObjectNamed:@"alice.png" body:@"alice data" inRuntime:worker];
+  NSString *aliceToken = [worker issueDownloadTokenForObjectID:alice[@"objectID"] expiresIn:60 error:NULL];
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:worker]);
+  NSString *dataPath =
+      [attachmentRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.bin", alice[@"attachmentID"]]];
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:dataPath]);
+
+  // Same length, other bytes (what a swapped attachment looks like), then a
+  // different length.
+  for (NSString *swapped in @[ @"bobby data", @"bob data" ]) {
+    XCTAssertTrue([[swapped dataUsingEncoding:NSUTF8StringEncoding] writeToFile:dataPath atomically:YES]);
+    NSError *error = nil;
+    XCTAssertNil([worker downloadDataForToken:aliceToken metadata:NULL error:&error]);
+    XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
+  }
+  NSError *error = nil;
+  NSDictionary *payload = @{ @"objectID" : alice[@"objectID"], @"variant" : @"thumb" };
+  XCTAssertNil([worker processVariantJobPayload:payload error:&error]);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
+}
+
+- (void)testStateLockTimeoutFailsTheChangeInsteadOfWaitingForever {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSError *adapterError = nil;
+  ALNFileSystemAttachmentAdapter *adapter =
+      [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:[tempDir stringByAppendingPathComponent:@"attachments"]
+                                                        adapterName:@"phase16c_fs"
+                                                              error:&adapterError];
+  XCTAssertNotNil(adapter);
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                            attachmentAdapter:adapter
+                                                  persistence:@{ @"lockTimeoutSeconds" : @0.3 }];
+  ALNStorageModuleRuntime *worker = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:worker withApplication:app]);
+
+  // Another holder (a hung worker) keeps the state lock.
+  int held = ALNPlatformOpenExclusiveLock([statePath stringByAppendingString:@".lock"]);
+  XCTAssertGreaterThanOrEqual(held, 0);
+  NSDate *started = [NSDate date];
+  NSError *error = nil;
+  NSDictionary *object = [worker storeObjectInCollection:@"gallery"
+                                                    name:@"late.png"
+                                             contentType:@"image/png"
+                                                    data:[@"late" dataUsingEncoding:NSUTF8StringEncoding]
+                                                metadata:nil
+                                                   error:&error];
+  NSTimeInterval waited = -[started timeIntervalSinceNow];
+  XCTAssertNil(object);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorPersistenceFailed, error.code);
+  XCTAssertGreaterThanOrEqual(waited, 0.25);
+  XCTAssertLessThan(waited, 5.0);
+  ALNPlatformReleaseExclusiveLock(held);
+
+  XCTAssertNotNil([self storeObjectNamed:@"on-time.png" body:@"on time" inRuntime:worker]);
 }
 
 @end

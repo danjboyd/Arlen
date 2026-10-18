@@ -50,6 +50,7 @@ if (![app startWithError:&error]) {
 | `mailAdapter` | `id<ALNMailAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `webhookAdapter` | `id<ALNWebhookAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `attachmentAdapter` | `id<ALNAttachmentAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
+| `usesDefaultAttachmentAdapter` | `BOOL` | `nonatomic, assign, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `eventStreamStore` | `id<ALNEventStreamStore>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamStore` property available on `ALNApplication`. |
 | `eventStreamBroker` | `id<ALNEventStreamBroker>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamBroker` property available on `ALNApplication`. |
 | `eventStreamAuthorizationHook` | `id<ALNEventStreamAuthorizationHook>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamAuthorizationHook` property available on `ALNApplication`. |

@@ -63,6 +63,20 @@
   - Download tokens are bound to the object they were issued for.
   - Download tokens issued before the upgrade are rejected; they expire within
     `downloadTokenTTLSeconds` anyway. Existing objects keep their IDs.
+  - Attachment data is shared too. With persistence on and no attachment
+    adapter configured, the module uses a filesystem adapter at
+    `<state file without extension>-attachments/` instead of the in-memory
+    default, and it refuses to start with an explicitly configured in-memory
+    adapter.
+  - Downloads and variant jobs verify the attachment's size and SHA-256
+    against the object record and answer 404 on a mismatch.
+  - A change waits at most `storageModule.persistence.lockTimeoutSeconds`
+    (default 10) for the state lock, then fails with an error.
+- `ALNApplication.usesDefaultAttachmentAdapter` reports whether the
+  attachment adapter is still the in-memory default, and the in-memory
+  attachment adapter reports `processLocal = YES` in its capabilities.
+  `ALNPlatformOpenExclusiveLockWithTimeout()` waits for a lock for at most a
+  given time, and both lock functions retry interrupted waits.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

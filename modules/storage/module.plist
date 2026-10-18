@@ -23,6 +23,10 @@
         persistence = {
           enabled = YES;
           path = "";
+          lockTimeoutSeconds = 10;
+        };
+        attachments = {
+          path = "";
         };
         collections = {
           classes = ();

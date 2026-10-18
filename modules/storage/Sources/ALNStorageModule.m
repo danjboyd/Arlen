@@ -12,6 +12,7 @@
 #import "ALNRequest.h"
 #import "ALNSecurityPrimitives.h"
 
+#include <errno.h>
 #include <sys/stat.h>
 
 NSString *const ALNStorageModuleErrorDomain = @"Arlen.Modules.Storage.Error";
@@ -207,6 +208,61 @@ static NSString *SMStateFileStamp(NSString *path) {
                                     (long long)info.st_mtime, mtimeNanos,
                                     (long long)info.st_ctime, ctimeNanos];
 #endif
+}
+
+static const NSTimeInterval SMDefaultLockTimeoutSeconds = 10.0;
+
+static NSString *SMRecordChecksum(NSDictionary *record) {
+  NSString *checksum = SMTrimmedString(record[@"checksumSHA256"]);
+  if ([checksum length] == 0 && [record[@"analysis"] isKindOfClass:[NSDictionary class]]) {
+    checksum = SMTrimmedString(record[@"analysis"][@"checksumSHA256"]);
+  }
+  return [checksum lowercaseString];
+}
+
+// The bytes an adapter returns must be the ones stored for this record: a
+// misconfigured or swapped attachment must never be served in its place.
+static BOOL SMAttachmentDataMatchesRecord(NSData *data, NSDictionary *record) {
+  if (![data isKindOfClass:[NSData class]]) {
+    return NO;
+  }
+  id size = record[@"sizeBytes"];
+  if ([size respondsToSelector:@selector(unsignedIntegerValue)] && [size unsignedIntegerValue] != [data length]) {
+    return NO;
+  }
+  NSString *expected = SMRecordChecksum(record);
+  if ([expected length] == 0) {
+    return YES;
+  }
+  NSString *actual = ALNLowercaseHexStringFromData(ALNSHA256(data)) ?: @"";
+  return [actual isEqualToString:expected];
+}
+
+// storageModule.persistence.lockTimeoutSeconds: how long a change waits for
+// another process's state lock before failing.
+static NSTimeInterval SMConfiguredLockTimeoutSeconds(NSDictionary *moduleConfig) {
+  NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]]
+                                  ? moduleConfig[@"persistence"]
+                                  : @{};
+  id value = persistence[@"lockTimeoutSeconds"];
+  if ([value respondsToSelector:@selector(doubleValue)] && [value doubleValue] > 0.0) {
+    return [value doubleValue];
+  }
+  return SMDefaultLockTimeoutSeconds;
+}
+
+static NSError *SMStateLockError(NSString *lockPath, int lockErrno, NSTimeInterval timeoutSeconds) {
+  NSString *message =
+      (lockErrno == ETIMEDOUT)
+          ? [NSString stringWithFormat:@"storage state lock was not released within %.1f seconds", timeoutSeconds]
+          : @"storage state lock could not be acquired";
+  return [NSError errorWithDomain:ALNStorageModuleErrorDomain
+                             code:ALNStorageModuleErrorPersistenceFailed
+                         userInfo:@{
+                           NSLocalizedDescriptionKey : message,
+                           @"path" : lockPath ?: @"",
+                           @"errno" : @(lockErrno),
+                         }];
 }
 
 static NSString *SMPathJoin(NSString *prefix, NSString *suffix) {
@@ -572,6 +628,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 @property(nonatomic, assign) NSUInteger transactionDepth;
 @property(nonatomic, assign) int stateLockDescriptor;
 @property(nonatomic, copy) NSString *loadedStateStamp;
+@property(nonatomic, assign) NSTimeInterval lockTimeoutSeconds;
 
 - (nullable NSDictionary *)normalizedCollectionMetadataForDefinition:(id<ALNStorageCollectionDefinition>)definition
                                                                error:(NSError **)error;
@@ -639,8 +696,73 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     _transactionDepth = 0;
     _stateLockDescriptor = -1;
     _loadedStateStamp = @"";
+    _lockTimeoutSeconds = SMDefaultLockTimeoutSeconds;
   }
   return self;
+}
+
+// The catalog is shared through the state file, so attachment data must be
+// shared too: a process-local adapter would let one worker's catalog entry
+// name another worker's bytes. With persistence on and no adapter configured,
+// the in-memory default is replaced by a filesystem adapter next to the state
+// file; a process-local adapter configured explicitly is refused.
+- (id<ALNAttachmentAdapter>)sharedAttachmentAdapterForApplication:(ALNApplication *)application
+                                                     moduleConfig:(NSDictionary *)moduleConfig
+                                                            error:(NSError **)error {
+  id<ALNAttachmentAdapter> adapter = application.attachmentAdapter;
+  BOOL processLocal = [SMAttachmentAdapterCapabilities(adapter)[@"processLocal"] boolValue];
+  // Without persistence each process keeps its own catalog, and object IDs
+  // are random, so another process's token finds nothing rather than other
+  // bytes.
+  if (!processLocal || !self.persistenceEnabled) {
+    return adapter;
+  }
+  if (application.usesDefaultAttachmentAdapter) {
+    NSDictionary *attachments = [moduleConfig[@"attachments"] isKindOfClass:[NSDictionary class]]
+                                    ? moduleConfig[@"attachments"]
+                                    : @{};
+    NSString *root = SMTrimmedString(attachments[@"path"]);
+    if ([root length] == 0) {
+      root = [[self.statePath stringByDeletingPathExtension] stringByAppendingString:@"-attachments"];
+    } else if (![root isAbsolutePath]) {
+      root = [application pathRelativeToAppRoot:root];
+    }
+    NSError *adapterError = nil;
+    ALNFileSystemAttachmentAdapter *filesystem =
+        [[ALNFileSystemAttachmentAdapter alloc] initWithRootDirectory:root
+                                                          adapterName:@"storage_filesystem"
+                                                                error:&adapterError];
+    if (filesystem == nil) {
+      if (error != NULL) {
+        *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                         @"storage module could not create its attachment directory",
+                         @{
+                           @"path" : root ?: @"",
+                           @"reason" : adapterError.localizedDescription ?: @"",
+                         });
+      }
+      return nil;
+    }
+    [application setAttachmentAdapter:filesystem];
+    [application.logger info:@"storage attachments use the filesystem"
+                      fields:@{
+                        @"path" : root ?: @"",
+                        @"detail" : @"no attachment adapter was configured and the in-memory default is not shared "
+                                    @"between processes",
+                      }];
+    return filesystem;
+  }
+  if (error != NULL) {
+    *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                     @"storage module persistence needs an attachment adapter that every process shares; "
+                     @"the configured adapter keeps attachments in process memory. Configure a filesystem or "
+                     @"object-store attachment adapter, or set storageModule.persistence.enabled = NO",
+                     @{
+                       @"adapter" : [adapter adapterName] ?: @"",
+                       @"reason" : @"process_local_attachment_adapter",
+                     });
+  }
+  return nil;
 }
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
@@ -746,6 +868,16 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   self.statePath = SMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
   self.loadedStateStamp = @"";
+  self.lockTimeoutSeconds = SMConfiguredLockTimeoutSeconds(moduleConfig);
+  [self.lock unlock];
+
+  id<ALNAttachmentAdapter> attachmentAdapter =
+      [self sharedAttachmentAdapterForApplication:application moduleConfig:moduleConfig error:error];
+  if (attachmentAdapter == nil) {
+    return NO;
+  }
+  [self.lock lock];
+  self.attachmentAdapter = attachmentAdapter;
   [self.lock unlock];
 
   if (![self loadPersistedStateWithError:error]) {
@@ -912,13 +1044,12 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                                        attributes:nil
                                                             error:NULL];
     }
-    int descriptor = ALNPlatformOpenExclusiveLock([self stateLockPath]);
+    int descriptor = ALNPlatformOpenExclusiveLockWithTimeout([self stateLockPath], self.lockTimeoutSeconds);
     if (descriptor < 0) {
+      int lockErrno = errno;
       [self.transactionLock unlock];
       if (error != NULL) {
-        *error = SMError(ALNStorageModuleErrorPersistenceFailed,
-                         @"storage state lock could not be acquired",
-                         @{ @"path" : [self stateLockPath] ?: @"" });
+        *error = SMStateLockError([self stateLockPath], lockErrno, self.lockTimeoutSeconds);
       }
       return NO;
     }
@@ -983,7 +1114,16 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   [self.transactionLock lock];
   int bareDescriptor = -1;
   if (self.transactionDepth == 0) {
-    bareDescriptor = ALNPlatformOpenExclusiveLock([self stateLockPath]);
+    bareDescriptor = ALNPlatformOpenExclusiveLockWithTimeout([self stateLockPath], self.lockTimeoutSeconds);
+    if (bareDescriptor < 0) {
+      // Without the lock this write could overwrite another process's.
+      int lockErrno = errno;
+      [self.transactionLock unlock];
+      if (error != NULL) {
+        *error = SMStateLockError([self stateLockPath], lockErrno, self.lockTimeoutSeconds);
+      }
+      return NO;
+    }
   }
   NSDictionary *payload = nil;
   [self.lock lock];
@@ -1466,6 +1606,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       @"sizeBytes" : @(sizeBytes),
       @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
       @"attachmentID" : attachmentID ?: @"",
+      @"checksumSHA256" : SMTrimmedString(analysis[@"checksumSHA256"]),
       @"metadata" : SMNormalizeDictionary(metadata),
       @"analysis" : analysis ?: @{},
       @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
@@ -1675,6 +1816,14 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (data == nil) {
     return nil;
   }
+  if (!SMAttachmentDataMatchesRecord(data, record)) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorNotFound,
+                       @"stored object data does not match its record",
+                       @{ @"objectID" : record[@"objectID"] ?: @"" });
+    }
+    return nil;
+  }
   if (metadata != NULL) {
     NSMutableDictionary *combined = [NSMutableDictionary dictionaryWithDictionary:adapterMetadata ?: @{}];
     combined[@"object"] = record;
@@ -1713,8 +1862,18 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return NO;
   }
   NSMutableArray<NSString *> *attachmentIDs = [NSMutableArray array];
-  if ([SMTrimmedString(record[@"attachmentID"]) length] > 0) {
-    [attachmentIDs addObject:record[@"attachmentID"]];
+  NSString *objectAttachmentID = SMTrimmedString(record[@"attachmentID"]);
+  NSDictionary *attachmentMetadata = ([objectAttachmentID length] > 0)
+                                         ? [self.attachmentAdapter attachmentMetadataForID:objectAttachmentID error:NULL]
+                                         : nil;
+  id storedSize = attachmentMetadata[@"sizeBytes"];
+  BOOL attachmentIsThisObjects =
+      ![storedSize respondsToSelector:@selector(unsignedIntegerValue)] ||
+      ![record[@"sizeBytes"] respondsToSelector:@selector(unsignedIntegerValue)] ||
+      [storedSize unsignedIntegerValue] == [record[@"sizeBytes"] unsignedIntegerValue];
+  // Never delete bytes that belong to something else.
+  if ([objectAttachmentID length] > 0 && attachmentIsThisObjects) {
+    [attachmentIDs addObject:objectAttachmentID];
   }
   for (NSDictionary *variant in (record[@"variants"] ?: @[])) {
     NSString *attachmentID = SMTrimmedString(variant[@"attachmentID"]);
@@ -1880,6 +2039,14 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSDictionary *originalMetadata = nil;
   NSData *data = [self.attachmentAdapter attachmentDataForID:record[@"attachmentID"] metadata:&originalMetadata error:error];
   if (data == nil) {
+    return nil;
+  }
+  if (!SMAttachmentDataMatchesRecord(data, record)) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorNotFound,
+                       @"stored object data does not match its record",
+                       @{ @"objectID" : objectID ?: @"" });
+    }
     return nil;
   }
   NSString *collectionID = SMLowerTrimmedString(record[@"collection"]);

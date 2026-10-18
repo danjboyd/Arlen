@@ -72,6 +72,10 @@ BOOL ALNPlatformFileVersion(NSString *path,
 // holds an exclusive, cross-process lock on it: flock() on POSIX, LockFileEx
 // on Windows. Returns the descriptor, or -1 with errno set.
 int ALNPlatformOpenExclusiveLock(NSString *path);
+// As ALNPlatformOpenExclusiveLock, but gives up after timeoutSeconds (a
+// negative value waits forever), returning -1 with errno ETIMEDOUT. Retries
+// interrupted waits.
+int ALNPlatformOpenExclusiveLockWithTimeout(NSString *path, NSTimeInterval timeoutSeconds);
 // Releases a lock from ALNPlatformOpenExclusiveLock and closes its descriptor.
 void ALNPlatformReleaseExclusiveLock(int descriptor);
 

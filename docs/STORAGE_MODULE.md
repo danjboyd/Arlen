@@ -56,10 +56,26 @@ delegates on one host) stay consistent:
 - Object and upload-session IDs are random (`obj-<32 hex>`,
   `upload-<32 hex>`), not per-process counters. Download tokens are bound to
   the object they were issued for, not just to its ID.
+- A change that can't get the lock within
+  `persistence.lockTimeoutSeconds` (default `10`) fails with an error instead
+  of waiting forever behind a hung process.
 
 The state file must be on a local filesystem that honours those locks, and
 every process must see the same file: this is single-host shared state, not
 multi-host storage.
+
+Attachment data has to be shared the same way, because the catalog names
+attachments by ID:
+
+- With persistence on and no attachment adapter configured, the module
+  replaces the application's in-memory default with a filesystem adapter at
+  `<state file without extension>-attachments/` (or `storageModule.attachments.path`,
+  relative to the app root).
+- With persistence on, an attachment adapter that keeps data in process memory
+  (`ALNInMemoryAttachmentAdapter`, alone or wrapped) is refused at startup.
+  Configure a filesystem or object-store adapter, or turn persistence off.
+- Downloads and variant jobs check the attachment's size and SHA-256 against
+  the object record, and answer 404 rather than serve bytes that don't match.
 
 Runtime access is available through `ALNStorageModuleRuntime`.
 

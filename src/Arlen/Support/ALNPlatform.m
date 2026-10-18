@@ -714,10 +714,16 @@ FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
 }
 
 int ALNPlatformOpenExclusiveLock(NSString *path) {
+  return ALNPlatformOpenExclusiveLockWithTimeout(path, -1.0);
+}
+
+int ALNPlatformOpenExclusiveLockWithTimeout(NSString *path, NSTimeInterval timeoutSeconds) {
   if ([path length] == 0) {
     errno = EINVAL;
     return -1;
   }
+  NSDate *deadline = (timeoutSeconds >= 0.0) ? [NSDate dateWithTimeIntervalSinceNow:timeoutSeconds] : nil;
+  unsigned int pause = 1000;  // microseconds, doubling to 50 ms
 #if defined(_WIN32)
   int descriptor = _wopen((const wchar_t *)[path fileSystemRepresentation],
                           _O_RDWR | _O_CREAT | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
@@ -725,27 +731,62 @@ int ALNPlatformOpenExclusiveLock(NSString *path) {
     return -1;
   }
   HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
-  OVERLAPPED overlapped;
-  memset(&overlapped, 0, sizeof(overlapped));
-  if (handle == INVALID_HANDLE_VALUE ||
-      !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+  if (handle == INVALID_HANDLE_VALUE) {
     _close(descriptor);
     errno = EIO;
     return -1;
   }
-  return descriptor;
+  DWORD flags = LOCKFILE_EXCLUSIVE_LOCK | ((deadline != nil) ? LOCKFILE_FAIL_IMMEDIATELY : 0);
+  for (;;) {
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    if (LockFileEx(handle, flags, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+      return descriptor;
+    }
+    DWORD lastError = GetLastError();
+    if (deadline == nil || lastError != ERROR_LOCK_VIOLATION) {
+      _close(descriptor);
+      errno = EIO;
+      return -1;
+    }
+    if ([deadline timeIntervalSinceNow] <= 0.0) {
+      _close(descriptor);
+      errno = ETIMEDOUT;
+      return -1;
+    }
+    Sleep((DWORD)(pause / 1000));
+    pause = (pause < 50000) ? pause * 2 : 50000;
+  }
 #else
-  int descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT, 0600);
+  int descriptor = -1;
+  do {
+    descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  } while (descriptor < 0 && errno == EINTR);
   if (descriptor < 0) {
     return -1;
   }
-  if (flock(descriptor, LOCK_EX) != 0) {
+  int operation = LOCK_EX | ((deadline != nil) ? LOCK_NB : 0);
+  for (;;) {
+    if (flock(descriptor, operation) == 0) {
+      return descriptor;
+    }
     int savedErrno = errno;
-    close(descriptor);
-    errno = savedErrno;
-    return -1;
+    if (savedErrno == EINTR) {
+      continue;
+    }
+    if (deadline == nil || savedErrno != EWOULDBLOCK) {
+      close(descriptor);
+      errno = savedErrno;
+      return -1;
+    }
+    if ([deadline timeIntervalSinceNow] <= 0.0) {
+      close(descriptor);
+      errno = ETIMEDOUT;
+      return -1;
+    }
+    usleep((useconds_t)pause);
+    pause = (pause < 50000) ? pause * 2 : 50000;
   }
-  return descriptor;
 #endif
 }
 

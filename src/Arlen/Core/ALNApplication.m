@@ -678,6 +678,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readwrite) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, assign, readwrite) BOOL usesDefaultAttachmentAdapter;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamStore> eventStreamStore;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamBroker> eventStreamBroker;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;
@@ -1094,6 +1095,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _mailAdapter = [[ALNInMemoryMailAdapter alloc] init];
     _webhookAdapter = [[ALNInMemoryWebhookAdapter alloc] init];
     _attachmentAdapter = [[ALNInMemoryAttachmentAdapter alloc] init];
+    _usesDefaultAttachmentAdapter = YES;
     _eventStreamBroker = [[ALNInMemoryEventStreamBroker alloc] initWithAdapterName:nil];
     NSDictionary *services = [_config[@"services"] isKindOfClass:[NSDictionary class]] ? _config[@"services"] : @{};
     NSDictionary *i18nConfig =
@@ -1427,6 +1429,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     return;
   }
   _attachmentAdapter = adapter;
+  _usesDefaultAttachmentAdapter = NO;
 }
 
 - (void)setEventStreamStore:(id<ALNEventStreamStore>)adapter {
