@@ -22,6 +22,10 @@
 }
 
 - (ALNApplication *)application {
+  return [self applicationWithProviderClasses:@[ @"Phase27SearchProvider" ]];
+}
+
+- (ALNApplication *)applicationWithProviderClasses:(NSArray<NSString *> *)providerClasses {
   return [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
     @"logFormat" : @"json",
@@ -31,7 +35,7 @@
       @"worker" : @{ @"retryDelaySeconds" : @0 },
     },
     @"searchModule" : @{
-      @"providers" : @{ @"classes" : @[ @"Phase27SearchProvider" ] },
+      @"providers" : @{ @"classes" : providerClasses ?: @[] },
       @"persistence" : @{ @"enabled" : @NO },
     },
   }];
@@ -460,6 +464,88 @@
   NSDictionary *limitedAutocomplete =
       [self productsQueryPayloadForApplication:app queryString:@"q=pri&mode=autocomplete&autocomplete_limit=1"];
   XCTAssertEqual((NSUInteger)1, [(NSArray *)(limitedAutocomplete[@"autocomplete"] ?: @[]) count]);
+}
+
+- (NSDictionary *)unscopedQueryPayloadForApplication:(ALNApplication *)app
+                                         queryString:(NSString *)queryString
+                                             headers:(NSDictionary *)headers {
+  NSMutableDictionary *allHeaders = [NSMutableDictionary dictionaryWithDictionary:headers ?: @{}];
+  allHeaders[@"Accept"] = @"application/json";
+  ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                  path:@"/search/api/query"
+                                                           queryString:queryString
+                                                               headers:allHeaders
+                                                                  body:nil]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSDictionary *json = [self JSONObjectFromResponse:response];
+  return [json[@"data"] isKindOfClass:[NSDictionary class]] ? json[@"data"] : @{};
+}
+
+- (void)assertEmptySearchPayload:(NSDictionary *)payload label:(NSString *)label {
+  XCTAssertEqualObjects(@0, payload[@"total"], @"%@", label);
+  XCTAssertEqualObjects(@0, payload[@"pagination"][@"total"], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"results"] ?: @[]) count], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"promotedResults"] ?: @[]) count], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"autocomplete"] ?: @[]) count], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"suggestions"] ?: @[]) count], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"facets"] ?: @[]) count], @"%@", label);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"resources"] ?: @[]) count], @"%@", label);
+}
+
+- (void)testUnscopedQueryMatchesNothingWhenNoResourceIsVisible {
+  ALNApplication *app = [self applicationWithProviderClasses:@[ @"Phase27SearchRoleGatedProvider" ]];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSArray<NSDictionary *> *deniedCallers = @[
+    @{},
+    @{ @"X-Search-User" : @"member-user" },
+    @{ @"X-Search-User" : @"member-user", @"X-Search-Roles" : @"user" },
+  ];
+  for (NSDictionary *headers in deniedCallers) {
+    NSString *label = [headers description];
+    [self assertEmptySearchPayload:[self unscopedQueryPayloadForApplication:app queryString:@"q=priority" headers:headers]
+                             label:label];
+    [self assertEmptySearchPayload:[self unscopedQueryPayloadForApplication:app queryString:@"q=quarterly" headers:headers]
+                             label:label];
+    [self assertEmptySearchPayload:[self unscopedQueryPayloadForApplication:app
+                                                                queryString:@"q=pri&mode=autocomplete"
+                                                                    headers:headers]
+                             label:label];
+    [self assertEmptySearchPayload:[self unscopedQueryPayloadForApplication:app
+                                                                queryString:@"q=prioritty&mode=fuzzy&suggestions_limit=5"
+                                                                    headers:headers]
+                             label:label];
+    [self assertEmptySearchPayload:[self unscopedQueryPayloadForApplication:app
+                                                                queryString:@"filter.category=priority"
+                                                                    headers:headers]
+                             label:label];
+
+    NSMutableDictionary *jsonHeaders = [NSMutableDictionary dictionaryWithDictionary:headers];
+    jsonHeaders[@"Accept"] = @"application/json";
+    NSDictionary *resources = [self apiResourcePayloadForApplication:app headers:jsonHeaders];
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(resources[@"resources"] ?: @[]) count], @"%@", label);
+
+    ALNResponse *html = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                path:@"/search"
+                                                         queryString:@"q=quarterly"
+                                                             headers:headers
+                                                                body:nil]];
+    XCTAssertEqual((NSInteger)200, html.statusCode, @"%@", label);
+    NSString *body = [[NSString alloc] initWithData:html.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+    XCTAssertFalse([body containsString:@"Quarterly Forecast"], @"%@", label);
+  }
+
+  NSDictionary *auditor = @{ @"X-Search-User" : @"auditor-user", @"X-Search-Roles" : @"auditor" };
+  NSDictionary *allowed = [self unscopedQueryPayloadForApplication:app queryString:@"q=priority" headers:auditor];
+  XCTAssertGreaterThan([allowed[@"total"] unsignedIntegerValue], (NSUInteger)0);
+  XCTAssertGreaterThan([(NSArray *)(allowed[@"facets"] ?: @[]) count], (NSUInteger)0);
+  NSDictionary *allowedFinance = [self unscopedQueryPayloadForApplication:app queryString:@"q=quarterly" headers:auditor];
+  XCTAssertEqualObjects(@1, allowedFinance[@"total"]);
+  NSDictionary *allowedAutocomplete =
+      [self unscopedQueryPayloadForApplication:app queryString:@"q=pri&mode=autocomplete" headers:auditor];
+  XCTAssertGreaterThan([(NSArray *)(allowedAutocomplete[@"autocomplete"] ?: @[]) count], (NSUInteger)0);
 }
 
 @end

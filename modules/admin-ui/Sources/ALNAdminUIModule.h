@@ -76,6 +76,10 @@ typedef NS_ENUM(NSInteger, ALNAdminUIModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *apiPrefix;
 @property(nonatomic, copy, readonly) NSString *dashboardTitle;
 @property(nonatomic, strong, readonly, nullable) ALNApplication *mountedApplication;
+/// Roles (any of) admin-ui requires for its HTML and API surfaces.
+@property(nonatomic, copy, readonly) NSArray<NSString *> *accessRoles;
+/// Minimum auth assurance level admin-ui requires (AAL2 step-up).
+@property(nonatomic, assign, readonly) NSUInteger minimumAuthAssuranceLevel;
 
 + (instancetype)sharedRuntime;
 

@@ -147,6 +147,14 @@ static NSError *STError(ALNSearchModuleErrorCode code, NSString *message, NSDict
                                                                  limit:(NSUInteger)limit
                                                                 offset:(NSUInteger)offset
                                                                  error:(NSError **)error;
+@optional
+- (NSArray<NSString *> *)accessRoles;
+- (NSUInteger)minimumAuthAssuranceLevel;
+- (BOOL)resourceIdentifier:(NSString *)identifier
+             allowsOperation:(NSString *)operation
+                   recordID:(nullable NSString *)recordID
+                    context:(ALNContext *)context
+                      error:(NSError **)error;
 @end
 
 @protocol ALNSearchOptionalAuthRuntime <NSObject>
@@ -945,6 +953,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 
 - (instancetype)initWithAdminRuntime:(id<ALNSearchOptionalAdminRuntime>)adminRuntime
                              metadata:(NSDictionary *)metadata;
+- (BOOL)adminUIAllowsQueryForContext:(ALNContext *)context error:(NSError **)error;
 
 @end
 
@@ -963,6 +972,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 
 @property(nonatomic, strong) ALNSearchModuleRuntime *runtime;
 @property(nonatomic, strong) id<ALNSearchOptionalAuthRuntime> authRuntime;
+
+- (BOOL)resourceMetadata:(NSDictionary *)metadata
+    allowsQueryPolicyInContext:(ALNContext *)ctx
+                         error:(NSError **)error;
 
 @end
 
@@ -3959,26 +3972,80 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   return STLowerTrimmedString(self.metadata[@"identifier"]);
 }
 
-- (NSDictionary *)searchModuleResourceMetadata {
-  NSString *identifier = [self searchModuleResourceIdentifier];
-  NSArray *fields = STNormalizeArray(self.metadata[@"fields"]);
-  NSMutableArray *indexedFields = [NSMutableArray array];
-  NSMutableArray *resultFields = [NSMutableArray array];
-  NSMutableArray *facetFields = [NSMutableArray array];
-  NSMutableDictionary *weights = [NSMutableDictionary dictionary];
-  for (NSDictionary *field in STSortedArrayFromValues(fields, @"name")) {
+// Roles (any of) that admin-ui requires. Auto-registered resources are
+// queryable only by callers admin-ui itself would admit.
+- (NSArray<NSString *> *)adminUIAccessRoles {
+  NSArray *roles = nil;
+  if ([(id)self.adminRuntime respondsToSelector:@selector(accessRoles)]) {
+    roles = STNormalizedStringArray([self.adminRuntime accessRoles]);
+  }
+  return ([roles count] > 0) ? roles : @[ @"admin" ];
+}
+
+- (NSUInteger)adminUIMinimumAuthAssuranceLevel {
+  NSUInteger level = 0U;
+  if ([(id)self.adminRuntime respondsToSelector:@selector(minimumAuthAssuranceLevel)]) {
+    level = [self.adminRuntime minimumAuthAssuranceLevel];
+  }
+  return (level > 0U) ? level : 2U;
+}
+
+- (NSString *)adminUIIdentifierField {
+  NSString *field = STLowerTrimmedString(self.metadata[@"identifierField"]);
+  return ([field length] > 0) ? field : @"id";
+}
+
+- (NSString *)adminUIPrimaryField {
+  NSString *field = STLowerTrimmedString(self.metadata[@"primaryField"]);
+  return ([field length] > 0) ? field : [self adminUIIdentifierField];
+}
+
+// Fields admin-ui displays on its list or detail views.
+- (NSArray<NSString *> *)adminUIDisplayedFields {
+  NSMutableArray<NSString *> *displayed = [NSMutableArray array];
+  for (NSDictionary *field in STSortedArrayFromValues(STNormalizeArray(self.metadata[@"fields"]), @"name")) {
     NSString *name = STLowerTrimmedString(field[@"name"]);
-    if ([name length] == 0) {
+    if ([name length] == 0 || [displayed containsObject:name]) {
       continue;
     }
-    [indexedFields addObject:name];
-    NSUInteger defaultWeight = [name isEqualToString:STLowerTrimmedString(self.metadata[@"primaryField"])] ? 4U : 1U;
-    NSUInteger weight = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(field[@"searchWeight"], defaultWeight));
-    weights[name] = @(weight);
     if (STBooleanValue(field[@"list"], NO) || STBooleanValue(field[@"detail"], NO)) {
-      [resultFields addObject:name];
+      [displayed addObject:name];
     }
   }
+  return STNormalizedStringArray(displayed);
+}
+
+// Record keys kept in the search index: displayed fields plus the identifier,
+// primary, filter and sort fields admin-ui already shows to the same callers.
+- (NSSet<NSString *> *)adminUIIndexedRecordKeys {
+  NSMutableSet<NSString *> *keys = [NSMutableSet setWithArray:[self adminUIDisplayedFields]];
+  [keys addObject:[self adminUIIdentifierField]];
+  [keys addObject:[self adminUIPrimaryField]];
+  for (NSString *collection in @[ @"filters", @"sorts" ]) {
+    for (NSDictionary *entry in STNormalizeArray(self.metadata[collection])) {
+      NSString *name = STLowerTrimmedString(entry[@"name"]);
+      if ([name length] > 0 && ![name isEqualToString:@"q"]) {
+        [keys addObject:name];
+      }
+    }
+  }
+  return keys;
+}
+
+- (NSDictionary *)searchModuleResourceMetadata {
+  NSString *identifier = [self searchModuleResourceIdentifier];
+  NSString *primaryField = [self adminUIPrimaryField];
+  NSArray<NSString *> *displayedFields = [self adminUIDisplayedFields];
+  NSMutableDictionary *weights = [NSMutableDictionary dictionary];
+  for (NSDictionary *field in STNormalizeArray(self.metadata[@"fields"])) {
+    NSString *name = STLowerTrimmedString(field[@"name"]);
+    if ([name length] == 0 || ![displayedFields containsObject:name]) {
+      continue;
+    }
+    NSUInteger defaultWeight = [name isEqualToString:primaryField] ? 4U : 1U;
+    weights[name] = @(MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(field[@"searchWeight"], defaultWeight)));
+  }
+  NSMutableArray *facetFields = [NSMutableArray array];
   for (NSDictionary *filter in STNormalizeArray(self.metadata[@"filters"])) {
     NSString *type = STLowerTrimmedString(filter[@"type"]);
     NSString *name = STLowerTrimmedString(filter[@"name"]);
@@ -3996,24 +4063,26 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
   }
   NSDictionary *paths = STNormalizeDictionary(self.metadata[@"paths"]);
+  NSArray *autocompleteFields = [displayedFields containsObject:primaryField] ? @[ primaryField ] : displayedFields;
   return @{
     @"label" : self.metadata[@"label"] ?: STTitleCaseIdentifier(identifier),
     @"summary" : self.metadata[@"summary"] ?: @"",
-    @"identifierField" : self.metadata[@"identifierField"] ?: @"id",
-    @"primaryField" : self.metadata[@"primaryField"] ?: self.metadata[@"identifierField"] ?: @"id",
-    @"indexedFields" : indexedFields,
-    @"searchFields" : indexedFields,
-    @"autocompleteFields" : @[ STLowerTrimmedString(self.metadata[@"primaryField"] ?: self.metadata[@"identifierField"] ?: @"id") ?: @"id" ],
-    @"suggestionFields" : indexedFields,
-    @"highlightFields" : indexedFields,
-    @"resultFields" : STNormalizedStringArray(resultFields),
+    @"identifierField" : [self adminUIIdentifierField],
+    @"primaryField" : primaryField,
+    @"indexedFields" : displayedFields,
+    @"searchFields" : displayedFields,
+    @"autocompleteFields" : autocompleteFields ?: @[],
+    @"suggestionFields" : displayedFields,
+    @"highlightFields" : displayedFields,
+    @"resultFields" : displayedFields,
     @"facetFields" : facetFields,
     @"filters" : ([STNormalizeArray(self.metadata[@"filters"]) count] > 0) ? STNormalizeArray(self.metadata[@"filters"]) : @[],
     @"sorts" : ([STNormalizeArray(self.metadata[@"sorts"]) count] > 0) ? STNormalizeArray(self.metadata[@"sorts"]) : @[],
     @"defaultSort" : STLowerTrimmedString(self.metadata[@"defaultSort"]),
     @"pagination" : STNormalizeDictionary(self.metadata[@"pagination"]),
-    @"queryPolicy" : @"public",
-    @"queryRoles" : @[],
+    @"queryPolicy" : @"role_gated",
+    @"queryRoles" : [self adminUIAccessRoles],
+    @"queryMinimumAuthAssuranceLevel" : @([self adminUIMinimumAuthAssuranceLevel]),
     @"queryModes" : @[ @"search", @"phrase", @"fuzzy", @"autocomplete" ],
     @"weightedFields" : weights,
     @"supportsHighlights" : @YES,
@@ -4023,11 +4092,40 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   };
 }
 
+- (BOOL)adminUIAllowsQueryForContext:(ALNContext *)context error:(NSError **)error {
+  if (![(id)self.adminRuntime respondsToSelector:@selector(resourceIdentifier:allowsOperation:recordID:context:error:)]) {
+    return YES;
+  }
+  return [self.adminRuntime resourceIdentifier:[self searchModuleResourceIdentifier]
+                               allowsOperation:@"list"
+                                      recordID:nil
+                                       context:context
+                                         error:error];
+}
+
 - (NSArray<NSDictionary *> *)searchModuleDocumentsForRuntime:(ALNSearchModuleRuntime *)runtime
                                                        error:(NSError **)error {
   (void)runtime;
   NSString *identifier = [self searchModuleResourceIdentifier];
-  return [self.adminRuntime listRecordsForResourceIdentifier:identifier query:nil limit:500 offset:0 error:error];
+  NSArray *records = [self.adminRuntime listRecordsForResourceIdentifier:identifier query:nil limit:500 offset:0 error:error];
+  if (records == nil) {
+    return nil;
+  }
+  NSSet<NSString *> *keys = [self adminUIIndexedRecordKeys];
+  NSMutableArray<NSDictionary *> *trimmed = [NSMutableArray arrayWithCapacity:[records count]];
+  for (id record in records) {
+    if (![record isKindOfClass:[NSDictionary class]]) {
+      continue;
+    }
+    NSMutableDictionary *kept = [NSMutableDictionary dictionary];
+    for (id key in [(NSDictionary *)record allKeys]) {
+      if ([key isKindOfClass:[NSString class]] && [keys containsObject:STLowerTrimmedString(key)]) {
+        kept[key] = record[key];
+      }
+    }
+    [trimmed addObject:kept];
+  }
+  return trimmed;
 }
 
 @end
@@ -4611,6 +4709,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if ([queryPolicy length] == 0) {
     queryPolicy = ([queryRoles count] > 0) ? @"role_gated" : @"public";
   }
+  NSUInteger queryMinimumAuthAssuranceLevel =
+      ALNUnsignedIntegerValueOrDefault(rawMetadata[@"queryMinimumAuthAssuranceLevel"], 0U);
   NSSet *allowedQueryPolicies = [NSSet setWithArray:@[ @"public", @"authenticated", @"role_gated", @"predicate" ]];
   if (![allowedQueryPolicies containsObject:queryPolicy]) {
     queryPolicy = ([queryRoles count] > 0) ? @"role_gated" : @"public";
@@ -4713,6 +4813,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"queryModes" : queryModes,
     @"queryPolicy" : queryPolicy,
     @"queryRoles" : queryRoles ?: @[],
+    @"queryMinimumAuthAssuranceLevel" : @(queryMinimumAuthAssuranceLevel),
     @"weightedFields" : weightedFields,
     @"fieldTypes" : fieldTypes,
     @"filters" : filters,
@@ -5954,7 +6055,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSString *resource = STLowerTrimmedString(resourceIdentifier);
-  NSSet *allowedSet = ([allowedResourceIdentifiers count] > 0) ? [NSSet setWithArray:allowedResourceIdentifiers] : nil;
+  // nil means the caller applies no resource restriction. A non-nil array is
+  // the complete set of resources the caller may query, so an empty array
+  // matches nothing.
+  NSSet *allowedSet = (allowedResourceIdentifiers != nil) ? [NSSet setWithArray:allowedResourceIdentifiers] : nil;
   NSArray *candidateMetadata = nil;
   if ([resource length] > 0) {
     NSDictionary *metadata = [self resourceMetadataForIdentifier:resource];
@@ -6205,6 +6309,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   row[@"pagination"] = metadata[@"pagination"] ?: @{};
   row[@"queryPolicy"] = metadata[@"queryPolicy"] ?: @"public";
   row[@"queryRoles"] = metadata[@"queryRoles"] ?: @[];
+  row[@"queryMinimumAuthAssuranceLevel"] = metadata[@"queryMinimumAuthAssuranceLevel"] ?: @0;
   row[@"queryModes"] = metadata[@"queryModes"] ?: @[];
   row[@"resultFields"] = metadata[@"resultFields"] ?: @[];
   row[@"facetFields"] = metadata[@"facetFields"] ?: @[];
@@ -6649,6 +6754,50 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 - (BOOL)resourceMetadata:(NSDictionary *)metadata
       allowsQueryInContext:(ALNContext *)ctx
                      error:(NSError **)error {
+  if (![self resourceMetadata:metadata allowsQueryPolicyInContext:ctx error:error]) {
+    return NO;
+  }
+  NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
+  NSUInteger minimumLevel = ALNUnsignedIntegerValueOrDefault(metadata[@"queryMinimumAuthAssuranceLevel"], 0U);
+  if (minimumLevel > 0U) {
+    if ([[ctx authSubject] length] == 0) {
+      if (error != NULL) {
+        *error = STError(ALNSearchModuleErrorUnauthorized,
+                         @"authentication is required for this search resource",
+                         @{ @"resource" : identifier ?: @"" });
+      }
+      return NO;
+    }
+    if ([ctx authAssuranceLevel] < minimumLevel) {
+      if (error != NULL) {
+        *error = STError(ALNSearchModuleErrorForbidden,
+                         @"additional authentication assurance is required for this search resource",
+                         @{
+                           @"resource" : identifier ?: @"",
+                           @"minimumAuthAssuranceLevel" : @(minimumLevel),
+                         });
+      }
+      return NO;
+    }
+  }
+  id definition = [self.runtime resourceDefinitionForIdentifier:identifier];
+  if ([definition isKindOfClass:[ALNSearchAdminRuntimeBackedResource class]]) {
+    NSError *adminError = nil;
+    if (![(ALNSearchAdminRuntimeBackedResource *)definition adminUIAllowsQueryForContext:ctx error:&adminError]) {
+      if (error != NULL) {
+        *error = STError(ALNSearchModuleErrorForbidden,
+                         @"you do not have access to query this search resource",
+                         @{ @"resource" : identifier ?: @"" });
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)resourceMetadata:(NSDictionary *)metadata
+    allowsQueryPolicyInContext:(ALNContext *)ctx
+                         error:(NSError **)error {
   NSString *policy = STLowerTrimmedString(metadata[@"queryPolicy"]);
   NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
   if ([policy length] == 0 || [policy isEqualToString:@"public"]) {
@@ -6900,6 +7049,39 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   return filters;
 }
 
+- (NSDictionary *)emptySearchResultForQuery:(NSString *)query
+                                 parameters:(NSDictionary *)parameters
+                           visibleResources:(NSArray<NSDictionary *> *)visibleResources
+                                      limit:(NSUInteger)limit
+                                     offset:(NSUInteger)offset {
+  return @{
+    @"query" : query ?: @"",
+    @"mode" : STLowerTrimmedString(parameters[@"mode"]).length > 0 ? STLowerTrimmedString(parameters[@"mode"]) : @"search",
+    @"availableModes" : @[],
+    @"resource" : @"",
+    @"resources" : [self.runtime resourceIdentifiersFromMetadataArray:visibleResources] ?: @[],
+    @"resourceMetadata" : @{},
+    @"results" : @[],
+    @"promotedResults" : @[],
+    @"autocomplete" : @[],
+    @"suggestions" : @[],
+    @"facets" : @[],
+    @"total" : @0,
+    @"matchedCount" : @0,
+    @"limit" : @(limit),
+    @"offset" : @(offset),
+    @"pagination" : @{
+      @"limit" : @(limit),
+      @"offset" : @(offset),
+      @"returned" : @0,
+      @"total" : @0,
+    },
+    @"engine" : self.runtime.engineIdentifier ?: @"ALNDefaultSearchEngine",
+    @"engineCapabilities" : [self.runtime.engine searchModuleCapabilities] ?: @{},
+    @"cursor" : @{ @"requested" : @"", @"next" : @"", @"supported" : @NO },
+  };
+}
+
 - (NSDictionary *)searchResultFromParameters:(NSDictionary *)parameters
                            resourceIdentifier:(NSString *)resourceIdentifier
                                       context:(ALNContext *)ctx
@@ -6912,33 +7094,22 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSUInteger offset = ALNUnsignedIntegerValueOrDefault(parameters[@"offset"], 0);
   NSDictionary *explicitFilters = [self searchFiltersFromParameters:parameters] ?: @{};
   NSString *query = STTrimmedString(parameters[@"q"]);
-  if ([query length] == 0 && [STLowerTrimmedString(resourceIdentifier) length] == 0 && [explicitFilters count] == 0) {
-    return @{
-      @"query" : @"",
-      @"mode" : STLowerTrimmedString(parameters[@"mode"]).length > 0 ? STLowerTrimmedString(parameters[@"mode"]) : @"search",
-      @"availableModes" : @[],
-      @"resource" : @"",
-      @"resources" : [self.runtime resourceIdentifiersFromMetadataArray:visibleResources] ?: @[],
-      @"resourceMetadata" : @{},
-      @"results" : @[],
-      @"promotedResults" : @[],
-      @"autocomplete" : @[],
-      @"suggestions" : @[],
-      @"facets" : @[],
-      @"total" : @0,
-      @"matchedCount" : @0,
-      @"limit" : @(limit),
-      @"offset" : @(offset),
-      @"pagination" : @{
-        @"limit" : @(limit),
-        @"offset" : @(offset),
-        @"returned" : @0,
-        @"total" : @0,
-      },
-      @"engine" : self.runtime.engineIdentifier ?: @"ALNDefaultSearchEngine",
-      @"engineCapabilities" : [self.runtime.engine searchModuleCapabilities] ?: @{},
-      @"cursor" : @{ @"requested" : @"", @"next" : @"", @"supported" : @NO },
-    };
+  BOOL unscoped = ([STLowerTrimmedString(resourceIdentifier) length] == 0);
+  if (unscoped && [query length] == 0 && [explicitFilters count] == 0) {
+    return [self emptySearchResultForQuery:@""
+                                parameters:parameters
+                          visibleResources:visibleResources
+                                     limit:limit
+                                    offset:offset];
+  }
+  if (unscoped && [visibleResources count] == 0 && [query length] <= ALNSearchMaxQueryLength) {
+    // The caller may not query any registered resource, so an unscoped query
+    // has nothing to search.
+    return [self emptySearchResultForQuery:query
+                                parameters:parameters
+                          visibleResources:visibleResources
+                                     limit:limit
+                                    offset:offset];
   }
   NSMutableDictionary *resourceFilters = [NSMutableDictionary dictionary];
   for (NSDictionary *metadata in visibleResources) {

@@ -17,6 +17,20 @@
   request host; other environments send no link and log an error, so set
   `authModule.publicBaseURL` before upgrading a production app that uses local
   passwords.
+- `search` (`1.0.5`): an unscoped query (`GET /search`, `GET /search/api/query`)
+  from a caller who may not query any registered resource now returns no
+  results, autocomplete, suggestions or facets, with `total = 0`. It used to
+  search every resource.
+- `search` (`1.0.5`) and `admin-ui` (`1.0.4`): resources the search module
+  auto-registers from `admin-ui` (`searchModule.adminUI.autoResources`,
+  including the built-in `users` resource) now use `queryPolicy = role_gated`
+  with `admin-ui`'s roles (`admin`), AAL2 and the resource's `list` operation
+  check, instead of `public`. Anonymous and non-admin callers can no longer
+  query them, and `GET /search/api/resources` no longer lists them for those
+  callers. Only fields `admin-ui` displays (`list` or `detail`) are indexed and
+  returned. Search resources can set the new `queryMinimumAuthAssuranceLevel`
+  metadata, and `ALNAdminUIModuleRuntime` reports `accessRoles` and
+  `minimumAuthAssuranceLevel`.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

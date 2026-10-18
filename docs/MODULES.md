@@ -243,6 +243,12 @@ too (GitHub issue 264).
 make password-reset and verification links single-use, and build those links
 from `authModule.publicBaseURL`.
 
+`search` moved to `1.0.5` so an unscoped query from a caller who may query no
+registered resource returns no results, and so auto-indexed `admin-ui`
+resources are searchable only by callers the `admin-ui` policy admits;
+`admin-ui` moved to `1.0.4` to report that policy (`accessRoles`,
+`minimumAuthAssuranceLevel`).
+
 ## MCP tools
 
 The optional `mcp` module is disabled by default. It exposes only explicitly
