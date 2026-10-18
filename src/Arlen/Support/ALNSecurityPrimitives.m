@@ -115,3 +115,58 @@ NSString *ALNLowercaseHexStringFromData(NSData *data) {
   }
   return hex;
 }
+
+NSArray<NSString *> *ALNKnownPublishedSigningSecrets(void) {
+  static NSArray<NSString *> *secrets = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    secrets = @[
+      // tools/deploy/systemd/site.env.example and `arlen deploy init` (older releases)
+      @"replace-with-32-plus-character-secret",
+      @"replace-with-distinct-32-plus-character-secret",
+      // examples/*/config
+      @"api-reference-secret-0123456789ab",
+      @"auth-admin-demo-session-secret-0123456789abcdef",
+      @"auth-module-stub-provider-secret-0123456789abcdef",
+      @"phase12-auth-primitives-session-secret-0123456789abcdef",
+      @"phase12-demo-client-secret-0123456789abcdef",
+      @"phase14-modules-demo-session-secret-0123456789abcdef",
+      @"phase16-modules-demo-session-secret-0123456789abcdef",
+      @"phase28-reference-session-secret-0123456789abcdef",
+      // tools/
+      @"client-secret-0123456789abcdef",
+      @"ignored-fixture-secret-01234567890123456789",
+      @"phase21-generated-app-matrix-session-secret-0123456789abcdef",
+    ];
+  });
+  return secrets;
+}
+
+NSString *ALNInsecureSigningSecretReason(NSString *secret) {
+  if (![secret isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *trimmed = [secret stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([trimmed length] == 0) {
+    return nil;
+  }
+  NSString *lowered = [trimmed lowercaseString];
+  for (NSString *marker in @[ @"replace-with", @"change-me", @"changeme", @"change_me", @"0123456789ab" ]) {
+    if ([lowered rangeOfString:marker].location != NSNotFound) {
+      return @"placeholder_secret";
+    }
+  }
+  if ([ALNKnownPublishedSigningSecrets() containsObject:trimmed]) {
+    return @"published_example_secret";
+  }
+  return nil;
+}
+
+BOOL ALNEnvironmentAllowsInsecureSigningSecrets(NSString *environment) {
+  if (![environment isKindOfClass:[NSString class]]) {
+    return NO;
+  }
+  NSString *normalized =
+      [[environment stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+  return [normalized isEqualToString:@"development"] || [normalized isEqualToString:@"test"];
+}

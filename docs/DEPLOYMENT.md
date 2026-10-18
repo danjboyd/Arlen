@@ -766,7 +766,11 @@ It currently creates:
 - generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`,
   or for `macos-*-apple-foundation` targets a launchd plist under
   `build/deploy/targets/<target>/launchd/<label>.plist`
-- generated env example under `build/deploy/targets/<target>/env/`
+- generated env example under `build/deploy/targets/<target>/env/` (mode
+  `0600`). It carries a freshly generated `ARLEN_SESSION_SECRET` (64 hex
+  characters) and a commented, distinct `ARLEN_STORAGE_SIGNING_SECRET`; each
+  run generates new values. Required `*_SECRET` keys get their own random
+  value, other required keys get `CHANGE_ME`.
 - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
 - generated README with operator follow-up steps
 
@@ -789,7 +793,7 @@ skipped.
 
 It does not:
 
-- create or rotate secret values
+- install or rotate secret values on the host
 - provision PostgreSQL
 - install ingress/reverse-proxy/TLS/DNS infrastructure
 - become a general-purpose machine provisioner
@@ -802,7 +806,10 @@ The intended flow is:
 4. run `arlen deploy dryrun <target>`
 5. run `arlen deploy init <target>` on the host or against the host filesystem
 6. install the generated unit/env artifacts where the host expects them
-7. populate secret values outside the release tree
+7. populate secret values outside the release tree. Production refuses
+   placeholder and published example secrets; generate real ones with
+   `openssl rand -hex 32` (see
+   [Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets))
 8. use `arlen deploy push|release <target>` for release shipping and activation
 
 ### 4.10 Arlen-Ready Debian GNUstep Host

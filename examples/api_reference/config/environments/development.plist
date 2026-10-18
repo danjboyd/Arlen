@@ -1,3 +1,8 @@
 {
   logFormat = "json";
+  /* Development-only auth.bearerSecret. Production refuses this published value;
+     set ARLEN_AUTH_BEARER_SECRET (openssl rand -hex 32) instead. */
+  auth = {
+    bearerSecret = "api-reference-secret-0123456789ab";
+  };
 }

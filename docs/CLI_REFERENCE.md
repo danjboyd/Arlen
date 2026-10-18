@@ -257,7 +257,11 @@ Named targets:
 - creates:
  - release/shared/log/tmp directories under the target release root
  - generated systemd unit under `build/deploy/targets/<target>/systemd/`
- - generated env example under `build/deploy/targets/<target>/env/`
+ - generated env example under `build/deploy/targets/<target>/env/`, mode
+ `0600`, with a freshly generated 64-hex `ARLEN_SESSION_SECRET` (and a
+ commented `ARLEN_STORAGE_SIGNING_SECRET`); required `*_SECRET` keys get their
+ own random value and other required keys get `CHANGE_ME`. Each run generates
+ new values.
  - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
  - generated README with operator follow-up steps
 - honors target runtime metadata:
@@ -266,7 +270,8 @@ Named targets:
  - for SSH targets, remote `release`/`status`/`doctor`/`logs`/`rollback` also
  source `runtime.gnustepScript` before running the packaged `arlen` when
  `runtime.requiresEnvWrapper` is on
-- does not provision secrets, PostgreSQL, reverse proxies, TLS, or DNS
+- does not install secrets on the host or provision PostgreSQL, reverse
+ proxies, TLS, or DNS
 
 `arlen deploy target sample`
 
@@ -1124,6 +1129,10 @@ Behavior:
  - missing `session.secret` when `session.enabled=YES`
  - weak `session.secret` values (minimum 32 characters required when `session.enabled=YES`)
  - weak `auth.bearerSecret` values (minimum 32 characters required when `auth.enabled=YES`)
+ - outside `development`/`test`, placeholder or published example values for
+ `session.secret` or `auth.bearerSecret` (containing `replace-with`,
+ `change-me`, `changeme`, `change_me` or `0123456789ab`, or a secret committed
+ in the Arlen repository); generate one with `openssl rand -hex 32`
  - `csrf.enabled=YES` without session middleware
  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`

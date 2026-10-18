@@ -201,7 +201,8 @@ doctor/deploy warnings for multi-worker apps.
 When the `storage` module is installed, `storageModule.signingSecret` signs
 its upload and download tokens. `ARLEN_STORAGE_SIGNING_SECRET` overrides it.
 The secret must be at least 32 characters. Outside `development` and `test` the
-module refuses to configure without one; see
+module refuses to configure without one, or with a placeholder or published
+example value (see [Signing secrets](#signing-secrets)); see
 [Storage Module](STORAGE_MODULE.md#signing-secret).
 
 ## 4.2 Dataverse (Optional)
@@ -293,6 +294,33 @@ token, including cookieless `GET`/`HEAD` for static-ish routes, get no
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.
+
+### Signing secrets
+
+`session.secret` (`ARLEN_SESSION_SECRET`), `auth.bearerSecret`
+(`ARLEN_AUTH_BEARER_SECRET`) and `storageModule.signingSecret`
+(`ARLEN_STORAGE_SIGNING_SECRET`) must be at least 32 characters in every
+environment. Generate one with:
+
+```bash
+openssl rand -hex 32
+```
+
+Outside `development` and `test`, startup also refuses a secret that:
+
+- contains `replace-with`, `change-me`, `changeme`, `change_me` or
+  `0123456789ab` (any case), or
+- equals a secret committed in the Arlen repository (the example apps, env
+  examples and tooling). The list lives in
+  `ALNKnownPublishedSigningSecrets()` in
+  `src/Arlen/Support/ALNSecurityPrimitives.m`.
+
+The session and bearer checks fail `startWithError:` with codes `337` and `338`
+(`reason` is `placeholder_secret` or `published_example_secret`); the storage
+module fails to configure with `ALNStorageModuleErrorInvalidConfiguration`.
+The error names the config key and environment variable. In `development` and
+`test` these values are still accepted, so the example apps keep their
+development secrets in `config/environments/development.plist`.
 
 A rejected unsafe request returns `403`. Requests that prefer JSON (an `Accept`
 of `application/json`, an `/api` path, or `apiOnly`) get the structured error
@@ -532,7 +560,7 @@ Troubleshooting:
 Auth:
 
 - `auth.enabled`
-- `auth.bearerSecret`
+- `auth.bearerSecret` (see [Signing secrets](#signing-secrets))
 - `auth.issuer`
 - `auth.audience`
 

@@ -117,7 +117,11 @@ Upload and download tokens are HMAC-SHA256 signed with
 - Set the secret with `ARLEN_STORAGE_SIGNING_SECRET` in the process
   environment, or `storageModule.signingSecret` in untracked config. The
   environment value wins.
-- The secret must be at least 32 characters in every environment.
+- The secret must be at least 32 characters in every environment. Generate
+  one with `openssl rand -hex 32`.
+- Outside `development` and `test`, placeholder and published example values
+  are refused (`reason = placeholder_secret` or `published_example_secret`);
+  see [Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets).
 - Outside `development` and `test`, the module refuses to configure when no
   secret is set (`ALNStorageModuleErrorInvalidConfiguration`,
   `config_key = storageModule.signingSecret`).
