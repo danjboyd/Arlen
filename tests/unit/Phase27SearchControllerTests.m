@@ -203,6 +203,31 @@
   XCTAssertTrue([fullIdentifiers containsObject:@"regional_docs"]);
 }
 
+- (void)testOverlongPublicQueryIsRejectedWith422 {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSString *overlong = [@"" stringByPaddingToLength:257 withString:@"a" startingAtIndex:0];
+  ALNResponse *rejected =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:[NSString stringWithFormat:@"q=%@&mode=fuzzy", overlong]
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)422, rejected.statusCode);
+
+  NSString *maximum = [@"" stringByPaddingToLength:256 withString:@"a" startingAtIndex:0];
+  ALNResponse *accepted =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:[NSString stringWithFormat:@"q=%@&mode=fuzzy", maximum]
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, accepted.statusCode);
+}
+
 - (void)testPublicQueryEnvelopeIsShapedAndPolicyRoutesFailClosed {
   ALNApplication *app = [self application];
   [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
@@ -403,6 +428,38 @@
   XCTAssertTrue([html containsString:@"Tenant A Priority Runbook"]);
   XCTAssertFalse([html containsString:@"Tenant B Priority Runbook"]);
   XCTAssertFalse([html containsString:@"Tenant A Archived Note"]);
+}
+
+- (NSDictionary *)productsQueryPayloadForApplication:(ALNApplication *)app queryString:(NSString *)queryString {
+  ALNResponse *response =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:queryString
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSDictionary *json = [self JSONObjectFromResponse:response];
+  return [json[@"data"] isKindOfClass:[NSDictionary class]] ? json[@"data"] : @{};
+}
+
+// Query-string values are NSStrings. Apple's NSString has no
+// -unsignedIntegerValue, so these limits used to fall back to their defaults.
+- (void)testQueryStringLimitsAreHonored {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSDictionary *unlimited = [self productsQueryPayloadForApplication:app queryString:@"q=kit"];
+  XCTAssertGreaterThan([(NSArray *)(unlimited[@"results"] ?: @[]) count], (NSUInteger)1);
+  NSDictionary *limited = [self productsQueryPayloadForApplication:app queryString:@"q=kit&limit=1"];
+  XCTAssertEqual((NSUInteger)1, [(NSArray *)(limited[@"results"] ?: @[]) count]);
+
+  NSDictionary *autocomplete = [self productsQueryPayloadForApplication:app queryString:@"q=pri&mode=autocomplete"];
+  XCTAssertGreaterThan([(NSArray *)(autocomplete[@"autocomplete"] ?: @[]) count], (NSUInteger)1);
+  NSDictionary *limitedAutocomplete =
+      [self productsQueryPayloadForApplication:app queryString:@"q=pri&mode=autocomplete&autocomplete_limit=1"];
+  XCTAssertEqual((NSUInteger)1, [(NSArray *)(limitedAutocomplete[@"autocomplete"] ?: @[]) count]);
 }
 
 @end

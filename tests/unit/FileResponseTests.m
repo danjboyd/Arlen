@@ -6,6 +6,7 @@
 #import "ALNController.h"
 #import "ALNFileResponse.h"
 #import "ALNMIMETypes.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "../shared/ALNWebTestSupport.h"
@@ -246,6 +247,68 @@ static NSDictionary *gFileResponseTestOptions = nil;
   ALNAssertResponseStatus(response, 304);
   XCTAssertNil(response.fileBodyPath);
   XCTAssertEqual((NSUInteger)0, [response bodyLength]);
+}
+
+// A same-size rewrite that keeps the modification time must still change the
+// validator. On Windows struct stat has no inode, whole-second times and
+// creation time as st_ctime, so the ETag used to stay the same and a changed
+// file answered 304.
+- (void)testSameSizeRewriteWithTheSameMTimeChangesTheETag {
+  ALNWebTestHarness *harness = [self loggedInHarnessWithConfig:nil];
+  ALNResponse *first = [self harness:harness method:@"GET" path:@"/media/voice.m4a" headers:nil];
+  NSString *etag = [first headerForName:@"ETag"];
+  XCTAssertTrue([etag length] > 0);
+  NSDate *mtime = [[NSFileManager defaultManager] attributesOfItemAtPath:gFileResponseTestMediaPath
+                                                                   error:NULL][NSFileModificationDate];
+  ALNPlatformSleepMilliseconds(20);
+  XCTAssertTrue([[@"fedcba9876543210" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:gFileResponseTestMediaPath
+                                                                               atomically:NO]);
+  XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : mtime }
+                                                 ofItemAtPath:gFileResponseTestMediaPath
+                                                        error:NULL]);
+  ALNResponse *response = [self harness:harness
+                                 method:@"GET"
+                                   path:@"/media/voice.m4a"
+                                headers:@{ @"if-none-match" : etag ?: @"" }];
+  ALNAssertResponseStatus(response, 200);
+  XCTAssertNotEqualObjects(etag, [response headerForName:@"ETag"]);
+}
+
+// Issue 247: HTTP-dates are formatted from fixed tables and IMF-fixdate is
+// parsed by hand. The output and the conditional-request behaviour must match
+// what the NSDateFormatter path produced.
+- (void)testHTTPDatesFormatAndParseWithoutAFormatter_Issue247 {
+  NSDate *modified = [NSDate dateWithTimeIntervalSince1970:784111777];  // Sun, 06 Nov 1994 08:49:37 GMT
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFileModificationDate : modified }
+                                                 ofItemAtPath:gFileResponseTestMediaPath
+                                                        error:&error],
+                @"%@", error);
+  ALNWebTestHarness *harness = [self loggedInHarnessWithConfig:nil];
+  ALNResponse *response = [self harness:harness method:@"GET" path:@"/media/voice.m4a" headers:nil];
+  ALNAssertResponseStatus(response, 200);
+  ALNAssertResponseHeaderEquals(response, @"Last-Modified", @"Sun, 06 Nov 1994 08:49:37 GMT");
+  NSString *date = [response headerForName:@"Date"];
+  XCTAssertEqual((NSUInteger)29, [date length], @"%@", date);
+  XCTAssertTrue([date hasSuffix:@" GMT"], @"%@", date);
+
+  NSDictionary<NSString *, NSNumber *> *cases = @{
+    @"Sun, 06 Nov 1994 08:49:37 GMT" : @304,   // IMF-fixdate, equal
+    @"Mon, 07 Nov 1994 08:49:37 GMT" : @304,   // later
+    @"Sat, 05 Nov 1994 08:49:37 GMT" : @200,   // earlier
+    @"Sunday, 06-Nov-94 08:49:37 GMT" : @304,  // obsolete RFC 850 form
+    @"Sun Nov  6 08:49:37 1994" : @304,        // obsolete asctime form
+    @"Mon, 06 Nov 1994 08:49:37 GMT" : @200,   // wrong weekday: ignored
+    @"Wed, 30 Feb 2026 08:49:37 GMT" : @200,   // impossible date: ignored
+    @"Sun, 06 Nov 1994 08:49:37 GMTx" : @200,  // trailing garbage: ignored
+  };
+  for (NSString *value in cases) {
+    ALNResponse *conditional = [self harness:harness
+                                      method:@"GET"
+                                        path:@"/media/voice.m4a"
+                                     headers:@{ @"if-modified-since" : value }];
+    XCTAssertEqual([cases[value] integerValue], conditional.statusCode, @"%@", value);
+  }
 }
 
 - (void)testHeadKeepsFullRepresentationMetadataAndIgnoresRange {

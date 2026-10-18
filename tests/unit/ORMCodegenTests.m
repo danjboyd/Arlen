@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#if !defined(_WIN32)
 #import <dlfcn.h>
+#endif
 #import <objc/runtime.h>
 
 #import "../shared/ALNTestSupport.h"
@@ -76,8 +78,9 @@
 }
 
 - (NSString *)gnuStepSyntaxOnlyContractFlags {
-  return @"-fobjc-runtime=gnustep-2.2 -fblocks -D_NATIVE_OBJC_EXCEPTIONS "
-         "-fconstant-string-class=NSConstantString";
+  return [NSString stringWithFormat:@"-fobjc-runtime=gnustep-2.2 -fblocks -D_NATIVE_OBJC_EXCEPTIONS "
+                                     "-fconstant-string-class=NSConstantString %@",
+                                    ALNTestPlatformObjCFlags()];
 }
 
 - (NSDictionary *)fixture {
@@ -162,7 +165,7 @@
     NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -pthread",
         ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
     NSString *archive = [root stringByAppendingPathComponent:@"build/lib/libArlenFramework.a"];
-    NSString *libraries = @"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl -ldl";
+    NSString *libraries = [NSString stringWithFormat:@"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl %@", ALNTestPlatformLinkLibraries()];
 #endif
     NSString *compile = [NSString stringWithFormat:@"%@ %@ -Wno-nullability-completeness %@ %@ %@ %@ -o %@ %@",
         compiler, sanitizers, includeFlags, ALNTestShellQuote(implementation),
@@ -400,6 +403,9 @@
 }
 
 - (void)testReservedGeneratedModelsCompileAndPreserveRuntimeBehavior {
+#if defined(_WIN32)
+  XCTSkip(@"Loads a library whose symbols resolve against the test bundle at dlopen time; Windows DLLs need import libraries instead");
+#else
   NSError *error = nil;
   NSDictionary *artifacts = [ALNORMCodegen renderArtifactsFromSchemaMetadata:[self reservedMetadata]
       classPrefix:@"ReservedRuntime" error:&error];
@@ -466,6 +472,7 @@
   XCTAssertEqual(ALNORMModelStateLoaded, model.state);
   [model markDetached];
   XCTAssertEqual(ALNORMModelStateDetached, model.state);
+#endif
 }
 
 - (void)testQuotedPhysicalNamesAndAliasCollisions {

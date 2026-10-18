@@ -126,9 +126,97 @@ windows_preview=0
 if detect_windows_preview; then
   windows_preview=1
 fi
+# Match the framework build's flags (GNUmakefile): on Windows CLANG64 llhttp is
+# off by default, GNUstep is linked statically, and libdispatch's header needs
+# HAVE_MODE_T next to MinGW's mode_t.
+default_enable_llhttp=1
+platform_objc_flags=""
+platform_link_libs="-ldl"
+if [[ $windows_preview -eq 1 ]]; then
+  default_enable_llhttp=0
+  platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -DARLEN_WINDOWS_PREVIEW=1"
+  platform_link_libs="-lws2_32 -lbcrypt"
+fi
+# App test bundle binary (--build-tests): GNUstep on Windows loads <name>.dll.
+app_test_binary_name="AppTests"
+if [[ $windows_preview -eq 1 ]]; then
+  app_test_binary_name="AppTests.dll"
+fi
+
+# space_free_path <dir> <label>
+# GNU make splits targets and prerequisites at whitespace, so an app or
+# framework under a path with a space ("My App", C:\Users\John Smith\...) broke
+# the generated AppGNUmakefile ("No rule to make target .../My"). Such a path is
+# used through a stable, space-free alias instead (a symlink, or a junction under
+# MSYS2), so make only ever sees paths without spaces. Other paths pass through.
+space_free_path() {
+  local real="$1"
+  local label="$2"
+  if [[ "$real" != *[[:space:]]* ]]; then
+    printf '%s\n' "$real"
+    return 0
+  fi
+  # Per user and private: in a shared /tmp another user could otherwise create
+  # the directory first and swap an alias, so boomhauer built their sources.
+  # In MSYS2 form: a C:/... TMPDIR would put a drive colon into make targets.
+  local tmp_base
+  tmp_base="$(normalize_host_path "${TMPDIR:-/tmp}")"
+  [[ "$tmp_base" == *[[:space:]]* ]] && tmp_base="/tmp"
+  local alias_parent="${tmp_base%/}/arlen-boomhauer-aliases-$(id -u)"
+  if [[ ! -d "$alias_parent" ]]; then
+    mkdir -m 700 "$alias_parent" 2>/dev/null || [[ -d "$alias_parent" ]] || {
+      echo "boomhauer: cannot create $alias_parent" >&2
+      return 1
+    }
+  fi
+  # Under MSYS2 /tmp lives inside the user's own gnustep-cli root, and POSIX
+  # ownership/mode bits are emulated, so the check is POSIX-only.
+  if ! aln_platform_is_msys; then
+    if [[ -L "$alias_parent" || ! -O "$alias_parent" ]] ||
+       [[ -n "$(find "$alias_parent" -maxdepth 0 \( -perm -g+w -o -perm -o+w \) 2>/dev/null)" ]]; then
+      echo "boomhauer: refusing $alias_parent: it must be a directory owned by you and writable only by you" >&2
+      return 1
+    fi
+  fi
+  local alias_path
+  alias_path="$alias_parent/$label-$(printf '%s' "$real" | cksum | awk '{print $1}')"
+  if [[ ! -L "$alias_path" || "$(cd "$alias_path" 2>/dev/null && pwd -P)" != "$real" ]]; then
+    if [[ -e "$alias_path" && ! -L "$alias_path" ]]; then
+      echo "boomhauer: $alias_path exists and is not a link; remove it" >&2
+      return 1
+    fi
+    aln_platform_link_directory "$real" "$alias_path" || return 1
+  fi
+  echo "boomhauer: $label path contains whitespace; building through $alias_path" >&2
+  printf '%s\n' "$alias_path"
+}
 
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
+framework_root="$(space_free_path "$framework_root" framework)" || exit 1
+# Framework makes run with ROOT_DIR pinned to framework_root. make -C (and a
+# plain make after cd) take CURDIR from getcwd(), which resolves the alias
+# above, so the GNUmakefile's ROOT_DIR := $(CURDIR) would get the spaces back.
+framework_make() {
+  make -C "$framework_root" ROOT_DIR="$framework_root" "$@"
+}
+framework_eocc_target="$framework_root/build/eocc"
+if [[ $windows_preview -eq 1 ]]; then
+  # The make target carries the .exe suffix the linker adds on Windows.
+  framework_eocc_target="$framework_root/build/eocc.exe"
+fi
+framework_boomhauer_target="$framework_root/build/boomhauer"
+[[ $windows_preview -eq 1 ]] && framework_boomhauer_target="$framework_root/build/boomhauer.exe"
+
+# Release archives without build/obj (Windows) carry build/.release-prebuilt;
+# while it matches, trust the prebuilt framework instead of `make -q`.
+if [[ -f "$framework_root/tools/release_prebuilt.sh" ]]; then
+  source "$framework_root/tools/release_prebuilt.sh"
+fi
+framework_prebuilt_is_current() {
+  declare -F aln_release_prebuilt_is_current >/dev/null 2>&1 &&
+    aln_release_prebuilt_is_current "$framework_root" "$@"
+}
 
 if [[ ! -f "$framework_root/GNUmakefile" || ! -d "$framework_root/src/Arlen" ]]; then
   echo "boomhauer: invalid framework root: $framework_root" >&2
@@ -138,6 +226,7 @@ fi
 
 app_root="$(normalize_host_path "${ARLEN_APP_ROOT:-$PWD}")"
 app_root="$(cd "$app_root" && pwd -P)"
+app_root="$(space_free_path "$app_root" app)" || exit 1
 
 watch_mode=1
 prepare_only=0
@@ -190,8 +279,8 @@ if [[ $build_tests_requested -eq 1 ]]; then
     echo "boomhauer: --build-tests must run from an app root (config/app.plist plus sources)" >&2
     exit 1
   fi
-  if aln_platform_is_macos || [[ ${windows_preview:-0} -eq 1 ]]; then
-    echo "boomhauer: --build-tests currently supports GNUstep on Linux only" >&2
+  if aln_platform_is_macos; then
+    echo "boomhauer: --build-tests builds GNUstep test bundles; on macOS use arlen test --app" >&2
     exit 1
   fi
 fi
@@ -488,7 +577,7 @@ if [[ $is_app_root -eq 0 ]]; then
   cd "$framework_root"
   if [[ $watch_mode -eq 1 ]]; then
     if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
-      make arlen >/dev/null
+      framework_make arlen >/dev/null
       if ! arlen_binary="$(resolve_compiled_binary "$framework_root/build/arlen")"; then
         echo "boomhauer: expected compiled arlen binary under $framework_root/build" >&2
         exit 1
@@ -504,7 +593,7 @@ if [[ $is_app_root -eq 0 ]]; then
   fi
 
   if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
-    make boomhauer >/dev/null
+    framework_make boomhauer >/dev/null
     if ! framework_boomhauer_binary="$(resolve_compiled_binary "$framework_root/build/boomhauer")"; then
       echo "boomhauer: expected compiled boomhauer binary under $framework_root/build" >&2
       exit 1
@@ -520,6 +609,9 @@ fi
 state_root="$app_root/.boomhauer"
 build_root="$state_root/build"
 app_binary="$build_root/boomhauer-app"
+# The linker writes boomhauer-app.exe on Windows; name the make target the same
+# way so it is not permanently missing (relinking the app on every build).
+[[ $windows_preview -eq 1 ]] && app_binary="$app_binary.exe"
 app_makefile="$build_root/AppGNUmakefile"
 framework_lib="$framework_root/build/lib/libArlenFramework.a"
 gen_root="$build_root/gen/templates"
@@ -593,7 +685,7 @@ runtime_fingerprint() {
     printf 'app_root|%s\n' "$app_root"
     printf 'framework_root|%s\n' "$framework_root"
     printf 'enable_yyjson|%s\n' "${ARLEN_ENABLE_YYJSON:-1}"
-    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-1}"
+    printf 'enable_llhttp|%s\n' "${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
     append_fingerprint_entries "$app_root" "app" src templates modules config public app_lite.m config/modules.plist
     append_fingerprint_entries "$framework_root" "framework" src modules GNUmakefile tools/eocc.m
   } | hash_fingerprint_stream
@@ -667,7 +759,7 @@ transpile_templates() {
         rm -rf "$gen_root/modules/$module_id" "$module_manifest_root/$module_id.json"
         continue
       fi
-      "$framework_root/build/eocc" \
+      "$framework_eocc_target" \
         --template-root "$module_template_root" \
         --output-dir "$gen_root" \
         --manifest "$module_manifest_root/$module_id.json" \
@@ -687,7 +779,7 @@ transpile_templates() {
     return
   fi
 
-  "$framework_root/build/eocc" \
+  "$framework_eocc_target" \
     --template-root "$app_root/templates" \
     --output-dir "$app_template_root" \
     --manifest "$app_template_root/manifest.json" \
@@ -754,6 +846,13 @@ emit_app_test_rules() {
   local entry="$test_root/aln_app_test_entry.m"
   local -a test_sources main_sources linked_objects test_objects
   local source_path object_path dep_path relative_path
+  # No XCTest ships in the Windows toolchain: compile and link against the
+  # framework's vendored tools-xctest, the library run_app_tests.sh's runner loads.
+  local xctest_compile_flags="" xctest_link_dirs=""
+  if [[ $windows_preview -eq 1 ]]; then
+    xctest_compile_flags="-I$framework_root/vendor/tools-xctest "
+    xctest_link_dirs="-L$framework_root/vendor/tools-xctest/XCTest/obj "
+  fi
   mapfile -t test_sources < <(find "$app_root/tests" -type f -name '*.m' 2>/dev/null | sort)
   mkdir -p "$test_root"
   cat >"$entry.tmp" <<'ENTRY'
@@ -790,7 +889,7 @@ ENTRY
   done
 
   printf '\nTEST_BUNDLE := %s\n' "$bundle"
-  printf 'TEST_BINARY := %s/AppTests\n' "$bundle"
+  printf 'TEST_BINARY := %s/%s\n' "$bundle" "$app_test_binary_name"
   printf 'TEST_LINK_OBJECTS :='
   printf ' %s' "${linked_objects[@]}" "${test_objects[@]}"
   printf '\n'
@@ -801,7 +900,7 @@ ENTRY
   printf '\n\n'
   printf '$(TEST_BINARY): $(OBJECTS_READY) $(TEST_LINK_OBJECTS) $(FRAMEWORK_LIB) $(lastword $(MAKEFILE_LIST))\n'
   printf '>mkdir -p $(TEST_BUNDLE)/Resources\n'
-  printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(TEST_LINK_OBJECTS) $(FRAMEWORK_LIB) -shared -fPIC -o $(TEST_BINARY) $(BASE_LINK_LIBS) -lXCTest\n'
+  printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(TEST_LINK_OBJECTS) $(FRAMEWORK_LIB) -shared -fPIC -o $(TEST_BINARY) %s$(BASE_LINK_LIBS) -lXCTest\n' "$xctest_link_dirs"
   printf '\n'
   for source_path in "${main_sources[@]}"; do
     relative_path="${source_path#"$app_root"/}"
@@ -809,7 +908,7 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -c %s -o %s\n\n' \
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -Dmain=ALNAppMain -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
       "$dep_path" "$source_path" "$object_path"
   done
   for source_path in "${test_sources[@]}" "$entry"; do
@@ -822,14 +921,14 @@ ENTRY
     dep_path="${object_path%.o}.d"
     printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
     printf '>mkdir -p $(@D)\n'
-    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -I%s -MMD -MP -MF %s -c %s -o %s\n\n' \
-      "$app_root/tests" "$dep_path" "$source_path" "$object_path"
+    printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) %s-I%s -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
+      "$xctest_compile_flags" "$app_root/tests" "$dep_path" "$source_path" "$object_path"
   done
 }
 
 emit_app_makefile() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local gnustep_objc_flags
   local gnustep_base_libs
   mapfile -t app_sources < <(find "$app_root/src" -type f -name '*.m' 2>/dev/null | sort)
@@ -906,8 +1005,8 @@ emit_app_makefile() {
     printf 'OBJECTS_READY := %s\n' "$build_root/.objects-ready"
     printf 'FRAMEWORK_LIB := %s\n' "$framework_lib"
     printf 'GNUSTEP_OBJC_FLAGS := %s\n' "$gnustep_objc_flags"
-    printf 'BASE_LINK_LIBS := %s -ldl -lcrypto -ldispatch -lcurl\n' "$gnustep_base_libs"
-    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1\n' "$enable_yyjson" "$enable_llhttp"
+    printf 'BASE_LINK_LIBS := %s -lcrypto -ldispatch -lcurl %s\n' "$gnustep_base_libs" "$platform_link_libs"
+    printf 'OBJC_FLAGS := $(GNUSTEP_OBJC_FLAGS) -fobjc-arc -fPIC -DARLEN_ENABLE_YYJSON=%s -DARLEN_ENABLE_LLHTTP=%s -DARGON2_NO_THREADS=1 %s\n' "$enable_yyjson" "$enable_llhttp" "$platform_objc_flags"
     printf 'INCLUDE_FLAGS :='
     for source_path in "${include_args[@]}"; do
       printf ' %s' "$source_path"
@@ -932,7 +1031,7 @@ emit_app_makefile() {
       dep_path="${object_path%.o}.d"
       printf '%s: %s $(lastword $(MAKEFILE_LIST))\n' "$object_path" "$source_path"
       printf '>mkdir -p $(@D)\n'
-      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -c %s -o %s\n\n' \
+      printf '>source $(GNUSTEP_SH) && clang $(OBJC_FLAGS) $(INCLUDE_FLAGS) -MMD -MP -MF %s -MT$@ -c %s -o %s\n\n' \
         "$dep_path" "$source_path" "$object_path"
     done
     emit_app_test_rules
@@ -944,7 +1043,8 @@ emit_app_makefile() {
 }
 
 framework_artifacts_are_current() {
-  make -q -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >/dev/null 2>&1
+  framework_prebuilt_is_current "$framework_eocc_target" "$framework_lib" ||
+    framework_make -q "$framework_eocc_target" "$framework_lib" >/dev/null 2>&1
 }
 
 framework_archive_contains_sanitizers() {
@@ -984,8 +1084,8 @@ ensure_framework_artifacts_ready() {
     if framework_archive_contains_sanitizers; then
       echo "boomhauer: [1/4] detected sanitizer-instrumented framework artifacts; rebuilding clean framework artifacts"
       if {
-        make -C "$framework_root" clean &&
-          make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib"
+        framework_make clean &&
+          framework_make "$framework_eocc_target" "$framework_lib"
       } >"$output_file" 2>&1; then
         if [[ -s "$output_file" ]]; then
           cat "$output_file"
@@ -994,7 +1094,7 @@ ensure_framework_artifacts_ready() {
         local status=$?
         record_build_failure \
           "tooling" \
-          "make -C $framework_root clean && make -C $framework_root $framework_root/build/eocc $framework_lib" \
+          "make -C $framework_root clean && make -C $framework_root $framework_eocc_target $framework_lib" \
           "$status" \
           "$output_file"
         return "$status"
@@ -1004,13 +1104,13 @@ ensure_framework_artifacts_ready() {
     fi
   else
     echo "boomhauer: [1/4] checking tool freshness and building framework artifacts"
-    if make -C "$framework_root" "$framework_root/build/eocc" "$framework_lib" >"$output_file" 2>&1; then
+    if framework_make "$framework_eocc_target" "$framework_lib" >"$output_file" 2>&1; then
       if [[ -s "$output_file" ]]; then
         cat "$output_file"
       fi
     else
       local status=$?
-      record_build_failure "tooling" "make -C $framework_root $framework_root/build/eocc $framework_lib" "$status" "$output_file"
+      record_build_failure "tooling" "make -C $framework_root $framework_eocc_target $framework_lib" "$status" "$output_file"
       return "$status"
     fi
   fi
@@ -1061,7 +1161,7 @@ run_app_make_target() {
 
 compile_app() {
   local enable_yyjson="${ARLEN_ENABLE_YYJSON:-1}"
-  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-1}"
+  local enable_llhttp="${ARLEN_ENABLE_LLHTTP:-$default_enable_llhttp}"
   local tmp_output
   tmp_output="$(mktemp)"
 
@@ -1141,11 +1241,15 @@ error_server_ready=0
 next_build_retry_at=0
 
 ensure_error_server_built() {
-  if [[ $error_server_ready -eq 1 && -x "$framework_root/build/boomhauer" ]]; then
+  if [[ $error_server_ready -eq 1 && -x "$framework_boomhauer_target" ]]; then
     return 0
   fi
 
-  if ! make -C "$framework_root" boomhauer >/dev/null; then
+  if framework_prebuilt_is_current "$framework_boomhauer_target"; then
+    error_server_ready=1
+    return 0
+  fi
+  if ! framework_make boomhauer >/dev/null; then
     echo "boomhauer: failed to build fallback dev error server" >&2
     return 1
   fi
@@ -1227,10 +1331,10 @@ run_once() {
       echo "boomhauer: no tests found under $app_root/tests (add one with: arlen generate test Home --request)" >&2
       exit 1
     fi
-    if run_app_make_target "$build_root/tests/AppTests.xctest/AppTests" \
+    if run_app_make_target "$build_root/tests/AppTests.xctest/$app_test_binary_name" \
         "boomhauer: app test bundle is current" \
         "boomhauer: building app test bundle" \
-        "app_test_bundle" "make -f $app_makefile $build_root/tests/AppTests.xctest/AppTests"; then
+        "app_test_bundle" "make -f $app_makefile $build_root/tests/AppTests.xctest/$app_test_binary_name"; then
       echo "boomhauer: test bundle $build_root/tests/AppTests.xctest"
     else
       local status=$?

@@ -182,6 +182,48 @@
   [invalid appendData:[@"\r\n--Aa--" dataUsingEncoding:NSUTF8StringEncoding]];
   XCTAssertEqual([self request:invalid].multipartError.code, ALNMultipartErrorMalformed);
 }
+// Issue 218: header-name and boundary checks use byte tables and quoted values
+// are collected into a buffer. The accepted and rejected inputs are unchanged.
+- (void)testHeaderTokenAndBoundaryValidationAfterFastPath_Issue218 {
+  NSError *error = nil;
+  NSString *ok = @"--b'()+_,-./:=? x\r\nContent-Disposition: form-data; name=\"q\\\\u\\\"o\"\r\n"
+                 @"X-Custom!#$%&'*+-.^_`|~: v\r\n\r\nvalue\r\n--b'()+_,-./:=? x--";
+  NSArray *parts = [ALNMultipart parseBody:[ok dataUsingEncoding:NSUTF8StringEncoding]
+                               contentType:@"multipart/form-data; boundary=\"b'()+_,-./:=? x\""
+                                    limits:@{}
+                                     error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual(parts.count, 1u);
+  XCTAssertEqualObjects([parts[0] fieldName], @"q\\u\"o");
+
+  NSString *badHeader = @"--Aa\r\nContent-Disposition: form-data; name=x\r\nBad Header: v\r\n\r\nv\r\n--Aa--";
+  error = nil;
+  XCTAssertNil([ALNMultipart parseBody:[badHeader dataUsingEncoding:NSUTF8StringEncoding]
+                           contentType:@"multipart/form-data; boundary=Aa"
+                                limits:@{}
+                                 error:&error]);
+  XCTAssertEqual(error.code, ALNMultipartErrorMalformed);
+
+  for (NSString *boundary in @[ @"bad\"quote", @"bad;semi", @"badé" ]) {
+    error = nil;
+    NSString *type = [NSString stringWithFormat:@"multipart/form-data; boundary=\"%@\"",
+                                                [boundary stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+    XCTAssertNil([ALNMultipart parseBody:[@"--x\r\n" dataUsingEncoding:NSUTF8StringEncoding]
+                             contentType:type
+                                  limits:@{}
+                                   error:&error], @"%@", boundary);
+    XCTAssertEqual(error.code, ALNMultipartErrorMalformed, @"%@", boundary);
+  }
+
+  NSString *nonASCIIName = @"--Aa\r\nContent-Disposition: form-data; name=x\r\nX-Hé: v\r\n\r\nv\r\n--Aa--";
+  error = nil;
+  XCTAssertNil([ALNMultipart parseBody:[nonASCIIName dataUsingEncoding:NSUTF8StringEncoding]
+                           contentType:@"multipart/form-data; boundary=Aa"
+                                limits:@{}
+                                 error:&error]);
+  XCTAssertEqual(error.code, ALNMultipartErrorMalformed);
+}
+
 - (void)testApplicationRejectsMalformedAndConfiguredLimits {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{@"requestLimits":@{@"maxMultipartParts":@1}}];
   XCTAssertEqual([app dispatchRequest:[self request:self.body]].statusCode, 413);
@@ -214,9 +256,13 @@
       XCTAssertNotNil(spooledPath);
       XCTAssertTrue([spooledPath hasPrefix:parent]);
       NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:spooledPath error:NULL];
+#if !defined(_WIN32)  // NTFS has no POSIX permission bits
       XCTAssertEqual(0600, [attributes[NSFilePosixPermissions] intValue]);
       XCTAssertEqual(0700, [[[NSFileManager defaultManager] attributesOfItemAtPath:[spooledPath stringByDeletingLastPathComponent]
                                                                              error:NULL][NSFilePosixPermissions] intValue]);
+#else
+      (void)attributes;
+#endif
       XCTAssertEqualObjects(upload.data, self.binary);
       XCTAssertEqual(upload.size, self.binary.length);
       // Small uploads and text fields stay in memory.

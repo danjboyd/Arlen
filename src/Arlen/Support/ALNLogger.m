@@ -4,6 +4,9 @@
 
 #include <limits.h>
 #include <stdio.h>
+#if defined(_WIN32)
+#include <io.h>
+#endif
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -210,18 +213,43 @@ static NSString *ALNEscapedTextLogComponent(NSString *value) {
   if (data == nil) {
     return;
   }
+  [self emitLogBytes:data];
+}
 
+// JSON lines arrive as UTF-8 bytes from the serializer: append the newline to
+// one copy instead of decoding to an NSString, appending, and encoding again
+// (two encodes and three copies per access-log line, #248).
+- (void)emitLogData:(NSData *)data {
+  NSMutableData *line = [NSMutableData dataWithCapacity:[data length] + 1];
+  [line appendData:data];
+  [line appendBytes:"\n" length:1];
+  [self emitLogBytes:line];
+}
+
+- (void)emitLogBytes:(NSData *)data {
   [_writeLock lock];
   int fd = self.outputFileDescriptor;
 #if defined(_WIN32)
-  // Windows has no pipe-backpressure failure mode in our deployments; preserve
-  // the historical synchronous behavior.
+  // Synchronous on Windows: anonymous pipes have no O_NONBLOCK, so the bounded
+  // drop-instead-of-block write below (ARLEN-BUG-033) is POSIX-only. Write to
+  // the configured descriptor; this used to send every line to stderr.
+  BOOL written = YES;
   if (fd == 2) {
     fprintf(stderr, "%.*s", (int)[data length], (const char *)[data bytes]);
   } else {
-    fwrite([data bytes], 1, [data length], stderr);
+    const char *bytes = (const char *)[data bytes];
+    size_t remaining = [data length];
+    while (remaining > 0) {
+      int chunk = (remaining > (size_t)INT_MAX) ? INT_MAX : (int)remaining;
+      int count = _write(fd, bytes, (unsigned int)chunk);
+      if (count <= 0) {
+        written = NO;
+        break;
+      }
+      bytes += count;
+      remaining -= (size_t)count;
+    }
   }
-  BOOL written = YES;
 #else
   int timeoutMs = (self.writeTimeoutMilliseconds > INT_MAX)
                       ? INT_MAX
@@ -248,11 +276,8 @@ static NSString *ALNEscapedTextLogComponent(NSString *value) {
                                                     options:0
                                                       error:&jsonError];
     if (data != nil) {
-      NSString *line = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-      if (line != nil) {
-        [self emitLogLine:line];
-        return;
-      }
+      [self emitLogData:data];
+      return;
     }
   }
 

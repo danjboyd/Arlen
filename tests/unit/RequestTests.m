@@ -4,6 +4,7 @@
 #import <stdlib.h>
 
 #import "ALNRequest.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface RequestTests : XCTestCase
 @end
@@ -97,6 +98,66 @@
     XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"1", request.cookies[@"a"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"two", request.cookies[@"b"], @"backend=%@", [self backendName:backend]);
+  }
+}
+
+// Issue 213 (RFC 9112 §3.2): an HTTP/1.1 request needs exactly one Host.
+- (void)testHostHeaderMustAppearExactlyOnceOnHTTP11AcrossBackends {
+  NSDictionary<NSString *, NSNumber *> *cases = @{
+    @"GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n" : @NO,
+    @"GET / HTTP/1.1\r\nhost: a\r\nHOST: a\r\n\r\n" : @NO,
+    @"GET / HTTP/1.1\r\nX-Test: 1\r\n\r\n" : @NO,
+    @"GET / HTTP/1.0\r\nX-Test: 1\r\n\r\n" : @YES,
+    @"GET / HTTP/1.1\r\nHost: a\r\n\r\n" : @YES,
+  };
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    for (NSString *raw in cases) {
+      NSError *error = nil;
+      ALNRequest *request = [ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                                   backend:backend
+                                                     error:&error];
+      if ([cases[raw] boolValue]) {
+        XCTAssertNotNil(request, @"backend=%@ raw=%@ error=%@", [self backendName:backend], raw, error);
+      } else {
+        XCTAssertNil(request, @"backend=%@ raw=%@", [self backendName:backend], raw);
+        XCTAssertNotNil(error, @"backend=%@ raw=%@", [self backendName:backend], raw);
+      }
+    }
+  }
+}
+
+// Issue 213 (RFC 9112 §3.2.2): an absolute-form target routes by its path,
+// and its authority replaces the Host header.
+- (void)testAbsoluteFormTargetUsesItsPathAndAuthorityAcrossBackends {
+  NSString *raw = @"GET http://example.test:8080/items/list?name=Peggy HTTP/1.1\r\n"
+                  "Host: ignored.test\r\n"
+                  "X-Test: 1\r\n\r\n";
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                                 backend:backend
+                                                   error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"/items/list", request.path, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Peggy", request.queryParams[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test:8080", [request headerValueForName:@"host"],
+                          @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test:8080", request.headers[@"host"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"1", request.headers[@"x-test"], @"backend=%@", [self backendName:backend]);
+  }
+  NSString *bare = @"GET HTTPS://example.test HTTP/1.1\r\n\r\n";
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:[bare dataUsingEncoding:NSUTF8StringEncoding]
+                                                 backend:backend
+                                                   error:&error];
+    XCTAssertNil(error, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"/", request.path, @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"example.test", [request headerValueForName:@"host"], @"backend=%@",
+                          [self backendName:backend]);
   }
 }
 
@@ -518,6 +579,33 @@
   XCTAssertTrue(secondHeadersComplete);
   XCTAssertEqual((NSInteger)0, secondContentLength);
   XCTAssertEqual([remainder length], secondConsumedLength);
+}
+
+
+// A handler exception leaks the request (ARC frames unwind without releasing
+// them), so the server's explicit removeTemporaryFiles must not depend on the
+// request being freed: it releases the request's own mapping of a spooled
+// body, and on Windows the spool file can then be deleted.
+- (void)testRemovingTemporaryFilesReleasesASpooledBodyWhileTheRequestLives {
+  NSString *directory = ALNTestTemporaryDirectory(@"request-spooled-body");
+  XCTAssertNotNil(directory);
+  NSString *path = [directory stringByAppendingPathComponent:@"arlen-body-test"];
+  NSData *payload = [@"a=1&b=2" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([payload writeToFile:path atomically:NO]);
+  NSData *head = [@"POST /explode HTTP/1.1\r\nHost: localhost\r\nContent-Length: 7\r\n\r\n"
+      dataUsingEncoding:NSUTF8StringEncoding];
+  ALNRequest *request = [ALNRequest requestFromHeadData:head backend:ALNHTTPParserBackendLegacy error:NULL];
+  XCTAssertNotNil(request);
+  NSError *error = nil;
+  XCTAssertTrue([request adoptSpooledBodyAtPath:path error:&error], @"%@", error);
+  XCTAssertEqualObjects(payload, request.body);
+
+  [request removeTemporaryFiles];
+  XCTAssertEqual((NSUInteger)0, request.body.length);
+  XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:path],
+                 @"the spool file must go while the request is still alive");
+  [request removeTemporaryFiles];
+  [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
 }
 
 @end

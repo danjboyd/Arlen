@@ -2,6 +2,7 @@
 """Regression checks for release packaging and managed-toolchain env setup."""
 
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -100,6 +101,129 @@ class ManagedToolchainEnvTests(unittest.TestCase):
             root = self._fake_root(base, managed=False)
             ld = self._ld_path_after_source(root / "System/Library/Makefiles/GNUstep.sh")
             self.assertEqual(ld, "/existing")
+
+
+class WindowsBundledDllListTests(unittest.TestCase):
+    LIST = REPO_ROOT / "tools/release/windows_bundled_dlls.txt"
+    SHA256 = r"^[0-9a-f]{64}$"
+
+    def _lines(self, list_path, toolchain, sha256):
+        script = (REPO_ROOT / "tools/release/package_framework.sh").read_text()
+        match = re.search(r"^windows_bundled_dll_lines\(\) \{\n.*?^\}\n", script, re.S | re.M)
+        self.assertIsNotNone(match, "windows_bundled_dll_lines() not found")
+        return subprocess.run(["bash", "-c", match.group(0) + 'windows_bundled_dll_lines "$1" "$2" "$3"\n',
+                               "test", str(list_path), toolchain, sha256],
+                              capture_output=True, text=True)
+
+    def test_list_is_well_formed(self):
+        sections = {}
+        current = None
+        for raw in self.LIST.read_text().splitlines():
+            fields = raw.split()
+            if not fields or fields[0].startswith("#"):
+                continue
+            if fields[0] == "toolchain":
+                self.assertEqual(3, len(fields), raw)
+                self.assertRegex(fields[2], self.SHA256, raw)
+                self.assertNotIn((fields[1], fields[2]), sections, f"duplicate section: {raw}")
+                current = (fields[1], fields[2])
+                sections[current] = 0
+                continue
+            self.assertEqual("dll", fields[0], raw)
+            self.assertIsNotNone(current, f"dll line before any toolchain line: {raw}")
+            self.assertEqual(5, len(fields), raw)
+            self.assertTrue(fields[1].startswith("https://"), raw)
+            self.assertRegex(fields[2], self.SHA256, raw)
+            self.assertRegex(fields[4], self.SHA256, raw)
+            sections[current] += 1
+        self.assertTrue(sections)
+        for section, count in sections.items():
+            self.assertGreater(count, 0, f"toolchain section without DLLs: {section}")
+
+    def test_selects_only_the_matching_toolchain_section(self):
+        with tempfile.TemporaryDirectory() as base:
+            path = Path(base) / "dlls.txt"
+            two = f"dll https://x/two.zst {'3' * 64} bin/two.dll {'4' * 64}"
+            path.write_text("# comment\n"
+                            f"toolchain 1.0 {'a' * 64}\n"
+                            f"dll https://x/one.zst {'1' * 64} bin/one.dll {'2' * 64}\n"
+                            "\n"
+                            f"toolchain 1.0 {'b' * 64}\n"
+                            f"{two}\n")
+            result = self._lines(path, "1.0", "b" * 64)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([two], result.stdout.splitlines())
+            # A rebuilt toolchain republished under the same version has no section yet.
+            result = self._lines(path, "1.0", "c" * 64)
+            self.assertEqual(1, result.returncode)
+            self.assertIn("no section for toolchain 1.0", result.stderr)
+
+    def test_unknown_line_kind_fails(self):
+        with tempfile.TemporaryDirectory() as base:
+            path = Path(base) / "dlls.txt"
+            path.write_text(f"toolchain 1.0 {'a' * 64}\nlib whatever\n")
+            result = self._lines(path, "1.0", "a" * 64)
+            self.assertEqual(2, result.returncode)
+            self.assertIn("unknown line kind lib", result.stderr)
+
+
+@unittest.skipUnless(os.uname().sysname == "Linux", "Linux build path only")
+class BuildReleaseEnvTests(unittest.TestCase):
+    """build_release.sh from a shell that never sourced GNUstep.sh (issue 181)."""
+
+    def test_sources_gnustep_env_and_prepares_app_with_any_sources(self):
+        with tempfile.TemporaryDirectory() as base:
+            base = Path(base)
+            gnustep_sh = base / "gs/System/Library/Makefiles/GNUstep.sh"
+            gnustep_sh.parent.mkdir(parents=True)
+            gnustep_sh.write_text("export GNUSTEP_FAKE_SOURCED=1\n")
+
+            framework = base / "framework"
+            (framework / "src/Arlen").mkdir(parents=True)
+            (framework / "GNUmakefile").write_text("")
+            (framework / "tools").mkdir()
+            for name in ("source_gnustep_env.sh", "resolve_gnustep.sh"):
+                (framework / "tools" / name).write_text(
+                    (REPO_ROOT / "tools" / name).read_text())
+            calls = base / "calls.log"
+            (framework / "bin").mkdir()
+            boomhauer = framework / "bin/boomhauer"
+            boomhauer.write_text(
+                "#!/usr/bin/env bash\n"
+                f"echo \"boomhauer sourced=${{GNUSTEP_FAKE_SOURCED:-}}\" >> '{calls}'\n"
+                "mkdir -p \"$ARLEN_APP_ROOT/.boomhauer/build\"\n"
+                "printf '#!/bin/sh\\n' > \"$ARLEN_APP_ROOT/.boomhauer/build/boomhauer-app\"\n"
+                "chmod +x \"$ARLEN_APP_ROOT/.boomhauer/build/boomhauer-app\"\n")
+            boomhauer.chmod(0o755)
+
+            stubs = base / "stubs"
+            stubs.mkdir()
+            make = stubs / "make"
+            make.write_text(
+                "#!/usr/bin/env bash\n"
+                f"echo \"make sourced=${{GNUSTEP_FAKE_SOURCED:-}}\" >> '{calls}'\n")
+            make.chmod(0o755)
+
+            # Like examples/tech_demo: sources, but no src/main.m.
+            app = base / "app"
+            (app / "config").mkdir(parents=True)
+            (app / "config/app.plist").write_text("{}\n")
+            (app / "src").mkdir()
+            (app / "src/demo_server.m").write_text("")
+
+            subprocess.run(
+                ["bash", str(REPO_ROOT / "tools/deploy/build_release.sh"),
+                 "--app-root", str(app), "--framework-root", str(framework),
+                 "--releases-dir", str(base / "releases"), "--release-id", "r1",
+                 "--allow-missing-certification"],
+                env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(base),
+                     "GNUSTEP_SH": str(gnustep_sh)},
+                check=True, capture_output=True, text=True)
+
+            self.assertEqual(calls.read_text().splitlines(),
+                             ["make sourced=1", "boomhauer sourced=1"])
+            self.assertTrue(
+                (base / "releases/r1/app/.boomhauer/build/boomhauer-app").is_file())
 
 
 if __name__ == "__main__":

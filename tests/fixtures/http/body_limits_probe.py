@@ -36,6 +36,11 @@ def rss_anon_kib():
     # footprint, which likewise leaves out clean file-backed pages. Bodies and
     # uploads are memory-mapped from their spool files, so total RSS would
     # count them even though nothing is buffered on the heap.
+    # Windows: None. The task's pid is MSYS2 bash, which runs a native server
+    # as a separate process instead of exec-ing it, so there is no server pid
+    # to sample; the uploads and spool checks still run.
+    if os.name == 'nt':
+        return None
     status_path = '/proc/%d/status' % SERVER_PID
     if os.path.exists(status_path):
         with open(status_path) as status:
@@ -141,7 +146,7 @@ baseline = rss_anon_kib()
 peak = [baseline]
 done = threading.Event()
 def sample():
-    while not done.is_set():
+    while baseline is not None and not done.is_set():
         peak[0] = max(peak[0], rss_anon_kib())
         time.sleep(0.01)
 results = []
@@ -154,10 +159,14 @@ workers = [threading.Thread(target=upload) for _ in range(8)]
 [w.join() for w in workers]
 done.set()
 sampler.join()
-assert all(s == 200 for s, _ in results), [s for s, _ in results]
-growth_mib = (peak[0] - baseline) / 1024.0
-print('rss_anon growth MiB %.1f' % growth_mib)
-# Spool threshold (1 MiB) x 8 plus buffers and fixed overhead; buffering would be >= 160 MiB.
-assert growth_mib < 64, growth_mib
+# A failure's body names the cause (spool errors carry the path and strerror).
+assert all(s == 200 for s, _ in results), [(s, r[:300]) if s != 200 else s for s, r in results]
+if baseline is None:
+    print('rss_anon growth not measured on this platform')
+else:
+    growth_mib = (peak[0] - baseline) / 1024.0
+    print('rss_anon growth MiB %.1f' % growth_mib)
+    # Spool threshold (1 MiB) x 8 plus buffers and fixed overhead; buffering would be >= 160 MiB.
+    assert growth_mib < 64, growth_mib
 wait_until_empty('concurrent uploads')
 print('body limit checks passed')

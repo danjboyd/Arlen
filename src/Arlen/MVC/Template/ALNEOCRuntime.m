@@ -516,36 +516,112 @@ NSString *ALNEOCNormalizeTemplateReference(NSString *path) {
   return canonical;
 }
 
-NSString *ALNEOCEscapeHTMLString(NSString *input) {
-  if (input == nil || [input length] == 0) {
-    return @"";
-  }
+enum {
+  ALNEOCEscapeScanChunkLength = 256,
+  ALNEOCEscapeOutputBufferLength = 1024,
+  ALNEOCEscapeMaxEntityLength = 6,
+};
 
-  NSMutableString *escaped = [NSMutableString stringWithCapacity:[input length]];
-  NSUInteger length = [input length];
-  for (NSUInteger idx = 0; idx < length; idx++) {
-    unichar ch = [input characterAtIndex:idx];
-    switch (ch) {
-    case '&':
-      [escaped appendString:@"&amp;"];
-      break;
-    case '<':
-      [escaped appendString:@"&lt;"];
-      break;
-    case '>':
-      [escaped appendString:@"&gt;"];
-      break;
-    case '"':
-      [escaped appendString:@"&quot;"];
-      break;
-    case '\'':
-      [escaped appendString:@"&#39;"];
-      break;
-    default:
-      [escaped appendFormat:@"%C", ch];
-      break;
+static inline BOOL ALNEOCHTMLCharacterNeedsEscape(unichar ch) {
+  return ch == '&' || ch == '<' || ch == '>' || ch == '"' || ch == '\'';
+}
+
+static NSUInteger ALNEOCFirstHTMLEscapeIndex(NSString *input, NSUInteger length) {
+  unichar chunk[ALNEOCEscapeScanChunkLength];
+  for (NSUInteger offset = 0; offset < length; offset += ALNEOCEscapeScanChunkLength) {
+    NSUInteger count = MIN((NSUInteger)ALNEOCEscapeScanChunkLength, length - offset);
+    [input getCharacters:chunk range:NSMakeRange(offset, count)];
+    for (NSUInteger idx = 0; idx < count; idx++) {
+      if (ALNEOCHTMLCharacterNeedsEscape(chunk[idx])) {
+        return offset + idx;
+      }
     }
   }
+  return NSNotFound;
+}
+
+static void ALNEOCFlushEscapeBuffer(NSMutableString *out, unichar *buffer, NSUInteger *used) {
+  if (*used == 0) {
+    return;
+  }
+  NSString *segment = [[NSString alloc] initWithCharactersNoCopy:buffer
+                                                          length:*used
+                                                    freeWhenDone:NO];
+  [out appendString:segment];
+  segment = nil;
+  *used = 0;
+}
+
+// Appends the HTML-escaped form of input to out. Only & < > " ' are replaced;
+// every other UTF-16 code unit (including surrogate halves) is copied as-is.
+// Inputs with nothing to escape are appended without any intermediate copy,
+// and escaped output is staged in a fixed buffer that is flushed into out.
+static void ALNEOCAppendHTMLEscapedString(NSMutableString *out, NSString *input) {
+  NSUInteger length = [input length];
+  if (out == nil || length == 0) {
+    return;
+  }
+
+  NSUInteger firstEscape = ALNEOCFirstHTMLEscapeIndex(input, length);
+  if (firstEscape == NSNotFound) {
+    [out appendString:input];
+    return;
+  }
+  if (firstEscape > 0) {
+    [out appendString:[input substringToIndex:firstEscape]];
+  }
+
+  unichar chunk[ALNEOCEscapeScanChunkLength];
+  unichar buffer[ALNEOCEscapeOutputBufferLength];
+  NSUInteger used = 0;
+  for (NSUInteger offset = firstEscape; offset < length; offset += ALNEOCEscapeScanChunkLength) {
+    NSUInteger count = MIN((NSUInteger)ALNEOCEscapeScanChunkLength, length - offset);
+    [input getCharacters:chunk range:NSMakeRange(offset, count)];
+    for (NSUInteger idx = 0; idx < count; idx++) {
+      if (used + ALNEOCEscapeMaxEntityLength > ALNEOCEscapeOutputBufferLength) {
+        ALNEOCFlushEscapeBuffer(out, buffer, &used);
+      }
+      unichar ch = chunk[idx];
+      const char *entity = NULL;
+      switch (ch) {
+      case '&':
+        entity = "&amp;";
+        break;
+      case '<':
+        entity = "&lt;";
+        break;
+      case '>':
+        entity = "&gt;";
+        break;
+      case '"':
+        entity = "&quot;";
+        break;
+      case '\'':
+        entity = "&#39;";
+        break;
+      default:
+        buffer[used++] = ch;
+        continue;
+      }
+      for (const char *cursor = entity; *cursor != '\0'; cursor++) {
+        buffer[used++] = (unichar)*cursor;
+      }
+    }
+  }
+  ALNEOCFlushEscapeBuffer(out, buffer, &used);
+}
+
+NSString *ALNEOCEscapeHTMLString(NSString *input) {
+  NSUInteger length = [input length];
+  if (input == nil || length == 0) {
+    return @"";
+  }
+  if (ALNEOCFirstHTMLEscapeIndex(input, length) == NSNotFound) {
+    return [input copy];
+  }
+
+  NSMutableString *escaped = [NSMutableString stringWithCapacity:length + (length / 4)];
+  ALNEOCAppendHTMLEscapedString(escaped, input);
   return escaped;
 }
 
@@ -556,7 +632,7 @@ void ALNEOCAppendEscaped(NSMutableString *out, id value) {
   BOOL conversionOK = YES;
   NSString *rendered = ALNEOCStringValueWithOptions(value, NO, &conversionOK);
   (void)conversionOK;
-  [out appendString:ALNEOCEscapeHTMLString(rendered ?: @"")];
+  ALNEOCAppendHTMLEscapedString(out, rendered ?: @"");
 }
 
 void ALNEOCAppendRaw(NSMutableString *out, id value) {
@@ -593,7 +669,7 @@ static BOOL ALNEOCAppendChecked(NSMutableString *out,
   }
 
   if (escape) {
-    [out appendString:ALNEOCEscapeHTMLString(rendered)];
+    ALNEOCAppendHTMLEscapedString(out, rendered);
   } else {
     [out appendString:rendered];
   }
@@ -785,10 +861,17 @@ ALNEOCRenderFunction ALNEOCResolveTemplate(NSString *logicalPath) {
   return [ptr pointerValue];
 }
 
-NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
+static NSString *ALNEOCResolvedTemplatePath(NSString *logicalPath) {
   NSString *normalizedPath = ALNEOCNormalizeTemplateReference(logicalPath);
-  NSString *resolvedPath = ([normalizedPath length] > 0) ? normalizedPath : logicalPath;
-  ALNEOCRenderFunction function = ALNEOCResolveTemplate(resolvedPath);
+  return ([normalizedPath length] > 0) ? normalizedPath : logicalPath;
+}
+
+// Renders an already-resolved template function. resolvedPath is only used for
+// diagnostics; function may be NULL, which reports "Template not found".
+static NSString *ALNEOCRenderResolvedTemplate(ALNEOCRenderFunction function,
+                                              NSString *resolvedPath,
+                                              id ctx,
+                                              NSError **error) {
   if (function == NULL) {
     if (error != NULL) {
       NSString *canonical = ALNEOCCanonicalTemplatePath(resolvedPath);
@@ -835,6 +918,12 @@ NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
     return nil;
   }
   return rendered;
+}
+
+NSString *ALNEOCRenderTemplate(NSString *logicalPath, id ctx, NSError **error) {
+  NSString *resolvedPath = ALNEOCResolvedTemplatePath(logicalPath);
+  return ALNEOCRenderResolvedTemplate(
+      ALNEOCResolveTemplate(resolvedPath), resolvedPath, ctx, error);
 }
 
 BOOL ALNEOCInclude(NSMutableString *out, id ctx, NSString *logicalPath, NSError **error) {
@@ -899,20 +988,30 @@ BOOL ALNEOCRenderCollection(NSMutableString *out,
   NSString *normalizedPath = ALNEOCNormalizeTemplateReference(logicalPath);
   NSString *normalizedEmptyPath = ALNEOCNormalizeTemplateReference(emptyLogicalPath ?: @"");
 
+  // Resolve the partial and build the shared locals overlay once, on the first
+  // item, instead of re-normalizing and re-locking the registry per item.
   BOOL renderedAny = NO;
+  NSString *resolvedPath = nil;
+  ALNEOCRenderFunction function = NULL;
+  id baseContext = nil;
   for (id item in collection ?: @[]) {
-    renderedAny = YES;
-    id overlayContext =
-        ALNEOCContextWithLocals(ctx, locals, templatePath, line, column, error);
-    if (overlayContext == nil && locals != nil && locals != [NSNull null]) {
-      return NO;
+    if (!renderedAny) {
+      renderedAny = YES;
+      baseContext = ALNEOCContextWithLocals(ctx, locals, templatePath, line, column, error);
+      if (baseContext == nil && locals != nil && locals != [NSNull null]) {
+        return NO;
+      }
+      resolvedPath = ALNEOCResolvedTemplatePath(normalizedPath);
+      function = ALNEOCResolveTemplate(resolvedPath);
     }
-    overlayContext = [[ALNEOCOverlayContext alloc]
-        initWithBaseContext:overlayContext
+    id itemContext = [[ALNEOCOverlayContext alloc]
+        initWithBaseContext:baseContext
                      locals:@{ itemLocalName : item ?: [NSNull null] }];
-    if (!ALNEOCInclude(out, overlayContext, normalizedPath, error)) {
+    NSString *rendered = ALNEOCRenderResolvedTemplate(function, resolvedPath, itemContext, error);
+    if (rendered == nil) {
       return NO;
     }
+    [out appendString:rendered];
   }
 
   if (!renderedAny && [normalizedEmptyPath length] > 0) {

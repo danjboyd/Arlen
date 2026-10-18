@@ -21,5 +21,12 @@ if [[ "$build_platform" == "apple" ]]; then
   exec "$repo_root/build/apple/arlen" "$@"
 fi
 
-make -C "$repo_root" arlen >/dev/null
+# A release archive without build/obj (Windows) is trusted while its
+# build/.release-prebuilt still matches; otherwise make keeps arlen current.
+arlen_binary="$repo_root/build/arlen"
+[[ -f "$repo_root/build/arlen.exe" ]] && arlen_binary="$repo_root/build/arlen.exe"
+source "$repo_root/tools/release_prebuilt.sh"
+if ! aln_release_prebuilt_is_current "$repo_root" "$arlen_binary"; then
+  make -C "$repo_root" arlen >/dev/null
+fi
 exec "$repo_root/build/arlen" "$@"

@@ -240,7 +240,17 @@ static NSString *ALNMSSQLRemoveLimitOffsetSuffix(NSString *sql,
   return rewritten;
 }
 
-static NSString *ALNMSSQLConvertPlaceholders(NSString *sql) {
+// Rewrites each `$N` to a positional `?` and returns the parameters in the
+// order those `?` appear, so a trusted expression that reorders or repeats
+// placeholders (`$2 ... $1`, `$1 ... $1`) binds the right values; on
+// PostgreSQL `$N` already names its parameter (#231). Returns nil for a `$N`
+// with no matching parameter.
+static NSString *ALNMSSQLConvertPlaceholders(NSString *sql,
+                                             NSArray *parameters,
+                                             NSArray **orderedParameters,
+                                             NSError **error) {
+  NSArray *source = [parameters isKindOfClass:[NSArray class]] ? parameters : @[];
+  *orderedParameters = source;
   NSError *regexError = nil;
   NSRegularExpression *regex =
       [NSRegularExpression regularExpressionWithPattern:@"\\$[0-9]+"
@@ -251,8 +261,25 @@ static NSString *ALNMSSQLConvertPlaceholders(NSString *sql) {
   }
   NSMutableString *result = [sql mutableCopy];
   NSArray *matches = [regex matchesInString:ALNSQLMaskQuotedText(sql, YES) options:0 range:NSMakeRange(0, sql.length)];
+  NSMutableArray *ordered = [NSMutableArray arrayWithCapacity:[matches count]];
+  for (NSTextCheckingResult *match in matches) {
+    NSString *digits = [sql substringWithRange:NSMakeRange(match.range.location + 1, match.range.length - 1)];
+    NSInteger index = [digits integerValue];
+    if ([digits length] > 9 || index < 1 || (NSUInteger)index > [source count]) {
+      if (error != NULL) {
+        *error = ALNMSSQLDialectError(ALNSQLBuilderErrorCompileFailed,
+                                      [NSString stringWithFormat:@"placeholder $%@ has no matching parameter", digits],
+                                      @"parameters");
+      }
+      return nil;
+    }
+    [ordered addObject:source[(NSUInteger)index - 1]];
+  }
   for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
     [result replaceCharactersInRange:match.range withString:@"?"];
+  }
+  if ([matches count] > 0) {
+    *orderedParameters = ordered;
   }
   return result;
 }
@@ -491,9 +518,14 @@ static NSDictionary *ALNMSSQLCompileBuilder(ALNSQLBuilder *builder,
     return nil;
   }
 
+  NSArray *orderedParameters = nil;
+  NSString *positionalSQL = ALNMSSQLConvertPlaceholders(quotedSQL ?: @"", parameters, &orderedParameters, error);
+  if (positionalSQL == nil) {
+    return nil;
+  }
   return @{
-    @"sql" : ALNMSSQLConvertPlaceholders(quotedSQL ?: @""),
-    @"parameters" : parameters ?: @[],
+    @"sql" : positionalSQL,
+    @"parameters" : orderedParameters ?: @[],
   };
 }
 

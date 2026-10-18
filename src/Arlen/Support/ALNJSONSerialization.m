@@ -295,11 +295,9 @@ static yyjson_mut_val *ALNYYValueFromFoundation(yyjson_mut_doc *doc,
 
     NSDictionary *dictionary = (NSDictionary *)obj;
     NSArray *keys = [dictionary allKeys];
-#ifdef NSJSONWritingSortedKeys
     if ((options & NSJSONWritingSortedKeys) != 0) {
       keys = [keys sortedArrayUsingSelector:@selector(compare:)];
     }
-#endif
 
     for (id rawKey in keys) {
       if (![rawKey isKindOfClass:[NSString class]]) {
@@ -546,7 +544,14 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
-  if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
+  // Where Foundation cannot sort keys (gnustep-base 1.31.1 on the Windows
+  // toolchain; see GNUmakefile), sorted-keys writes use the yyjson writer.
+#if defined(ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS) && ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS
+  BOOL foundationCanWrite = (options & NSJSONWritingSortedKeys) == 0;
+#else
+  BOOL foundationCanWrite = YES;
+#endif
+  if (([self backend] == ALNJSONBackendFoundation && foundationCanWrite) || ![self isYYJSONAvailable]) {
     return [NSJSONSerialization dataWithJSONObject:obj options:options error:error];
   }
 
@@ -605,3 +610,69 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
 }
 
 @end
+
+static const unichar *ALNEOCJSONScriptEscapeForCharacter(unichar ch) {
+  static const unichar lessThan[] = {'\\', 'u', '0', '0', '3', 'c'};
+  static const unichar greaterThan[] = {'\\', 'u', '0', '0', '3', 'e'};
+  static const unichar ampersand[] = {'\\', 'u', '0', '0', '2', '6'};
+  static const unichar lineSeparator[] = {'\\', 'u', '2', '0', '2', '8'};
+  static const unichar paragraphSeparator[] = {'\\', 'u', '2', '0', '2', '9'};
+  switch (ch) {
+  case '<':
+    return lessThan;
+  case '>':
+    return greaterThan;
+  case '&':
+    return ampersand;
+  case 0x2028:
+    return lineSeparator;
+  case 0x2029:
+    return paragraphSeparator;
+  default:
+    return NULL;
+  }
+}
+
+// Declared in ALNEOCRuntime.h and defined here, like ALNEOCMarkdownHTML in
+// ALNMarkdown.m: eocc links the template runtime without the JSON code, and
+// Support does not include MVC/Template headers.
+NSString *ALNEOCJSONForScript(id value) {
+  // Wrap in an array so scalars (strings, numbers, booleans, null) serialize
+  // too, then strip the brackets. Compact output never pads them.
+  id root = (value != nil) ? value : [NSNull null];
+  NSData *data = [ALNJSONSerialization dataWithJSONObject:@[ root ]
+                                                  options:NSJSONWritingSortedKeys
+                                                    error:NULL];
+  NSString *wrapped =
+      (data != nil) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  NSUInteger wrappedLength = [wrapped length];
+  if (wrappedLength < 3 || [wrapped characterAtIndex:0] != '[' ||
+      [wrapped characterAtIndex:wrappedLength - 1] != ']') {
+    return @"null";
+  }
+
+  NSUInteger length = wrappedLength - 2;
+  unichar *input = malloc(sizeof(unichar) * length);
+  unichar *output = malloc(sizeof(unichar) * length * 6);
+  if (input == NULL || output == NULL) {
+    free(input);
+    free(output);
+    return @"null";
+  }
+  [wrapped getCharacters:input range:NSMakeRange(1, length)];
+
+  NSUInteger used = 0;
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    const unichar *escape = ALNEOCJSONScriptEscapeForCharacter(input[idx]);
+    if (escape == NULL) {
+      output[used++] = input[idx];
+    } else {
+      memcpy(output + used, escape, sizeof(unichar) * 6);
+      used += 6;
+    }
+  }
+  free(input);
+  NSString *result = [[NSString alloc] initWithCharacters:output length:used];
+  free(output);
+  return result;
+}

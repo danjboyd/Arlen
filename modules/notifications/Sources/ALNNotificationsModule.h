@@ -112,6 +112,13 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
 - (nullable NSDictionary *)outboxEntryForIdentifier:(NSString *)entryID;
 - (NSArray<NSDictionary *> *)inboxSnapshotForRecipient:(NSString *)recipient;
 - (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient;
+// Paginated inbox listing. `limit` 0 returns every stored entry (at most
+// `inbox.maxEntriesPerRecipient`); larger limits are clamped to 200. The
+// result adds `pagination` = { limit, offset, returned, total, hasMore };
+// `totalCount` and `unreadCount` still describe the whole inbox.
+- (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient
+                                     limit:(NSUInteger)limit
+                                    offset:(NSUInteger)offset;
 - (nullable NSDictionary *)markInboxEntryID:(NSString *)entryID
                                        read:(BOOL)read
                                forRecipient:(NSString *)recipient

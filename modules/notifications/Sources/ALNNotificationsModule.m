@@ -7,6 +7,7 @@
 #import "ALNApplication.h"
 #import "ALNController.h"
 #import "ALNContext.h"
+#import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNRealtime.h"
 #import "ALNResponse.h"
@@ -16,6 +17,9 @@
 NSString *const ALNNotificationsModuleErrorDomain = @"Arlen.Modules.Notifications.Error";
 
 static NSString *const ALNNotificationsDispatchJobIdentifier = @"notifications.dispatch";
+static NSUInteger const ALNNotificationsDefaultMaxOutboxEntries = 1000;
+static NSUInteger const ALNNotificationsDefaultMaxInboxEntriesPerRecipient = 200;
+static NSUInteger const ALNNotificationsMaxInboxPageLimit = 200;
 
 static NSString *NMTrimmedString(id value) {
   if (![value isKindOfClass:[NSString class]]) {
@@ -189,6 +193,60 @@ static NSDictionary *NMInboxSummary(NSString *recipient, NSArray<NSDictionary *>
   };
 }
 
+// Positive integer config value, or the default when missing or invalid.
+static NSUInteger NMConfiguredLimit(id rawValue, NSUInteger defaultValue) {
+  if ([rawValue isKindOfClass:[NSString class]]) {
+    NSInteger parsed = [(NSString *)rawValue integerValue];
+    return (parsed > 0) ? (NSUInteger)parsed : defaultValue;
+  }
+  if ([rawValue respondsToSelector:@selector(longLongValue)] && [rawValue longLongValue] > 0) {
+    return (NSUInteger)[rawValue longLongValue];
+  }
+  return defaultValue;
+}
+
+// Inbox deep links render only for http(s) URLs and same-origin relative
+// references; anything else (other schemes, protocol-relative `//host`,
+// backslashes or control characters) renders without a link.
+static NSString *NMSafeInboxHref(id rawValue) {
+  NSString *href = NMTrimmedString(rawValue);
+  if ([href length] == 0) {
+    return @"";
+  }
+  for (NSUInteger index = 0; index < [href length]; index++) {
+    unichar character = [href characterAtIndex:index];
+    if (character < 0x20 || character == 0x7f || character == '\\') {
+      return @"";
+    }
+  }
+  if ([href hasPrefix:@"//"]) {
+    return @"";
+  }
+  if ([href hasPrefix:@"/"]) {
+    return href;
+  }
+  NSRange delimiter = [href rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@":/?#"]];
+  if (delimiter.location == NSNotFound || [href characterAtIndex:delimiter.location] != ':') {
+    return href;
+  }
+  NSString *scheme = [[href substringToIndex:delimiter.location] lowercaseString];
+  if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"]) {
+    return @"";
+  }
+  NSURL *url = [NSURL URLWithString:href];
+  if ([[url host] length] == 0) {
+    return @"";
+  }
+  return href;
+}
+
+// Drops the oldest entries so at most `limit` remain.
+static void NMTrimOldestEntries(NSMutableArray *entries, NSUInteger limit) {
+  if (limit > 0 && [entries count] > limit) {
+    [entries removeObjectsInRange:NSMakeRange(0, [entries count] - limit)];
+  }
+}
+
 static NSError *NMError(ALNNotificationsModuleErrorCode code, NSString *message, NSDictionary *details) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:details ?: @{}];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"notifications module error";
@@ -355,9 +413,7 @@ static NSDictionary *NMNormalizedChannelPolicies(id rawValue) {
       continue;
     }
     NSString *queue = NMTrimmedString(policy[@"queue"]);
-    NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                 ? [policy[@"maxAttempts"] unsignedIntegerValue]
-                                 : 0;
+    NSUInteger maxAttempts = ALNUnsignedIntegerValueOrDefault(policy[@"maxAttempts"], 0);
     normalized[channel] = @{
       @"queue" : queue ?: @"",
       @"maxAttempts" : @(maxAttempts),
@@ -705,6 +761,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *inboxByRecipient;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *preferencesByRecipient;
 @property(nonatomic, assign) NSUInteger nextEntrySequence;
+@property(nonatomic, assign) NSUInteger maxOutboxEntries;
+@property(nonatomic, assign) NSUInteger maxInboxEntriesPerRecipient;
 @property(nonatomic, strong) id<ALNNotificationPreferenceHook> preferenceHook;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *recentFanoutEvents;
 @property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
@@ -785,6 +843,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     _inboxByRecipient = [NSMutableDictionary dictionary];
     _preferencesByRecipient = [NSMutableDictionary dictionary];
     _nextEntrySequence = 0;
+    _maxOutboxEntries = ALNNotificationsDefaultMaxOutboxEntries;
+    _maxInboxEntriesPerRecipient = ALNNotificationsDefaultMaxInboxEntriesPerRecipient;
     _recentFanoutEvents = [NSMutableArray array];
     _realtimeHub = [ALNRealtimeHub sharedHub];
     _persistenceEnabled = NO;
@@ -853,9 +913,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   }
   NSArray *hosts = [config[@"allowedEndpointHosts"] isKindOfClass:[NSArray class]] ? config[@"allowedEndpointHosts"]
                                                                                    : NMWebPushDefaultAllowedHosts();
-  NSUInteger maxSubscriptions = [config[@"maxSubscriptionsPerRecipient"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                    ? [config[@"maxSubscriptionsPerRecipient"] unsignedIntegerValue]
-                                    : 10;
+  NSUInteger maxSubscriptions = ALNUnsignedIntegerValueOrDefault(config[@"maxSubscriptionsPerRecipient"], 10);
   NSDictionary *testRoute = NMNormalizeDictionary(config[@"testRoute"]);
   NSDictionary *nudge = NMNormalizeDictionary(config[@"nudge"]);
   NSMutableDictionary *nudgeDefaults = [NSMutableDictionary dictionary];
@@ -960,6 +1018,11 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.recentFanoutEvents removeAllObjects];
   self.preferenceHook = nil;
   self.nextEntrySequence = 0;
+  self.maxOutboxEntries = NMConfiguredLimit(NMNormalizeDictionary(moduleConfig[@"outbox"])[@"maxEntries"],
+                                            ALNNotificationsDefaultMaxOutboxEntries);
+  self.maxInboxEntriesPerRecipient =
+      NMConfiguredLimit(NMNormalizeDictionary(moduleConfig[@"inbox"])[@"maxEntriesPerRecipient"],
+                        ALNNotificationsDefaultMaxInboxEntriesPerRecipient);
   self.statePath = NMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
   [self.lock unlock];
@@ -1048,6 +1111,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.lock lock];
   NSArray *outbox = [state[@"outboxEntries"] isKindOfClass:[NSArray class]] ? state[@"outboxEntries"] : @[];
   [self.outboxEntries addObjectsFromArray:outbox];
+  NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
   NSDictionary *inboxByRecipient = [state[@"inboxByRecipient"] isKindOfClass:[NSDictionary class]]
                                        ? state[@"inboxByRecipient"]
                                        : @{};
@@ -1057,6 +1121,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     for (id rawEntry in entries) {
       [normalizedEntries addObject:NMNormalizedInboxEntry(rawEntry)];
     }
+    NMTrimOldestEntries(normalizedEntries, self.maxInboxEntriesPerRecipient);
     self.inboxByRecipient[recipient] = normalizedEntries;
   }
   NSDictionary *preferences = [state[@"preferencesByRecipient"] isKindOfClass:[NSDictionary class]]
@@ -1119,6 +1184,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"error" : NMTrimmedString(errorMessage),
   };
   [self.outboxEntries addObject:entry];
+  NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
   [self.lock unlock];
   return entry;
 }
@@ -1160,6 +1226,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"sender" : self.senderAddress ?: @"notifications@example.test",
     @"definitionCount" : @([self.metadataByIdentifier count]),
     @"outboxCount" : @([self.outboxEntries count]),
+    @"maxOutboxEntries" : @(self.maxOutboxEntries),
+    @"maxInboxEntriesPerRecipient" : @(self.maxInboxEntriesPerRecipient),
     @"inboxRecipientCount" : @([self.inboxByRecipient count]),
     @"preferenceRecipientCount" : @([self.preferencesByRecipient count]),
     @"preferenceHookClass" : self.preferenceHook ? NSStringFromClass([(NSObject *)self.preferenceHook class]) : @"",
@@ -1716,6 +1784,7 @@ notificationIdentifier:(NSString *)identifier
         @"read" : @NO,
       };
       [inbox addObject:record];
+      NMTrimOldestEntries(inbox, self.maxInboxEntriesPerRecipient);
       self.inboxByRecipient[recipient] = inbox;
       [self.lock unlock];
       [self appendOutboxEntryForNotification:identifier
@@ -2325,6 +2394,28 @@ notificationIdentifier:(NSString *)identifier
   return summary ?: NMInboxSummary(normalizedRecipient, @[]);
 }
 
+- (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient
+                                     limit:(NSUInteger)limit
+                                    offset:(NSUInteger)offset {
+  NSDictionary *summary = [self inboxSummaryForRecipient:recipient];
+  NSArray *entries = NMNormalizeArray(summary[@"entries"]);
+  NSUInteger total = [entries count];
+  NSUInteger resolvedLimit = (limit == 0U) ? total : MIN(limit, ALNNotificationsMaxInboxPageLimit);
+  NSUInteger start = MIN(offset, total);
+  NSUInteger length = MIN(resolvedLimit, total - start);
+  NSArray *page = [entries subarrayWithRange:NSMakeRange(start, length)];
+  NSMutableDictionary *paged = [NSMutableDictionary dictionaryWithDictionary:summary];
+  paged[@"entries"] = page ?: @[];
+  paged[@"pagination"] = @{
+    @"limit" : @(resolvedLimit),
+    @"offset" : @(start),
+    @"returned" : @([page count]),
+    @"total" : @(total),
+    @"hasMore" : @((start + length) < total),
+  };
+  return paged;
+}
+
 - (NSDictionary *)markInboxEntryID:(NSString *)entryID
                               read:(BOOL)read
                       forRecipient:(NSString *)recipient
@@ -2455,11 +2546,25 @@ notificationIdentifier:(NSString *)identifier
   }
   NSMutableDictionary *normalized = [NSMutableDictionary dictionary];
   NSDictionary *rawPreferences = [preferences isKindOfClass:[NSDictionary class]] ? preferences : @{};
+  NSMutableSet<NSString *> *knownIdentifiers = [NSMutableSet set];
+  NSMutableSet<NSString *> *knownChannels = [NSMutableSet setWithArray:@[ @"email", @"in_app", @"webhook", @"webpush" ]];
+  for (NSDictionary *definition in [self registeredNotifications]) {
+    [knownIdentifiers addObject:NMTrimmedString(definition[@"identifier"])];
+    [knownChannels addObjectsFromArray:NMNormalizeArray(definition[@"channels"])];
+  }
   for (id notificationKey in rawPreferences) {
     NSString *identifier = NMTrimmedString(notificationKey);
     NSDictionary *channelMap = [rawPreferences[notificationKey] isKindOfClass:[NSDictionary class]] ? rawPreferences[notificationKey] : nil;
     if ([identifier length] == 0 || channelMap == nil) {
       continue;
+    }
+    if (![knownIdentifiers containsObject:identifier]) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                         @"unknown notification in preferences",
+                         @{ @"field" : @"preferences", @"notification" : identifier });
+      }
+      return nil;
     }
     NSMutableDictionary *normalizedChannels = [NSMutableDictionary dictionary];
     for (id channelKey in channelMap) {
@@ -2467,6 +2572,14 @@ notificationIdentifier:(NSString *)identifier
       id value = channelMap[channelKey];
       if ([channel length] == 0 || ![value respondsToSelector:@selector(boolValue)]) {
         continue;
+      }
+      if (![knownChannels containsObject:channel]) {
+        if (error != NULL) {
+          *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                           @"unknown notification channel in preferences",
+                           @{ @"field" : @"preferences", @"notification" : identifier, @"channel" : channel });
+        }
+        return nil;
       }
       normalizedChannels[channel] = @([value boolValue]);
     }
@@ -2649,11 +2762,50 @@ notificationIdentifier:(NSString *)identifier
   return [self renderInboxPageForContext:ctx message:@"" errors:nil];
 }
 
+- (NSUInteger)inboxPaginationValueForName:(NSString *)name {
+  id rawValue = self.context.request.queryParams[name];
+  if ([rawValue isKindOfClass:[NSString class]] || [rawValue isKindOfClass:[NSNumber class]]) {
+    long long value = [rawValue longLongValue];
+    return (value > 0) ? (NSUInteger)value : 0U;
+  }
+  return 0U;
+}
+
+- (NSDictionary *)inboxPageForRecipient:(NSString *)recipient {
+  return [self.runtime inboxSummaryForRecipient:recipient
+                                          limit:[self inboxPaginationValueForName:@"limit"]
+                                         offset:[self inboxPaginationValueForName:@"offset"]] ?: @{};
+}
+
 - (id)renderInboxPageForContext:(ALNContext *)ctx
                         message:(NSString *)message
                          errors:(NSArray *)errors {
   NSString *recipient = [ctx authSubject] ?: @"";
-  NSDictionary *inboxSummary = [self.runtime inboxSummaryForRecipient:recipient] ?: @{};
+  NSMutableDictionary *inboxSummary = [NSMutableDictionary dictionaryWithDictionary:[self inboxPageForRecipient:recipient]];
+  NSMutableArray *displayEntries = [NSMutableArray array];
+  for (NSDictionary *entry in NMNormalizeArray(inboxSummary[@"entries"])) {
+    NSMutableDictionary *displayEntry = [NSMutableDictionary dictionaryWithDictionary:entry];
+    NSDictionary *metadata = NMNormalizeDictionary(entry[@"metadata"]);
+    displayEntry[@"linkHref"] = NMSafeInboxHref(metadata[@"href"] ?: metadata[@"path"]);
+    [displayEntries addObject:displayEntry];
+  }
+  inboxSummary[@"entries"] = displayEntries;
+  NSDictionary *pagination = NMNormalizeDictionary(inboxSummary[@"pagination"]);
+  NSUInteger pageLimit = [pagination[@"limit"] unsignedIntegerValue];
+  NSUInteger pageOffset = [pagination[@"offset"] unsignedIntegerValue];
+  NSString *inboxPath = NMPathJoin(self.runtime.prefix, @"inbox");
+  if ([pagination[@"hasMore"] boolValue] && pageLimit > 0U) {
+    inboxSummary[@"nextPagePath"] = [NSString stringWithFormat:@"%@?limit=%lu&offset=%lu",
+                                                               inboxPath,
+                                                               (unsigned long)pageLimit,
+                                                               (unsigned long)(pageOffset + pageLimit)];
+  }
+  if (pageOffset > 0U && pageLimit > 0U) {
+    inboxSummary[@"previousPagePath"] = [NSString stringWithFormat:@"%@?limit=%lu&offset=%lu",
+                                                                   inboxPath,
+                                                                   (unsigned long)pageLimit,
+                                                                   (unsigned long)((pageOffset > pageLimit) ? (pageOffset - pageLimit) : 0U)];
+  }
   [self renderTemplate:@"modules/notifications/inbox/index"
                context:[self pageContextWithTitle:@"Notifications"
                                           heading:@"Inbox"
@@ -2872,12 +3024,13 @@ notificationIdentifier:(NSString *)identifier
 
 - (id)apiInbox:(ALNContext *)ctx {
   NSString *recipient = [[ctx authSubject] length] > 0 ? [ctx authSubject] : ([self stringParamForName:@"recipient"] ?: @"");
-  NSDictionary *summary = [self.runtime inboxSummaryForRecipient:recipient] ?: @{};
+  NSDictionary *summary = [self inboxPageForRecipient:recipient];
   [self renderJSONEnvelopeWithData:@{
     @"recipient" : recipient ?: @"",
     @"inbox" : summary[@"entries"] ?: @[],
     @"totalCount" : summary[@"totalCount"] ?: @0,
     @"unreadCount" : summary[@"unreadCount"] ?: @0,
+    @"pagination" : summary[@"pagination"] ?: @{},
   } meta:nil error:NULL];
   return nil;
 }

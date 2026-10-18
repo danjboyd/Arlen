@@ -240,7 +240,10 @@ Platform runner provisioning:
 Windows preview CI currently validates two layers:
 
 - runtime parity via `make phase24-windows-confidence`
-- packaged release/deploy parity via `make windows-confidence`
+- the unit suite via `make test-unit`
+
+Packaged release/deploy parity (`make windows-confidence`) is a manual lane
+until Windows production support in 0.4.0.
 
 Linux/GNUstep deploy confidence now validates three layers:
 

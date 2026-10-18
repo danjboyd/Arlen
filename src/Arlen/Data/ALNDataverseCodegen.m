@@ -517,9 +517,7 @@ NSError *ALNDataverseCodegenMakeError(ALNDataverseCodegenErrorCode code,
   manifestObject[@"entities"] = manifestEntities;
 
   NSJSONWritingOptions options = NSJSONWritingPrettyPrinted;
-#ifdef NSJSONWritingSortedKeys
   options |= NSJSONWritingSortedKeys;
-#endif
   NSError *jsonError = nil;
   NSData *manifestData = [ALNJSONSerialization dataWithJSONObject:manifestObject options:options error:&jsonError];
   if (manifestData == nil) {

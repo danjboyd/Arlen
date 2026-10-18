@@ -230,6 +230,15 @@ on Apple arm64 (GitHub issue 132).
 `notifications` moved to `1.1.0` for the Web Push channel, and `jobs` to `1.1.0`
 for `ALNJobsModuleRetryAfterSecondsErrorKey`, which `notifications` now requires
 (GitHub issue 173).
+`search` moved to `1.0.3` to bound query cost (GitHub issue 226).
+`notifications` moved to `1.1.2` for outbox/inbox caps, inbox pagination and
+preference validation (GitHub issue 227).
+`mcp` moved to `1.0.5` to filter `tools/list` by role and scope, and `auth` to
+`1.5.2` to equalize unknown-email login timing (GitHub issue 228).
+`admin-ui` and `ops` moved to `1.0.3`, `auth` to `1.5.3`, `jobs` to `1.1.1`,
+`notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
+numbers given as strings (query parameters, old-style plists) are read on Apple
+too (GitHub issue 264).
 
 ## MCP tools
 

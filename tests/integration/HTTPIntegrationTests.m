@@ -2,16 +2,14 @@
 #import <XCTest/XCTest.h>
 #import "../ALNXCTestCompat.h"
 
-#import <arpa/inet.h>
-#import <netinet/in.h>
 #import <signal.h>
 #import <unistd.h>
 #import <stdlib.h>
 #import <string.h>
-#import <sys/socket.h>
 
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
+#import "ALNRequest.h"
 
 @interface HTTPIntegrationTests : XCTestCase
 @end
@@ -19,43 +17,12 @@
 @implementation HTTPIntegrationTests
 
 - (int)randomPort {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd >= 0) {
-    int port = 0;
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = 0;
-
-    if (bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0) {
-      socklen_t length = sizeof(address);
-      if (getsockname(fd, (struct sockaddr *)&address, &length) == 0) {
-        port = (int)ntohs(address.sin_port);
-      }
-    }
-
-    close(fd);
-    if (port > 0) {
-      return port;
-    }
-  }
-
-  return 32000 + (int)arc4random_uniform(20000);
+  int port = ALNTestFreeLoopbackPort();
+  return port > 0 ? port : 32000 + (int)ALNTestRandomUniform(20000);
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:
-                             [NSString stringWithFormat:@"%@-XXXXXX", prefix ?: @"arlen"]];
-  const char *templateCString = [templatePath fileSystemRepresentation];
-  char *buffer = strdup(templateCString);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (NSString *)createTempFilePathWithPrefix:(NSString *)prefix suffix:(NSString *)suffix {
@@ -167,7 +134,7 @@
 
 - (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/bin/bash";
+  task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-lc", command ];
   NSString *capturePath = [self createTempFilePathWithPrefix:@"arlen-http-shell" suffix:@".log"];
   [[NSFileManager defaultManager] createFileAtPath:capturePath contents:nil attributes:nil];
@@ -189,8 +156,25 @@
 }
 
 - (NSString *)runPythonScript:(NSString *)script exitCode:(int *)exitCode {
-  NSString *command = [NSString stringWithFormat:@"python3 - 2>&1 <<'PY'\n%@\nPY", script ?: @""];
-  return [self runShellCapture:command exitCode:exitCode];
+  // Run from a file: passing the script inline through `bash -lc` lost
+  // backslashes on Windows, where NSTask quotes the command line MSVCRT-style.
+  NSString *scriptPath = [self createTempFilePathWithPrefix:@"arlen-http-probe" suffix:@".py"];
+  if (![(script ?: @"") writeToFile:scriptPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
+    if (exitCode != NULL) {
+      *exitCode = -1;
+    }
+    return @"failed to write python probe script";
+  }
+  NSString *command = [NSString stringWithFormat:@"python3 %@ 2>&1", [self shellQuoted:scriptPath]];
+  NSString *output = [self runShellCapture:command exitCode:exitCode];
+  [[NSFileManager defaultManager] removeItemAtPath:scriptPath error:NULL];
+#if defined(_WIN32)
+  // Native Windows python3 writes text-mode stdout with \r\n, and splitting on
+  // newlineCharacterSet turns each \r\n into two lines. Only the scripts'
+  // printed lines are normalized; raw HTTP captures keep their \r\n.
+  output = [output stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+#endif
+  return output;
 }
 
 - (NSString *)capturedOutputFromPipe:(NSPipe *)pipe {
@@ -212,11 +196,17 @@
     [task waitUntilExit];
     return YES;
   }
+#if defined(_WIN32)
+  // -terminate ends only the bash wrapper; the native server under it would
+  // be orphaned, still listening. Kill the whole tree.
+  (void)ALNTestStopServerTask(task);
+#else
   [task terminate];
+#endif
   if ([self waitForTaskExit:task timeoutSeconds:timeoutSeconds]) {
     return YES;
   }
-  (void)kill(task.processIdentifier, SIGKILL);
+  (void)ALNTestKill(task.processIdentifier, SIGKILL);
   return [self waitForTaskExit:task timeoutSeconds:2.0];
 }
 
@@ -237,7 +227,8 @@
                             attempts:(NSInteger)attempts
                              success:(BOOL *)success {
   NSString *command =
-      [NSString stringWithFormat:@"curl -fsS 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
+      // --max-time: a server that accepts but never answers must fail this check, not hang it.
+      [NSString stringWithFormat:@"curl -fsS --max-time 10 'http://127.0.0.1:%d%@'", port, path ?: @"/"];
   __block NSString *body = @"";
   BOOL answered = ALNTestWaitUntil([self pollTimeoutForAttempts:attempts], 0.2, ^BOOL {
     int curlCode = 0;
@@ -387,7 +378,7 @@
     NSString *serverCmd = [NSString stringWithFormat:@"%@%@ --port %d --once", prefix, binary, port];
 
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc", serverCmd ];
     NSPipe *stdoutPipe = [NSPipe pipe];
     NSPipe *stderrPipe = [NSPipe pipe];
@@ -609,7 +600,7 @@
                                    [self shellQuoted:preparedBinary],
                                    port];
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[ @"-lc", serverCmd ];
     NSPipe *stdoutPipe = [NSPipe pipe];
     NSPipe *stderrPipe = [NSPipe pipe];
@@ -684,8 +675,8 @@
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   environment[@"ARLEN_CONNECTION_TIMEOUT_SECONDS"] = @"120";
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -717,7 +708,7 @@
         doubleValue] < 1.2);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -726,13 +717,13 @@
 - (void)testHTTPSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_HTTP_SESSIONS=1 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -785,7 +776,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -794,7 +785,7 @@
 - (void)testConcurrentWorkerQueueLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -802,8 +793,8 @@
                    @"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS=1 ./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -875,7 +866,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -886,8 +877,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -951,9 +942,154 @@
     XCTAssertTrue([output containsString:@"ok"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+  }
+}
+
+// GitHub issue 187: idle keep-alive connections must not pin the fixed HTTP
+// worker pool (default 8 workers, 30 s connection timeout). Open twice as many
+// idle keep-alive connections as there are workers, then a fresh request must
+// still be served promptly, and every parked connection must still work.
+- (void)testIdleKeepAliveConnectionsDoNotStarveHTTPWorkers {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time\n"
+                                         @"PORT=%d\n"
+                                         @"IDLE=16\n"
+                                         @"def request(sock, connection):\n"
+                                         @"    sock.sendall((f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\n'\n"
+                                         @"                  f'Connection: {connection}\\r\\n\\r\\n').encode('utf-8'))\n"
+                                         @"    data = b''\n"
+                                         @"    while b'\\r\\n\\r\\n' not in data:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before headers')\n"
+                                         @"        data += chunk\n"
+                                         @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+                                         @"    while len(body) < 3:\n"
+                                         @"        chunk = sock.recv(4096)\n"
+                                         @"        if not chunk:\n"
+                                         @"            raise RuntimeError('connection closed before body')\n"
+                                         @"        body += chunk\n"
+                                         @"    if b' 200 ' not in head.split(b'\\r\\n', 1)[0] or body[:3] != b'ok\\n':\n"
+                                         @"        raise RuntimeError(head.decode('utf-8', 'replace'))\n"
+                                         @"idle = []\n"
+                                         @"for _ in range(IDLE):\n"
+                                         @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+                                         @"    request(sock, 'keep-alive')\n"
+                                         @"    idle.append(sock)\n"
+                                         @"start = time.time()\n"
+                                         @"fresh = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+                                         @"request(fresh, 'close')\n"
+                                         @"fresh.close()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"if elapsed > 3.0:\n"
+                                         @"    raise RuntimeError(f'fresh request waited {elapsed:.1f}s behind idle keep-alive connections')\n"
+                                         @"for sock in idle:\n"
+                                         @"    request(sock, 'keep-alive')\n"
+                                         @"for sock in idle:\n"
+                                         @"    request(sock, 'close')\n"
+                                         @"    sock.close()\n"
+                                         @"print(f'ok {elapsed:.3f}')\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+// PERF-07 on #187: #193 parks *idle* keep-alive connections, but clients that
+// keep sending requests held every worker (8 by default), so a new client got
+// no service at all. A worker now yields its connection when others are
+// queued, and the connection rejoins the queue when its next request arrives.
+- (void)testBusyKeepAliveConnectionsDoNotStarveNewClients_Issue187 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import socket, threading, time\n"
+        @"PORT=%d\n"
+        @"BUSY=16\n"
+        @"def request(sock, connection):\n"
+        @"    sock.sendall((f'GET /healthz HTTP/1.1\\r\\nHost: 127.0.0.1:{PORT}\\r\\nConnection: {connection}\\r\\n\\r\\n').encode('utf-8'))\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(4096)\n"
+        @"        if not chunk:\n"
+        @"            raise RuntimeError('connection closed before headers')\n"
+        @"        data += chunk\n"
+        @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+        @"    while len(body) < 3:\n"
+        @"        chunk = sock.recv(4096)\n"
+        @"        if not chunk:\n"
+        @"            raise RuntimeError('connection closed before body')\n"
+        @"        body += chunk\n"
+        @"    if b' 200 ' not in head.split(b'\\r\\n', 1)[0]:\n"
+        @"        raise RuntimeError(head.decode('utf-8', 'replace'))\n"
+        @"stop = threading.Event()\n"
+        @"served = [0] * BUSY\n"
+        @"errors = []\n"
+        @"def busy(index):\n"
+        @"    try:\n"
+        @"        sock = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+        @"        while not stop.is_set():\n"
+        @"            request(sock, 'keep-alive')\n"
+        @"            served[index] += 1\n"
+        @"        sock.close()\n"
+        @"    except Exception as exc:\n"
+        @"        errors.append(repr(exc))\n"
+        @"threads = [threading.Thread(target=busy, args=(i,)) for i in range(BUSY)]\n"
+        @"[t.start() for t in threads]\n"
+        @"deadline = time.time() + 10\n"
+        @"while min(served) == 0 and time.time() < deadline:\n"
+        @"    time.sleep(0.05)\n"
+        @"start = time.time()\n"
+        @"fresh = socket.create_connection(('127.0.0.1', PORT), timeout=10)\n"
+        @"request(fresh, 'close')\n"
+        @"fresh.close()\n"
+        @"elapsed = time.time() - start\n"
+        @"stop.set()\n"
+        @"[t.join() for t in threads]\n"
+        @"assert not errors, errors\n"
+        @"assert min(served) > 0, served\n"
+        @"if elapsed > 3.0:\n"
+        @"    raise RuntimeError(f'fresh request waited {elapsed:.1f}s behind busy keep-alive connections')\n"
+        @"print(f'ok {elapsed:.3f} served={sum(served)}')\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
   }
 }
 
@@ -962,8 +1098,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1001,7 +1137,7 @@
     XCTAssertTrue([output containsString:@"ok"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1017,8 +1153,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1115,7 +1251,7 @@
     XCTAssertEqual((NSUInteger)3, [parts count]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1126,8 +1262,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1165,7 +1301,7 @@
         doubleValue] < 0.8);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1176,8 +1312,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--env", @"production", @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1215,7 +1351,7 @@
         doubleValue] < 0.8);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1224,15 +1360,15 @@
 - (void)testProductionRequestDispatchModeCanBeOverriddenToSerialized {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
                   @"ARLEN_REQUEST_DISPATCH_MODE=serialized ./build/boomhauer --env production --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1270,7 +1406,7 @@
         doubleValue] >= 0.9);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1279,15 +1415,15 @@
 - (void)testSerializedDispatchAllowsKeepAliveConnections {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
                   @"ARLEN_REQUEST_DISPATCH_MODE=serialized ./build/boomhauer --env production --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1375,7 +1511,7 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1385,10 +1521,10 @@
                                          expectKeepAlive:(BOOL)expectKeepAlive {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[ @"-lc", [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
   [server launch];
 
   @try {
@@ -1591,9 +1727,41 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
+  }
+}
+
+// GitHub issues 239 and 214: idle websocket subscribers are pinged instead of
+// dropped by the read timeout, a client that never answers is closed with
+// 1001, and frames that break RFC 6455 close with the right status code.
+- (void)testWebSocketIdlePingsAndRFC6455Conformance_Issues239_214 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:
+      @"ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS=1 ARLEN_CONNECTION_TIMEOUT_SECONDS=2 exec ./build/boomhauer --port %d",
+      port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/websocket_conformance_probe.py"
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:NULL];
+    script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                               withString:[NSString stringWithFormat:@"%d", port]];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"websocket checks passed"], @"%@", output);
+  } @finally {
+    (void)ALNTestStopServerTask(server);
   }
 }
 
@@ -1612,8 +1780,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1667,7 +1835,7 @@
                                       [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1885,8 +2053,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1934,7 +2102,7 @@
     XCTAssertTrue([viewerBody containsString:@"Arlen OpenAPI Viewer"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1943,13 +2111,13 @@
 - (void)testOpenAPISwaggerDocsStyleAndDedicatedRoute {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_OPENAPI_DOCS_UI_STYLE=swagger ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1973,7 +2141,7 @@
     XCTAssertTrue([swaggerBody containsString:@"Arlen Swagger UI"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -1983,6 +2151,52 @@
   NSString *body = [self simpleRequestPath:@"/api/echo/hank"];
   XCTAssertTrue([body containsString:@"\"name\""]);
   XCTAssertTrue([body containsString:@"hank"]);
+}
+
+// Issue 270: the demo server's JSON string helper fell back to raw bytes for
+// any value with a quote, backslash or non-ASCII character, so a route
+// parameter could break out of the string and inject keys.
+- (void)testEchoEndpointEscapesRouteParametersInJSON_Issue270 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import json, socket\n"
+        @"PORT=%d\n"
+        @"def echo(raw):\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.sendall(b'GET /api/echo/' + raw + b' HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"    data = b''\n"
+        @"    while True:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    sock.close()\n"
+        @"    head, _, body = data.partition(b'\\r\\n\\r\\n')\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    return json.loads(body)\n"
+        @"injected = echo(b'a\",\"injected\":true,\"x\":\"b')\n"
+        @"assert 'injected' not in injected, injected\n"
+        @"assert injected['name'] == 'a\",\"injected\":true,\"x\":\"b', injected\n"
+        @"backslash = echo(b'a\\\\')\n"
+        @"assert backslash['name'] == 'a\\\\', backslash\n"
+        @"print('echo escaping passed')\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
 }
 
 - (void)testPhase3EServiceRoutesCacheAndI18n {
@@ -2017,8 +2231,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2094,7 +2308,7 @@
     XCTAssertEqualObjects(@"hello-ws", trimmed);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2103,7 +2317,7 @@
 - (void)testWebSocketRejectsInvalidHandshakeAndUnmaskedOrStalledFrames {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2111,8 +2325,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2215,7 +2429,7 @@
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2224,7 +2438,7 @@
 - (void)testWebSocketOriginAllowlistRejectsUnexpectedOrigins {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2232,8 +2446,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2279,7 +2493,7 @@
     XCTAssertTrue([lines[2] containsString:@" 403 "], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2288,13 +2502,13 @@
 - (void)testWebSocketSessionLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2347,7 +2561,7 @@
     XCTAssertTrue([output containsString:@"X-Arlen-Backpressure-Reason: websocket_session_limit"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2356,7 +2570,7 @@
 - (void)testRealtimeChannelSubscriberLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:
@@ -2364,8 +2578,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2427,7 +2641,7 @@
     XCTAssertTrue([output containsString:@"recovered"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2438,8 +2652,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2525,7 +2739,7 @@
     XCTAssertEqualObjects(@"fanout-message", lines[1]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2536,8 +2750,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2680,7 +2894,7 @@
     XCTAssertEqualObjects(@"ok\n", healthBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -2771,7 +2985,7 @@
       }
     } @finally {
       if ([server isRunning]) {
-        (void)kill(server.processIdentifier, SIGTERM);
+        (void)ALNTestKill(server.processIdentifier, SIGTERM);
         [server waitUntilExit];
       }
 
@@ -2847,8 +3061,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -2972,8 +3186,8 @@
       [[NSProcessInfo processInfo] environment]];
   [environment addEntriesFromDictionary:extraEnvironment];
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -2999,8 +3213,8 @@
       [[NSProcessInfo processInfo] environment]];
   environment[@"ARLEN_STATIC_CACHE_CONTROL"] = @"public, max-age=600";
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -3038,6 +3252,64 @@
 
 - (void)testStaticHTTPValidatorsHeadAndRangesWithoutFDCache {
   [self assertStaticHTTPContractWithEnvironment:@{ @"ARLEN_STATIC_FILE_FD_CACHE_CAPACITY": @"0" }];
+}
+
+// Issue 243: a file response is a header write plus a sendfile body. Without
+// TCP_NODELAY, each response after the first on a keep-alive connection waited
+// about 40 ms for the client's delayed ACK (20 requests: ~800 ms, now ~10 ms).
+- (void)testKeepAliveFileResponsesAreNotDelayedByNagle_Issue243 {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[ @"-lc", [NSString stringWithFormat:@"exec ./build/boomhauer --port %d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"request = b'GET /static/sample.txt HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n'\n"
+        @"def read_response():\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk, data\n"
+        @"        data += chunk\n"
+        @"    head, body = data.split(b'\\r\\n\\r\\n', 1)\n"
+        @"    assert head.startswith(b'HTTP/1.1 200'), head\n"
+        @"    length = 0\n"
+        @"    for line in head.split(b'\\r\\n')[1:]:\n"
+        @"        name, _, value = line.partition(b':')\n"
+        @"        if name.strip().lower() == b'content-length':\n"
+        @"            length = int(value.strip())\n"
+        @"    while len(body) < length:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        assert chunk\n"
+        @"        body += chunk\n"
+        @"sock.sendall(request)\n"
+        @"read_response()\n"
+        @"started = time.monotonic()\n"
+        @"for _ in range(20):\n"
+        @"    sock.sendall(request)\n"
+        @"    read_response()\n"
+        @"elapsed_ms = (time.monotonic() - started) * 1000.0\n"
+        @"sock.close()\n"
+        @"print('keep-alive file responses: 20 in %%.1f ms' %% elapsed_ms)\n"
+        @"assert elapsed_ms < 400, elapsed_ms\n",
+        port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+  } @finally {
+    ALNTestStopServerTask(server);
+  }
 }
 
 - (void)testStaticAssetEndpointInDevelopment {
@@ -3150,8 +3422,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -3183,7 +3455,7 @@
     XCTAssertEqualObjects(secondContent, secondBody);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     (void)[[NSFileManager defaultManager] removeItemAtPath:assetDir error:nil];
@@ -3374,11 +3646,11 @@
     if (prepareCode != 0) return;
     int port = [self randomPort];
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     BOOL ready = NO;
     (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3403,7 +3675,7 @@
       XCTAssertTrue([output containsString:expected], @"%@ missing from %@", expected, output);
     }
   } @finally {
-    if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
   }
 }
@@ -3439,11 +3711,11 @@
       if (prepareCode != 0) return;
       int port = [self randomPort];
       server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-      server.standardOutput = [NSPipe pipe];
-      server.standardError = [NSPipe pipe];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = [NSFileHandle fileHandleWithNullDevice];
       [server launch];
       BOOL ready = NO;
       (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3464,7 +3736,7 @@
         XCTAssertFalse([output containsString:@"X-Content-Type-Options"], @"%@", output);
       }
     } @finally {
-      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+      if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
       [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
     }
   }
@@ -3492,11 +3764,11 @@
     if (prepareCode != 0) return;
     int port = [self randomPort];
     server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     BOOL ready = NO;
     (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3511,7 +3783,7 @@
     XCTAssertEqual(code, 0, @"%@", output);
     XCTAssertTrue([output containsString:@"cookie jar issuance, scope, session, logout and HEAD checks passed"], @"%@", output);
   } @finally {
-    if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+    if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
   }
 }
@@ -3520,11 +3792,11 @@
   for (NSString *backend in @[@"llhttp", @"legacy"]) {
     int port = [self randomPort];
     NSTask *server = [[NSTask alloc] init];
-    server.launchPath = @"/bin/bash";
+    server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:
         @"ARLEN_MAX_BODY_BYTES=115343360 ARLEN_HTTP_PARSER_BACKEND=%@ ./build/boomhauer --port %d", backend, port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     @try {
       BOOL ready = NO;
@@ -3539,7 +3811,7 @@
       XCTAssertEqual(code, 0, @"%@: %@", backend, output);
       XCTAssertTrue([output containsString:@"multipart socket checks passed"], @"%@", output);
     } @finally {
-      if (server.isRunning) { (void)kill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
+      if (server.isRunning) { (void)ALNTestKill(server.processIdentifier, SIGTERM); [server waitUntilExit]; }
     }
   }
 }
@@ -3572,7 +3844,7 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
           envPrefix, backend,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
@@ -3600,6 +3872,65 @@
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
     [[NSFileManager defaultManager] removeItemAtPath:spoolRoot error:NULL];
+  }
+}
+
+// GitHub issue 240: SSE clients that start while other requests append must
+// see every later event once, in order (the server used to replay, then
+// subscribe, and publish out of order); `id:` is the sequence and a
+// Last-Event-ID reconnect resumes after it.
+- (void)testSSEStreamDeliversEveryEventInOrderUnderConcurrentAppends_Issue240 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-event-stream-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_app.m"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
+                                   // Each SSE client holds a worker; the probe runs 12 plus 3 appenders.
+                                   "runtimeLimits = { maxConcurrentHTTPWorkers = 32; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+                                                     [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                                              envPrefix]
+                                          exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[ @"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+                                       [self shellQuoted:[appRoot stringByAppendingPathComponent:
+                                                                      ALNTestAppBinaryRelativePath()]],
+                                       port] ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = server.standardOutput;
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_probe.py"
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:NULL];
+      script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+                                                 withString:[NSString stringWithFormat:@"%d", port]];
+      int code = 0;
+      NSString *output = [self runPythonScript:script exitCode:&code];
+      XCTAssertEqual(0, code, @"%@", output);
+      XCTAssertTrue([output containsString:@"event stream checks passed"], @"%@", output);
+    } @finally {
+      (void)ALNTestStopServerTask(server);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
   }
 }
 
@@ -3631,12 +3962,16 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       // exec: the task's pid is the server's, so the probe can read its memory.
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ ARLEN_HTTP_PARSER_BACKEND=%@ exec %@ --port %d",
           envPrefix, backend,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      // Keep the server log: a 500 from an escaped exception is only explained there.
+      NSString *serverLog = [appRoot stringByAppendingPathComponent:
+          [NSString stringWithFormat:@"server-%@.log", backend]];
+      [[NSFileManager defaultManager] createFileAtPath:serverLog contents:nil attributes:nil];
+      server.standardOutput = [NSFileHandle fileHandleForWritingAtPath:serverLog];
       server.standardError = server.standardOutput;
       [server launch];
       @try {
@@ -3655,6 +3990,11 @@
         NSString *output = [self runPythonScript:script exitCode:&code];
         XCTAssertEqual(code, 0, @"%@: %@", backend, output);
         XCTAssertTrue([output containsString:@"body limit checks passed"], @"%@: %@", backend, output);
+        if (code != 0) {
+          NSString *log = [NSString stringWithContentsOfFile:serverLog encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+          XCTFail(@"%@ server log tail:\n%@", backend,
+                  [log substringFromIndex:[log length] - MIN([log length], (NSUInteger)4000)]);
+        }
       } @finally {
         XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
       }
@@ -3669,6 +4009,9 @@
 // range, 304 and HEAD, plus a static mount) leave the worker's descriptor count
 // and its /dev/null descriptors where they started, in both dispatch modes.
 - (void)testFileResponsesKeepWorkerDescriptorsStable_Issue67 {
+#if defined(_WIN32)
+  XCTSkip(@"counts worker descriptors with lsof, which Windows does not have");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-fd-stability"];
   XCTAssertNotNil(appRoot);
@@ -3701,7 +4044,7 @@
       if (prepareCode != 0) return;
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
       server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
@@ -3745,7 +4088,7 @@
     for (NSString *backend in @[@"llhttp", @"legacy"]) {
       int port = [self randomPort];
       NSTask *server = [[NSTask alloc] init];
-      server.launchPath = @"/bin/bash";
+      server.launchPath = ALNTestBashPath();
       server.currentDirectoryPath = appRoot;
       server.arguments = @[@"-lc", [NSString stringWithFormat:
           @"ARLEN_HTTP_PARSER_BACKEND=%@ %@ --port %d",
@@ -3795,13 +4138,13 @@
 - (void)testContentLengthEdgeCasesRejectMalformedAndRespectLimit {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_BODY_BYTES=16 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -3873,8 +4216,92 @@
     XCTAssertTrue([lines[3] containsString:@" 413 "]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
+    }
+  }
+}
+
+// Issues 211, 212 and 253: chunk framing is not counted as header bytes,
+// Expect: 100-continue gets an interim response (other expectations get 417),
+// and parser-level rejections carry the configured security headers.
+- (void)testChunkFramingExpectContinueAndEarlyErrorHeaders_Issues211_212_253 {
+  for (NSString *backend in @[ @"llhttp", @"legacy" ]) {
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[
+      @"-lc", [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=%@ exec ./build/boomhauer --port %d", backend, port]
+    ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
+    [server launch];
+
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready, @"%@", backend);
+      NSString *script = [NSString stringWithFormat:
+        @"import socket, time\n"
+        @"PORT=%d\n"
+        @"BACKEND='%@'\n"
+        @"LLHTTP=%@\n"
+        @"def connect():\n"
+        @"    sock = socket.create_connection(('127.0.0.1', PORT), timeout=5)\n"
+        @"    sock.settimeout(5)\n"
+        @"    return sock\n"
+        @"def read_head(sock):\n"
+        @"    data = b''\n"
+        @"    while b'\\r\\n\\r\\n' not in data:\n"
+        @"        chunk = sock.recv(65536)\n"
+        @"        if not chunk:\n"
+        @"            break\n"
+        @"        data += chunk\n"
+        @"    return data\n"
+        @"def status(head):\n"
+        @"    return int(head.split(b' ')[1]) if head else 0\n"
+        @"# Issue 211 (llhttp only: the legacy parser rejects Transfer-Encoding, and builds without llhttp fall back to it): 7000 one-byte chunks are framing, not header bytes.\n"
+        @"if BACKEND == 'llhttp' and LLHTTP:\n"
+        @"    sock = connect()\n"
+        @"    chunks = b'1\\r\\na\\r\\n' * 7000\n"
+        @"    sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nTransfer-Encoding: chunked\\r\\nConnection: close\\r\\n\\r\\n' + chunks + b'0\\r\\n\\r\\n')\n"
+        @"    small_chunks = status(read_head(sock))\n"
+        @"    sock.close()\n"
+        @"    assert small_chunks not in (400, 413, 431), small_chunks\n"
+        @"# Issue 212: Expect: 100-continue gets an interim 100 before the body is sent.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: 100-continue\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        @"sock.settimeout(0.5)\n"
+        @"interim = read_head(sock)\n"
+        @"assert interim.startswith(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'), interim\n"
+        @"sock.settimeout(5)\n"
+        @"sock.sendall(b'ping')\n"
+        @"final = interim[len(b'HTTP/1.1 100 Continue\\r\\n\\r\\n'):]\n"
+        @"if b'\\r\\n\\r\\n' not in final:\n"
+        @"    final += read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(final) not in (0, 100, 400, 417), final\n"
+        @"# An expectation other than 100-continue is answered with 417.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: 4\\r\\nExpect: something-else\\r\\n\\r\\n')\n"
+        @"unsupported = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(unsupported) == 417, unsupported\n"
+        @"# Issue 253: responses written before the app runs carry the security headers.\n"
+        @"sock = connect()\n"
+        @"sock.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Length: abc\\r\\n\\r\\n')\n"
+        @"rejected = read_head(sock)\n"
+        @"sock.close()\n"
+        @"assert status(rejected) == 400, rejected\n"
+        @"assert b'x-content-type-options: nosniff' in rejected.lower(), rejected\n"
+        @"print('framing checks passed')\n",
+          port, backend, [ALNRequest isLLHTTPAvailable] ? @"True" : @"False"];
+      int pyCode = 0;
+      NSString *output = [self runPythonScript:script exitCode:&pyCode];
+      XCTAssertEqual(0, pyCode, @"%@: %@", backend, output);
+      XCTAssertTrue([output containsString:@"framing checks passed"], @"%@: %@", backend, output);
+    } @finally {
+      ALNTestStopServerTask(server);
     }
   }
 }
@@ -3882,13 +4309,13 @@
 - (void)testLegacyParserRejectsAmbiguousFramingHeaders {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=legacy ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -3951,7 +4378,7 @@
     XCTAssertTrue([lines[2] containsString:@" 400 "], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -4010,6 +4437,76 @@
   XCTAssertTrue([body containsString:@"http"]);
 }
 
+// GitHub issue 219: static mounts served dotfiles and dot-directories whose
+// extension was allowed. Any "."-prefixed path component is now 404, except
+// the public ".well-known" directory (RFC 8615).
+- (void)testStaticMountRefusesHiddenPaths_Issue219 {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-hidden"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n"
+                                  "  host = \"127.0.0.1\";\n"
+                                  "  port = 3000;\n"
+                                  "  logFormat = \"text\";\n"
+                                  "  serveStatic = YES;\n"
+                                  "}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{\n  logFormat = \"text\";\n}\n"]);
+    XCTAssertTrue([self writeLiteAppEntrypointAtRoot:appRoot]);
+    NSDictionary *files = @{
+      @"public/visible.json" : @"{\"visible\":true}\n",
+      @"public/.secret.json" : @"{\"secret\":1}\n",
+      @"public/.git/config.json" : @"{\"secret\":2}\n",
+      @"public/sub/.env.json" : @"{\"secret\":3}\n",
+      @"public/.well-known/security.txt" : @"Contact: mailto:security@example.com\n",
+    };
+    for (NSString *relativePath in files) {
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:relativePath] content:files[relativePath]]);
+    }
+
+    NSString *envPrefix =
+        [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT='%@' ARLEN_APP_ROOT='%@'", repoRoot, appRoot];
+    int prepareCode = 0;
+    NSString *prepareOutput =
+        [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1", envPrefix]
+                     exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    NSString *preparedBinary = [appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()];
+
+    NSDictionary *expectedStatus = @{
+      @"visible.json" : @"200",
+      @".secret.json" : @"404",
+      @".git/config.json" : @"404",
+      @"sub/.env.json" : @"404",
+      @"%%2esecret.json" : @"404",
+      @".well-known/security.txt" : @"200",
+    };
+    for (NSString *path in expectedStatus) {
+      int curlCode = 0;
+      int serverCode = 0;
+      NSString *curl = [NSString
+          stringWithFormat:@"curl -sS -o /dev/null -w '%%%%{http_code}' http://127.0.0.1:%%d/static/%@", path];
+      NSString *status = [self requestWithServerEnv:envPrefix
+                                       serverBinary:preparedBinary
+                                           curlBody:curl
+                                           curlCode:&curlCode
+                                         serverCode:&serverCode];
+      XCTAssertEqual(0, curlCode, @"%@: %@", path, status);
+      XCTAssertEqualObjects(expectedStatus[path],
+                            [status stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]],
+                            @"%@", path);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testStaticMountRejectsSymlinkEscape {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-static-symlink"];
@@ -4046,6 +4543,12 @@
         createSymbolicLinkAtPath:[appRoot stringByAppendingPathComponent:@"public/assets/escape.txt"]
              withDestinationPath:@"../../private/secret.txt"
                            error:&symlinkError];
+#if defined(_WIN32)
+    if (!linked) {
+      // Creating symlinks needs SeCreateSymbolicLinkPrivilege or Developer Mode.
+      XCTSkip(@"cannot create a symlink on this Windows host: %@", symlinkError);
+    }
+#endif
     XCTAssertTrue(linked);
     XCTAssertNil(symlinkError);
 
@@ -4140,9 +4643,15 @@
                                                           error:&chmodError]);
     XCTAssertNil(chmodError);
 
+#if defined(_WIN32)
+    // A C:/ entry would split at the drive colon in MSYS2's ':'-separated PATH.
+    NSString *fakeBinPathEntry = [NSString stringWithFormat:@"\"$(cygpath -u %@)\"", [self shellQuoted:fakeBin]];
+#else
+    NSString *fakeBinPathEntry = [self shellQuoted:fakeBin];
+#endif
     NSString *command = [NSString
         stringWithFormat:@"PATH=%@:$PATH ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ --prepare-only 2>&1",
-                         [self shellQuoted:fakeBin],
+                         fakeBinPathEntry,
                          [self shellQuoted:repoRoot],
                          [self shellQuoted:appRoot],
                          [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]]];
@@ -4184,6 +4693,9 @@
 }
 
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
+#if defined(_WIN32)
+  XCTSkip(@"creates a git worktree, and git is not on the Windows CLANG64 PATH");
+#endif
   ALNSkipOnApple(@"GNU make sanitizer build of an external framework root");
   // Rebuilds framework artifacts; well past the lane default per-test limit.
   ALNTestSetExecutionTimeAllowance(self, 900);
@@ -4332,8 +4844,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/tech-demo-server";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
   if (environment == nil) {
     environment = [NSMutableDictionary dictionary];
@@ -4404,7 +4916,7 @@
     XCTAssertTrue([output containsString:@"Delta"], @"%@", output);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -4531,6 +5043,9 @@
 }
 
 - (void)testPropaneServesRequestsAndHandlesReloadSignal {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -4570,7 +5085,7 @@
     XCTAssertTrue(firstOK);
     XCTAssertEqualObjects(@"ok\n", firstBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGHUP));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGHUP));
 
     BOOL secondOK = NO;
     NSString *secondBody = [self requestPathWithRetries:@"/healthz"
@@ -4580,13 +5095,13 @@
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -4594,6 +5109,9 @@
 }
 
 - (void)testPropaneRespawnsWorkerAfterCrash {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -4645,7 +5163,7 @@
     if (killedPID <= 0) {
       return;  // kill(0) would signal this test process's own group.
     }
-    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(killedPID, SIGKILL));
 
     BOOL respawned = [self waitForFile:lifecycleLog
                          containingAll:@[
@@ -4663,7 +5181,7 @@
     XCTAssertTrue(secondOK);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -4679,7 +5197,7 @@
     XCTAssertTrue([lifecycle containsString:@"reason=respawn_after_exit"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -4688,6 +5206,9 @@
 }
 
 - (void)testPropaneClusterOverridesApplyToWorkers {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -4761,13 +5282,13 @@
     });
     XCTAssertTrue(headerSeen);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -4775,6 +5296,9 @@
 }
 
 - (void)testPropaneSupervisesAsyncWorkersAndRespawnsOnCrash {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -4828,7 +5352,7 @@
       return;  // kill(0) would signal this test process's own group.
     }
 
-    XCTAssertEqual(0, kill(firstAsyncPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(firstAsyncPID, SIGKILL));
 
     pid_t replacementAsyncPID = [self waitForChildPIDForParent:server.processIdentifier
                                                 containingToken:@"sleep 30"
@@ -4845,13 +5369,13 @@
     XCTAssertTrue(secondReady);
     XCTAssertEqualObjects(@"ok\n", secondBody);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -4859,6 +5383,9 @@
 }
 
 - (void)testPropaneRestartLoopRemainsStableUnderActiveTraffic {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
 
@@ -4890,8 +5417,8 @@
     env[@"ARLEN_APP_ROOT"] = appRoot;
     env[@"ARLEN_PROPANE_LIFECYCLE_LOG"] = lifecycleLog;
     server.environment = env;
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
 
     @try {
@@ -4938,7 +5465,7 @@
                             [output stringByTrimmingCharactersInSet:
                                         [NSCharacterSet whitespaceAndNewlineCharacterSet]]);
 
-      XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+      XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
       [server waitUntilExit];
       XCTAssertEqual(0, server.terminationStatus);
       XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -4954,7 +5481,7 @@
       XCTAssertTrue([lifecycle containsString:@"reason=signal_term"]);
     } @finally {
       if ([server isRunning]) {
-        (void)kill(server.processIdentifier, SIGTERM);
+        (void)ALNTestKill(server.processIdentifier, SIGTERM);
         [server waitUntilExit];
       }
       [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -4964,6 +5491,9 @@
 }
 
 - (void)testPropaneGracefulShutdownDrainsInflightQueuedAndKeepAliveConnections {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -4993,8 +5523,8 @@
   env[@"ARLEN_MAX_HTTP_WORKERS"] = @"1";
   env[@"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS"] = @"4";
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -5096,7 +5626,7 @@
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5104,6 +5634,9 @@
 }
 
 - (void)testPropaneLifecycleDiagnosticsCoverChurnReloadAndMixedSignals {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5131,8 +5664,8 @@
   env[@"ARLEN_APP_ROOT"] = appRoot;
   env[@"ARLEN_PROPANE_LIFECYCLE_LOG"] = lifecycleLog;
   server.environment = env;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -5156,7 +5689,7 @@
     if (killedPID <= 0) {
       return;  // kill(0) would signal this test process's own group.
     }
-    XCTAssertEqual(0, kill(killedPID, SIGKILL));
+    XCTAssertEqual(0, ALNTestKill(killedPID, SIGKILL));
 
     BOOL respawned = ALNTestWaitUntil(40.0, 0.2, ^BOOL {
       NSArray *workers = [self childPIDsForParent:server.processIdentifier];
@@ -5164,7 +5697,7 @@
     });
     XCTAssertTrue(respawned);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGHUP));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGHUP));
     BOOL reloadLifecycleSeen =
         [self waitForFile:lifecycleLog
             containingAll:@[ @"event=manager_reload_started", @"event=manager_reload_completed" ]
@@ -5179,7 +5712,7 @@
     XCTAssertTrue(healthyAfterReload);
     XCTAssertEqualObjects(@"ok\n", postReload);
 
-    XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+    XCTAssertEqual(0, ALNTestKill(server.processIdentifier, SIGTERM));
     [server waitUntilExit];
     XCTAssertEqual(0, server.terminationStatus);
     XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
@@ -5204,7 +5737,7 @@
     XCTAssertTrue([lifecycle containsString:@"exit_code=0"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
@@ -5318,9 +5851,13 @@
 
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  // Run the script through bash: Windows cannot launch a script by its path.
+  server.launchPath = ALNTestBashPath();
   server.currentDirectoryPath = appRoot;
-  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.arguments = @[
+    [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"], @"--watch", @"--port",
+    [NSString stringWithFormat:@"%d", port]
+  ];
   NSMutableDictionary *env =
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
@@ -5418,7 +5955,7 @@
     XCTAssertFalse([recoveredHeaders containsString:@"unsafe-inline"], @"%@", recoveredHeaders);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [log closeFile];
@@ -5523,9 +6060,13 @@
 
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  // Run the script through bash: Windows cannot launch a script by its path.
+  server.launchPath = ALNTestBashPath();
   server.currentDirectoryPath = appRoot;
-  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.arguments = @[
+    [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"], @"--watch", @"--port",
+    [NSString stringWithFormat:@"%d", port]
+  ];
   NSMutableDictionary *env =
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
@@ -5571,7 +6112,7 @@
     XCTAssertFalse([recovered containsString:@"alpha"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
     [log closeFile];
@@ -5582,14 +6123,14 @@
 - (void)testAuthPrimitivesStubProviderLoginCompletesAndEstablishesSession {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -5623,7 +6164,7 @@
     XCTAssertTrue([methods containsObject:@"federated"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }
@@ -5632,14 +6173,14 @@
 - (void)testAuthPrimitivesProviderLoginStillRequiresLocalStepUpForAAL2Routes {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = @"/bin/bash";
+  server.launchPath = ALNTestBashPath();
   server.arguments = @[
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -5700,7 +6241,7 @@
     XCTAssertEqualObjects(@2, secureAfter[@"session"][@"aal"]);
   } @finally {
     if ([server isRunning]) {
-      (void)kill(server.processIdentifier, SIGTERM);
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
       [server waitUntilExit];
     }
   }

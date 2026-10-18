@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "ALNPlatform.h"
+
 #import <stdlib.h>
 #import <string.h>
 #import <unistd.h>
@@ -12,13 +14,12 @@
 
 - (NSString *)resolvedBashLaunchPath {
   NSString *override = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_BASH_PATH"];
-  NSArray<NSString *> *candidates = @[
-    [override isKindOfClass:[NSString class]] ? override : @"",
-    @"C:/msys64/usr/bin/bash.exe",
-    @"C:/msys64/usr/bin/bash",
-    @"/usr/bin/bash",
-    @"/bin/bash",
-  ];
+  NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+  [candidates addObject:[override isKindOfClass:[NSString class]] ? override : @""];
+  for (NSString *root in ALNPlatformWindowsMSYSRoots()) {
+    [candidates addObject:[root stringByAppendingPathComponent:@"usr/bin/bash.exe"]];
+  }
+  [candidates addObjectsFromArray:@[ @"/usr/bin/bash", @"/bin/bash" ]];
   for (NSString *candidate in candidates) {
     if ([candidate length] == 0) {
       continue;
@@ -31,7 +32,13 @@
 }
 
 - (int)randomPort {
-  return 35000 + (int)(rand() % 2000);
+  // rand() was never seeded, so every run picked 35041 first and collided with
+  // servers left behind by an earlier run that hit the time allowance.
+  uint32_t value = 0;
+  if (!ALNPlatformFillRandomBytes(&value, sizeof(value))) {
+    value = (uint32_t)ALNPlatformProcessIdentifier() ^ (uint32_t)ALNPlatformNowMilliseconds();
+  }
+  return 35000 + (int)(value % 2000);
 }
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
@@ -320,7 +327,10 @@
                                                 success:&errorServerReady];
     XCTAssertTrue(errorServerReady, @"server log:\n%@",
                   [self readTextFile:serverLogPath]);
-    XCTAssertEqualObjects(@"degraded\n", healthBody);
+    // /healthz is a reserved built-in that app routes cannot shadow
+    // (docs/CLI_REFERENCE.md), so the diagnostic server answers "ok"; the
+    // build failure is reported by / and /api/dev/build-error below.
+    XCTAssertEqualObjects(@"ok\n", healthBody);
 
     BOOL errorPageSeen = NO;
     for (NSInteger attempt = 0; attempt < 30; attempt++) {

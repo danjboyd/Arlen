@@ -36,6 +36,18 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           submodules: recursive
 
+      # iep-apt's /tmp is a small shared tmpfs, and GNUstep's NSTemporaryDirectory()
+      # reads TEMP/TMP (not TMPDIR). Give each job its own on-disk temp directory,
+      # which the runner empties between jobs, so leaked test files can't fill /tmp.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
       - name: Check release version
         run: |
           python3 ./tools/ci/check_release_version.py --repo-root . --tag "$RELEASE_TAG"
@@ -98,9 +110,39 @@ jobs:
           path: build/release-assets/
           if-no-files-found: error
 
+  windows-x64-archive:
+    name: release-assets / windows-x64-archive
+    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          submodules: recursive
+
+      - name: Package prebuilt Windows archive
+        shell: powershell
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/release/package_framework.sh --version $version --kind windows-x64 --out build/release-assets"
+
+      - name: Smoke-test the Windows archive
+        shell: powershell
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/release/smoke_windows_archive.sh build/release-assets/arlen-$version-windows-x64.zip"
+
+      - name: Upload Windows archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-windows-x64
+          path: build/release-assets/
+          if-no-files-found: error
+
   publish:
     name: release-assets / publish
-    needs: [source-archive, macos-arm64-archive]
+    needs: [source-archive, macos-arm64-archive, windows-x64-archive]
     if: github.event_name == 'release' || inputs.upload
     runs-on: ubuntu-latest
     permissions:
@@ -120,9 +162,10 @@ jobs:
       - name: Assemble assets
         run: |
           mkdir -p build/publish
-          find build/downloaded -name '*.tar.gz' -exec cp {} build/publish/ \;
+          find build/downloaded \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} build/publish/ \;
           cp tools/install.sh build/publish/install.sh
-          (cd build/publish && sha256sum *.tar.gz install.sh | sort -k2 > SHA256SUMS)
+          cp tools/install.ps1 build/publish/install.ps1
+          (cd build/publish && sha256sum *.tar.gz *.zip install.sh install.ps1 | sort -k2 > SHA256SUMS)
           cat build/publish/SHA256SUMS
 
       - name: Attach assets to the release

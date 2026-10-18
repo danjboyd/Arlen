@@ -27,6 +27,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `preparedStatementCacheLimit` | `NSUInteger` | `nonatomic, assign` | Public `preparedStatementCacheLimit` property available on `ALNPg`. |
 | `builderCompilationCacheLimit` | `NSUInteger` | `nonatomic, assign` | Public `builderCompilationCacheLimit` property available on `ALNPg`. |
 | `connectionLivenessChecksEnabled` | `BOOL` | `nonatomic, assign` | Public `connectionLivenessChecksEnabled` property available on `ALNPg`. |
+| `connectionLivenessCheckIdleThreshold` | `NSTimeInterval` | `nonatomic, assign` | Public `connectionLivenessCheckIdleThreshold` property available on `ALNPg`. |
 | `includeSQLInDiagnosticsEvents` | `BOOL` | `nonatomic, assign` | Public `includeSQLInDiagnosticsEvents` property available on `ALNPg`. |
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |

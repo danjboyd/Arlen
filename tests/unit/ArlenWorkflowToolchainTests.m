@@ -50,23 +50,28 @@
   return root;
 }
 
-- (NSString *)runArlen:(NSString *)arguments frameworkRoot:(NSString *)frameworkRoot exitCode:(int *)exitCode {
+- (NSString *)arlenCommand:(NSString *)arguments frameworkRoot:(NSString *)frameworkRoot {
   // The Linux ASan lane preloads a sanitizer runtime that conflicts with the
   // one linked into build/arlen, so clear it as BuildPolicyTests does.
-  NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
-                                                  "ARLEN_FRAMEWORK_ROOT=%@ %@ %@ 2>&1",
-                                                 ALNTestShellQuote(frameworkRoot), ALNTestShellQuote(frameworkRoot),
-                                                 ALNTestShellQuote([self arlenPath]), arguments];
+  return [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+                                     "ARLEN_FRAMEWORK_ROOT=%@ %@ %@",
+                                    ALNTestShellQuote(frameworkRoot), ALNTestShellQuote(frameworkRoot),
+                                    ALNTestShellQuote([self arlenPath]), arguments];
+}
+
+- (NSString *)runArlen:(NSString *)arguments frameworkRoot:(NSString *)frameworkRoot exitCode:(int *)exitCode {
+  NSString *command = [[self arlenCommand:arguments frameworkRoot:frameworkRoot] stringByAppendingString:@" 2>&1"];
   return ALNTestRunShellCapture(command, exitCode);
 }
 
 - (NSDictionary *)dryRunPayload:(NSString *)commandName frameworkRoot:(NSString *)frameworkRoot {
-  int exitCode = -1;
-  NSString *output = [self runArlen:[NSString stringWithFormat:@"%@ --dry-run --json", commandName]
-                      frameworkRoot:frameworkRoot
-                           exitCode:&exitCode];
-  XCTAssertEqual(0, exitCode, @"%@", output);
-  NSDictionary *payload = ALNTestJSONDictionaryFromString(output, NULL);
+  // Parse stdout alone: the toolchain may print warnings on stderr (GNUstep
+  // reports unknown GNUstep.conf keys there), and they are not part of the JSON.
+  NSDictionary *result = ALNTestRunShellCaptureStreams(
+      [self arlenCommand:[NSString stringWithFormat:@"%@ --dry-run --json", commandName] frameworkRoot:frameworkRoot]);
+  NSString *output = [NSString stringWithFormat:@"stdout:\n%@\nstderr:\n%@", result[@"stdout"], result[@"stderr"]];
+  XCTAssertEqualObjects(@0, result[@"status"], @"%@", output);
+  NSDictionary *payload = ALNTestJSONDictionaryFromString(result[@"stdout"], NULL);
   XCTAssertNotNil(payload, @"%@", output);
   XCTAssertEqualObjects(@"planned", payload[@"status"]);
   return payload ?: @{};
@@ -76,6 +81,9 @@
   // arlen boomhauer, propane and jobs worker must run the server in the
   // caller's process group, so a terminal Ctrl-C (or a signal to that group)
   // stops the server instead of only arlen.
+#if defined(_WIN32)
+  XCTSkip(@"Process groups are POSIX; Windows console Ctrl-C reaches the whole console, and native python has no os.getpgrp");
+#endif
   NSString *root = [self createFrameworkFixtureWithAppleBuilder:NO];
   NSError *error = nil;
   NSString *pgidScript = @"#!/usr/bin/env bash\n"

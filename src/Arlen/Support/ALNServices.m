@@ -1,6 +1,7 @@
 #import "ALNServices.h"
 #import "ALNDataCompat.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPlatform.h"
 
 #include <fcntl.h>
 #include <errno.h>
@@ -12,6 +13,7 @@
 #include <ws2tcpip.h>
 #else
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
 #endif
 #include <unistd.h>
@@ -499,6 +501,15 @@ static NSString *ALNNormalizeLocale(NSString *locale) {
   return value;
 }
 
+// A job is due when notBefore <= now. Stored notBefore values round-trip
+// through timeIntervalSince1970, which can leave a job enqueued in the same
+// clock tick ~1e-7 s after "now", so an immediate dequeue missed it (often with
+// GNUstep's ~1 ms clock on Windows; rarely elsewhere). Absorb that rounding
+// only: 1 microsecond, far below any real scheduling delay.
+static BOOL ALNJobIsDue(NSDate *notBefore, NSDate *now) {
+  return notBefore == nil || [notBefore timeIntervalSinceDate:now] <= 1e-6;
+}
+
 static NSDate *ALNDateFromTimestampValue(id value, NSDate *defaultValue) {
   if ([value isKindOfClass:[NSDate class]]) {
     return value;
@@ -800,6 +811,17 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
           [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
         result = [runtime jobWorker:self resultForJob:job];
       }
+    } @catch (NSException *exception) {
+      // A throwing ("poison") job is a failed attempt: retried with backoff,
+      // then dead-lettered. Letting it escape stopped the worker and left an
+      // in-memory job leased forever (GitHub issue 241).
+      disposition = ALNJobWorkerDispositionRetry;
+      result = nil;
+      handlerError = ALNServiceError(
+          506,
+          [NSString stringWithFormat:@"job handler raised %@: %@", exception.name ?: @"an exception",
+                                     exception.reason ?: @""],
+          nil);
     } @finally {
       heartbeatError = [heartbeat stop];
     }
@@ -972,9 +994,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *normalizedOptions = ALNNormalizeDictionary(options);
   NSUInteger maxAttempts = 3;
   id configuredAttempts = normalizedOptions[@"maxAttempts"];
-  if ([configuredAttempts respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [configuredAttempts unsignedIntegerValue] > 0) {
-    maxAttempts = [configuredAttempts unsignedIntegerValue];
+  NSUInteger parsedAttempts = ALNUnsignedIntegerValueOrDefault(configuredAttempts, 0);
+  if (parsedAttempts > 0) {
+    maxAttempts = parsedAttempts;
   }
 
   NSDate *notBefore = [NSDate date];
@@ -1033,7 +1055,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       continue;
     }
     ALNJobEnvelope *current = (ALNJobEnvelope *)candidate;
-    if ([current.notBefore compare:now] != NSOrderedDescending) {
+    if (ALNJobIsDue(current.notBefore, now)) {
       foundIndex = idx;
       selected = current;
       break;
@@ -1479,9 +1501,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDictionary *normalizedOptions = ALNNormalizeDictionary(options);
   NSUInteger maxAttempts = 3;
   id configuredAttempts = normalizedOptions[@"maxAttempts"];
-  if ([configuredAttempts respondsToSelector:@selector(unsignedIntegerValue)] &&
-      [configuredAttempts unsignedIntegerValue] > 0) {
-    maxAttempts = [configuredAttempts unsignedIntegerValue];
+  NSUInteger parsedAttempts = ALNUnsignedIntegerValueOrDefault(configuredAttempts, 0);
+  if (parsedAttempts > 0) {
+    maxAttempts = parsedAttempts;
   }
 
   NSDate *notBefore = [NSDate date];
@@ -1598,7 +1620,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   ALNJobEnvelope *selected = nil;
   for (NSUInteger idx = 0; idx < [pending count]; idx++) {
     ALNJobEnvelope *candidate = [pending[idx] isKindOfClass:[ALNJobEnvelope class]] ? pending[idx] : nil;
-    if (candidate != nil && [candidate.notBefore compare:now] != NSOrderedDescending) {
+    if (candidate != nil && ALNJobIsDue(candidate.notBefore, now)) {
       foundIndex = idx;
       selected = candidate;
       break;
@@ -1940,8 +1962,20 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 @property(nonatomic, copy) NSString *password;
 @property(nonatomic, copy) NSString *namespacePrefix;
 @property(nonatomic, assign) NSTimeInterval ioTimeoutSeconds;
+@property(nonatomic, strong) NSLock *connectionLock;
+@property(nonatomic, strong) NSMutableArray *idleConnections;
+@property(nonatomic, assign) NSUInteger maxIdleConnections;
 
 @end
+
+// Reply limits. The cache adapter only issues commands with flat replies, so a
+// reply that nests deeper, or declares a bulk/array size beyond these bounds, is
+// treated as a protocol error instead of being trusted.
+static const NSUInteger ALNRedisMaxReplyDepth = 8;
+static const long long ALNRedisMaxBulkLength = 512LL * 1024LL * 1024LL;
+static const long long ALNRedisMaxArrayCount = 16LL * 1024LL * 1024LL;
+static const size_t ALNRedisBulkReadChunkSize = 64 * 1024;
+static const NSUInteger ALNRedisDefaultMaxIdleConnections = 4;
 
 static BOOL ALNParseSignedInteger(NSString *text, long long *outValue) {
   if (![text isKindOfClass:[NSString class]] || [text length] == 0) {
@@ -1967,10 +2001,228 @@ static NSError *ALNRedisClientError(NSInteger code, NSString *message, NSError *
   return ALNServiceError(code, message, underlying);
 }
 
+// Cached records are binary property lists written by this adapter. A GET
+// reply comes from the network, so before handing it to Foundation (whose
+// plist parsers recurse without a depth limit) check that it is a well-formed
+// "bplist00" document with no reference cycles, whose containers nest at most
+// ALNRedisMaxRecordDepth deep, and which does not expand (by sharing one
+// container under many parents) into far more objects than its size allows.
+// The walk is iterative and visits each object once, so its own cost is
+// linear in the payload.
+enum { ALNRedisMaxRecordDepth = 64 };
+
+typedef struct {
+  NSUInteger refStart;
+  uint64_t refCount;
+  uint64_t nextRef;
+  uint64_t objectIndex;
+  uint8_t tallestChild;
+  uint64_t expandedCount;
+} ALNRedisPlistFrame;
+
+typedef struct {
+  const uint8_t *bytes;
+  NSUInteger length;
+  NSUInteger offsetIntSize;
+  NSUInteger objectRefSize;
+  uint64_t objectCount;
+  uint64_t offsetTableOffset;
+} ALNRedisPlistLayout;
+
+static BOOL ALNRedisReadBigEndian(const uint8_t *bytes,
+                                  NSUInteger length,
+                                  NSUInteger offset,
+                                  NSUInteger width,
+                                  uint64_t *valueOut) {
+  if (width == 0 || width > 8 || offset > length || width > length - offset) {
+    return NO;
+  }
+  uint64_t value = 0;
+  for (NSUInteger idx = 0; idx < width; idx++) {
+    value = (value << 8) | bytes[offset + idx];
+  }
+  *valueOut = value;
+  return YES;
+}
+
+// Sets *isContainer, and for a container its reference range. Returns NO when
+// the object's offset or header is out of bounds.
+static BOOL ALNRedisPlistObjectRefs(const ALNRedisPlistLayout *layout,
+                                    uint64_t objectIndex,
+                                    BOOL *isContainer,
+                                    NSUInteger *refStartOut,
+                                    uint64_t *refCountOut) {
+  uint64_t objectOffset = 0;
+  NSUInteger tableEnd = (NSUInteger)layout->offsetTableOffset;
+  if (!ALNRedisReadBigEndian(layout->bytes,
+                             layout->length,
+                             tableEnd + (NSUInteger)objectIndex * layout->offsetIntSize,
+                             layout->offsetIntSize,
+                             &objectOffset) ||
+      objectOffset < 8 || objectOffset >= layout->offsetTableOffset) {
+    return NO;
+  }
+  uint8_t marker = layout->bytes[objectOffset];
+  uint8_t type = marker >> 4;
+  if (type != 0xA && type != 0xC && type != 0xD) {
+    *isContainer = NO;
+    return YES;
+  }
+  uint64_t count = marker & 0x0F;
+  NSUInteger cursor = (NSUInteger)objectOffset + 1;
+  if (count == 0x0F) {
+    if (cursor >= tableEnd || (layout->bytes[cursor] >> 4) != 0x1 || (layout->bytes[cursor] & 0x0F) > 3) {
+      return NO;
+    }
+    NSUInteger width = (NSUInteger)1 << (layout->bytes[cursor] & 0x0F);
+    if (!ALNRedisReadBigEndian(layout->bytes, tableEnd, cursor + 1, width, &count)) {
+      return NO;
+    }
+    cursor += 1 + width;
+  }
+  if (type == 0xD && count > UINT64_MAX / 2U) {
+    return NO;
+  }
+  uint64_t refCount = (type == 0xD) ? count * 2U : count;
+  if (cursor > tableEnd || refCount > (tableEnd - cursor) / layout->objectRefSize) {
+    return NO;
+  }
+  *isContainer = YES;
+  *refStartOut = cursor;
+  *refCountOut = refCount;
+  return YES;
+}
+
+static BOOL ALNRedisBinaryPlistIsBounded(NSData *payload) {
+  ALNRedisPlistLayout layout;
+  layout.bytes = [payload bytes];
+  layout.length = [payload length];
+  if (layout.length < 8 + 32 || memcmp(layout.bytes, "bplist00", 8) != 0) {
+    return NO;
+  }
+  NSUInteger trailer = layout.length - 32;
+  layout.offsetIntSize = layout.bytes[trailer + 6];
+  layout.objectRefSize = layout.bytes[trailer + 7];
+  uint64_t topObject = 0;
+  // Writers use 1-, 2- or 4-byte offsets and references for anything under
+  // 4 GiB, and GNUstep's reader raises on any other size.
+  BOOL offsetSizeValid = layout.offsetIntSize == 1 || layout.offsetIntSize == 2 || layout.offsetIntSize == 4;
+  BOOL refSizeValid = layout.objectRefSize == 1 || layout.objectRefSize == 2 || layout.objectRefSize == 4;
+  if (!offsetSizeValid || !refSizeValid ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 8, 8, &layout.objectCount) ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 16, 8, &topObject) ||
+      !ALNRedisReadBigEndian(layout.bytes, layout.length, trailer + 24, 8, &layout.offsetTableOffset)) {
+    return NO;
+  }
+  if (layout.objectCount == 0 || topObject >= layout.objectCount || layout.offsetTableOffset < 8 ||
+      layout.offsetTableOffset > trailer ||
+      layout.objectCount > (trailer - layout.offsetTableOffset) / layout.offsetIntSize) {
+    return NO;
+  }
+
+  // state: 0 unvisited, 1 on the current path, 2 done. height: containers
+  // nested at and below a finished object (leaves are 0). expanded: objects a
+  // finished container stands for once shared references are copied out.
+  // Writers may store equal objects once (GNUstep shares equal dictionaries
+  // too), so a real record can expand well past its byte length; allow up to
+  // a million objects, or four per payload byte for larger records. A tiny
+  // plist built to expand exponentially still exceeds that.
+  uint64_t expansionLimit = MAX((uint64_t)1000000U, (uint64_t)layout.length * 4U + 4096U);
+  NSMutableData *stateData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
+  NSMutableData *heightData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount];
+  NSMutableData *expandedData = [NSMutableData dataWithLength:(NSUInteger)layout.objectCount * sizeof(uint64_t)];
+  uint8_t *state = [stateData mutableBytes];
+  uint8_t *height = [heightData mutableBytes];
+  uint64_t *expanded = [expandedData mutableBytes];
+  ALNRedisPlistFrame path[ALNRedisMaxRecordDepth];
+  NSUInteger pathLength = 0;
+
+  BOOL isContainer = NO;
+  NSUInteger refStart = 0;
+  uint64_t refCount = 0;
+  if (!ALNRedisPlistObjectRefs(&layout, topObject, &isContainer, &refStart, &refCount)) {
+    return NO;
+  }
+  if (!isContainer) {
+    return YES;
+  }
+  state[topObject] = 1;
+  path[pathLength++] = (ALNRedisPlistFrame){refStart, refCount, 0, topObject, 0, 1};
+
+  while (pathLength > 0) {
+    ALNRedisPlistFrame *frame = &path[pathLength - 1];
+    if (frame->nextRef == frame->refCount) {
+      uint8_t finished = (uint8_t)(frame->tallestChild + 1U);
+      uint64_t finishedCount = frame->expandedCount;
+      state[frame->objectIndex] = 2;
+      height[frame->objectIndex] = finished;
+      expanded[frame->objectIndex] = finishedCount;
+      pathLength--;
+      if (pathLength > 0) {
+        ALNRedisPlistFrame *parent = &path[pathLength - 1];
+        if (finished > parent->tallestChild) {
+          parent->tallestChild = finished;
+        }
+        parent->expandedCount += finishedCount;
+        if (parent->expandedCount > expansionLimit) {
+          return NO;
+        }
+      }
+      continue;
+    }
+    uint64_t child = 0;
+    NSUInteger tableEnd = (NSUInteger)layout.offsetTableOffset;
+    if (!ALNRedisReadBigEndian(layout.bytes,
+                               tableEnd,
+                               frame->refStart + (NSUInteger)frame->nextRef * layout.objectRefSize,
+                               layout.objectRefSize,
+                               &child) ||
+        child >= layout.objectCount) {
+      return NO;
+    }
+    frame->nextRef++;
+    if (state[child] == 1) {
+      return NO;
+    }
+    if (state[child] == 2) {
+      if (height[child] > frame->tallestChild) {
+        frame->tallestChild = height[child];
+      }
+      frame->expandedCount += expanded[child];
+      if (pathLength + height[child] > ALNRedisMaxRecordDepth || frame->expandedCount > expansionLimit) {
+        return NO;
+      }
+      continue;
+    }
+    if (!ALNRedisPlistObjectRefs(&layout, child, &isContainer, &refStart, &refCount)) {
+      return NO;
+    }
+    if (!isContainer) {
+      state[child] = 2;
+      expanded[child] = 1;
+      frame->expandedCount += 1;
+      if (frame->expandedCount > expansionLimit) {
+        return NO;
+      }
+      continue;
+    }
+    if (pathLength == ALNRedisMaxRecordDepth) {
+      return NO;
+    }
+    state[child] = 1;
+    path[pathLength++] = (ALNRedisPlistFrame){refStart, refCount, 0, child, 0, 1};
+  }
+  return YES;
+}
+
 static BOOL ALNRedisWriteBytes(int socketFD, const uint8_t *bytes, size_t length, NSError **error) {
   size_t written = 0;
   while (written < length) {
+#if defined(MSG_NOSIGNAL)
+    ssize_t count = send(socketFD, bytes + written, length - written, MSG_NOSIGNAL);
+#else
     ssize_t count = send(socketFD, bytes + written, length - written, 0);
+#endif
     if (count < 0) {
       if (errno == EINTR) {
         continue;
@@ -2004,6 +2256,12 @@ static BOOL ALNRedisReadExact(int socketFD, uint8_t *buffer, size_t length, NSEr
     if (count < 0) {
       if (errno == EINTR) {
         continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        if (error != NULL) {
+          *error = ALNRedisClientError(2234, @"redis read timed out", nil);
+        }
+        return NO;
       }
       if (error != NULL) {
         *error = ALNRedisClientError(2202,
@@ -2062,9 +2320,9 @@ static NSString *ALNRedisReadLine(int socketFD, NSError **error) {
   return line;
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error);
+static id ALNRedisReadReply(int socketFD, NSUInteger depth, NSError **error);
 
-static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **error) {
+static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSUInteger depth, NSError **error) {
   long long count = 0;
   if (!ALNParseSignedInteger(countText, &count) || count < -1) {
     if (error != NULL) {
@@ -2075,10 +2333,24 @@ static id ALNRedisReadArrayReply(int socketFD, NSString *countText, NSError **er
   if (count == -1) {
     return [NSNull null];
   }
-  NSMutableArray *out = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+  if (count > ALNRedisMaxArrayCount) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2233, @"redis protocol error: array reply is too large", nil);
+    }
+    return nil;
+  }
+  if (depth >= ALNRedisMaxReplyDepth) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2231, @"redis protocol error: reply nesting is too deep", nil);
+    }
+    return nil;
+  }
+  // Grow with the elements actually received; the declared count is not a
+  // trustworthy capacity hint.
+  NSMutableArray *out = [NSMutableArray array];
   for (long long index = 0; index < count; index++) {
     NSError *stepError = nil;
-    id item = ALNRedisReadReply(socketFD, &stepError);
+    id item = ALNRedisReadReply(socketFD, depth + 1, &stepError);
     if (stepError != nil) {
       if (error != NULL) {
         *error = stepError;
@@ -2101,10 +2373,25 @@ static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **er
   if (length == -1) {
     return [NSNull null];
   }
-
-  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)length];
-  if (length > 0 && !ALNRedisReadExact(socketFD, [data mutableBytes], (size_t)length, error)) {
+  if (length > ALNRedisMaxBulkLength) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2232, @"redis protocol error: bulk reply is too large", nil);
+    }
     return nil;
+  }
+
+  // Read in bounded chunks so memory tracks bytes actually received rather than
+  // the declared length.
+  NSMutableData *data = [NSMutableData data];
+  size_t remaining = (size_t)length;
+  while (remaining > 0) {
+    size_t step = remaining < ALNRedisBulkReadChunkSize ? remaining : ALNRedisBulkReadChunkSize;
+    size_t offset = [data length];
+    [data increaseLengthBy:step];
+    if (!ALNRedisReadExact(socketFD, (uint8_t *)[data mutableBytes] + offset, step, error)) {
+      return nil;
+    }
+    remaining -= step;
   }
   uint8_t tail[2] = { 0, 0 };
   if (!ALNRedisReadExact(socketFD, tail, 2, error)) {
@@ -2119,7 +2406,7 @@ static id ALNRedisReadBulkReply(int socketFD, NSString *lengthText, NSError **er
   return [NSData dataWithData:data];
 }
 
-static id ALNRedisReadReply(int socketFD, NSError **error) {
+static id ALNRedisReadReply(int socketFD, NSUInteger depth, NSError **error) {
   uint8_t prefix = 0;
   if (!ALNRedisReadExact(socketFD, &prefix, 1, error)) {
     return nil;
@@ -2153,7 +2440,7 @@ static id ALNRedisReadReply(int socketFD, NSError **error) {
     return ALNRedisReadBulkReply(socketFD, line, error);
   }
   if (prefix == '*') {
-    return ALNRedisReadArrayReply(socketFD, line, error);
+    return ALNRedisReadArrayReply(socketFD, line, depth, error);
   }
 
   if (error != NULL) {
@@ -2233,9 +2520,11 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   if (timeoutMillis <= 0) {
     timeoutMillis = 2500;
   }
+#if !defined(_WIN32)
   struct timeval timeoutValue;
   timeoutValue.tv_sec = timeoutMillis / 1000;
   timeoutValue.tv_usec = (timeoutMillis % 1000) * 1000;
+#endif
 
   for (struct addrinfo *candidate = result; candidate != NULL; candidate = candidate->ai_next) {
     socketFD = socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
@@ -2243,8 +2532,19 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       continue;
     }
 
+#if defined(_WIN32)
+    // Winsock takes the timeout as a DWORD of milliseconds, not a timeval.
+    DWORD timeoutDWORD = (DWORD)timeoutMillis;
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeoutDWORD, sizeof(timeoutDWORD));
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeoutDWORD, sizeof(timeoutDWORD));
+#else
     (void)setsockopt(socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeoutValue, sizeof(timeoutValue));
     (void)setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeoutValue, sizeof(timeoutValue));
+#endif
+#if defined(SO_NOSIGPIPE)
+    int noSigPipe = 1;
+    (void)setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof(noSigPipe));
+#endif
 
     if (connect(socketFD, candidate->ai_addr, candidate->ai_addrlen) == 0) {
       break;
@@ -2263,6 +2563,37 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     return -1;
   }
   return socketFD;
+}
+
+// An idle pooled connection should have nothing to read. Readability here means
+// the server closed it (EOF), reset it, or sent unsolicited bytes, so it must
+// not be reused.
+static BOOL ALNRedisIdleConnectionIsReusable(int socketFD) {
+#if defined(_WIN32)
+  (void)socketFD;
+  return YES;
+#else
+  struct pollfd descriptor;
+  memset(&descriptor, 0, sizeof(descriptor));
+  descriptor.fd = socketFD;
+  descriptor.events = POLLIN;
+  int ready = 0;
+  do {
+    ready = poll(&descriptor, 1, 0);
+  } while (ready < 0 && errno == EINTR);
+  if (ready < 0) {
+    return NO;
+  }
+  return ready == 0;
+#endif
+}
+
+static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
+  if (![[error domain] isEqualToString:ALNServiceErrorDomain]) {
+    return NO;
+  }
+  NSInteger code = [error code];
+  return code == 2200 || code == 2201 || code == 2202 || code == 2203;
 }
 
 @implementation ALNRedisCacheAdapter
@@ -2324,7 +2655,17 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       [ALNNonEmptyString(adapterName,
                          [NSString stringWithFormat:@"redis_cache@%@:%lu", host, (unsigned long)port]) copy];
   _ioTimeoutSeconds = 2.5;
+  _connectionLock = [[NSLock alloc] init];
+  _idleConnections = [NSMutableArray array];
+  _maxIdleConnections = ALNRedisDefaultMaxIdleConnections;
   return self;
+}
+
+- (void)dealloc {
+  for (NSNumber *descriptor in _idleConnections) {
+    close([descriptor intValue]);
+  }
+  [_idleConnections removeAllObjects];
 }
 
 - (NSString *)adapterName {
@@ -2354,7 +2695,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       }
       return -1;
     }
-    id authReply = ALNRedisReadReply(fd, &authError);
+    id authReply = ALNRedisReadReply(fd, 0, &authError);
     if (authReply == nil || ![[authReply description] isEqualToString:@"OK"]) {
       close(fd);
       if (error != NULL) {
@@ -2374,7 +2715,7 @@ static int ALNRedisOpenSocketConnection(NSString *host,
       }
       return -1;
     }
-    id selectReply = ALNRedisReadReply(fd, &selectError);
+    id selectReply = ALNRedisReadReply(fd, 0, &selectError);
     if (selectReply == nil || ![[selectReply description] isEqualToString:@"OK"]) {
       close(fd);
       if (error != NULL) {
@@ -2387,36 +2728,90 @@ static int ALNRedisOpenSocketConnection(NSString *host,
   return fd;
 }
 
+// Hands out an authenticated, SELECTed connection: an idle pooled one when
+// available, otherwise a freshly opened one. Each connection is used by one
+// thread at a time; the lock only guards the idle list.
+- (int)checkoutConnectionReused:(BOOL *)reused error:(NSError **)error {
+  while (YES) {
+    int fd = -1;
+    [self.connectionLock lock];
+    NSNumber *descriptor = [self.idleConnections lastObject];
+    if (descriptor != nil) {
+      fd = [descriptor intValue];
+      [self.idleConnections removeLastObject];
+    }
+    [self.connectionLock unlock];
+    if (fd < 0) {
+      break;
+    }
+    if (ALNRedisIdleConnectionIsReusable(fd)) {
+      *reused = YES;
+      return fd;
+    }
+    close(fd);
+  }
+  *reused = NO;
+  return [self openConnectionWithError:error];
+}
+
+- (void)checkinConnection:(int)fd {
+  BOOL pooled = NO;
+  [self.connectionLock lock];
+  if ([self.idleConnections count] < self.maxIdleConnections) {
+    [self.idleConnections addObject:@(fd)];
+    pooled = YES;
+  }
+  [self.connectionLock unlock];
+  if (!pooled) {
+    close(fd);
+  }
+}
+
 - (id)runCommand:(NSArray *)parts error:(NSError **)error {
-  int fd = [self openConnectionWithError:error];
-  if (fd < 0) {
-    return nil;
-  }
+  for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+    BOOL reused = NO;
+    int fd = [self checkoutConnectionReused:&reused error:error];
+    if (fd < 0) {
+      return nil;
+    }
 
-  NSError *commandError = nil;
-  BOOL wrote = ALNRedisWriteCommand(fd, parts, &commandError);
-  id reply = nil;
-  if (wrote) {
-    reply = ALNRedisReadReply(fd, &commandError);
-  }
-  close(fd);
+    NSError *commandError = nil;
+    BOOL wrote = ALNRedisWriteCommand(fd, parts, &commandError);
+    id reply = nil;
+    if (wrote) {
+      reply = ALNRedisReadReply(fd, 0, &commandError);
+    }
 
-  if (!wrote || commandError != nil) {
+    if (wrote && commandError == nil) {
+      [self checkinConnection:fd];
+      return reply;
+    }
+
+    // Any failure may leave unread reply bytes behind, so the connection is
+    // never returned to the pool. A pooled connection the server dropped while
+    // idle is retried once on a fresh connection.
+    close(fd);
+    if (reused && attempt == 0 && ALNRedisErrorIsRetryableIO(commandError)) {
+      continue;
+    }
     if (error != NULL) {
       *error = commandError ?: ALNRedisClientError(2223, @"redis command failed", nil);
     }
     return nil;
   }
-  return reply;
+  return nil;
 }
 
 - (NSData *)serializedRecordForObject:(id)object
                            expiresAt:(NSDate *)expiresAt
                                error:(NSError **)error {
-  NSDictionary *record = @{
-    @"value" : object ?: [NSNull null],
-    @"expiresAt" : expiresAt != nil ? @([expiresAt timeIntervalSince1970]) : [NSNull null]
-  };
+  // Property lists cannot hold NSNull (Apple Foundation rejects it), so a
+  // record without a TTL simply omits expiresAt.
+  NSMutableDictionary *record = [NSMutableDictionary dictionary];
+  record[@"value"] = object;
+  if (expiresAt != nil) {
+    record[@"expiresAt"] = @([expiresAt timeIntervalSince1970]);
+  }
   NSError *serializeError = nil;
   NSData *payload = [NSPropertyListSerialization dataWithPropertyList:record
                                                                format:NSPropertyListBinaryFormat_v1_0
@@ -2438,13 +2833,29 @@ static int ALNRedisOpenSocketConnection(NSString *host,
     }
     return nil;
   }
+  if (!ALNRedisBinaryPlistIsBounded(payload)) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2235, @"redis cache payload is not a bounded binary property list", nil);
+    }
+    return nil;
+  }
   NSError *parseError = nil;
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
-  id parsed = [NSPropertyListSerialization propertyListWithData:payload
-                                                        options:NSPropertyListImmutable
-                                                         format:&format
-                                                          error:&parseError];
-  if (![parsed isKindOfClass:[NSDictionary class]]) {
+  id parsed = nil;
+  @try {
+    parsed = [NSPropertyListSerialization propertyListWithData:payload
+                                                       options:NSPropertyListImmutable
+                                                        format:&format
+                                                         error:&parseError];
+  } @catch (NSException *exception) {
+    // GNUstep's binary plist reader raises on some malformed input instead of
+    // returning an error; never let a cache reply throw into the caller.
+    if (error != NULL) {
+      *error = ALNRedisClientError(2235, @"redis cache payload is not a bounded binary property list", nil);
+    }
+    return nil;
+  }
+  if (![parsed isKindOfClass:[NSDictionary class]] || format != NSPropertyListBinaryFormat_v1_0) {
     if (error != NULL) {
       *error = ALNRedisClientError(2226, @"redis cache payload is malformed", parseError);
     }

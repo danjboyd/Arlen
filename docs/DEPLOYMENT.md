@@ -406,6 +406,16 @@ Arlen reserves its built-in operability endpoints ahead of app route dispatch:
 
 Use these for LB probes and deployment readiness checks.
 
+`/metrics` and `/clusterz` are anonymous by default, and `/clusterz` reports the
+hostname and worker layout. In production, set
+`observability.operabilityToken` (or `ARLEN_OPERABILITY_TOKEN`) so scrapers
+must send `Authorization: Bearer <token>`, set
+`observability.operabilityLoopbackOnly = YES` (or
+`ARLEN_OPERABILITY_LOOPBACK_ONLY=1`) for same-host scrapers, or block both
+paths at the reverse proxy. Behind a same-host proxy, loopback-only mode
+refuses requests that carry `Forwarded`, `X-Forwarded-For` or `X-Real-IP`.
+`arlen doctor --env production` warns while both endpoints are anonymous.
+
 JSON signal payloads are available for health/readiness when requested:
 
 - `GET /healthz` with `Accept: application/json` (or `?format=json`)
@@ -616,8 +626,9 @@ Windows support statement for deployment:
 
 - packaged release and deploy workflows are now available on MSYS2 `CLANG64`
  as a preview path
-- the preview path is verified by the Windows self-hosted workflow and the
- repo-native `windows-confidence` lane
+- the repo-native `windows-confidence` lane exercises it, but only by hand:
+ it left the Windows self-hosted workflow with 0.3.0's development-only
+ Windows scope and returns with Windows production in 0.4.0
 - this is still not a general production support claim for Windows hosts
 
 ### 6.1 Build a release artifact
@@ -700,7 +711,10 @@ tools/deploy/activate_release.sh \
   --release-id <release-id>
 ```
 
-This switches `releases/current` symlink.
+This switches `releases/current` symlink. The new link is created under a
+temporary name and renamed over `current`, so a service restart during the
+switch always finds `releases/current` (on Windows/MSYS2 the junction is still
+removed and recreated).
 
 Activation also rewrites `metadata/release.env` so:
 

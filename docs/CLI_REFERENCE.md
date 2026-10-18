@@ -125,6 +125,10 @@ Run bootstrap environment diagnostics without requiring a framework build.
  `vendor/tools-xctest` is present; otherwise it looks for `xctest` on `PATH`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
  managed toolchains without libdispatch headers fail early
+- with `--env production`, warns (`operability_endpoints`) when `/metrics` and
+ `/clusterz` are anonymous, i.e. neither `observability.operabilityToken` /
+ `ARLEN_OPERABILITY_TOKEN` nor `observability.operabilityLoopbackOnly` /
+ `ARLEN_OPERABILITY_LOOPBACK_ONLY` is set
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -345,7 +349,9 @@ Named targets:
  - uploads it to the remote target
  - invokes the packaged remote `arlen deploy release` inside that uploaded release
 - runs `migrate --env <name>` only when packaged SQL migrations exist, unless `--skip-migrate` is passed
-- activates `releases/current` via `tools/deploy/activate_release.sh`
+- activates `releases/current` via `tools/deploy/activate_release.sh`; the new
+ link is created under a temporary name and renamed over `current`, so
+ `releases/current` never goes missing during the switch
 - can reload or restart a systemd unit through `--service <unit>` and
  `--runtime-action <reload|restart|none>` after activation
 - rewrites `metadata/release.env` against the activated release root so
@@ -375,7 +381,7 @@ Named targets:
 `arlen deploy rollback`
 
 - selects the most recent non-active release by default, or uses `--release-id <id>`
-- switches `releases/current` via `tools/deploy/rollback_release.sh`
+- switches `releases/current` via `tools/deploy/rollback_release.sh` (atomic rename; see `deploy release`)
 - can reload or restart a systemd unit through `--service <unit>` and `--runtime-action <reload|restart|none>`
 - can verify operability after rollback with `--base-url <url>`
 - surfaces an explicit warning that packaged migrations do not imply reversibility
@@ -752,8 +758,12 @@ route/OpenAPI contracts.
  - React/TanStack output is optional and layered on top of the plain client
  - top-level OpenAPI `x-arlen` metadata can add resource/module/workspace
  contracts without changing route schemas
+- OpenAPI-only mode: without an ORM input, `client` / `react` / `meta`
+ render from the OpenAPI document, and `models.ts` holds only the shared
+ envelope types
 - missing or vague inputs fail closed:
  - `client` / `react` targets require `--openapi-input`
+ - `models` / `validators` / `query` / `all` require at least one ORM descriptor
  - OpenAPI operations must carry stable `operationId` values
  - request bodies must expose `application/json` schemas
  - descriptor or operation naming collisions abort generation
@@ -762,7 +772,7 @@ route/OpenAPI contracts.
  - resource query metadata cannot expose fields or relations the ORM
  descriptors do not actually define
 
-- `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`)
+- `--orm-input <path>`: ORM manifest or schema metadata input (default: `db/schema/arlen_orm_manifest.json`). Only `models`, `validators`, `query` and `all` need ORM descriptors. For `client`, `react` and `meta`, a missing default manifest is skipped and the package is generated from `--openapi-input` alone, so apps that don't use the ORM can generate a client. An explicit `--orm-input` path must exist. `meta` still needs descriptors when `x-arlen.resources` names ORM entities.
 - `--openapi-input <path>`: exported OpenAPI JSON input; required for `client` and `react`
 - `--output-dir <path>` / `--out-dir <path>`: generated package root (default: `frontend/generated/arlen`)
 - `--manifest <path>`: TypeScript manifest output (default: `db/schema/arlen_typescript.json`)
@@ -906,6 +916,8 @@ through `tools/run_app_tests.sh`:
 - `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`;
   an `--only` that matches no test fails the run (`No tests matched '...'`)
 - exit status is the runner's: non-zero when any test fails
+- Windows (MSYS2 `CLANG64`): the bundle binary is `AppTests.dll`, compiled and
+  linked against the framework's vendored tools-xctest
 - macOS: `tools/build_apple_app.sh --build-tests` builds
   `.boomhauer/apple/tests/AppTests.xctest` the same way, and Xcode's
   `xcrun xctest` runs it. `--only` becomes `-XCTest Class[/method]` (several
@@ -1012,12 +1024,25 @@ Diagnostics behavior:
  - `<%@ include "partials/_row" with @{ ... } %>`
  - `<%@ render "partials/_row" collection:$rows as:"row" empty:"partials/_empty" with @{ ... } %>`
 
-### `arlen config [--env <name>] [--json]`
+### `arlen config [--env <name>] [--json] [--show-secrets]`
 
 Load and print merged runtime config.
 
 - `--env <name>`: select environment overlay
 - `--json`: deterministic pretty JSON output (sorted keys when runtime supports `NSJSONWritingSortedKeys`)
+- `--show-secrets`: print secret values as loaded instead of redacting them
+
+By default, secret values print as `[redacted]`, in both text and JSON output.
+A string value is redacted when its key contains `secret`, `password`, `token`,
+`apiKey` or `connectionString` (case-insensitive), for example
+`session.secret`, `auth.bearerSecret`, `storageModule.signingSecret` and
+`database.connectionString`. Keys that describe a secret rather than hold one
+keep their values: names ending in `EnvironmentKey`, `Endpoint`, `URL`, `Path`,
+`Seconds`, `TTL`, `Enabled` and similar. Passwords inside other values are
+masked too: `postgres://user:pass@host/db` prints as
+`postgres://user:[redacted]@host/db`, and `password=...` in a keyword DSN
+prints as `password=[redacted]`. Numbers, booleans, empty strings and the JSON
+shape are unchanged. `propane` reads the config with `--json --show-secrets`.
 
 ### `arlen webpush <generate-keys|public-key> [--json]`
 
@@ -1070,6 +1095,7 @@ Behavior:
 - watch mode retries failed builds automatically (`ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, default `2`) even when no additional watched-file fingerprint change is observed
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- requests run on `runtimeLimits.maxConcurrentHTTPWorkers` worker threads (default `8`). An idle keep-alive connection releases its worker after `runtimeLimits.keepAliveParkAfterMilliseconds` (default `5`) and is picked up again when its next request arrives (see `docs/CONFIGURATION_REFERENCE.md`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
 - HTTP session limit violations return deterministic overload diagnostics:
@@ -1139,8 +1165,8 @@ Behavior:
  - `GET /clusterz` quorum and coordination capability-matrix payload
  - response headers `X-Arlen-Cluster-Status`, `X-Arlen-Cluster-Observed-Nodes`, and `X-Arlen-Cluster-Expected-Nodes` (when `cluster.enabled=YES` and `cluster.emitHeaders=YES`)
 - built-in observability/API docs endpoints are available when enabled:
- - `/metrics`
- - `/clusterz`
+ - `/metrics` (anonymous unless `ARLEN_OPERABILITY_TOKEN` or `ARLEN_OPERABILITY_LOOPBACK_ONLY=1` is set)
+ - `/clusterz` (same restriction as `/metrics`)
  - `/openapi.json`
  - `/openapi` (interactive explorer by default)
  - `/openapi/viewer` (lightweight fallback viewer)
@@ -1178,6 +1204,7 @@ Environment:
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
+- `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS` (`runtimeLimits.webSocketPingIntervalSeconds`; idle WebSocket ping interval, `0` disables)
 - `ARLEN_MAX_QUEUED_HTTP_CONNECTIONS` (runtime HTTP worker queue depth; legacy `MOJOOBJC_MAX_QUEUED_HTTP_CONNECTIONS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS` (runtime global realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS` also accepted)
 - `ARLEN_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` (runtime per-channel realtime subscriber cap; legacy `MOJOOBJC_MAX_REALTIME_SUBSCRIBERS_PER_CHANNEL` also accepted)
@@ -1192,6 +1219,8 @@ Environment:
 - `ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED` (default `1`; disables `X-Request-Id`/`X-Correlation-Id` emission when set to `0`; legacy `MOJOOBJC_RESPONSE_IDENTITY_HEADERS_ENABLED` also accepted)
 - `ARLEN_METRICS_ENABLED` (default `1`; disables hot-path metrics writes when set to `0`; legacy `MOJOOBJC_METRICS_ENABLED` also accepted)
 - `ARLEN_HEALTH_DETAILS_ENABLED` (default `1`; legacy `MOJOOBJC_HEALTH_DETAILS_ENABLED` also accepted)
+- `ARLEN_OPERABILITY_TOKEN` (unset by default; when set, `/metrics` and `/clusterz` require `Authorization: Bearer <token>`; overrides `observability.operabilityToken`)
+- `ARLEN_OPERABILITY_LOOPBACK_ONLY` (default `0`; when `1`, `/metrics` and `/clusterz` answer only direct loopback requests; overrides `observability.operabilityLoopbackOnly`)
 - `ARLEN_READINESS_REQUIRES_STARTUP` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_STARTUP` also accepted)
 - `ARLEN_READINESS_REQUIRES_CLUSTER_QUORUM` (default `0`; legacy `MOJOOBJC_READINESS_REQUIRES_CLUSTER_QUORUM` also accepted)
 - `ARLEN_CLUSTER_OBSERVED_NODES` (defaults to expected nodes; legacy `MOJOOBJC_CLUSTER_OBSERVED_NODES` also accepted)

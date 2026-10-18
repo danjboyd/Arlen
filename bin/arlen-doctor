@@ -188,6 +188,24 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
       "multi-worker state contract is quiet for $environment workerCount=$phase39_worker_count" \
       "Warnings are quiet when workerCount <= 1, state.durable=YES, or a database connection string is configured."
   fi
+
+  phase39_operability_restricted=""
+  if [[ -n "${ARLEN_OPERABILITY_TOKEN:-}" ]] || phase39_has_nonempty_assignment "operabilityToken"; then
+    phase39_operability_restricted="bearer token"
+  fi
+  phase39_operability_loopback="$(printf '%s' "${ARLEN_OPERABILITY_LOOPBACK_ONLY:-}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$phase39_operability_loopback" =~ ^(1|yes|true)$ ]] ||
+     phase39_config_blob | grep -Eq 'operabilityLoopbackOnly[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+    phase39_operability_restricted="${phase39_operability_restricted:+$phase39_operability_restricted, }loopback only"
+  fi
+  if [[ -n "$phase39_operability_restricted" ]]; then
+    add_check "operability_endpoints" "pass" \
+      "/metrics and /clusterz are restricted ($phase39_operability_restricted)"
+  else
+    add_check "operability_endpoints" "warn" \
+      "/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)" \
+      "Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy."
+  fi
 fi
 
 matrix_path="$repo_root/docs/TOOLCHAIN_MATRIX.md"
@@ -289,7 +307,32 @@ EOF
       "Install Homebrew 'unixodbc' or 'libiodbc' if MSSQL transport is required."
   fi
 else
-  add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"
+  # Windows CLANG64 compiles Foundation/libdispatch headers with the same
+  # workaround flags as the GNUmakefile (libdispatch's mode_t clash) and loads
+  # libpq from a DLL, so those two checks differ there.
+  windows_clang64=0
+  probe_flags=""
+  if aln_platform_is_msys; then
+    windows_clang64=1
+    probe_flags="-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1"
+    add_check "platform" "pass" "platform: Windows MSYS2 CLANG64 (gnustep-cli toolchain) path"
+    toolchain_state="/state/cli-state.json"
+    if [[ -f "$toolchain_state" ]]; then
+      toolchain_version="$(tr -d '\r' <"$toolchain_state" | sed -n 's/^[[:space:]]*"toolchain_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+      add_check "toolchain" "pass" "gnustep-cli managed toolchain ${toolchain_version:-(unknown version)}"
+    else
+      add_check "toolchain" "warn" "not a gnustep-cli managed toolchain (no /state/cli-state.json)" \
+        "Arlen's Windows release is built against the gnustep-cli managed CLANG64 toolchain; see docs/WINDOWS_CLANG64.md."
+    fi
+    if compgen -G "/clang64/lib/libcurl.dll.a" >/dev/null || compgen -G "/clang64/bin/libcurl*.dll" >/dev/null; then
+      add_check "libcurl" "pass" "libcurl available in the toolchain"
+    else
+      add_check "libcurl" "fail" "libcurl is missing from the toolchain (Arlen links -lcurl)" \
+        "Inside the toolchain run: pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl (never pacman -Sy or -Syu)."
+    fi
+  else
+    add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"
+  fi
 
   gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
   if [[ -z "$gnustep_script" ]]; then
@@ -321,7 +364,7 @@ else
         "Verify your active GNUstep environment and gnustep-config availability."
     fi
 
-    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
+    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
       add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available to clang"
     else
       add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active toolchain include paths" \
@@ -329,7 +372,24 @@ else
     fi
   fi
 
-  if command -v ldconfig >/dev/null 2>&1; then
+  if (( windows_clang64 == 1 )); then
+    # Where ALNDefaultLibpqCandidatePaths looks: the release's bundled
+    # build/dll first, then the toolchain's clang64/bin.
+    libpq_dll=""
+    for candidate in "$framework_root/build/dll/libpq-5.dll" "$framework_root/build/dll/libpq.dll" \
+                     /clang64/bin/libpq-5.dll /clang64/bin/libpq.dll; do
+      if [[ -f "$candidate" ]]; then
+        libpq_dll="$candidate"
+        break
+      fi
+    done
+    if [[ -n "$libpq_dll" ]]; then
+      add_check "libpq" "pass" "libpq available: $libpq_dll"
+    else
+      add_check "libpq" "warn" "libpq not found (release build/dll or toolchain clang64/bin)" \
+        "Windows releases bundle libpq.dll in build/dll; a source checkout needs it only for PostgreSQL apps."
+    fi
+  elif command -v ldconfig >/dev/null 2>&1; then
     libpq_line="$(ldconfig -p 2>/dev/null | grep -m1 'libpq\\.so' || true)"
     if [[ -n "$libpq_line" ]]; then
       add_check "libpq" "pass" "libpq available: $libpq_line"
