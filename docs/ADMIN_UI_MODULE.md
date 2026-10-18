@@ -152,6 +152,12 @@ The module protects both HTML and JSON surfaces with the same defaults:
 Apps can add per-resource policy checks through the optional
 `adminUIResourceAllowsOperation:identifier:context:error:` hook.
 
+`ALNAdminUIModuleRuntime` reports these defaults as `accessRoles` (`admin`) and
+`minimumAuthAssuranceLevel` (`2`). When the `search` module auto-indexes admin
+resources, it applies the same requirements, plus the resource's `list`
+operation check, to search queries over them. See
+[Search Module](SEARCH_MODULE.md#admin-ui-auto-resources).
+
 ## SPA Notes
 
 Use `/admin/api/...` for React or other SPA clients. The module does not ship a

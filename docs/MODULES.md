@@ -240,7 +240,10 @@ preference validation (GitHub issue 227).
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
 `search` moved to `1.0.5` so an unscoped query from a caller who may query no
-registered resource returns no results.
+registered resource returns no results, and so auto-indexed `admin-ui`
+resources are searchable only by callers the `admin-ui` policy admits;
+`admin-ui` moved to `1.0.4` to report that policy (`accessRoles`,
+`minimumAuthAssuranceLevel`).
 
 ## MCP tools
 

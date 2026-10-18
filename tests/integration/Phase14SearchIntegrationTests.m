@@ -7,7 +7,9 @@
 #import "ALNApplication.h"
 #import "ALNContext.h"
 #import "ALNJobsModule.h"
+#import "ALNMigrationRunner.h"
 #import "ALNOpsModule.h"
+#import "ALNPg.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNSearchModule.h"
@@ -40,14 +42,29 @@ static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase14SearchOrde
 
 @implementation Phase14SearchAuthMiddleware
 
+// Authenticates every request as an AAL2 admin unless `X-Phase14-Caller`
+// asks for an anonymous or a plain member caller.
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   (void)error;
+  NSString *caller = @"";
+  NSDictionary *headers = [context.request.headers isKindOfClass:[NSDictionary class]] ? context.request.headers : @{};
+  for (id key in [headers allKeys]) {
+    if ([[[key description] lowercaseString] isEqualToString:@"x-phase14-caller"]) {
+      caller = [[headers[key] description] lowercaseString];
+    }
+  }
+  if ([caller isEqualToString:@"anonymous"]) {
+    return YES;
+  }
+  BOOL member = [caller isEqualToString:@"member"];
+  NSString *subject = member ? @"search-member" : @"search-admin";
+  NSArray *roles = member ? @[ @"user" ] : @[ @"admin", @"operator" ];
   NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-  context.stash[ALNContextAuthSubjectStashKey] = @"search-admin";
-  context.stash[ALNContextAuthRolesStashKey] = @[ @"admin", @"operator" ];
+  context.stash[ALNContextAuthSubjectStashKey] = subject;
+  context.stash[ALNContextAuthRolesStashKey] = roles;
   context.stash[ALNContextAuthClaimsStashKey] = @{
-    @"sub" : @"search-admin",
-    @"roles" : @[ @"admin", @"operator" ],
+    @"sub" : subject,
+    @"roles" : roles,
     @"aal" : @2,
     @"amr" : @[ @"otp" ],
     @"iat" : @((NSInteger)now),
@@ -330,6 +347,102 @@ static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase14SearchOrde
   NSDictionary *search = opsJSON[@"data"][@"search"];
   XCTAssertEqualObjects(@YES, search[@"available"]);
   XCTAssertEqualObjects(@2, search[@"totals"][@"documents"]);
+}
+
+- (void)testAdminUIUsersResourceIsSearchableOnlyByAdmins {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:1 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *authMigrations =
+      [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:@"modules/auth/Migrations"];
+  BOOL migrated = [ALNMigrationRunner applyMigrationsAtPath:authMigrations
+                                                   database:database
+                                             databaseTarget:nil
+                                           versionNamespace:@"phase14_search_auth"
+                                                     dryRun:NO
+                                               appliedFiles:NULL
+                                                      error:&error];
+  XCTAssertTrue(migrated, @"%@", error);
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *email = [NSString stringWithFormat:@"searchable-%@@example.test", token];
+  NSString *subject = [NSString stringWithFormat:@"user:phase14-%@", token];
+  NSInteger inserted = [database executeCommand:@"INSERT INTO auth_users (subject, email, display_name, roles_json) "
+                                                 "VALUES ($1, $2, 'Searchable Person', '[\"user\"]')"
+                                     parameters:@[ subject, email ]
+                                          error:&error];
+  XCTAssertEqual((NSInteger)1, inserted);
+  XCTAssertNil(error);
+
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase14SearchAuthMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+
+  NSDictionary *metadata = [[ALNSearchModuleRuntime sharedRuntime] resourceMetadataForIdentifier:@"users"];
+  XCTAssertEqualObjects(@"role_gated", metadata[@"queryPolicy"]);
+  XCTAssertEqualObjects(@[ @"admin" ], metadata[@"queryRoles"]);
+  XCTAssertEqualObjects(@2, metadata[@"queryMinimumAuthAssuranceLevel"]);
+
+  ALNResponse *queueResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/search/api/resources/users/reindex"
+                                       queryString:@""
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, queueResponse.statusCode);
+  ALNResponse *workerResponse =
+      [app dispatchRequest:[self requestWithMethod:@"POST"
+                                              path:@"/jobs/api/run-worker"
+                                       queryString:@""
+                                           headers:@{ @"Accept" : @"application/json" }
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, workerResponse.statusCode);
+
+  NSString *queryString = [NSString stringWithFormat:@"q=%@", token];
+  NSDictionary *expectedStatus = @{ @"anonymous" : @401, @"member" : @403 };
+  for (NSString *caller in @[ @"anonymous", @"member" ]) {
+    NSDictionary *headers = @{ @"Accept" : @"application/json", @"X-Phase14-Caller" : caller };
+    ALNResponse *scoped = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                  path:@"/search/api/resources/users/query"
+                                                           queryString:queryString
+                                                               headers:headers
+                                                                  body:nil]];
+    XCTAssertEqual([expectedStatus[caller] integerValue], scoped.statusCode, @"%@", caller);
+    NSString *scopedBody = [[NSString alloc] initWithData:scoped.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+    XCTAssertFalse([scopedBody containsString:email], @"%@", caller);
+
+    ALNResponse *unscoped = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:@"/search/api/query"
+                                                             queryString:queryString
+                                                                 headers:headers
+                                                                    body:nil]];
+    XCTAssertEqual((NSInteger)200, unscoped.statusCode, @"%@", caller);
+    XCTAssertEqualObjects(@0, [self JSONObjectFromResponse:unscoped][@"data"][@"total"], @"%@", caller);
+
+    ALNResponse *listing = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                   path:@"/search/api/resources"
+                                                            queryString:@""
+                                                                headers:headers
+                                                                   body:nil]];
+    XCTAssertEqual((NSInteger)200, listing.statusCode, @"%@", caller);
+    NSString *listingBody = [[NSString alloc] initWithData:listing.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+    XCTAssertFalse([listingBody containsString:@"\"users\""], @"%@", caller);
+  }
+
+  ALNResponse *adminQuery = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:@"/search/api/resources/users/query"
+                                                             queryString:queryString
+                                                                 headers:@{ @"Accept" : @"application/json" }
+                                                                    body:nil]];
+  XCTAssertEqual((NSInteger)200, adminQuery.statusCode);
+  NSArray *results = [self JSONObjectFromResponse:adminQuery][@"data"][@"results"] ?: @[];
+  XCTAssertEqual((NSUInteger)1, [results count]);
+  XCTAssertEqualObjects(email, [results firstObject][@"fields"][@"email"]);
+
+  [database executeCommand:@"DELETE FROM auth_users WHERE subject = $1" parameters:@[ subject ] error:NULL];
 }
 
 @end
