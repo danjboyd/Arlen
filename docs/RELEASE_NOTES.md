@@ -446,6 +446,14 @@
     and uses `LIKE ... ESCAPE '\'`, so `q=%` no longer matches every
     document.
 
+- Windows is now documented as a supported development platform, on the
+  gnustep-cli `v0.1.1` managed MSYS2 `CLANG64` toolchain, which includes
+  libcurl. The new `docs/GETTING_STARTED_WINDOWS.md` covers the toolchain,
+  `install.ps1`, and building and running apps. README, the docs index, `WINDOWS_CLANG64.md`,
+  `TOOLCHAIN_MATRIX.md` and `CLI_REFERENCE.md` carry the new support
+  statement. Windows production (`propane`, `jobs-worker`, service deploys) is
+  planned for 0.4.0 (#200).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.

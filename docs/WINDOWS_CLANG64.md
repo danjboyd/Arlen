@@ -1,9 +1,16 @@
-# Windows CLANG64 Preview
+# Windows CLANG64
 
-Last updated: 2026-04-20
+Last updated: 2026-10-16
 
-This document records the current `main`-branch reintegration slice of Arlen's
-native Windows work for MSYS2 `CLANG64`.
+Windows is supported for **development** from Arlen 0.3.0, on the
+gnustep-cli managed MSYS2 `CLANG64` toolchain. You can install Arlen with
+`install.ps1`, create apps with `arlen new`, build them, and run them under
+`boomhauer`. **Production on Windows is not supported yet**: `propane`,
+`jobs-worker` and service deploys are planned for 0.4.0. To install and get
+started, see [Getting Started on Windows](GETTING_STARTED_WINDOWS.md).
+
+This document covers the `CLANG64` entry path, the Windows CI lanes, and the
+packaged-release contract.
 
 Current scope on `main`:
 
@@ -16,10 +23,8 @@ Current scope on `main`:
 - focused Windows DB smoke and runtime parity lanes
 - a main-based Windows preview workflow
 
-This is still not a full claim that current `main` has complete Windows
-support. Runtime parity, packaged-release parity, deploy/doctor parity, and
-preview CI coverage are now forward ported, but Windows remains a preview
-target rather than a general production support claim.
+Development is the supported scope. Production hosting stays out of scope
+until 0.4.0; see the support statement below.
 
 ## 1. Host Entry Path
 
@@ -50,33 +55,31 @@ MSYS2 at `C:\msys64`. Arlen's runtime uses the same search order to find
 ### Toolchain from gnustep-cli
 
 The public way to get a `CLANG64` GNUstep toolchain is the gnustep-cli
-PowerShell bootstrap. Pass the stable manifest explicitly; the bootstrap
-script at the `v0.1.0` tag otherwise selects `0.1.0-dev`:
+PowerShell bootstrap. Arlen 0.3.0 needs gnustep-cli `v0.1.1`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json
+iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/release-manifest.json
 ```
 
-It installs to `%LOCALAPPDATA%\gnustep-cli`, which is itself an MSYS2 root
-with `pacman`. It does not include libcurl; install it inside that root:
-
-```sh
-pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl
-```
+It installs to `%LOCALAPPDATA%\gnustep-cli` (pass `--root DIR` for another
+location), which is itself an MSYS2 root. `v0.1.1` includes libcurl (with TLS
+and asynchronous DNS), so nothing else needs to be installed into it. The
+prebuilt Windows release bundles `libpq.dll`.
 
 Never run `pacman -Sy` or `pacman -Syu` against the managed root, and don't
-install anything else into it. The managed root is a pinned toolchain: a
-database refresh makes later installs partial upgrades (one left the root's
-`python3` newer than its `expat`, so `import pyexpat` failed), and the live
-repository's current clang breaks the shipped gnustep-base headers.
+install anything into it. The managed root is a pinned toolchain: a database
+refresh makes later installs partial upgrades (one left the root's `python3`
+newer than its `expat`, so `import pyexpat` failed), and the live repository's
+current clang breaks the shipped gnustep-base headers.
 
-Known issues in the `v0.1.0` Windows toolchain, worked around by Arlen's
-build: libdispatch's `os/generic_win_base.h` redefines `mode_t` (Arlen
-compiles with `-DHAVE_MODE_T=1`) and `pthread_attr_t` (Arlen sources avoid
-`<pthread.h>`); the shipped gnustep-base predates
-`+dataWithContentsOfFile:options:error:` (use `ALNPlatformMappedFileData`);
-and drives mount under `/cygdrive/c` rather than `/c`. Fixes for the first two
-are queued for the next gnustep-cli Windows republish.
+`v0.1.1` fixes the `v0.1.0` toolchain's libdispatch header clashes over
+`mode_t` and `pthread_attr_t`. Arlen's build keeps its workarounds
+(`-DHAVE_MODE_T=1`, no `<pthread.h>` in Arlen sources), which are harmless on
+`v0.1.1`. Arlen also avoids `+dataWithContentsOfFile:options:error:`, which
+the `v0.1.0` gnustep-base lacked (it uses `ALNPlatformMappedFileData`). The
+managed root mounts drives under `/cygdrive/c` rather than `/c`, so Arlen's
+scripts convert paths with `cygpath`.
 
 For Windows runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
@@ -93,7 +96,7 @@ Expected inside the active `CLANG64` environment:
 - `bash`
 - `gnustep-config`
 - `libdispatch`
-- libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`)
+- libcurl headers/library with TLS and asynchronous DNS (`mingw-w64-clang-x86_64-curl`, included in gnustep-cli `v0.1.1`)
 
 Recommended for the current Windows preview lanes:
 
@@ -201,23 +204,29 @@ Minimum assumptions that still remain external on Windows:
 - the preview path is validated through a self-hosted Windows workflow rather
   than a generic GitHub-hosted runner image
 
-## 5. Current Non-Claims
+## 5. Not Supported Yet
 
-Not yet claimed on current `main`:
+Planned for 0.4.0:
 
-- full unit/integration/live/perf confidence parity
-- generic supported production hosting on Windows
-- a Windows operator path that does not depend on MSYS2 `CLANG64` and the
-  GNUstep/MSYS2 runtime stack
+- `propane` as a production manager. `arlen propane` starts from a Windows
+  console, but its worker supervision, reloads and signal handling are not
+  validated on Windows yet.
+- Supervised `jobs-worker` processes and Windows service deploys
+  (`arlen deploy` targets).
+
+Not planned:
+
+- A Windows path that does not depend on MSYS2 `CLANG64` and the
+  GNUstep/MSYS2 runtime.
 
 ## 6. Support Statement
 
-Current Windows support statement:
-
-- Windows on MSYS2 `CLANG64` is a supported preview workflow for framework
-  development, runtime parity checks, and packaged release/deploy validation
-- the authoritative preview verification entrypoints are
-  `make phase24-windows-confidence` and `make test-unit` (CI);
-  `make windows-confidence` is a manual lane until Windows production in 0.4.0
-- Arlen does not yet claim broad production support for Windows deployments;
-  Linux remains the authoritative production baseline
+- **Development: supported.** Installing from the release
+  (`arlen-X.Y.Z-windows-x64.zip` through `install.ps1`), `arlen new`, building
+  apps, and running them under `boomhauer` with watch mode are supported on
+  64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
+- **Production: not supported until 0.4.0.** Deploy production apps to Linux,
+  the authoritative production baseline, or to macOS.
+- The `windows-preview` CI lane runs `make phase24-windows-confidence` and
+  `make test-unit`. `make windows-confidence` (packaged release and deploy
+  parity) is a manual lane until Windows production support lands in 0.4.0.

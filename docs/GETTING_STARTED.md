@@ -4,7 +4,8 @@ This guide gets you from a clean checkout to a running Arlen app without
 pulling you through contributor-only release or CI material first.
 
 If you are targeting macOS with Apple APIs rather than GNUstep, use
-`docs/GETTING_STARTED_MACOS.md` first.
+`docs/GETTING_STARTED_MACOS.md` first. On Windows, use
+`docs/GETTING_STARTED_WINDOWS.md` first.
 
 If you prefer a narrower path, see:
 
