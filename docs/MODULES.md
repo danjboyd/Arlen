@@ -118,11 +118,11 @@ app keeps running the old module code until you re-vendor each module:
 # then rebuild and restart (boomhauer rebuilds on its next start)
 ```
 
-`arlen module doctor` and `./build/arlen doctor` report `module_outdated` for
-every vendored module whose framework copy has a newer version, and the app
-logs `vendored module is older than the framework copy` at startup (outside
-the `test` environment) when it runs under `boomhauer`, `propane` or
-`jobs-worker`, which export `ARLEN_FRAMEWORK_ROOT`.
+`arlen doctor` and `arlen module doctor` report `module_outdated` for every
+vendored module whose framework copy has a newer version, and the app logs
+`vendored module is older than the framework copy` at startup (outside the
+`test` environment) when it runs under `boomhauer`, `propane` or
+`jobs-worker`, which export `ARLEN_FRAMEWORK_ROOT` to it.
 
 Re-run it for every installed module whenever you move your framework pin.
 First-party module sources can change without a `version` bump, so `upgrade`

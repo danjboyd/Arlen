@@ -127,6 +127,11 @@ Run bootstrap environment diagnostics without requiring a framework build.
  `vendor/tools-xctest` is present; otherwise it looks for `xctest` on `PATH`
 - verifies `dispatch/dispatch.h` is available to `clang` after GNUstep init so
  managed toolchains without libdispatch headers fail early
+- in an app root, warns (`module_outdated`) for each vendored
+ `modules/<id>` whose `version` is lower than the framework checkout's
+ `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
+ `arlen module migrate`, then rebuild (a version-string comparison only;
+ `arlen module doctor` also compares file contents)
 - with `--env production`, warns (`operability_endpoints`) when `/metrics` and
  `/clusterz` are anonymous, i.e. neither `observability.operabilityToken` /
  `ARLEN_OPERABILITY_TOKEN` nor `observability.operabilityLoopbackOnly` /
@@ -550,9 +555,9 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
  - `module_outdated`: the framework checkout's copy of the module has a newer
    `version` than the app's vendored copy; the hint is
    `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild.
-   `./build/arlen doctor` runs the same version check, and apps log it at
-   startup (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as it is under
-   `boomhauer`, `propane` and `jobs-worker`
+   `arlen doctor` runs the same version check, and apps log it at startup
+   (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as `boomhauer`,
+   `propane` and `jobs-worker` do for the app process
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
  - `module_framework_copy_differs`: the vendored copy differs from
