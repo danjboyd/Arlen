@@ -19,6 +19,7 @@
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
 NSString *const ALNPgErrorConnectionLostKey = @"connection_lost";
+NSString *const ALNPgErrorStatementNotSentKey = @"statement_not_sent";
 NSString *const ALNPgErrorDiagnosticsKey = @"pg_diagnostics";
 NSString *const ALNPgErrorSQLStateKey = @"sqlstate";
 NSString *const ALNPgErrorServerDetailKey = @"server_detail";
@@ -149,6 +150,38 @@ static ALNOid (*ALNPQftype)(const PGresult *res, int columnNumber) = NULL;
 static int (*ALNPQgetisnull)(const PGresult *res, int rowNumber, int columnNumber) = NULL;
 static char *(*ALNPQgetvalue)(const PGresult *res, int rowNumber, int columnNumber) = NULL;
 static char *(*ALNPQcmdTuples)(PGresult *res) = NULL;
+typedef void (*ALNPQnoticeReceiver)(void *arg, const PGresult *res);
+static ALNPQnoticeReceiver (*ALNPQsetNoticeReceiver)(PGconn *conn, ALNPQnoticeReceiver proc, void *arg) = NULL;
+static int (*ALNPQisBusy)(PGconn *conn) = NULL;
+
+// Per-connection state for ALNPgNoticeReceiver. A server that ends a session
+// sends an ErrorResponse with severity FATAL; on an idle connection libpq
+// hands it to the notice receiver rather than to a result.
+typedef struct {
+  BOOL serverEndedSession;
+  ALNPQnoticeReceiver previous;
+  void *previousArg;
+} ALNPgNoticeState;
+
+static void ALNPgNoticeReceiver(void *arg, const PGresult *res) {
+  ALNPgNoticeState *state = (ALNPgNoticeState *)arg;
+  if (state == NULL) {
+    return;
+  }
+  const char *severity = NULL;
+  if (ALNPQresultErrorField != NULL) {
+    severity = ALNPQresultErrorField(res, 'V');  // PG_DIAG_SEVERITY_NONLOCALIZED
+    if (severity == NULL) {
+      severity = ALNPQresultErrorField(res, 'S');  // PG_DIAG_SEVERITY
+    }
+  }
+  if (severity != NULL && (strcmp(severity, "FATAL") == 0 || strcmp(severity, "PANIC") == 0)) {
+    state->serverEndedSession = YES;
+  }
+  if (state->previous != NULL) {
+    state->previous(state->previousArg, res);
+  }
+}
 
 #if defined(_WIN32)
 static NSString *ALNLibpqDynamicLoaderLastError(void) {
@@ -310,6 +343,9 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ALNBindOptionalLibpqSymbol((void **)&ALNPQnotifies, handle, "PQnotifies");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQsocket, handle, "PQsocket");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQfreemem, handle, "PQfreemem");
+    // Detecting a session the server ended while the connection sat idle.
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQsetNoticeReceiver, handle, "PQsetNoticeReceiver");
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQisBusy, handle, "PQisBusy");
 
     if (!ok) {
       gLibpqLoadError =
@@ -1944,6 +1980,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @interface ALNPgConnection () {
   PGconn *_conn;
   BOOL _inTransaction;
+  ALNPgNoticeState _noticeState;
 }
 
 @property(nonatomic, copy, readwrite) NSString *connectionString;
@@ -1964,6 +2001,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 - (BOOL)hasActiveTransaction;
 - (void)reportConnectionLossForError:(NSError **)error;
+- (BOOL)isInsideTransaction;
+- (BOOL)failIfConnectionClosedBeforeSend:(NSError **)error;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
@@ -2018,6 +2057,17 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
   _open = YES;
   _inTransaction = NO;
+  _noticeState.serverEndedSession = NO;
+  _noticeState.previous = NULL;
+  _noticeState.previousArg = NULL;
+  if (ALNPQsetNoticeReceiver != NULL) {
+    // A NULL proc returns the current receiver without changing it. On a new
+    // connection that is libpq's default receiver, whose arg is NULL; chaining
+    // to it keeps notices going to the notice processor as before.
+    _noticeState.previous = ALNPQsetNoticeReceiver(_conn, NULL, NULL);
+    _noticeState.previousArg = NULL;
+    (void)ALNPQsetNoticeReceiver(_conn, ALNPgNoticeReceiver, &_noticeState);
+  }
   _preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAuto;
   _preparedStatementCacheLimit = 128;
   _builderCompilationCacheLimit = 128;
@@ -2153,6 +2203,71 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     *error = [NSError errorWithDomain:ALNPgErrorDomain code:ALNPgErrorConnectionFailed userInfo:userInfo];
   }
   [self close];
+}
+
+// YES while a transaction is open on this connection: one started with
+// -beginTransaction, or one the caller opened by sending BEGIN by hand
+// (libpq's transaction status is anything but PQTRANS_IDLE).
+- (BOOL)isInsideTransaction {
+  if (_inTransaction) {
+    return YES;
+  }
+  // PGTransactionStatusType: 0 = PQTRANS_IDLE, 4 = PQTRANS_UNKNOWN (bad
+  // connection); 1-3 = a command or transaction in progress.
+  int status = (_conn != NULL) ? ALNPQtransactionStatus(_conn) : 0;
+  return status >= 1 && status <= 3;
+}
+
+// Called just before a statement is sent. ALNPg executes with the synchronous
+// PQexec/PQexecParams/PQprepare/PQexecPrepared calls, which send and then wait
+// in one step: when they fail, the caller cannot tell whether the statement
+// reached the server. So the "never reached the server" case is decided here,
+// before sending. libpq keeps its socket non-blocking, so PQconsumeInput reads
+// whatever the server already sent without waiting. A server that ended the
+// session while the connection sat idle (restart, failover, idle timeout,
+// pg_terminate_backend) has already sent its FATAL message or closed the
+// socket; reading it marks the connection CONNECTION_BAD. In that case the
+// statement is not sent at all, the connection is closed, and the error
+// carries ALNPgErrorStatementNotSentKey, which is what makes a write safe to
+// retry. A connection that fails after this check (the send went out and the
+// failure came while waiting for the result) is reported without that key.
+- (BOOL)failIfConnectionClosedBeforeSend:(NSError **)error {
+  if (_conn == NULL) {
+    return NO;
+  }
+  if (ALNPQconsumeInput == NULL) {
+    return NO;
+  }
+  // A server that ends a session sends a FATAL message and then closes the
+  // socket. Either one is enough: the end of stream marks the connection
+  // CONNECTION_BAD, and the FATAL message, once PQisBusy parses it, reaches
+  // ALNPgNoticeReceiver (libpq routes errors on an idle connection to the
+  // notice receiver).
+  BOOL alive = (ALNPQconsumeInput(_conn) != 0 && ALNPQstatus(_conn) == ALNConnectionOK);
+  if (alive && ALNPQisBusy != NULL) {
+    (void)ALNPQisBusy(_conn);
+    alive = (ALNPQstatus(_conn) == ALNConnectionOK);
+  }
+  if (alive && _noticeState.serverEndedSession) {
+    alive = NO;
+  }
+  if (alive) {
+    return NO;
+  }
+  if (error != NULL) {
+    NSString *detail = [NSString stringWithUTF8String:ALNPQerrorMessage(_conn) ?: ""];
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:@{
+      NSLocalizedDescriptionKey : @"connection was closed by the server before the statement was sent",
+      ALNPgErrorConnectionLostKey : @YES,
+      ALNPgErrorStatementNotSentKey : @YES,
+    }];
+    if ([detail length] > 0) {
+      userInfo[@"detail"] = detail;
+    }
+    *error = [NSError errorWithDomain:ALNPgErrorDomain code:ALNPgErrorConnectionFailed userInfo:userInfo];
+  }
+  [self close];
+  return YES;
 }
 
 - (BOOL)checkConnectionLiveness:(NSError **)error {
@@ -2482,6 +2597,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NO;
   }
 
+  if ([self failIfConnectionClosedBeforeSend:error]) {
+    return NO;
+  }
   PGresult *result = ALNPQprepare(_conn,
                                [name UTF8String],
                                [sql UTF8String],
@@ -2544,6 +2662,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NULL;
   }
 
+  if ([self failIfConnectionClosedBeforeSend:error]) {
+    ALNPgFreeExecParamsBuffer(&paramBuffer);
+    return NULL;
+  }
   PGresult *result = ALNPQexecParams(_conn,
                                   [sql UTF8String],
                                   (int)count,
@@ -2588,6 +2710,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NULL;
   }
 
+  if ([self failIfConnectionClosedBeforeSend:error]) {
+    return NULL;
+  }
   PGresult *result = ALNPQexec(_conn, [sql UTF8String]);
   if (result == NULL) {
     if (error != NULL) {
@@ -2631,6 +2756,10 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NULL;
   }
 
+  if ([self failIfConnectionClosedBeforeSend:error]) {
+    ALNPgFreeExecParamsBuffer(&paramBuffer);
+    return NULL;
+  }
   PGresult *result = ALNPQexecPrepared(_conn,
                                     [name UTF8String],
                                     (int)count,
@@ -3765,12 +3894,112 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
          [error.userInfo[ALNPgErrorConnectionLostKey] boolValue];
 }
 
-// Runs `work` on a pooled connection. When a connection reused from the idle
-// list turns out to have been closed by the server, the statement could not
-// have run, so it is retried once on a newly opened connection (idle
-// connections are discarded first). A freshly opened connection is never
-// retried, so a statement is not sent twice.
+// Conservative: YES only for a statement that starts with SELECT, WITH,
+// VALUES, TABLE, SHOW or EXPLAIN (without ANALYZE) and contains none of the
+// words that write or take locks or change session state (INSERT, UPDATE,
+// DELETE, MERGE, TRUNCATE, COPY, CALL, DO, INTO, LOCK, SHARE, NOTIFY,
+// LISTEN, NEXTVAL, SETVAL, SET_CONFIG, ANALYZE, and the pg_advisory and
+// pg_try_advisory lock functions). String literals, quoted identifiers and
+// comments are skipped. A SELECT that calls a user function with side
+// effects is still classified as a read; run such statements with
+// executeCommand, which is never retried once sent.
+static BOOL ALNPgSQLIsPlainRead(NSString *sql) {
+  static NSSet *firstWords = nil;
+  static NSSet *writeWords = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    firstWords = [NSSet setWithArray:@[ @"SELECT", @"WITH", @"VALUES", @"TABLE", @"SHOW", @"EXPLAIN" ]];
+    writeWords = [NSSet setWithArray:@[
+      @"INSERT", @"UPDATE", @"DELETE", @"MERGE", @"TRUNCATE", @"COPY", @"CALL", @"DO", @"INTO", @"LOCK",
+      @"SHARE", @"NOTIFY", @"LISTEN", @"NEXTVAL", @"SETVAL", @"SET_CONFIG", @"ANALYZE",
+    ]];
+  });
+  NSUInteger length = [sql length];
+  if (length == 0) {
+    return NO;
+  }
+  NSMutableString *word = [NSMutableString string];
+  __block BOOL sawFirst = NO;
+  NSUInteger index = 0;
+  BOOL (^finishWord)(void) = ^BOOL {
+    if ([word length] == 0) {
+      return YES;
+    }
+    NSString *upper = [word uppercaseString];
+    [word setString:@""];
+    if (!sawFirst) {
+      sawFirst = YES;
+      return [firstWords containsObject:upper];
+    }
+    return !([writeWords containsObject:upper] || [upper hasPrefix:@"PG_ADVISORY"] ||
+             [upper hasPrefix:@"PG_TRY_ADVISORY"]);
+  };
+  while (index < length) {
+    unichar ch = [sql characterAtIndex:index];
+    if (ch == '\'' || ch == '"') {
+      if (!finishWord()) {
+        return NO;
+      }
+      unichar quote = ch;
+      index += 1;
+      while (index < length && [sql characterAtIndex:index] != quote) {
+        index += 1;
+      }
+      index += 1;
+      continue;
+    }
+    if (ch == '-' && index + 1 < length && [sql characterAtIndex:index + 1] == '-') {
+      if (!finishWord()) {
+        return NO;
+      }
+      while (index < length && [sql characterAtIndex:index] != '\n') {
+        index += 1;
+      }
+      continue;
+    }
+    if (ch == '/' && index + 1 < length && [sql characterAtIndex:index + 1] == '*') {
+      if (!finishWord()) {
+        return NO;
+      }
+      index += 2;
+      while (index + 1 < length &&
+             !([sql characterAtIndex:index] == '*' && [sql characterAtIndex:index + 1] == '/')) {
+        index += 1;
+      }
+      index += 2;
+      continue;
+    }
+    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_' || (ch >= '0' && ch <= '9' && [word length] > 0)) {
+      [word appendFormat:@"%C", ch];
+    } else if (!finishWord()) {
+      return NO;
+    }
+    index += 1;
+  }
+  return finishWord() && sawFirst;
+}
+
+static BOOL ALNPgErrorStatementNotSent(NSError *error) {
+  return ALNPgErrorIsConnectionLost(error) && [error.userInfo[ALNPgErrorStatementNotSentKey] boolValue];
+}
+
+// Runs `work` on a pooled connection, retrying once on a new connection when a
+// connection reused from the idle list turns out to have been closed by the
+// server. The retry policy:
+//   - never when a transaction was open on the connection (an earlier
+//     statement of it would be lost and this one would run on its own);
+//   - never for a connection that was opened for this call;
+//   - reads (`readOnly`, see ALNPgSQLIsPlainRead): when the connection was lost
+//     at any point;
+//   - writes: only when the statement was never sent
+//     (ALNPgErrorStatementNotSentKey, see -failIfConnectionClosedBeforeSend:).
+//     If it was sent and the connection failed while waiting for the result,
+//     the server may have run it, so the error is returned instead of running
+//     the write a second time.
+// Idle connections are closed before a retry: the same server event very
+// likely ended them too.
 - (BOOL)runOnPooledConnection:(BOOL (^)(ALNPgConnection *connection, NSError **error))work
+                     readOnly:(BOOL)readOnly
                         error:(NSError **)error {
   for (NSUInteger attempt = 0; attempt < 2; attempt++) {
     NSError *acquireError = nil;
@@ -3782,6 +4011,7 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
       return NO;
     }
     BOOL reused = connection.reusedFromPool;
+    BOOL insideTransaction = [connection isInsideTransaction];
     NSError *runError = nil;
     BOOL ok = NO;
     @try {
@@ -3792,7 +4022,9 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
     if (ok) {
       return YES;
     }
-    if (attempt == 0 && reused && ALNPgErrorIsConnectionLost(runError)) {
+    BOOL retryable = (attempt == 0 && reused && !insideTransaction &&
+                      (readOnly ? ALNPgErrorIsConnectionLost(runError) : ALNPgErrorStatementNotSent(runError)));
+    if (retryable) {
       [self.poolCondition lock];
       self.connectionRetryCount += 1;
       [self.poolCondition unlock];
@@ -3843,7 +4075,7 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
   (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
     rows = [connection executeQuery:sql parameters:parameters ?: @[] error:runError];
     return rows != nil;
-  } error:error];
+  } readOnly:ALNPgSQLIsPlainRead(sql) error:error];
   return rows;
 }
 
@@ -3855,7 +4087,7 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
   (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
     result = [connection executeQueryResult:sql parameters:parameters ?: @[] error:runError];
     return result != nil;
-  } error:error];
+  } readOnly:ALNPgSQLIsPlainRead(sql) error:error];
   return result;
 }
 
@@ -3866,7 +4098,8 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
   (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
     rows = [connection executeBuilderQuery:builder error:runError];
     return rows != nil;
-  } error:error];
+  } readOnly:(builder.kind == ALNSQLBuilderKindSelect && ALNPgSQLIsPlainRead([builder buildSQL:NULL]))
+        error:error];
   return rows;
 }
 
@@ -3878,7 +4111,7 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
   (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
     affected = [connection executeCommand:sql parameters:parameters ?: @[] error:runError];
     return affected >= 0;
-  } error:error];
+  } readOnly:NO error:error];
   return affected;
 }
 
@@ -3911,12 +4144,32 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
   (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
     affected = [connection executeBuilderCommand:builder error:runError];
     return affected >= 0;
-  } error:error];
+  } readOnly:NO error:error];
   return affected;
 }
 
 - (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection, NSError **error))block
                   error:(NSError **)error {
+  return [self runTransaction:block replayOnConnectionLoss:NO error:error];
+}
+
+- (BOOL)withTransactionReplayingOnConnectionLoss:(BOOL (^)(ALNPgConnection *connection, NSError **error))block
+                                           error:(NSError **)error {
+  return [self runTransaction:block replayOnConnectionLoss:YES error:error];
+}
+
+// Runs `block` between BEGIN and COMMIT on one pooled connection. When BEGIN
+// itself fails because a connection reused from the idle list was closed by
+// the server, nothing has run yet, so the transaction restarts once on a new
+// connection. When the connection is lost later (inside the block or at
+// COMMIT), the server rolled back what had run, and the connection-lost error
+// is returned; the block is replayed from BEGIN on a new connection, once,
+// only with `replayOnConnectionLoss` (the caller's promise that running the
+// whole block again is safe: it is idempotent or compare-and-set guarded,
+// including when COMMIT may have succeeded before the connection dropped).
+- (BOOL)runTransaction:(BOOL (^)(ALNPgConnection *connection, NSError **error))block
+    replayOnConnectionLoss:(BOOL)replayOnConnectionLoss
+                     error:(NSError **)error {
   ALNPgClearError(error);
   if (block == nil) {
     if (error != NULL) {
@@ -3939,49 +4192,49 @@ static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
     }
 
     BOOL reused = connection.reusedFromPool;
-    BOOL retry = NO;
     BOOL success = NO;
-    NSError *blockError = nil;
+    BOOL beginFailed = NO;
+    NSError *failure = nil;
     @try {
       NSError *beginError = nil;
       if (![connection beginTransaction:&beginError]) {
-        // BEGIN is the first statement, so a connection the server closed
-        // while it sat idle fails here, before the block has run: restart
-        // the transaction once on a new connection.
-        if (attempt == 0 && reused && ALNPgErrorIsConnectionLost(beginError)) {
-          retry = YES;
-        } else if (error != NULL) {
-          *error = beginError;
-        }
+        beginFailed = YES;
+        failure = beginError;
       } else {
+        NSError *blockError = nil;
         success = block(connection, &blockError);
         if (success) {
           NSError *commitError = nil;
           if (![connection commitTransaction:&commitError]) {
             success = NO;
-            if (error != NULL) {
-              *error = commitError;
-            }
+            failure = commitError;
           }
         } else {
           NSError *rollbackError = nil;
           (void)[connection rollbackTransaction:&rollbackError];
-          if (error != NULL) {
-            *error = blockError ?: rollbackError;
-          }
+          failure = blockError ?: rollbackError;
         }
       }
     } @finally {
       [self releaseConnection:connection];
     }
-    if (retry) {
+    if (success) {
+      return YES;
+    }
+    BOOL lost = ALNPgErrorIsConnectionLost(failure);
+    BOOL restart = (attempt == 0 && lost &&
+                    ((beginFailed && reused) || (!beginFailed && replayOnConnectionLoss)));
+    if (restart) {
       [self.poolCondition lock];
       self.connectionRetryCount += 1;
       [self.poolCondition unlock];
       [self discardIdleConnections];
       continue;
     }
-    return success;
+    if (error != NULL) {
+      *error = failure;
+    }
+    return NO;
   }
   return NO;
 }

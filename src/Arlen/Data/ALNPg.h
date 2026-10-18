@@ -45,6 +45,9 @@ extern NSString *const ALNPgQueryEventSQLKey;
 // userInfo key (NSNumber YES) on an ALNPgErrorConnectionFailed error raised
 // because the server closed the connection while a statement ran on it.
 extern NSString *const ALNPgErrorConnectionLostKey;
+// userInfo key (NSNumber YES), alongside ALNPgErrorConnectionLostKey, when the
+// connection was found closed before the statement was sent, so it never ran.
+extern NSString *const ALNPgErrorStatementNotSentKey;
 
 typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorConnectionFailed = 1,
@@ -192,9 +195,21 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
                               error:(NSError *_Nullable *_Nullable)error;
 
+// Runs `block` in a transaction on one pooled connection. If BEGIN fails
+// because the server had closed an idle connection, it restarts once on a new
+// connection (nothing has run yet). If the connection is lost inside the block
+// or at COMMIT, the server rolled back what ran and the connection-lost error
+// (ALNPgErrorConnectionLostKey) is returned; the block is not run again.
 - (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection,
                                   NSError *_Nullable *_Nullable error))block
                   error:(NSError *_Nullable *_Nullable)error;
+// Like withTransaction:, but when the connection is lost inside the block or
+// at COMMIT, runs the whole block again from BEGIN on a new connection, once.
+// Use it only for blocks that are safe to run twice (idempotent or guarded by
+// compare-and-set), since a lost connection at COMMIT may follow a commit.
+- (BOOL)withTransactionReplayingOnConnectionLoss:(BOOL (^)(ALNPgConnection *connection,
+                                                           NSError *_Nullable *_Nullable error))block
+                                           error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)withTransactionUsingBlock:
             (BOOL (^)(id<ALNDatabaseConnection> connection,
                       NSError *_Nullable *_Nullable error))block

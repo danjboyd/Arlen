@@ -28,9 +28,15 @@
   (restart, failover, idle timeout, `pg_terminate_backend`). Such a failure is
   reported as `ALNPgErrorConnectionFailed` with the new
   `ALNPgErrorConnectionLostKey`, whatever SQLSTATE (or none) the result
-  carried, and the connection is closed. Pooled single statements on a reused
-  connection, and transactions whose `BEGIN` failed, are retried once on a new
-  connection; `poolDiagnostics` adds `connection_retry_count`. The auth module
+  carried, and the connection is closed and never reused. On a connection
+  from the idle list, the pool retries a plain read once on a new
+  connection; a write only when the statement had not been sent
+  (`ALNPgErrorStatementNotSentKey`: the connection was found closed before
+  sending); nothing while a transaction is open. `withTransaction:` restarts
+  only when `BEGIN` itself failed; the new
+  `withTransactionReplayingOnConnectionLoss:` also replays the whole block
+  once for blocks that are safe to run twice. `poolDiagnostics` adds
+  `connection_retry_count`. The auth module
   treats these failures, and any database failure without a SQLSTATE, as the
   database being unavailable (`503` with `Retry-After`), never as a failed
   sign-in, and no longer passes driver messages to clients.
