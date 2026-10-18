@@ -185,12 +185,17 @@ These need auth module migration `004_auth_totp_limits` (run
     does not reveal whether an account exists.
   - the tables stay bounded: at most once a minute a sign-in starts a prune
     on a background queue, so the request does not wait for it. Each prune
-    deletes at most `pruneBatchSize` rows (default 1000): rows with no active
-    wait that have not changed for 24 hours (or `accountWindowSeconds`, if
-    longer), then, above `maxTrackedEntries` rows, the oldest rows without an
-    active wait, and only then the oldest waiting rows. Every statement is
-    limited and walks the `updated_at` index; the only count reads at most
-    `maxTrackedEntries + pruneBatchSize` rows.
+    deletes at most `pruneBatchSize` rows (default 1000). First it removes
+    expired rows with no active wait: account-wide rows untouched for a whole
+    `accountWindowSeconds` (their count would restart anyway), pair rows
+    untouched for 24 hours unless they signed in within `trustedPairDays`, and
+    mail rows past their window. Then, above `maxTrackedEntries` rows, it
+    removes pair rows still under `maxFailures` failures with no active wait,
+    oldest first, known devices last. Account-wide rows and rows with an
+    active wait are never removed to meet the cap: if only those are left,
+    the table stays over the cap until they expire and a warning is logged.
+    Every statement is limited and walks the `updated_at` index; the only
+    count reads at most `maxTrackedEntries + pruneBatchSize` rows.
 - forgot-password is not subject to the password delays or the account-wide
   ceiling, so the owner can always ask for a reset. It has its own limit
   against sending lots of mail (`auth_mail_sends`): per hashed submitted email

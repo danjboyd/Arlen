@@ -771,47 +771,109 @@
   XCTAssertEqualObjects(@"0", [[database executeQuery:countSQL parameters:likeParameters error:NULL] firstObject][@"total"]);
 }
 
+- (NSString *)countRowsSQL {
+  return @"SELECT COUNT(*)::text AS total FROM auth_password_attempts WHERE key_hash = $1";
+}
+
+- (NSString *)rowCountForKey:(NSString *)key {
+  return [[[self database] executeQuery:[self countRowsSQL] parameters:@[ key ] error:NULL] firstObject][@"total"];
+}
+
 - (void)testPasswordAttemptPruningDropsExpiredRowsAndCapsGrowth {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithAttemptLimits:@{
-    @"password" : @{ @"maxFailures" : @5, @"maxTrackedEntries" : @4 },
+    @"password" : @{ @"maxFailures" : @5, @"maxTrackedEntries" : @100000 },
   }
                                                csrfEnabled:NO];
+  [[ALNAuthModuleRuntime sharedRuntime] setValue:@([[NSDate date] timeIntervalSince1970])
+                                          forKey:@"passwordAttemptsLastPrunedAt"];
   ALNPg *database = [self database];
   NSString *suffix = [[[NSUUID UUID] UUIDString] lowercaseString];
   NSString *staleKey = [@"stale-" stringByAppendingString:suffix];
+  NSString *staleAccountKey = [@"stale-account-" stringByAppendingString:suffix];
   NSString *delayedKey = [@"delayed-" stringByAppendingString:suffix];
-  XCTAssertEqual((NSInteger)1,
-                 [database executeCommand:@"INSERT INTO auth_password_attempts "
-                                          "(key_hash, client_ip, failure_count, updated_at) "
-                                          "VALUES ($1, '192.0.2.1', 1, NOW() - INTERVAL '3 days')"
-                               parameters:@[ staleKey ]
-                                    error:NULL]);
-  XCTAssertEqual((NSInteger)1,
-                 [database executeCommand:@"INSERT INTO auth_password_attempts "
-                                          "(key_hash, client_ip, failure_count, delayed_until, updated_at) "
-                                          "VALUES ($1, '192.0.2.1', 9, NOW() + INTERVAL '1 hour', NOW())"
-                               parameters:@[ delayedKey ]
-                                    error:NULL]);
-
+  NSString *trustedKey = [@"trusted-" stringByAppendingString:suffix];
+  NSArray *inserts = @[
+    @[ @"INSERT INTO auth_password_attempts (key_hash, client_ip, failure_count, updated_at) "
+       "VALUES ($1, '192.0.2.1', 1, NOW() - INTERVAL '3 days')", staleKey ],
+    @[ @"INSERT INTO auth_password_attempts (key_hash, client_ip, failure_count, updated_at) "
+       "VALUES ($1, '*', 7, NOW() - INTERVAL '2 hours')", staleAccountKey ],
+    @[ @"INSERT INTO auth_password_attempts (key_hash, client_ip, failure_count, delayed_until, updated_at) "
+       "VALUES ($1, '192.0.2.1', 9, NOW() + INTERVAL '1 hour', NOW() - INTERVAL '3 days')", delayedKey ],
+    @[ @"INSERT INTO auth_password_attempts (key_hash, client_ip, failure_count, last_success_at, updated_at) "
+       "VALUES ($1, '192.0.2.1', 0, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days')", trustedKey ],
+  ];
+  for (NSArray *insert in inserts) {
+    XCTAssertEqual((NSInteger)1, [database executeCommand:insert[0] parameters:@[ insert[1] ] error:NULL]);
+  }
+  NSMutableArray *flooded = [NSMutableArray array];
   for (NSUInteger index = 0; index < 4; index++) {
-    XCTAssertEqual((NSInteger)401,
-                   [self loginEmail:[self uniqueEmail] password:@"wrong-password" fromAddress:@"192.0.2.33" app:app]
-                       .statusCode);
+    NSString *email = [self uniqueEmail];
+    [flooded addObject:email];
+    XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:@"192.0.2.33" app:app].statusCode);
   }
   XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] prunePasswordAttempts] > 0);
 
-  NSArray *countRows = [database executeQuery:@"SELECT COUNT(*)::text AS total FROM auth_password_attempts"
-                                   parameters:@[]
-                                        error:NULL];
-  XCTAssertTrue([[countRows firstObject][@"total"] integerValue] <= 4, @"%@", countRows);
-  NSString *existsSQL = @"SELECT COUNT(*)::text AS total FROM auth_password_attempts WHERE key_hash = $1";
-  XCTAssertEqualObjects(@"0", [[database executeQuery:existsSQL parameters:@[ staleKey ] error:NULL] firstObject][@"total"]);
-  // Rows that are still delaying sign-in go last.
-  XCTAssertEqualObjects(@"1", [[database executeQuery:existsSQL parameters:@[ delayedKey ] error:NULL] firstObject][@"total"]);
-  XCTAssertTrue([database executeCommand:@"DELETE FROM auth_password_attempts WHERE key_hash = $1"
-                              parameters:@[ delayedKey ]
-                                   error:NULL] >= 0);
+  // Expired: the stale pair and the account row idle for a whole window.
+  XCTAssertEqualObjects(@"0", [self rowCountForKey:staleKey]);
+  XCTAssertEqualObjects(@"0", [self rowCountForKey:staleAccountKey]);
+  // Kept: an active wait, and a pair that signed in within trustedPairDays.
+  XCTAssertEqualObjects(@"1", [self rowCountForKey:delayedKey]);
+  XCTAssertEqualObjects(@"1", [self rowCountForKey:trustedKey]);
+  for (NSString *email in flooded) {
+    XCTAssertEqualObjects(@"1", [self passwordRowForEmail:email address:@"192.0.2.33"][@"failure_count"]);
+  }
+
+  // Over the cap, free-tier pairs go (the flood's, then the trusted pair);
+  // account rows and the active wait stay.
+  (void)[self applicationWithAttemptLimits:@{ @"password" : @{ @"maxFailures" : @5, @"maxTrackedEntries" : @4 } }
+                               csrfEnabled:NO];
+  [[ALNAuthModuleRuntime sharedRuntime] setValue:@([[NSDate date] timeIntervalSince1970])
+                                          forKey:@"passwordAttemptsLastPrunedAt"];
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] prunePasswordAttempts] > 0);
+  XCTAssertEqualObjects(@"1", [self rowCountForKey:delayedKey]);
+  for (NSString *email in flooded) {
+    XCTAssertEqual((NSUInteger)0, [[self passwordRowForEmail:email address:@"192.0.2.33"] count]);
+    XCTAssertEqualObjects(@"1", [self passwordRowForEmail:email address:@"*"][@"failure_count"]);
+  }
+  for (NSString *key in @[ delayedKey, trustedKey ]) {
+    XCTAssertTrue([database executeCommand:@"DELETE FROM auth_password_attempts WHERE key_hash = $1"
+                                parameters:@[ key ]
+                                     error:NULL] >= 0);
+  }
+}
+
+- (void)testPruneFloodKeepsAnotherAccountsCeilingCount {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"password" : @{ @"maxFailures" : @5, @"accountMaxFailures" : @50, @"maxTrackedEntries" : @5 },
+  }
+                                               csrfEnabled:NO];
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  [runtime setValue:@([[NSDate date] timeIntervalSince1970]) forKey:@"passwordAttemptsLastPrunedAt"];
+  NSString *target = [self registeredEmailWithPassword:@"mfa-limits-password-123" app:app];
+  for (NSString *address in @[ @"198.51.100.201", @"198.51.100.202", @"198.51.100.203" ]) {
+    XCTAssertEqual((NSInteger)401, [self loginEmail:target password:@"wrong-password" fromAddress:address app:app].statusCode);
+  }
+  // A pair with an active wait is protected too.
+  for (NSUInteger attempt = 0; attempt < 5; attempt++) {
+    (void)[self loginEmail:target password:@"wrong-password" fromAddress:@"198.51.100.204" app:app];
+  }
+  XCTAssertTrue([[self passwordRowForEmail:target address:@"198.51.100.204"][@"delay_remaining"] integerValue] > 0);
+  NSString *targetCount = [self passwordRowForEmail:target address:@"*"][@"failure_count"];
+  XCTAssertEqualObjects(@"8", targetCount);
+
+  for (NSUInteger index = 0; index < 20; index++) {
+    NSString *address = [NSString stringWithFormat:@"192.0.2.%lu", (unsigned long)(100 + index)];
+    (void)[self loginEmail:[self uniqueEmail] password:@"wrong-password" fromAddress:address app:app];
+  }
+  for (NSUInteger pass = 0; pass < 3; pass++) {
+    (void)[runtime prunePasswordAttempts];
+  }
+  XCTAssertEqualObjects(targetCount, [self passwordRowForEmail:target address:@"*"][@"failure_count"]);
+  XCTAssertTrue([[self passwordRowForEmail:target address:@"198.51.100.204"][@"delay_remaining"] integerValue] > 0);
+  // Free-tier pairs, the target's included, were the ones removed.
+  XCTAssertEqual((NSUInteger)0, [[self passwordRowForEmail:target address:@"198.51.100.201"] count]);
 }
 
 - (void)testVerificationKeepsWorkingWhenMigration004IsMissing {

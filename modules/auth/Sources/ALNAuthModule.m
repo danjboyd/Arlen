@@ -2747,82 +2747,125 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 #pragma mark - Password attempt delays and mail send limits
 
 // Deletes at most passwordPruneBatchSize rows per call, across
-// auth_password_attempts and auth_mail_sends: first rows past their retention
-// with no active wait, then (if the password table holds more than
-// passwordMaxTrackedEntries rows) the oldest rows without an active wait, and
-// only then the oldest waiting rows.
-// Every statement is bounded by LIMIT and walks the updated_at indexes, so a
-// call never scans or sorts a whole table. Returns rows removed, or -1 when
-// the tables are unavailable. The request path runs it on a background queue.
+// auth_password_attempts and auth_mail_sends, in this order:
+//   1. expired rows with no active wait: account-wide ('*') rows untouched for
+//      a whole accountWindowSeconds (their count would restart anyway), pair
+//      rows untouched for 24 hours whose last successful sign-in (if any) is
+//      older than passwordTrustedPairDays, and mail rows past their window;
+//   2. while the password table holds more than passwordMaxTrackedEntries
+//      rows: pair rows still in the free tier (fewer than
+//      passwordMaxFailures failures, no active wait), oldest first, pairs
+//      without a recent successful sign-in before those with one.
+// Account-wide rows and rows with an active wait are never removed to meet
+// the cap; if only those are left, the table stays over the cap until they
+// expire, and a warning is logged. Every statement is bounded by LIMIT and
+// walks the updated_at indexes; the only count reads at most
+// passwordMaxTrackedEntries + passwordPruneBatchSize rows. Returns rows
+// removed, or -1 when the tables are unavailable. The request path runs it on
+// a background queue.
 - (NSInteger)prunePasswordAttempts {
   if (self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
     return -1;
   }
   NSUInteger budget = MAX(self.passwordPruneBatchSize, (NSUInteger)1U);
-  NSUInteger retention = MAX((NSUInteger)86400U, self.passwordAccountWindowSeconds);
-  NSUInteger mailRetention = MAX(self.mailWindowSeconds, (NSUInteger)1U);
+  NSString *(^number)(NSUInteger) = ^NSString *(NSUInteger value) {
+    return [NSString stringWithFormat:@"%lu", (unsigned long)value];
+  };
+  NSString *accountWindow = number(MAX(self.passwordAccountWindowSeconds, (NSUInteger)1U));
+  NSString *trustedSeconds = number(self.passwordTrustedPairDays * 86400U);
+  NSString *mailWindow = number(MAX(self.mailWindowSeconds, (NSUInteger)1U));
+  NSString *pairMax = number(MAX(self.passwordMaxFailures, (NSUInteger)1U));
   NSInteger removed = 0;
-  NSError *dbError = nil;
-  NSInteger expired = [self.database executeCommand:@"DELETE FROM auth_password_attempts WHERE ctid IN ("
-                                                    "SELECT ctid FROM auth_password_attempts "
-                                                    "WHERE updated_at < NOW() - ($1::integer * INTERVAL '1 second') "
-                                                    "AND (delayed_until IS NULL OR delayed_until <= NOW()) "
-                                                    "ORDER BY updated_at LIMIT $2::integer)"
-                                         parameters:@[
-                                           [NSString stringWithFormat:@"%lu", (unsigned long)retention],
-                                           [NSString stringWithFormat:@"%lu", (unsigned long)budget],
-                                         ]
-                                              error:&dbError];
-  if (expired < 0) {
-    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
-      [self markAttemptLimitSchemaUnavailable];
+  __block NSInteger budgetLeft = (NSInteger)budget;
+
+  NSArray *expirySteps = @[
+    @[ @"DELETE FROM auth_password_attempts WHERE ctid IN ("
+       "SELECT ctid FROM auth_password_attempts "
+       "WHERE updated_at < NOW() - ($1::integer * INTERVAL '1 second') AND client_ip = '*' "
+       "AND (delayed_until IS NULL OR delayed_until <= NOW()) "
+       "ORDER BY updated_at LIMIT $2::integer)",
+       accountWindow ],
+    @[ @"DELETE FROM auth_password_attempts WHERE ctid IN ("
+       "SELECT ctid FROM auth_password_attempts "
+       "WHERE updated_at < NOW() - INTERVAL '24 hours' AND client_ip <> '*' "
+       "AND (delayed_until IS NULL OR delayed_until <= NOW()) "
+       "AND (last_success_at IS NULL OR last_success_at < NOW() - ($1::integer * INTERVAL '1 second')) "
+       "ORDER BY updated_at LIMIT $2::integer)",
+       trustedSeconds ],
+    @[ @"DELETE FROM auth_mail_sends WHERE ctid IN ("
+       "SELECT ctid FROM auth_mail_sends "
+       "WHERE updated_at < NOW() - ($1::integer * INTERVAL '1 second') "
+       "ORDER BY updated_at LIMIT $2::integer)",
+       mailWindow ],
+  ];
+  for (NSArray *step in expirySteps) {
+    if (budgetLeft <= 0) {
+      break;
     }
-    return -1;
-  }
-  removed += expired;
-  if ((NSUInteger)removed < budget) {
-    NSInteger mailExpired = [self.database executeCommand:@"DELETE FROM auth_mail_sends WHERE ctid IN ("
-                                                          "SELECT ctid FROM auth_mail_sends "
-                                                          "WHERE updated_at < NOW() - ($1::integer * INTERVAL '1 second') "
-                                                          "ORDER BY updated_at LIMIT $2::integer)"
-                                               parameters:@[
-                                                 [NSString stringWithFormat:@"%lu", (unsigned long)mailRetention],
-                                                 [NSString stringWithFormat:@"%lu", (unsigned long)(budget - (NSUInteger)removed)],
-                                               ]
-                                                    error:NULL];
-    removed += MAX(mailExpired, (NSInteger)0);
-  }
-  if ((NSUInteger)removed < budget) {
-    // Count at most cap + budget rows: enough to know how far over the cap the
-    // table is without counting all of it.
-    NSUInteger cap = self.passwordMaxTrackedEntries;
-    NSArray *rows = [self.database executeQuery:@"SELECT COUNT(*)::text AS total FROM "
-                                                "(SELECT 1 FROM auth_password_attempts LIMIT $1::bigint) bounded"
-                                     parameters:@[ [NSString stringWithFormat:@"%lu", (unsigned long)(cap + budget)] ]
-                                          error:NULL];
-    long long total = [AMTrimmedString([rows firstObject][@"total"]) longLongValue];
-    if (total > (long long)cap) {
-      NSUInteger overflow = MIN((NSUInteger)(total - (long long)cap), budget - (NSUInteger)removed);
-      NSInteger trimmed = [self.database executeCommand:@"DELETE FROM auth_password_attempts WHERE ctid IN ("
-                                                        "SELECT ctid FROM auth_password_attempts "
-                                                        "WHERE delayed_until IS NULL OR delayed_until <= NOW() "
-                                                        "ORDER BY updated_at LIMIT $1::integer)"
-                                             parameters:@[ [NSString stringWithFormat:@"%lu", (unsigned long)overflow] ]
-                                                  error:NULL];
-      trimmed = MAX(trimmed, (NSInteger)0);
-      removed += trimmed;
-      // Still over the cap with only waiting rows left: drop the oldest of
-      // those too, so the cap holds.
-      NSUInteger stillOver = overflow - MIN(overflow, (NSUInteger)trimmed);
-      if (stillOver > 0 && (NSUInteger)removed < budget) {
-        NSInteger forced = [self.database executeCommand:@"DELETE FROM auth_password_attempts WHERE ctid IN ("
-                                                         "SELECT ctid FROM auth_password_attempts "
-                                                         "ORDER BY updated_at LIMIT $1::integer)"
-                                              parameters:@[ [NSString stringWithFormat:@"%lu",
-                                                                                       (unsigned long)MIN(stillOver, budget - (NSUInteger)removed)] ]
-                                                   error:NULL];
-        removed += MAX(forced, (NSInteger)0);
+    NSError *dbError = nil;
+    NSInteger deleted = [self.database executeCommand:step[0]
+                                           parameters:@[ step[1], number((NSUInteger)budgetLeft) ]
+                                                error:&dbError];
+    if (deleted < 0) {
+      if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+        [self markAttemptLimitSchemaUnavailable];
+        return -1;
       }
+      continue;
+    }
+    removed += deleted;
+    budgetLeft -= deleted;
+  }
+  if (budgetLeft <= 0) {
+    return removed;
+  }
+
+  NSUInteger cap = self.passwordMaxTrackedEntries;
+  NSArray *rows = [self.database executeQuery:@"SELECT COUNT(*)::text AS total FROM "
+                                              "(SELECT 1 FROM auth_password_attempts LIMIT $1::bigint) bounded"
+                                   parameters:@[ number(cap + budget) ]
+                                        error:NULL];
+  long long total = [AMTrimmedString([rows firstObject][@"total"]) longLongValue];
+  if (total <= (long long)cap) {
+    return removed;
+  }
+  NSInteger overflow = (NSInteger)MIN((long long)budgetLeft, total - (long long)cap);
+  NSArray *evictionSteps = @[
+    @"DELETE FROM auth_password_attempts WHERE ctid IN ("
+     "SELECT ctid FROM auth_password_attempts "
+     "WHERE client_ip <> '*' AND failure_count < $1::integer "
+     "AND (delayed_until IS NULL OR delayed_until <= NOW()) "
+     "AND (last_success_at IS NULL OR last_success_at < NOW() - ($2::integer * INTERVAL '1 second')) "
+     "ORDER BY updated_at LIMIT $3::integer)",
+    @"DELETE FROM auth_password_attempts WHERE ctid IN ("
+     "SELECT ctid FROM auth_password_attempts "
+     "WHERE client_ip <> '*' AND failure_count < $1::integer "
+     "AND (delayed_until IS NULL OR delayed_until <= NOW()) "
+     "AND $2::integer >= 0 "
+     "ORDER BY updated_at LIMIT $3::integer)",
+  ];
+  for (NSString *sql in evictionSteps) {
+    if (overflow <= 0) {
+      break;
+    }
+    NSInteger deleted = [self.database executeCommand:sql
+                                           parameters:@[ pairMax, trustedSeconds, number((NSUInteger)overflow) ]
+                                                error:NULL];
+    if (deleted > 0) {
+      removed += deleted;
+      overflow -= deleted;
+    }
+  }
+  if (overflow > 0 && (NSUInteger)removed < budget) {
+    // Only account-wide rows and rows with an active wait are left over the
+    // cap. They are kept; the table shrinks again as they expire.
+    NSString *message = @"auth module sign-in counters are over maxTrackedEntries; account-wide and "
+                         "waiting entries are kept until they expire";
+    NSDictionary *fields = @{ @"module" : @"auth", @"cap" : @(cap), @"over_by_at_least" : @(overflow) };
+    if (self.logger != nil) {
+      [self.logger warn:message fields:fields];
+    } else {
+      NSLog(@"%@ %@", message, fields);
     }
   }
   return removed;
