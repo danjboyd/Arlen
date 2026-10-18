@@ -515,6 +515,22 @@ BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
   return NO;
 }
 
+const char *ALNFileResponseFilesystemPathCString(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NULL;
+  }
+  // C0 controls (U+0000 included) and DEL; format characters such as U+200D
+  // stay allowed, since emoji file names use them.
+  NSUInteger length = [path length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar ch = [path characterAtIndex:idx];
+    if (ch < 0x20 || ch == 0x7f) {
+      return NULL;
+    }
+  }
+  return [path UTF8String];
+}
+
 @implementation ALNFileResponse
 
 + (BOOL)prepareResponse:(ALNResponse *)response
@@ -525,9 +541,7 @@ BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
   if (response == nil) {
     return NO;
   }
-  const char *fsPath = ([filePath isKindOfClass:[NSString class]] && [filePath length] > 0)
-                           ? [filePath UTF8String]
-                           : NULL;
+  const char *fsPath = ALNFileResponseFilesystemPathCString(filePath);
   struct stat fileStat;
   int rc = -1;
   if (fsPath != NULL) {

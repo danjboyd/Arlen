@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- File responses (`renderFileAtPath:`, `ALNFileResponse`) and static mounts
+  answer 404 for a path that contains a control character (U+0000-U+001F or
+  DEL) instead of passing it to the filesystem. A C path ends at U+0000, which
+  JSON and multipart strings can carry, so a name checked as
+  `report\u0000.pdf` reached `report`. Format characters such as U+200D,
+  which emoji file names use, are still allowed.
 - An exception raised in middleware, or in the request or auth contract
   stages before the controller, now answers that request with a 500 (the
   normal error page or JSON; no exception details outside development and

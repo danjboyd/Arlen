@@ -138,10 +138,7 @@ static ALNSocketHandle ALNSocketHandleFromNumber(NSNumber *value) {
 }
 
 static const char *ALNHTTPFilesystemPathCString(NSString *path) {
-  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
-    return NULL;
-  }
-  return [path UTF8String];
+  return ALNFileResponseFilesystemPathCString(path);
 }
 
 #if defined(_WIN32)
