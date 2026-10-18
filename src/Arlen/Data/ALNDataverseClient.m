@@ -108,6 +108,20 @@ static NSString *ALNDataversePathEncodedLiteral(NSString *literal) {
   return [literal stringByAddingPercentEncodingWithAllowedCharacters:allowed];
 }
 
+// An operation name: a safe identifier, optionally namespace-qualified
+// (`Microsoft.Dynamics.CRM.WhoAmI`).
+static BOOL ALNDataverseOperationNameIsSafe(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  for (NSString *part in [value componentsSeparatedByString:@"."]) {
+    if (!ALNDataverseIdentifierIsSafe(part)) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static NSString *ALNDataverseEscapeODataStringLiteral(NSString *value) {
   return [ALNDataverseTrimmedString(value) stringByReplacingOccurrencesOfString:@"'"
                                                                      withString:@"''"];
@@ -524,6 +538,35 @@ static id ALNDataverseSerializedObject(id object, NSError **error) {
                                    @{ @"value" : [object description] ?: @"" });
   }
   return nil;
+}
+
+// A bound operation's path: `/`-separated segments, each an operation name or
+// `entitySet(<GUID>)`. Nil or empty means unbound and is returned as @"".
+static NSString *ALNDataverseValidatedBoundPath(NSString *boundPath, NSError **error) {
+  NSString *path = ALNDataverseTrimmedString(boundPath);
+  if ([path length] == 0) {
+    return @"";
+  }
+  for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
+    BOOL safe = ALNDataverseOperationNameIsSafe(segment);
+    NSRange open = [segment rangeOfString:@"("];
+    if (!safe && open.location != NSNotFound && [segment hasSuffix:@")"]) {
+      NSString *entitySet = [segment substringToIndex:open.location];
+      NSString *key = [segment substringWithRange:NSMakeRange(NSMaxRange(open),
+                                                              [segment length] - NSMaxRange(open) - 1)];
+      safe = ALNDataverseIdentifierIsSafe(entitySet) && ALNDataverseLooksLikeGUID(key) &&
+             [key isEqualToString:ALNDataverseTrimmedString(key)];
+    }
+    if (!safe) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse bound path segments must be identifiers or entitySet(<GUID>)",
+                                       @{ @"boundPath" : path });
+      }
+      return nil;
+    }
+  }
+  return path;
 }
 
 static NSString *ALNDataverseODataLiteral(id value, NSError **error) {
@@ -2229,10 +2272,23 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                boundPath:(NSString *)boundPath
               parameters:(NSDictionary<NSString *, id> *)parameters
                    error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
   NSString *name = ALNDataverseTrimmedString(actionName);
-  NSString *path = ([ALNDataverseTrimmedString(boundPath) length] > 0)
-                       ? [NSString stringWithFormat:@"%@/%@", ALNDataverseTrimmedString(boundPath), name]
-                       : name;
+  if (!ALNDataverseOperationNameIsSafe(name)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse action name must be a safe identifier",
+                                     @{ @"action" : name ?: @"" });
+    }
+    return nil;
+  }
+  NSString *bound = ALNDataverseValidatedBoundPath(boundPath, error);
+  if (bound == nil) {
+    return nil;
+  }
+  NSString *path = ([bound length] > 0) ? [NSString stringWithFormat:@"%@/%@", bound, name] : name;
   ALNDataverseResponse *response = [self performRequestWithMethod:@"POST"
                                                             path:path
                                                            query:nil
@@ -2265,10 +2321,33 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                  boundPath:(NSString *)boundPath
                 parameters:(NSDictionary<NSString *, id> *)parameters
                      error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
   NSString *name = ALNDataverseTrimmedString(functionName);
+  if (!ALNDataverseOperationNameIsSafe(name)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse function name must be a safe identifier",
+                                     @{ @"function" : name ?: @"" });
+    }
+    return nil;
+  }
+  NSString *bound = ALNDataverseValidatedBoundPath(boundPath, error);
+  if (bound == nil) {
+    return nil;
+  }
   NSMutableArray<NSString *> *parameterParts = [NSMutableArray array];
   NSArray<NSString *> *keys = [[parameters allKeys] sortedArrayUsingSelector:@selector(compare:)];
   for (NSString *key in keys) {
+    if (!ALNDataverseIdentifierIsSafe(key)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse function parameter name must be a safe identifier",
+                                       @{ @"key" : [key description] ?: @"" });
+      }
+      return nil;
+    }
     NSError *literalError = nil;
     NSString *literal = ALNDataverseODataLiteral(parameters[key], &literalError);
     if ([literal length] == 0 || literalError != nil) {
@@ -2277,12 +2356,19 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       }
       return nil;
     }
-    [parameterParts addObject:[NSString stringWithFormat:@"%@=%@", key, literal]];
+    NSString *encoded = ALNDataversePathEncodedLiteral(literal);
+    if ([encoded length] == 0) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse function parameter value could not be encoded",
+                                       @{ @"key" : key });
+      }
+      return nil;
+    }
+    [parameterParts addObject:[NSString stringWithFormat:@"%@=%@", key, encoded]];
   }
   NSString *suffix = [NSString stringWithFormat:@"%@(%@)", name, [parameterParts componentsJoinedByString:@","]];
-  NSString *path = ([ALNDataverseTrimmedString(boundPath) length] > 0)
-                       ? [NSString stringWithFormat:@"%@/%@", ALNDataverseTrimmedString(boundPath), suffix]
-                       : suffix;
+  NSString *path = ([bound length] > 0) ? [NSString stringWithFormat:@"%@/%@", bound, suffix] : suffix;
   ALNDataverseResponse *response = [self performRequestWithMethod:@"GET"
                                                             path:path
                                                            query:nil

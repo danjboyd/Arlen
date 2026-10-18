@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Dataverse: `invokeFunctionNamed:` percent-encodes parameter values inside
+  their OData literal, the same way as alternate keys. Function and action
+  names must be identifiers (optionally namespace-qualified, such as
+  `Microsoft.Dynamics.CRM.WhoAmI`), and so must parameter names. `boundPath:`
+  segments must be identifiers or `entitySet(<GUID>)`. Anything else fails
+  with `ALNDataverseErrorInvalidArgument` before a request is sent.
 - Dataverse: `recordID:` accepts only a GUID (a canonical GUID string or an
   `NSUUID`). Any other value, including the `(key=value)` and `key=value`
   forms, now fails with `ALNDataverseErrorInvalidArgument` before a request is

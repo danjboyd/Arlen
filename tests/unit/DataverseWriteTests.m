@@ -275,4 +275,62 @@
   XCTAssertEqualObjects(path, @"contacts(active=true,externalid=42)");
 }
 
+- (void)testFunctionParametersAreEncodedAndOperationPathsValidated {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+
+  [client invokeFunctionNamed:@"new_LookupContact"
+                    boundPath:nil
+                   parameters:@{ @"Email" : @"x/../../../systemusers?$select=internalemailaddress#" }
+                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [transport.capturedRequests count]);
+  XCTAssertTrue([transport.capturedRequests[0].URLString
+      hasSuffix:@"/new_LookupContact(Email='x%2F..%2F..%2F..%2Fsystemusers%3F%24select%3Dinternalemailaddress%23')"]);
+
+  [client invokeFunctionNamed:@"Microsoft.Dynamics.CRM.RetrievePrincipalAccess"
+                    boundPath:@"systemusers(00000000-0000-0000-0000-000000000010)"
+                   parameters:@{}
+                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([transport.capturedRequests[1].URLString
+      hasSuffix:@"/systemusers(00000000-0000-0000-0000-000000000010)/Microsoft.Dynamics.CRM.RetrievePrincipalAccess()"]);
+
+  NSArray<NSString *> *badBoundPaths = @[
+    @"accounts(00000000-0000-0000-0000-000000000010)/../../systemusers",
+    @"accounts(name='x')",
+    @"accounts?$select=name",
+    @"accounts#",
+  ];
+  for (NSString *boundPath in badBoundPaths) {
+    error = nil;
+    XCTAssertNil([client invokeFunctionNamed:@"WhoAmI" boundPath:boundPath parameters:@{} error:&error], @"%@", boundPath);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", boundPath);
+    error = nil;
+    XCTAssertNil([client invokeActionNamed:@"new_Recalculate" boundPath:boundPath parameters:@{} error:&error],
+                 @"%@", boundPath);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", boundPath);
+  }
+  error = nil;
+  XCTAssertNil([client invokeFunctionNamed:@"WhoAmI()/../systemusers" boundPath:nil parameters:@{} error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client invokeActionNamed:@"new_Recalculate?x=1" boundPath:nil parameters:@{} error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client invokeFunctionNamed:@"WhoAmI" boundPath:nil parameters:@{ @"a)/x" : @"1" } error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  XCTAssertEqual((NSUInteger)2, [transport.capturedRequests count]);
+}
+
 @end
