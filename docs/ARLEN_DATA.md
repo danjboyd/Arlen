@@ -694,3 +694,7 @@ strings. `ALNPg` therefore refuses a string parameter that contains U+0000
 with `ALNPgErrorInvalidArgument` instead of letting it be cut short at the NUL
 (which would make the database see a different value than the one the app
 validated). Send binary data as `NSData`; it is bound as `bytea`.
+
+`ALNMSSQL` binds text parameters with their full byte length, so a value with
+an embedded U+0000 reaches SQL Server unchanged (SQL Server stores NUL inside
+`(n)varchar`).

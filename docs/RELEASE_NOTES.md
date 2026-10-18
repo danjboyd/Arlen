@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `ALNMSSQL` binds text parameters with their byte length instead of
+  `SQL_NTS`, so a value with an embedded U+0000 reaches SQL Server whole
+  instead of being cut short, and multi-byte text declares its UTF-8 length.
 - `ALNPg` refuses a string parameter containing U+0000 with
   `ALNPgErrorInvalidArgument`. Before, libpq cut the value short at the NUL,
   so the database matched a different value than the app had checked. Send

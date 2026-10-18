@@ -11,6 +11,13 @@
 #import "ALNMSSQLDialect.h"
 #import "ALNSQLBuilder.h"
 
+// Test hook in ALNMSSQL.m (not public API): the lengths one parameter binds with.
+extern BOOL ALNMSSQLTestBindLengthsForValue(id value,
+                                            long long *indicatorOut,
+                                            unsigned long long *columnSizeOut,
+                                            NSData **boundBytesOut,
+                                            NSError **error);
+
 // Stands in for an ODBC connection so the pool's acquire timeout can be
 // exercised without a SQL Server.
 @interface ALNFakeMSSQLPoolConnection : ALNMSSQLConnection
@@ -330,6 +337,50 @@
   XCTAssertEqualObjects([[actorID UUIDString] uppercaseString], [row[@"actor_id"] uppercaseString]);
   XCTAssertTrue([row[@"payload"] isKindOfClass:[NSData class]]);
   XCTAssertEqualObjects(payload, row[@"payload"]);
+}
+
+// The text bind must hand the driver the value's byte length. With SQL_NTS the
+// driver measured the value with strlen() and dropped everything after an
+// embedded U+0000. Runs without an ODBC driver or server.
+- (void)testMSSQLTextParametersBindTheirFullByteLength {
+  XCTSkipUnless([[ALNMSSQL capabilityMetadata][@"transport_available"] boolValue],
+                @"this build lacks the ODBC headers the MSSQL bind code is compiled with");
+  NSString *withNUL = [NSString stringWithFormat:@"victim@evil.test%C@company.example", (unichar)0];
+  long long indicator = -1;
+  unsigned long long columnSize = 0;
+  NSData *bound = nil;
+  NSError *error = nil;
+  XCTAssertTrue(ALNMSSQLTestBindLengthsForValue(withNUL, &indicator, &columnSize, &bound, &error));
+  XCTAssertNil(error);
+  NSData *expected = [withNUL dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertEqual((long long)[expected length], indicator);
+  XCTAssertEqualObjects(expected, bound);
+  XCTAssertGreaterThanOrEqual(columnSize, (unsigned long long)[expected length]);
+
+  // Multi-byte text declares at least its UTF-8 length.
+  NSString *accented = @"ééé";
+  XCTAssertTrue(ALNMSSQLTestBindLengthsForValue(accented, &indicator, &columnSize, &bound, &error));
+  XCTAssertEqual((long long)6, indicator);
+  XCTAssertGreaterThanOrEqual(columnSize, (unsigned long long)6);
+}
+
+- (void)testMSSQLEmbeddedNULTextParameterRoundTripsWhenExplicitTestDSNIsProvided {
+  XCTSkipUnless([self requireMSSQLTransportForSelector:_cmd], @"this build lacks ODBC transport support for MSSQL");
+  NSString *dsn = [self requiredMSSQLTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_MSSQL_TEST_DSN is not set");
+
+  NSError *error = nil;
+  ALNMSSQL *adapter = [[ALNMSSQL alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNil(error);
+  if (adapter == nil) {
+    return;
+  }
+  NSString *value = [NSString stringWithFormat:@"a%C@b", (unichar)0];
+  NSArray<NSDictionary *> *rows = [adapter executeQuery:@"SELECT LEN(CAST(? AS NVARCHAR(100))) AS n"
+                                             parameters:@[ value ]
+                                                  error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@4, rows.firstObject[@"n"]);
 }
 
 - (void)testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided {
