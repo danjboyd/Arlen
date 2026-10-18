@@ -102,7 +102,9 @@
     record loaded without its ID refuses those writes with
     `ALNORMErrorMissingField`; before, a save created a duplicate record. New
     `-[ALNORMDataverseChangeset applyInputValues:permittedFields:error:]`
-    matches the SQL changeset.
+    matches the SQL changeset. An update the server answers with `204` (no
+    representation) keeps the model's fields and ID, so later saves still
+    target the same record.
 - The `storage` module (now `1.2.0`) keeps one consistent catalog across
   processes that share its state file, such as propane workers and the jobs
   worker:

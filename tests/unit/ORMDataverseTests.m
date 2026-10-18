@@ -241,6 +241,45 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
 }
 
+// A server may ignore return=representation and answer a PATCH with 204. The
+// model then keeps the ID it was saved with, so the next save still PATCHes the
+// same record instead of being refused.
+- (void)testDataverseUpdateAnsweredWith204KeepsThePersistedID {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:[[ALNFakeDataverseTokenProvider alloc] init]
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNotNil(client, @"%@", error);
+  ALNORMDataverseContext *context = [[ALNORMDataverseContext alloc] initWithClient:client];
+  ALNORMDataverseRepository *accounts = [context repositoryForModelClass:[ALNORMDVAccount class]];
+
+  ALNDataverseRecord *record =
+      [ALNDataverseRecord recordWithDictionary:@{ @"accountid" : @"3f2504e0-4f89-11d3-9a0c-0305e82c3301", @"name" : @"Beta" } error:&error];
+  ALNORMDVAccount *account = [[ALNORMDVAccount alloc] init];
+  XCTAssertTrue([account applyRecord:record error:&error], @"%@", error);
+
+  XCTAssertTrue([account setObject:@"First" forFieldName:@"name" error:&error], @"%@", error);
+  XCTAssertTrue([accounts saveModel:account error:&error], @"%@", error);
+  XCTAssertEqualObjects(@"3f2504e0-4f89-11d3-9a0c-0305e82c3301", [account persistedPrimaryIDValue]);
+  XCTAssertEqualObjects(@"First", [account objectForFieldName:@"name"]);
+  XCTAssertEqual((NSUInteger)0, [account.dirtyFieldNames count]);
+
+  error = nil;
+  XCTAssertTrue([account setObject:@"Second" forFieldName:@"name" error:&error], @"%@", error);
+  XCTAssertTrue([accounts saveModel:account error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)2, [transport.capturedRequests count]);
+  for (ALNDataverseRequest *request in transport.capturedRequests) {
+    XCTAssertEqualObjects(@"PATCH", request.method);
+    XCTAssertTrue([request.URLString containsString:@"3f2504e0-4f89-11d3-9a0c-0305e82c3301"], @"%@", request.URLString);
+  }
+}
+
 - (void)testDataversePermittedFieldsDropUnlistedInput {
   NSError *error = nil;
   ALNDataverseRecord *record =

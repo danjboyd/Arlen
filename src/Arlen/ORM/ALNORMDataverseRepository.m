@@ -372,14 +372,25 @@
   if (updated == nil) {
     return NO;
   }
-  ALNDataverseRecord *record = [ALNDataverseRecord recordWithDictionary:updated error:error];
-  if (record != nil) {
+  [self applyWriteResponse:updated toModel:model];
+  [self.context trackModel:model];
+  return YES;
+}
+
+// A write answered with the record (return=representation) refreshes the
+// model from it. A server may ignore that preference and answer 204, which
+// leaves only a response summary; applying it would erase the model's fields,
+// its persisted ID among them, so the model keeps what it sent instead.
+- (void)applyWriteResponse:(NSDictionary *)response toModel:(ALNORMDataverseModel *)model {
+  ALNDataverseRecord *record = [ALNDataverseRecord recordWithDictionary:response error:NULL];
+  ALNORMDataverseFieldDescriptor *primaryField = [self.descriptor fieldNamed:self.descriptor.primaryIDAttribute ?: @""];
+  NSDictionary<NSString *, id> *returned = record.values ?: @{};
+  id returnedID = returned[primaryField.readKey ?: @""] ?: returned[self.descriptor.primaryIDAttribute ?: @""];
+  if (record != nil && returnedID != nil && returnedID != [NSNull null]) {
     [model applyRecord:record error:nil];
   } else {
     [model markClean];
   }
-  [self.context trackModel:model];
-  return YES;
 }
 
 - (BOOL)upsertModel:(ALNORMDataverseModel *)model
