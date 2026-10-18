@@ -11,6 +11,7 @@
 #import "ALNController.h"
 #import "ALNRequest.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLogger.h"
 #import "ALNPg.h"
 #import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
@@ -153,6 +154,36 @@ static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *
   [expanded addEntriesFromDictionary:provider];
   [expanded removeObjectForKey:@"preset"];
   return expanded;
+}
+
+// `authModule.publicBaseURL`: the origin (plus optional path prefix) used for
+// links in auth emails. Returns "" when unset, nil (with an error) when invalid.
+static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  NSString *trimmed = [value isKindOfClass:[NSString class]] ? AMTrimmedString(value) : nil;
+  if (trimmed != nil && [trimmed length] == 0) {
+    return @"";
+  }
+  NSURLComponents *components = (trimmed != nil) ? [NSURLComponents componentsWithString:trimmed] : nil;
+  NSString *scheme = [components.scheme lowercaseString];
+  BOOL valid = (components != nil) && ([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) &&
+               [components.host length] > 0 && components.user == nil && components.password == nil &&
+               components.query == nil && components.fragment == nil;
+  if (!valid) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"authModule.publicBaseURL must be an absolute http(s) URL without a query or fragment, "
+                       @"for example \"https://app.example.com\"",
+                       @{ @"key_path" : @"authModule.publicBaseURL" });
+    }
+    return nil;
+  }
+  while ([trimmed hasSuffix:@"/"]) {
+    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  }
+  return trimmed;
 }
 
 static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
@@ -718,6 +749,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 
 @property(nonatomic, strong) ALNPg *database;
 @property(nonatomic, strong) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, nullable) ALNLogger *logger;
+@property(nonatomic, copy, readwrite) NSString *publicBaseURL;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
 @property(nonatomic, copy) NSString *environmentName;
 @property(nonatomic, copy, readwrite) NSString *prefix;
@@ -873,6 +906,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                                    returnTo:(NSString *)returnTo;
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL;
 - (BOOL)isDevelopmentOrTestEnvironment;
+- (nullable NSString *)emailLinkBaseURLWithRequestBaseURL:(NSString *)requestBaseURL
+                                                    event:(NSString *)event;
 
 @end
 
@@ -1113,6 +1148,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _stubProviderSharedSecret = @"auth-module-stub-provider-secret-0123456789abcdef";
     _bootstrapAdminEmails = @[];
     _environmentName = @"development";
+    _publicBaseURL = @"";
   }
   return self;
 }
@@ -1170,6 +1206,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.failureRedirect = failureRedirect;
+  NSString *publicBaseURL = AMNormalizedPublicBaseURL(self.moduleConfig[@"publicBaseURL"], error);
+  if (publicBaseURL == nil) {
+    return NO;
+  }
+  self.publicBaseURL = publicBaseURL;
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1403,7 +1444,31 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.mailAdapter = application.mailAdapter;
+  self.logger = application.logger;
+  if ([self.publicBaseURL length] == 0 && ![self isDevelopmentOrTestEnvironment] && self.localPasswordEnabled &&
+      self.mailAdapter != nil) {
+    [self.logger warn:@"authModule.publicBaseURL is not set; password-reset and email-verification links will not be sent"
+               fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                         @"key_path" : @"authModule.publicBaseURL" }];
+  }
   return YES;
+}
+
+- (NSString *)emailLinkBaseURLWithRequestBaseURL:(NSString *)requestBaseURL
+                                           event:(NSString *)event {
+  if ([self.publicBaseURL length] > 0) {
+    return self.publicBaseURL;
+  }
+  // Without a configured base URL the request Host is the only source, and it
+  // is client-supplied. Use it only for local development and tests.
+  if ([self isDevelopmentOrTestEnvironment]) {
+    return requestBaseURL;
+  }
+  [self.logger error:@"auth email link not sent: authModule.publicBaseURL is not set"
+              fields:@{ @"event" : event ?: @"",
+                        @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                        @"key_path" : @"authModule.publicBaseURL" }];
+  return nil;
 }
 
 - (NSDictionary *)resolvedHookSummary {
@@ -2070,6 +2135,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *email = AMLowerTrimmedString(user[@"email"]);
   if ([email length] == 0) {
     return YES;
+  }
+  if ([AMTrimmedString(baseURL) length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"A base URL is required to send auth email links",
+                       @{ @"key_path" : @"authModule.publicBaseURL" });
+    }
+    return NO;
   }
   NSString *eventName = AMTrimmedString(event);
   NSString *path = [eventName isEqualToString:@"password_reset"] ? self.resetPasswordPath : self.verifyPath;
@@ -3880,12 +3952,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
-  NSString *verificationToken = [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
+  NSString *verificationBaseURL = [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                             event:@"email_verification"];
+  NSString *verificationToken = ([verificationBaseURL length] > 0)
+                                    ? [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error]
+                                    : nil;
   if ([verificationToken length] > 0) {
     (void)[self.runtime sendNotificationEvent:@"email_verification"
                                          user:user
                                         token:verificationToken
-                                      baseURL:[self requestBaseURL:ctx]
+                                      baseURL:verificationBaseURL
                                         error:NULL];
   }
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
@@ -3973,14 +4049,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSDictionary *user = [self.runtime userForEmail:email error:NULL];
-  if (user != nil) {
+  NSString *resetBaseURL = (user != nil) ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                                       event:@"password_reset"]
+                                         : nil;
+  if (user != nil && [resetBaseURL length] > 0) {
     NSError *error = nil;
     NSString *token = [self.runtime issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
     if ([token length] > 0) {
       (void)[self.runtime sendNotificationEvent:@"password_reset"
                                            user:user
                                           token:token
-                                        baseURL:[self requestBaseURL:ctx]
+                                        baseURL:resetBaseURL
                                           error:NULL];
     }
   }

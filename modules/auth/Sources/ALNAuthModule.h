@@ -112,6 +112,11 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 // once registration mounts them there, else the framework's `/modules/auth` mount.
 @property(nonatomic, copy, readonly) NSString *uiAssetPrefix;
 @property(nonatomic, assign, readonly) BOOL smsEnabled;
+/// `authModule.publicBaseURL` without a trailing slash, or "" when unset. Links
+/// in password-reset and email-verification mail start with it. When unset,
+/// development and test fall back to the request's Host header; other
+/// environments send no link.
+@property(nonatomic, copy, readonly) NSString *publicBaseURL;
 
 + (instancetype)sharedRuntime;
 

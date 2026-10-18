@@ -79,6 +79,14 @@ email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
 the account exists. (Registration still reports an already-registered email.)
 
+Password-reset and email-verification emails link to
+`authModule.publicBaseURL` (for example `publicBaseURL =
+"https://app.example.com";`). Set it in production: there, without it, the module
+sends no link rather than trusting the request's `Host` header, and logs an
+error. In `development` and `test` an unset value falls back to the request's
+scheme and `Host`. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
+
 Password-reset links expire after 30 minutes and email-verification links after
 one day. Each link works once, even when several requests present it at the same
 time. Any successful password change, through a reset link or the authenticated
@@ -615,6 +623,10 @@ development and test convenience only:
   configuration fail, so the app refuses to start. There is no override.
 - Even if a stub route is reached outside `development`/`test`, it answers 404
   and the stub identity never creates or signs in a user.
+
+Production apps that use local passwords must set `authModule.publicBaseURL`
+when upgrading to auth 1.5.4; without it, password-reset and verification
+emails are not sent outside `development` and `test`.
 
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login

@@ -11,6 +11,12 @@
   even under concurrent requests; only one request can consume a given link.
   A successful password change (by reset link or the change-password route)
   now retires every other outstanding reset link for that user.
+- Auth module: new `authModule.publicBaseURL` key. Password-reset and
+  email-verification links are built from it instead of the request's `Host`
+  header. When it is unset, `development` and `test` still fall back to the
+  request host; other environments send no link and log an error, so set
+  `authModule.publicBaseURL` before upgrading a production app that uses local
+  passwords.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

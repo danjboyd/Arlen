@@ -640,6 +640,23 @@ framework tests require no tenant or public deployment.
 
 Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). Request bodies and multipart file parts larger than `spoolThresholdBytes` (1048576) are spooled to private temporary files under `spoolDirectory` (an absolute path; default the system temp directory) instead of memory. All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
 
+## Auth Module Email Links
+
+`authModule.publicBaseURL` is the absolute `http(s)` URL that links in
+password-reset and email-verification mail start with, for example
+`"https://app.example.com"` (a path prefix such as
+`"https://example.com/app"` is allowed; a trailing slash is dropped; a query,
+fragment or user info fails startup). The module never builds these links from
+the request's `Host` header when it is set.
+
+When it is not set, the `development` and `test` environments fall back to the
+request's scheme and `Host` header so local sign-up keeps working. Every other
+environment sends no link: the forgot-password and registration responses are
+unchanged, no token is issued, and the module logs an error naming
+`authModule.publicBaseURL` (and warns at startup when local passwords and a mail
+adapter are configured). Set it in production. `claimTrustedEmail:` keeps
+taking its `baseURL` from the caller.
+
 ## Auth Module OIDC Providers
 
 Configure `authModule.providers.<identifier>` with `enabled = YES` and
