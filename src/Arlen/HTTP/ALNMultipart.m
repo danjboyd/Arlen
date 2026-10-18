@@ -51,6 +51,11 @@ static BOOL ALNReplaceFile(NSString *from, NSString *to) {
   return ALNPlatformMappedFileData(self.backingPath, NULL) ?: [NSData data];
 }
 - (BOOL)writeToFile:(NSString *)path error:(NSError **)error {
+  // The destination is often built from request data; a C path ends at U+0000.
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
+    if (error) *error = SpoolError(@"Upload destination path is empty or contains a control character", path ?: @"");
+    return NO;
+  }
   if (!self.backingPath) return [[super data] writeToFile:path options:NSDataWritingAtomic error:error];
   if (!self.backingMoved) {
     if (ALNReplaceFile(self.backingPath, path)) {

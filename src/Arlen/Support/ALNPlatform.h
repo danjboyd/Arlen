@@ -47,8 +47,14 @@ void *_Nullable ALNPlatformLoadWindowsLibrary(NSString *path);
 #endif
 BOOL ALNPlatformFillRandomBytes(void *buffer, size_t count);
 BOOL ALNPlatformGMTimeUTC(const time_t *seconds, struct tm *utc);
+// NO for an empty path or one holding a C0 control character (U+0000
+// included) or DEL. A C path ends at U+0000, so a check made on the NSString
+// would describe a different file than the one the filesystem call reaches.
+// Format characters such as U+200D (emoji file names) are allowed.
+BOOL ALNPlatformPathHasNoControlCharacters(NSString *_Nullable path);
 // fopen() for an NSString path. -fileSystemRepresentation is UTF-16 on
-// Windows GNUstep, so this uses _wfopen there and fopen elsewhere.
+// Windows GNUstep, so this uses _wfopen there and fopen elsewhere. Paths
+// holding control characters fail with EINVAL.
 FILE *_Nullable ALNPlatformOpenFile(NSString *path, const char *mode);
 // Memory-mapped file contents. On Windows a read-only file mapping
 // (CreateFileMappingW/MapViewOfFile): the MSYS2 gnustep-base has no
