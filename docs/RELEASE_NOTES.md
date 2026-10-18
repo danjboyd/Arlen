@@ -336,43 +336,6 @@
   CI occasionally failed with `bind: Address already in use` (#170).
 
 
-- Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
-  managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
-  toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming
-  `C:\msys64`. Code added since the Windows lane last ran was made portable
-  again (UTF-16 file paths, Winsock timeouts, no `getrlimit`/`pthread`/`execl`
-  on Windows), apps built by `boomhauer` get the framework's Windows flags,
-  and a pointer stored in an `unsigned long` (32 bits on 64-bit Windows) no
-  longer truncates. Windows test lanes now run through the vendored
-  tools-xctest runner (#116), and make no longer relinks every tool and
-  rebuilds the framework on each run on Windows.
-- On Windows, `boomhauer` started from a native process (the test runner, an
-  app) no longer rebuilds the whole framework, header edits now rebuild the
-  objects that include them, and `propane` no longer rejects its own config
-  ("cluster enabled must be a boolean"). The repository now checks out LF
-  line endings on every platform (`.gitattributes`). `phase24-windows-runtime-tests`
-  passes, and the `windows-preview` workflow has a self-hosted runner (fork
-  pull requests are not run on it).
-- An OIDC authorization callback validated in the same clock tick its state
-  was issued in could be rejected as "exceeded the configured age window":
-  rebuilding `issuedAt` from seconds since 1970 left it ~1e-7 s in the future.
-  Callbacks now allow 1 s of future skew. The same rounding made a job
-  enqueued "now" in the file job adapter not due for an immediate dequeue.
-  Both were common on Windows (GNUstep's clock there ticks in ~1 ms steps)
-  and possible anywhere.
-- On Windows, `ALNLogger` wrote to stderr even when `outputFileDescriptor`
-  named another descriptor; boomhauer relinked the app on every build (the
-  make target lacked `.exe`); and the notifications module's Web Push store
-  did not compile (it now locks with `LockFileEx`). The unit test suite builds
-  and runs on Windows.
-- Release archives built without `build/obj` (the planned Windows zip) carry
-  `build/.release-prebuilt`. While it matches the tree and toolchain,
-  `bin/arlen` and `boomhauer` use the prebuilt framework instead of running
-  `make` (`tools/release_prebuilt.sh`).
-- `arlen new /absolute/path` creates the app at that path. It used to be
-  nested under the current directory on every platform.
-- `make` parses faster: module template paths no longer spawn a shell per
-  template (about 0.3 s per invocation on Linux, about 15 s on Windows).
 - Releases now include `arlen-X.Y.Z-windows-x64.zip`, a prebuilt Windows
   archive for the gnustep-cli managed MSYS2 `CLANG64` toolchain. It bundles
   `libpq.dll`, which the toolchain does not ship, and records the toolchain
