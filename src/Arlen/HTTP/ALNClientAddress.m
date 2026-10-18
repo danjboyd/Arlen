@@ -239,6 +239,54 @@ NSArray *ALNClientAddressForwardedHops(NSString *header) {
   return hops;
 }
 
+NSString *ALNClientAddressForwardedHeaderName(NSDictionary *config) {
+  NSDictionary *security = [config isKindOfClass:[NSDictionary class]] &&
+                                   [config[@"security"] isKindOfClass:[NSDictionary class]]
+                               ? config[@"security"]
+                               : @{};
+  NSString *header = [ALNClientAddressTrimmed(security[@"forwardedClientIPHeader"]) lowercaseString];
+  return [header isEqualToString:@"forwarded"] ? @"forwarded" : @"x-forwarded-for";
+}
+
+BOOL ALNClientAddressForwardedHeaderSettingIsValid(id value) {
+  if (value == nil) {
+    return YES;
+  }
+  NSString *header = [ALNClientAddressTrimmed(value) lowercaseString];
+  return [header isEqualToString:@"x-forwarded-for"] || [header isEqualToString:@"forwarded"];
+}
+
+NSArray *ALNClientAddressHopsFromHeader(NSString *headerName, NSString *value) {
+  return [[headerName lowercaseString] isEqualToString:@"forwarded"] ? ALNClientAddressForwardedHops(value)
+                                                                     : ALNClientAddressXForwardedForHops(value);
+}
+
+NSString *ALNClientAddressRateLimitKey(NSString *address, NSUInteger ipv6PrefixLength) {
+  int family = 0;
+  uint8_t bytes[16];
+  if (!ALNClientAddressParseBytes(address, &family, bytes)) {
+    return address;
+  }
+  NSUInteger prefix = (ipv6PrefixLength == 0 || ipv6PrefixLength > 128) ? 128 : ipv6PrefixLength;
+  if (family == AF_INET6 && prefix < 128) {
+    NSUInteger fullBytes = prefix / 8;
+    NSUInteger remainingBits = prefix % 8;
+    if (remainingBits > 0) {
+      bytes[fullBytes] &= (uint8_t)(0xFF << (8 - remainingBits));
+      fullBytes += 1;
+    }
+    memset(bytes + fullBytes, 0, 16 - fullBytes);
+  }
+  char text[INET6_ADDRSTRLEN + 1];
+  memset(text, 0, sizeof(text));
+  if (inet_ntop(family, bytes, text, sizeof(text)) == NULL) {
+    return address;
+  }
+  NSString *canonical = [NSString stringWithUTF8String:text];
+  return (family == AF_INET6 && prefix < 128) ? [NSString stringWithFormat:@"%@/%lu", canonical, (unsigned long)prefix]
+                                              : canonical;
+}
+
 NSString *ALNClientAddressFromForwardedHops(NSString *directPeer,
                                             NSArray *hops,
                                             NSArray *trustedCIDRs,

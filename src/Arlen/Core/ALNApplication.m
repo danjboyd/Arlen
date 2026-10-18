@@ -5437,8 +5437,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (rateLimitEnabled) {
     NSUInteger requests = ALNUIntConfigValue(rateLimit[@"requests"], 120, 1);
     NSUInteger windowSeconds = ALNUIntConfigValue(rateLimit[@"windowSeconds"], 60, 1);
+    NSUInteger ipv6PrefixLength = ALNUIntConfigValue(rateLimit[@"ipv6PrefixLength"], 64, 1);
     [self addMiddleware:[[ALNRateLimitMiddleware alloc] initWithMaxRequests:requests
-                                                               windowSeconds:windowSeconds]];
+                                                               windowSeconds:windowSeconds
+                                                            ipv6PrefixLength:ipv6PrefixLength]];
   }
 
   NSDictionary *session = ALNDictionaryConfigValue(self.config, @"session");

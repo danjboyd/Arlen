@@ -316,6 +316,16 @@ Rate limiting:
 - `rateLimit.enabled`
 - `rateLimit.requests`
 - `rateLimit.windowSeconds`
+- `rateLimit.ipv6PrefixLength` (default `64`, 1-128): IPv6 clients are counted
+  per network of this size, since one IPv6 client usually holds a whole `/64`
+  and could otherwise use a new address for every request. `128` counts each
+  address. IPv4 clients (including IPv4-mapped `::ffff:a.b.c.d`) are counted
+  per address.
+
+The limiter keys on the request's `effectiveRemoteAddress`: the direct peer,
+or behind a trusted proxy the forwarded client (see
+`security.forwardedClientIPHeader` below). It tracks at most 65,536 clients;
+past that, a new client evicts the oldest.
 
 Security headers:
 
@@ -397,9 +407,12 @@ Hops to its left were sent by the client and are ignored. If Arlen cannot
 resolve a client IP for a protected allowlist check, the request is denied.
 
 - `security.forwardedClientIPHeader` (default `"X-Forwarded-For"`): the one
-  header route policies read the client from. Set `"Forwarded"` only when your
-  proxy writes RFC 7239 `Forwarded`. The header that is not selected is ignored,
-  since a proxy passes through whichever one it does not set.
+  header the forwarded client is read from, by route policies and by the
+  server's `effectiveRemoteAddress` (which the rate limiter keys on) alike. Set
+  `"Forwarded"` only when your proxy writes RFC 7239 `Forwarded`. The header
+  that is not selected is ignored, since a proxy passes through whichever one it
+  does not set. Repeated lines of either header are combined in order, as RFC
+  9110 requires, so a client's own line can't hide the one the proxy appended.
 
 Denied route-policy requests return `403`, set
 `X-Arlen-Policy-Denial-Reason`, and log `route_policy.denied` with distinct

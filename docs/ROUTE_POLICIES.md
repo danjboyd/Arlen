@@ -73,7 +73,9 @@ Default behavior is deterministic and fail-closed:
   client's `Forwarded` header through untouched. If your proxy sets RFC 7239
   `Forwarded` instead, set `security.forwardedClientIPHeader = "Forwarded";`
   (the other accepted value is `"X-Forwarded-For"`; anything else fails
-  startup).
+  startup). The server's `effectiveRemoteAddress`, and so the rate limiter,
+  reads the same header. Repeated header lines are combined in order before
+  the hops are read.
 - If a protected allowlist check cannot resolve a usable client IP (no header,
   or a hop that is not an IP address where the client should be), the request
   is denied.

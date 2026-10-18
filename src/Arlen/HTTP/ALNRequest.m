@@ -382,6 +382,22 @@ static NSString *ALNTakeAbsoluteFormAuthority(NSString **pathInOut) {
   return authority;
 }
 
+// The stored value after another `name: value` field line. Repeated lines of
+// the forwarding list fields are combined in order with ", " (RFC 9110
+// 5.3), so a proxy's appended line is not dropped or replaced by the
+// client's. For other fields the last line wins, as before.
+static NSString *ALNHeaderValueAddingFieldLine(NSString *name, NSString *existing, NSString *value) {
+  value = value ?: @"";
+  if ([existing length] == 0 ||
+      !([name isEqualToString:@"x-forwarded-for"] || [name isEqualToString:@"forwarded"])) {
+    return value;
+  }
+  if ([value length] == 0) {
+    return existing;
+  }
+  return [NSString stringWithFormat:@"%@, %@", existing, value];
+}
+
 // RFC 9112 §3.2: an HTTP/1.1 request must carry exactly one Host header
 // (an absolute-form target supplies the authority instead). Requests with
 // several, or HTTP/1.1 requests with none, get 400 (#213).
@@ -756,6 +772,9 @@ static NSString *ALNLLHTTPHotHeaderKey(const unsigned char *bytes, size_t length
   if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "x-forwarded-proto")) {
     return @"x-forwarded-proto";
   }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "forwarded")) {
+    return @"forwarded";
+  }
   if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "accept")) {
     return @"accept";
   }
@@ -882,7 +901,7 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
     if (value == nil) {
       return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
     }
-    state->_headers[hotKey] = value ?: @"";
+    state->_headers[hotKey] = ALNHeaderValueAddingFieldLine(hotKey, state->_headers[hotKey], value);
   } else {
     id deferredName = ALNLLHTTPDeferredHeaderStorageFromBytes(fieldBytes,
                                                               fieldByteLength,
@@ -1277,7 +1296,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
     } else if ([name isEqualToString:@"host"]) {
       hostHeaderCount += 1;
     }
-    headers[name] = value;
+    headers[name] = ALNHeaderValueAddingFieldLine(name, headers[name], value);
   }
   if (!ALNHostHeaderCountIsValid(hostHeaderCount, httpVersion, authority)) {
     if (error != NULL) {

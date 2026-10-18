@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNClientAddressInternal.h"
+#import "ALNRequest.h"
 
 @interface ClientAddressTests : XCTestCase
 @end
@@ -134,6 +135,100 @@
                                      trusted:chain]);
   XCTAssertEqualObjects([self clientFromPeer:@"127.0.0.1" xForwardedFor:@"203.0.113.9" trusted:trusted],
                         [self clientFromPeer:@"::ffff:127.0.0.1" xForwardedFor:@"::ffff:203.0.113.9" trusted:trusted]);
+}
+
+- (ALNRequest *)proxiedRequestWithHeaders:(NSDictionary *)headers {
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET"
+                                                      path:@"/"
+                                               queryString:@""
+                                                   headers:headers
+                                                      body:[NSData data]];
+  request.remoteAddress = @"127.0.0.1";
+  return request;
+}
+
+// The server's effectiveRemoteAddress (the rate limiter's key) reads the same
+// one header route policies do.
+- (void)testServerReadsOnlyTheConfiguredForwardedHeader {
+  NSDictionary *headers = @{
+    @"x-forwarded-for" : @"10.1.1.1",
+    @"forwarded" : @"for=203.0.113.9",
+  };
+  ALNRequest *byDefault = [self proxiedRequestWithHeaders:headers];
+  ALNApplyProxyMetadata(byDefault, @{ @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ] });
+  XCTAssertEqualObjects(@"10.1.1.1", byDefault.effectiveRemoteAddress);
+
+  ALNRequest *forwardedMode = [self proxiedRequestWithHeaders:headers];
+  ALNApplyProxyMetadata(forwardedMode, @{
+    @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
+    @"security" : @{ @"forwardedClientIPHeader" : @"Forwarded" },
+  });
+  XCTAssertEqualObjects(@"203.0.113.9", forwardedMode.effectiveRemoteAddress);
+
+  // A client-supplied X-Forwarded-For can't pick the key in Forwarded mode.
+  ALNRequest *spoofed = [self proxiedRequestWithHeaders:@{ @"x-forwarded-for" : @"10.9.9.9" }];
+  ALNApplyProxyMetadata(spoofed, @{
+    @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
+    @"security" : @{ @"forwardedClientIPHeader" : @"forwarded" },
+  });
+  XCTAssertEqualObjects(@"127.0.0.1", spoofed.effectiveRemoteAddress);
+
+  XCTAssertEqualObjects(@"x-forwarded-for", ALNClientAddressForwardedHeaderName(@{}));
+  XCTAssertEqualObjects(@"forwarded",
+                        ALNClientAddressForwardedHeaderName(@{ @"security" : @{ @"forwardedClientIPHeader" : @" FORWARDED " } }));
+  XCTAssertTrue(ALNClientAddressForwardedHeaderSettingIsValid(nil));
+  XCTAssertTrue(ALNClientAddressForwardedHeaderSettingIsValid(@"X-Forwarded-For"));
+  XCTAssertFalse(ALNClientAddressForwardedHeaderSettingIsValid(@"X-Real-IP"));
+  XCTAssertFalse(ALNClientAddressForwardedHeaderSettingIsValid(@[ @"Forwarded" ]));
+}
+
+// RFC 9110 5.3: repeated field lines of a list field combine in order. A
+// request with the client's own X-Forwarded-For line plus the proxy's appended
+// line must not lose the proxy's.
+- (void)testRepeatedForwardingFieldLinesAreCombinedInOrderByBothParsers {
+  NSString *raw = @"GET /admin HTTP/1.1\r\n"
+                  "Host: localhost\r\n"
+                  "X-Forwarded-For: 10.1.1.1\r\n"
+                  "x-forwarded-for: 203.0.113.9\r\n"
+                  "Forwarded: for=10.2.2.2\r\n"
+                  "FORWARDED: for=203.0.113.10\r\n"
+                  "X-Other: first\r\n"
+                  "X-Other: second\r\n\r\n";
+  NSData *data = [raw dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSNumber *backend in @[ @(ALNHTTPParserBackendLLHTTP), @(ALNHTTPParserBackendLegacy) ]) {
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:data
+                                                 backend:(ALNHTTPParserBackend)[backend unsignedIntegerValue]
+                                                   error:&error];
+    XCTAssertNil(error, @"backend %@", backend);
+    XCTAssertEqualObjects(@"10.1.1.1, 203.0.113.9", [request headerValueForName:@"X-Forwarded-For"], @"backend %@", backend);
+    XCTAssertEqualObjects(@"10.1.1.1, 203.0.113.9", request.headers[@"x-forwarded-for"], @"backend %@", backend);
+    XCTAssertEqualObjects(@"for=10.2.2.2, for=203.0.113.10", [request headerValueForName:@"forwarded"], @"backend %@", backend);
+    XCTAssertEqualObjects(@"second", [request headerValueForName:@"x-other"], @"backend %@", backend);
+
+    request.remoteAddress = @"127.0.0.1";
+    ALNApplyProxyMetadata(request, @{ @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ] });
+    XCTAssertEqualObjects(@"203.0.113.9", request.effectiveRemoteAddress, @"backend %@", backend);
+    ALNApplyProxyMetadata(request, @{
+      @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
+      @"security" : @{ @"forwardedClientIPHeader" : @"Forwarded" },
+    });
+    XCTAssertEqualObjects(@"203.0.113.10", request.effectiveRemoteAddress, @"backend %@", backend);
+  }
+}
+
+- (void)testRateLimitKeysBucketIPv6ByPrefix {
+  XCTAssertEqualObjects(@"2001:db8:1:2::/64", ALNClientAddressRateLimitKey(@"2001:db8:1:2:aaaa::1", 64));
+  XCTAssertEqualObjects(@"2001:db8:1:2::/64", ALNClientAddressRateLimitKey(@"[2001:DB8:1:2::ffff]:443", 64));
+  XCTAssertEqualObjects(@"2001:db8:1:3::/64", ALNClientAddressRateLimitKey(@"2001:db8:1:3::1", 64));
+  XCTAssertEqualObjects(@"2001:db8:1::/56", ALNClientAddressRateLimitKey(@"2001:db8:1:ff::1", 56));
+  XCTAssertEqualObjects(@"2001:db8::/33", ALNClientAddressRateLimitKey(@"2001:db8:7fff::1", 33));
+  XCTAssertEqualObjects(@"2001:db8::1", ALNClientAddressRateLimitKey(@"2001:db8::1", 128));
+  XCTAssertEqualObjects(@"2001:db8::1", ALNClientAddressRateLimitKey(@"2001:db8::1", 0));
+  // IPv4 (and IPv4-mapped IPv6) is per address; non-IP keys pass through.
+  XCTAssertEqualObjects(@"10.1.1.1", ALNClientAddressRateLimitKey(@"10.1.1.1", 64));
+  XCTAssertEqualObjects(@"10.1.1.1", ALNClientAddressRateLimitKey(@"::ffff:10.1.1.1", 64));
+  XCTAssertEqualObjects(@"unknown", ALNClientAddressRateLimitKey(@"unknown", 64));
 }
 
 - (void)testForwardedHeaderHopsAreReadInOrder {

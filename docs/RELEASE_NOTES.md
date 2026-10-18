@@ -37,12 +37,19 @@
     on the request, and denies a protected allowlist check.
   - Route policies no longer read a `Forwarded` header unless
     `security.forwardedClientIPHeader = "Forwarded"` is set. They used to
-    prefer it over `X-Forwarded-For`.
+    prefer it over `X-Forwarded-For`. The setting also picks the header the
+    server's `effectiveRemoteAddress` comes from, so every reader uses one
+    header.
+  - Repeated `X-Forwarded-For` or `Forwarded` field lines are combined in order
+    with ", " (RFC 9110), in both HTTP parsers. Before, only one of the lines was
+    kept.
   - `trustedProxyCIDRs` and `ARLEN_TRUSTED_PROXY_CIDRS` accept IPv6 ranges.
     IPv4-mapped addresses (`::ffff:10.1.1.1`, which a dual-stack listener
     reports for IPv4 peers) count as the IPv4 address, for proxy matching,
     allowlists and the rate limiter's key.
-  - The rate limiter tracks at most 65,536 clients at once.
+  - The rate limiter tracks at most 65,536 clients at once. It evicts the
+    oldest window first, in constant time per request. It counts IPv6 clients
+    per `/64` by default (`rateLimit.ipv6PrefixLength`).
   - **Upgrade:** with more than one proxy in front of Arlen (for example a load
     balancer and then nginx), list every proxy in `security.trustedProxies` and
     `trustedProxyCIDRs`.

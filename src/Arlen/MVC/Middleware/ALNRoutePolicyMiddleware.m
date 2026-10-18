@@ -125,23 +125,6 @@ static NSArray *ALNTrustedProxyCIDRs(NSDictionary *config) {
   return ALNPolicyStringArray(ALNSecurityDictionary(config)[@"trustedProxies"]);
 }
 
-// The header trusted proxies report the client in: X-Forwarded-For unless
-// security.forwardedClientIPHeader names "Forwarded" (RFC 7239). Only that one
-// header is read; a proxy that sets one passes the other through from the
-// client untouched.
-static NSString *ALNForwardedClientIPHeader(NSDictionary *config) {
-  NSString *header = ALNTrimmedPolicyString(ALNSecurityDictionary(config)[@"forwardedClientIPHeader"]);
-  return ([[header lowercaseString] isEqualToString:@"forwarded"]) ? @"Forwarded" : @"X-Forwarded-For";
-}
-
-static BOOL ALNForwardedClientIPHeaderIsValid(id value) {
-  if (value == nil) {
-    return YES;
-  }
-  NSString *header = [ALNTrimmedPolicyString(value) lowercaseString];
-  return [header isEqualToString:@"x-forwarded-for"] || [header isEqualToString:@"forwarded"];
-}
-
 static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
   NSDictionary *policies = ALNRoutePoliciesDictionary([context application].config ?: @{});
   NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSet];
@@ -180,10 +163,10 @@ static NSDictionary *ALNResolvedClientIP(ALNContext *context, BOOL trustForwarde
     return @{ @"status" : @"ok", @"client_ip" : directPeer, @"source" : @"direct" };
   }
 
-  NSString *headerName = ALNForwardedClientIPHeader(config);
-  NSString *headerValue = [context.request headerValueForName:headerName];
-  NSArray *hops = [headerName isEqualToString:@"Forwarded"] ? ALNClientAddressForwardedHops(headerValue)
-                                                            : ALNClientAddressXForwardedForHops(headerValue);
+  // The same header, and the same resolution, as the server's
+  // effectiveRemoteAddress.
+  NSString *headerName = ALNClientAddressForwardedHeaderName(config);
+  NSArray *hops = ALNClientAddressHopsFromHeader(headerName, [context.request headerValueForName:headerName]);
   BOOL unresolved = NO;
   NSString *forwarded = ALNClientAddressFromForwardedHops(directPeer, hops, trustedProxyCIDRs, &unresolved);
   if (forwarded == nil && !unresolved) {
@@ -253,7 +236,7 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
     }
   }
 
-  if (!ALNForwardedClientIPHeaderIsValid(ALNSecurityDictionary(config)[@"forwardedClientIPHeader"])) {
+  if (!ALNClientAddressForwardedHeaderSettingIsValid(ALNSecurityDictionary(config)[@"forwardedClientIPHeader"])) {
     [details addObject:@{
       @"field" : @"security.forwardedClientIPHeader",
       @"code" : @"unsupported_forwarded_header",

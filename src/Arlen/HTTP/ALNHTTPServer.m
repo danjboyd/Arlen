@@ -2700,7 +2700,7 @@ static BOOL ALNProxyForwardingEnabled(NSDictionary *config, NSArray *trustedProx
   return ALNConfigBool(config, @"trustedProxy", NO);
 }
 
-static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
+void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   request.effectiveRemoteAddress = request.remoteAddress ?: @"";
   request.scheme = @"http";
 
@@ -2714,10 +2714,12 @@ static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
     return;
   }
 
-  // The right-most X-Forwarded-For hop that is not a trusted proxy: clients
-  // control everything to its left. When the chain can't be read, the
-  // request keeps the proxy's address.
-  NSArray *hops = ALNClientAddressXForwardedForHops([request headerValueForName:@"x-forwarded-for"]);
+  // The right-most hop that is not a trusted proxy, in the one header
+  // security.forwardedClientIPHeader selects (route policies read the same
+  // one): clients control everything to its left. When the chain can't be
+  // read, the request keeps the proxy's address.
+  NSString *headerName = ALNClientAddressForwardedHeaderName(config);
+  NSArray *hops = ALNClientAddressHopsFromHeader(headerName, [request headerValueForName:headerName]);
   NSString *effectiveAddress = ALNClientAddressFromForwardedHops(request.remoteAddress, hops, trustedProxyCIDRs, NULL);
   if ([effectiveAddress length] > 0) {
     request.effectiveRemoteAddress = effectiveAddress;

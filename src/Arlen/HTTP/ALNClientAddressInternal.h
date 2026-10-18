@@ -3,6 +3,8 @@
 
 #import <Foundation/Foundation.h>
 
+@class ALNRequest;
+
 // Client-address helpers shared by the HTTP server (effectiveRemoteAddress,
 // which the rate limiter keys on) and route policies (sourceIPAllowlist).
 // Framework-internal; not exported from Arlen.h.
@@ -24,6 +26,28 @@ FOUNDATION_EXPORT NSArray *ALNClientAddressXForwardedForHops(NSString *header);
 // removed. Elements without `for=` are skipped.
 FOUNDATION_EXPORT NSArray *ALNClientAddressForwardedHops(NSString *header);
 
+// The one header trusted proxies report the client in, from
+// `security.forwardedClientIPHeader` in the app config: "x-forwarded-for"
+// (the default) or "forwarded" (RFC 7239). Every reader (the server's
+// effectiveRemoteAddress and route policies) uses this; the header that is not
+// selected is ignored, since a proxy passes through whichever one it does not
+// set.
+FOUNDATION_EXPORT NSString *ALNClientAddressForwardedHeaderName(NSDictionary *config);
+
+// NO for a `security.forwardedClientIPHeader` value other than nil,
+// "X-Forwarded-For" or "Forwarded" (any case). Startup rejects those.
+FOUNDATION_EXPORT BOOL ALNClientAddressForwardedHeaderSettingIsValid(id value);
+
+// The hops of `value`, read as the header `headerName` (one of the names
+// ALNClientAddressForwardedHeaderName returns).
+FOUNDATION_EXPORT NSArray *ALNClientAddressHopsFromHeader(NSString *headerName, NSString *value);
+
+// The key a rate limiter counts `address` under: the canonical IPv4 address,
+// or for IPv6 its /`ipv6PrefixLength` network ("2001:db8:1:2::/64"), since a
+// single IPv6 client usually controls a whole /64. A prefix of 0 or above 128
+// means 128. Non-IP values are returned unchanged.
+FOUNDATION_EXPORT NSString *ALNClientAddressRateLimitKey(NSString *address, NSUInteger ipv6PrefixLength);
+
 // The client a request came from, when `directPeer` is a proxy in
 // `trustedCIDRs` that appended the peer it saw to `hops`.
 //
@@ -41,5 +65,11 @@ FOUNDATION_EXPORT NSString *ALNClientAddressFromForwardedHops(NSString *directPe
                                                               NSArray *hops,
                                                               NSArray *trustedCIDRs,
                                                               BOOL *unresolvedOut);
+
+// What ALNHTTPServer does to every parsed request: sets
+// effectiveRemoteAddress (and scheme) from the forwarded headers when the peer
+// is in the top-level `trustedProxyCIDRs` (or `trustedProxy` is on), else to
+// remoteAddress. Implemented in ALNHTTPServer.m.
+FOUNDATION_EXPORT void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config);
 
 #endif

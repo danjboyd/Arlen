@@ -1213,24 +1213,115 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   XCTAssertEqualObjects((@[ @200, @200, @200, @429, @429, @429 ]), statuses);
 }
 
+- (BOOL)rateLimiter:(ALNRateLimitMiddleware *)limiter
+    allowsRemoteAddress:(NSString *)address
+                 logger:(ALNLogger *)logger {
+  ALNRequest *request = [self requestWithMethod:@"GET" path:@"/ping" headers:@{}];
+  request.remoteAddress = address;
+  ALNContext *context = [[ALNContext alloc] initWithRequest:request
+                                                   response:[[ALNResponse alloc] init]
+                                                     params:@{}
+                                                      stash:[NSMutableDictionary dictionary]
+                                                     logger:logger
+                                                  perfTrace:[[ALNPerfTrace alloc] initWithEnabled:NO]
+                                                  routeName:@"ping"
+                                             controllerName:@"MiddlewareFormController"
+                                                 actionName:@"ping"];
+  return [limiter processContext:context error:NULL];
+}
+
 - (void)testRateLimitEntryTableIsBounded {
-  ALNRateLimitMiddleware *limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:5 windowSeconds:60];
+  ALNRateLimitMiddleware *limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:1 windowSeconds:60];
   [limiter setValue:@(8) forKey:@"maxEntries"];
+  ALNLogger *logger = [[ALNLogger alloc] initWithFormat:@"json"];
   for (NSUInteger idx = 0; idx < 50; idx++) {
-    ALNRequest *request = [self requestWithMethod:@"GET" path:@"/ping" headers:@{}];
-    request.remoteAddress = [NSString stringWithFormat:@"198.51.100.%lu", (unsigned long)idx];
-    ALNContext *context = [[ALNContext alloc] initWithRequest:request
-                                                     response:[[ALNResponse alloc] init]
-                                                       params:@{}
-                                                        stash:[NSMutableDictionary dictionary]
-                                                       logger:[[ALNLogger alloc] initWithFormat:@"json"]
-                                                    perfTrace:[[ALNPerfTrace alloc] initWithEnabled:NO]
-                                                    routeName:@"ping"
-                                               controllerName:@"MiddlewareFormController"
-                                                   actionName:@"ping"];
-    XCTAssertTrue([limiter processContext:context error:NULL]);
+    NSString *address = [NSString stringWithFormat:@"198.51.100.%lu", (unsigned long)idx];
+    XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:address logger:logger]);
   }
   XCTAssertLessThanOrEqual([[limiter valueForKey:@"entries"] count], (NSUInteger)8);
+  // The oldest clients were evicted; the newest are still counted.
+  XCTAssertFalse([self rateLimiter:limiter allowsRemoteAddress:@"198.51.100.49" logger:logger]);
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"198.51.100.0" logger:logger]);
+}
+
+// At the real cap, a stream of new clients (each one evicting the oldest) must
+// cost a bounded amount per request: eviction never sorts or scans the table
+// under the lock every request takes.
+- (void)testRateLimitStaysFastWhenEveryRequestIsANewClientAtTheCap {
+  ALNRateLimitMiddleware *limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:5
+                                                                        windowSeconds:60
+                                                                     ipv6PrefixLength:128];
+  ALNLogger *logger = [[ALNLogger alloc] initWithFormat:@"json"];
+  NSUInteger cap = 65536;
+  NSUInteger total = cap + 4464;
+  NSDate *started = [NSDate date];
+  NSTimeInterval slowestOverflowBatch = 0;
+  NSDate *batchStarted = nil;
+  for (NSUInteger idx = 0; idx < total; idx++) {
+    @autoreleasepool {
+      if (idx >= cap && ((idx - cap) % 1000) == 0) {
+        if (batchStarted != nil) {
+          slowestOverflowBatch = MAX(slowestOverflowBatch, -[batchStarted timeIntervalSinceNow]);
+        }
+        batchStarted = [NSDate date];
+      }
+      NSString *address = [NSString stringWithFormat:@"2001:db8:%lx:%lx::1",
+                                                     (unsigned long)(idx >> 16),
+                                                     (unsigned long)(idx & 0xffff)];
+      XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:address logger:logger]);
+    }
+  }
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertEqual(cap, [[limiter valueForKey:@"entries"] count]);
+  // Before the fix one overflow insert at this size took seconds.
+  XCTAssertLessThan(slowestOverflowBatch, 1.0, @"1000 inserts at the cap took %.2fs", slowestOverflowBatch);
+  XCTAssertLessThan(elapsed, 20.0, @"%lu inserts took %.2fs", (unsigned long)total, elapsed);
+}
+
+- (void)testRateLimitCountsIPv6ClientsPerSlash64ByDefault {
+  ALNLogger *logger = [[ALNLogger alloc] initWithFormat:@"json"];
+  ALNRateLimitMiddleware *limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:2 windowSeconds:60];
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"2001:db8:1:2::1" logger:logger]);
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"2001:db8:1:2::2" logger:logger]);
+  XCTAssertFalse([self rateLimiter:limiter allowsRemoteAddress:@"2001:db8:1:2:ffff::3" logger:logger]);
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"2001:db8:1:3::1" logger:logger]);
+  // IPv4 and its IPv4-mapped spelling are one client.
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"10.1.1.1" logger:logger]);
+  XCTAssertTrue([self rateLimiter:limiter allowsRemoteAddress:@"::ffff:10.1.1.1" logger:logger]);
+  XCTAssertFalse([self rateLimiter:limiter allowsRemoteAddress:@"10.1.1.1" logger:logger]);
+
+  ALNRateLimitMiddleware *perAddress = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:1
+                                                                           windowSeconds:60
+                                                                        ipv6PrefixLength:128];
+  XCTAssertTrue([self rateLimiter:perAddress allowsRemoteAddress:@"2001:db8:1:2::1" logger:logger]);
+  XCTAssertTrue([self rateLimiter:perAddress allowsRemoteAddress:@"2001:db8:1:2::2" logger:logger]);
+}
+
+- (void)testRateLimitIPv6PrefixLengthComesFromConfig {
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"rateLimit" : @{
+      @"enabled" : @(YES),
+      @"requests" : @(1),
+      @"windowSeconds" : @(60),
+      @"ipv6PrefixLength" : @(48),
+    }
+  }
+                                                     routeMethod:@"GET"
+                                                            path:@"/ping"
+                                                       routeName:@"ping"
+                                                 controllerClass:[MiddlewareFormController class]
+                                                          action:@"ping"
+                                                     middlewares:nil];
+  NSMutableArray *statuses = [NSMutableArray array];
+  for (NSString *address in @[ @"2001:db8:1:2::1", @"2001:db8:1:ffff::1", @"2001:db8:2::1" ]) {
+    ALNRequest *request = [self requestWithMethod:@"GET" path:@"/ping" headers:@{}];
+    request.remoteAddress = address;
+    request.effectiveRemoteAddress = address;
+    [statuses addObject:@([harness dispatchRequest:request recycleCookies:NO].statusCode)];
+  }
+  XCTAssertEqualObjects((@[ @200, @429, @200 ]), statuses);
 }
 
 - (void)testSecurityHeadersAreAppliedByDefault {

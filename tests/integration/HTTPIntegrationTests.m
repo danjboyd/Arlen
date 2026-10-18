@@ -4420,6 +4420,23 @@
   XCTAssertTrue([body containsString:@"\"effectiveRemoteAddress\":\"203.0.113.9\""], @"%@", body);
 }
 
+// The client's own X-Forwarded-For line plus a second line the proxy added:
+// the lines combine in order (RFC 9110), so the proxy's hop is the client.
+- (void)testTrustedProxyCombinesRepeatedForwardedForLines {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Forwarded-For: 198.51.100.4' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"effectiveRemoteAddress\":\"198.51.100.4\""], @"%@", body);
+}
+
 - (void)testTrustedProxyCIDRListEnablesForwardedMetadataWithoutLegacyToggle {
   int curlCode = 0;
   int serverCode = 0;
