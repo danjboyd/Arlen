@@ -257,6 +257,61 @@ static NSString *SMPercentEncodedQueryComponent(NSString *value) {
   return [SMTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
 }
 
+// RFC 9110 token characters.
+static BOOL SMIsMediaTypeTokenString(NSString *value) {
+  static NSCharacterSet *invalid = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    invalid = [[NSCharacterSet
+        characterSetWithCharactersInString:
+            @"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"] invertedSet];
+  });
+  return [value length] > 0 && [value rangeOfCharacterFromSet:invalid].location == NSNotFound;
+}
+
+// Parses a declared content type as exactly one media type: `type/subtype`
+// with optional `; name=value` token parameters. Commas (media type lists),
+// quoted strings, control and non-ASCII characters are rejected. Returns the
+// lowercased `type/subtype`, plus `; charset=<value>` when a well-formed
+// charset parameter is present; other parameters are dropped. Returns nil when
+// the value is not a single well-formed media type, and
+// `application/octet-stream` when it is empty.
+static NSString *SMNormalizedDeclaredContentType(NSString *rawValue) {
+  NSString *value = [rawValue isKindOfClass:[NSString class]] ? SMTrimmedString(rawValue) : @"";
+  if ([value length] == 0) {
+    return @"application/octet-stream";
+  }
+  for (NSUInteger index = 0; index < [value length]; index++) {
+    unichar character = [value characterAtIndex:index];
+    if (character < 0x20 || character >= 0x7f || character == ',' || character == '"' || character == '\\') {
+      return nil;
+    }
+  }
+  NSArray<NSString *> *parts = [value componentsSeparatedByString:@";"];
+  NSArray<NSString *> *typeParts = [SMTrimmedString(parts[0]) componentsSeparatedByString:@"/"];
+  if ([typeParts count] != 2 || !SMIsMediaTypeTokenString(typeParts[0]) || !SMIsMediaTypeTokenString(typeParts[1])) {
+    return nil;
+  }
+  NSString *charset = nil;
+  for (NSUInteger index = 1; index < [parts count]; index++) {
+    NSString *parameter = SMTrimmedString(parts[index]);
+    NSRange equals = [parameter rangeOfString:@"="];
+    if (equals.location == NSNotFound) {
+      return nil;
+    }
+    NSString *name = [parameter substringToIndex:equals.location];
+    NSString *parameterValue = [parameter substringFromIndex:NSMaxRange(equals)];
+    if (!SMIsMediaTypeTokenString(name) || !SMIsMediaTypeTokenString(parameterValue)) {
+      return nil;
+    }
+    if ([[name lowercaseString] isEqualToString:@"charset"]) {
+      charset = [parameterValue lowercaseString];
+    }
+  }
+  NSString *mediaType = [[NSString stringWithFormat:@"%@/%@", typeParts[0], typeParts[1]] lowercaseString];
+  return (charset != nil) ? [NSString stringWithFormat:@"%@; charset=%@", mediaType, charset] : mediaType;
+}
+
 // The media type without parameters, lowercased: "Image/PNG; q=1" -> "image/png".
 static NSString *SMBaseContentType(NSString *contentType) {
   NSString *type = SMLowerTrimmedString(contentType);
@@ -1155,9 +1210,14 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
     return NO;
   }
-  NSString *normalizedContentType = SMLowerTrimmedString(contentType);
-  if ([normalizedContentType length] == 0) {
-    normalizedContentType = @"application/octet-stream";
+  NSString *normalizedContentType = SMNormalizedDeclaredContentType(contentType);
+  if (normalizedContentType == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorValidationFailed,
+                       @"content type must be a single media type such as image/png",
+                       @{ @"field" : @"contentType", @"collection" : collectionID ?: @"" });
+    }
+    return NO;
   }
   BOOL contentTypeAllowed = NO;
   for (NSString *allowed in (collectionMetadata[@"acceptedContentTypes"] ?: @[])) {
@@ -1218,7 +1278,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"sessionID" : sessionID,
     @"collection" : SMLowerTrimmedString(collection),
     @"name" : SMTrimmedString(name),
-    @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
+    @"contentType" : SMNormalizedDeclaredContentType(contentType) ?: @"application/octet-stream",
     @"sizeBytes" : @(sizeBytes),
     @"metadata" : SMNormalizeDictionary(metadata),
     @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
@@ -1269,8 +1329,9 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                           error:error]) {
     return nil;
   }
+  NSString *storedContentType = SMNormalizedDeclaredContentType(contentType) ?: @"application/octet-stream";
   NSString *attachmentID = [self.attachmentAdapter saveAttachmentNamed:SMTrimmedString(name)
-                                                           contentType:([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream"
+                                                           contentType:storedContentType
                                                                   data:data ?: [NSData data]
                                                               metadata:metadata
                                                                  error:error];
@@ -1295,7 +1356,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       @"sizeBytes" : @0,
     } mutableCopy]];
   }
-  NSDictionary *analysis = SMAnalyzeObjectData(name, contentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
+  NSDictionary *analysis = SMAnalyzeObjectData(name, storedContentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
 
   NSDictionary *record = nil;
   [self.lock lock];
@@ -1306,7 +1367,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"sequence" : @(self.nextSequence),
     @"collection" : SMLowerTrimmedString(collection),
     @"name" : SMTrimmedString(name),
-    @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
+    @"contentType" : storedContentType,
     @"sizeBytes" : @(sizeBytes),
     @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
     @"attachmentID" : attachmentID ?: @"",
@@ -2131,10 +2192,9 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Download failed" } error:NULL];
     return nil;
   }
-  NSString *contentType = SMTrimmedString(metadata[@"object"][@"contentType"]);
-  if ([contentType length] == 0) {
-    contentType = @"application/octet-stream";
-  }
+  // Send only the media type parsed and classified here, never the stored
+  // string itself; a value that does not parse is served as opaque bytes.
+  NSString *contentType = SMNormalizedDeclaredContentType(metadata[@"object"][@"contentType"]) ?: @"application/octet-stream";
   // Stored objects carry the uploader-declared content type, so only a small
   // set of passive media types is displayed inline; everything else is a
   // download. A sandbox policy keeps any document that is rendered from

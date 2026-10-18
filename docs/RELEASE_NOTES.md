@@ -10,7 +10,7 @@
   for the whole index (`DELETE /<index>/`). Arlen's libcurl HTTP transport
   (GNUstep) now sets `CURLOPT_PATH_AS_IS`, so it never collapses `.`/`..`
   path segments.
-- Storage module `1.3.0`: `GET /storage/api/download/:token` now sends
+- Storage module `1.3.0`: declared content types must be a single media type (no lists, quotes or control characters) and are stored normalized; `GET /storage/api/download/:token` sends only that normalized type, and now sends
   `Content-Disposition: attachment` with a sanitized filename,
   `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
   Only PNG, JPEG, GIF, WebP, AVIF, PDF, audio and video objects are served
