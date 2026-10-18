@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Auth module (`auth` 1.5.4): the stub OIDC provider is now available only in
+  the `development` and `test` environments. Elsewhere it defaults off, its
+  routes are not registered, and setting `authModule.providers.stub.enabled =
+  YES` makes the app refuse to start. Apps that relied on the stub outside
+  development or test must configure a real provider or local passwords.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

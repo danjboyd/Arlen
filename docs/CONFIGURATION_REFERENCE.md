@@ -669,11 +669,13 @@ Its class implements `ALNAuthProviderSessionResolver` and decides whether a
 verified principal maps to an application user. There is no automatic email
 linking or user creation on this path.
 
-`authModule.localPassword.enabled` and `authModule.providers.stub.enabled`
-default to false when a real provider is enabled, true otherwise. Explicit
-values override those defaults. Older copied manifests may explicitly enable
-stub; turn it off in application configuration. The same choices apply to
-HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
+`authModule.localPassword.enabled` defaults to false when a real provider is
+enabled, true otherwise; an explicit value overrides that default.
+`authModule.providers.stub.enabled` follows the same default in the
+`development` and `test` environments only. In any other environment the stub
+provider defaults off, and an explicit `YES` fails startup. Older copied
+manifests may explicitly enable stub; turn it off in application configuration.
+The same choices apply to HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
 injection, primarily for deterministic tests.
 
 See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)

@@ -119,6 +119,12 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                            error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
                                  error:(NSError *_Nullable *_Nullable)error;
+/// Sets the environment name (as `configureWithApplication:` does from the
+/// application) before configuring. Environment-dependent defaults, such as the
+/// development/test-only stub provider, follow it.
+- (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
+                           environment:(NSString *)environment
+                                 error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)resolvedHookSummary;
 - (BOOL)registrationAllowedForRequest:(NSDictionary *)registrationRequest
                                 error:(NSError *_Nullable *_Nullable)error;

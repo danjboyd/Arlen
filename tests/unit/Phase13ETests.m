@@ -333,8 +333,14 @@ static NSUInteger gPhase15UIContextCalls = 0;
   gPhase13EPostLoginRedirectCalls = 0;
   gPhase15UIContextCalls = 0;
   NSError *error = nil;
-  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:&error]);
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:&error]);
   XCTAssertNil(error);
+}
+
+- (void)tearDown {
+  // The runtime is process-wide; leave it in the test environment for other suites.
+  [[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:NULL];
+  [super tearDown];
 }
 
 - (void)testDefaultAuthModuleConfigIsStableWithoutOverrides {
@@ -902,6 +908,86 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/bodies/sms_challenge_body.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/mfa/totp_recovery_codes.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/layouts/auth_generated.html.eoc"]]);
+}
+
+#pragma mark - Stub provider environment gating
+
+- (void)testStubProviderDefaultsOnOnlyInDevelopmentAndTest {
+  for (NSString *environment in @[ @"development", @"test", @"production", @"staging", @"qa" ]) {
+    ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:environment error:&error], @"%@ %@",
+                  environment, error);
+    BOOL expected = [environment isEqualToString:@"development"] || [environment isEqualToString:@"test"];
+    XCTAssertEqual(expected, [runtime isProviderEnabled:@"stub"], @"%@", environment);
+    XCTAssertEqual((NSUInteger)(expected ? 1 : 0), runtime.loginProviders.count, @"%@", environment);
+  }
+}
+
+- (void)testStubProviderExplicitEnableIsRefusedOutsideDevelopmentAndTest {
+  NSDictionary *config = @{ @"providers" : @{ @"stub" : @{ @"enabled" : @YES } } };
+  for (NSString *environment in @[ @"production", @"staging" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:config
+                                                                  environment:environment
+                                                                        error:&error],
+                   @"%@", environment);
+    XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code, @"%@", environment);
+    XCTAssertEqualObjects(@"authModule.providers.stub.enabled", error.userInfo[@"key_path"]);
+    XCTAssertTrue([error.localizedDescription containsString:environment], @"%@", error);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:config environment:environment error:NULL], @"%@", environment);
+    XCTAssertTrue([runtime isProviderEnabled:@"stub"], @"%@", environment);
+  }
+
+  // Registration (application startup) fails the same way.
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule" : config,
+  }];
+  NSError *error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code);
+}
+
+- (void)testStubProviderRoutesAreAbsentInProductionByDefault {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  XCTAssertFalse([[ALNAuthModuleRuntime sharedRuntime] isProviderEnabled:@"stub"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_login"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_callback"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_login"]);
+  for (NSString *path in @[ @"/auth/provider/stub/login", @"/auth/provider/stub/callback",
+                            @"/auth/api/provider/stub/login" ]) {
+    ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:path
+                                                                 headers:@{ @"Accept" : @"application/json" }
+                                                                    body:nil]];
+    XCTAssertEqual((NSInteger)404, response.statusCode, @"%@", path);
+  }
+}
+
+- (void)testStubIdentityIsNotResolvedOutsideDevelopmentAndTest {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
+  NSError *error = nil;
+  NSDictionary *descriptor =
+      [runtime resolveSessionDescriptorForNormalizedIdentity:@{
+        @"provider_subject" : @"stub:stub-user@example.test",
+        @"email" : @"stub-user@example.test",
+      }
+                                       providerConfiguration:@{ @"identifier" : @"stub" }
+                                                       error:&error];
+  XCTAssertNil(descriptor);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorPolicyRejected, error.code);
 }
 
 @end

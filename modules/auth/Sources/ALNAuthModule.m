@@ -869,6 +869,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
                                                    returnTo:(NSString *)returnTo;
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL;
+- (BOOL)isDevelopmentOrTestEnvironment;
 
 @end
 
@@ -1225,7 +1226,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.localPasswordEnabled = AMConfigBool(localPasswordConfig[@"enabled"], !hasOIDC);
-  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], !hasOIDC);
+  // The stub provider signs anyone in without credentials, so it is a
+  // development and test convenience only. Elsewhere it defaults off, and an
+  // explicit `providers.stub.enabled = YES` stops configuration.
+  BOOL developmentOrTest = [self isDevelopmentOrTestEnvironment];
+  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], !hasOIDC && developmentOrTest);
+  if (stubEnabled && !developmentOrTest) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       [NSString stringWithFormat:@"authModule.providers.stub.enabled is only allowed in the development "
+                                                  @"and test environments (current environment: %@)",
+                                                  AMEffectiveEnvironmentName(self.environmentName)],
+                       @{ @"key_path" : @"authModule.providers.stub.enabled" });
+    }
+    return NO;
+  }
   NSString *stubEmail = AMLowerTrimmedString(stubProvider[@"email"]);
   if ([stubEmail length] > 0) {
     self.stubProviderEmail = stubEmail;
@@ -1260,8 +1275,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
                                                  @protocol(ALNAuthModuleOIDCTransport), error) : nil;
   if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
-  BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
-                                   [self.environmentName isEqualToString:@"test"];
+  BOOL allowLoopbackHTTPRedirect = developmentOrTest;
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
   NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
@@ -1341,6 +1355,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   return YES;
+}
+
+- (BOOL)isDevelopmentOrTestEnvironment {
+  NSString *environment = AMEffectiveEnvironmentName(self.environmentName);
+  return [environment isEqualToString:@"development"] || [environment isEqualToString:@"test"];
+}
+
+- (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
+                           environment:(NSString *)environment
+                                 error:(NSError **)error {
+  self.environmentName = AMEffectiveEnvironmentName(environment);
+  return [self configureHooksWithModuleConfig:moduleConfig error:error];
 }
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
@@ -3154,6 +3180,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                           providerConfiguration:(NSDictionary *)providerConfiguration
                                                           error:(NSError **)error {
   NSString *provider = AMTrimmedString(providerConfiguration[@"identifier"]);
+  if ([provider isEqualToString:@"stub"] && ![self isDevelopmentOrTestEnvironment]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                       @"The stub provider is only available in the development and test environments", nil);
+    }
+    return nil;
+  }
   NSString *providerSubject = AMTrimmedString(normalizedIdentity[@"provider_subject"]);
   NSDictionary *matchedUser = [self userForProvider:provider providerSub:providerSubject error:error];
   NSString *matchedBy = @"provider_identity";
@@ -4510,7 +4543,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubLogin:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }
@@ -4540,7 +4573,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubAuthorize:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }
@@ -4557,7 +4590,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubCallback:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }

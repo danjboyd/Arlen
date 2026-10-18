@@ -351,6 +351,8 @@ static void RegisterOIDCLoginTemplates(void) {
       XCTAssertTrue([error.localizedDescription containsString:@"redirect"], @"%@ %@", environment, error);
     }
   }
+  // The runtime is process-wide; leave it in the test environment for other suites.
+  [[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:NULL];
 }
 
 - (ALNApplication *)application {

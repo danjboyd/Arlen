@@ -81,7 +81,9 @@ the account exists. (Registration still reports an already-registered email.)
 
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
-provider CTA disappears and the stub provider routes are not registered.
+provider CTA disappears and the stub provider routes are not registered. The
+stub provider is only available in the `development` and `test` environments;
+see [Defaults and Upgrade Behavior](#defaults-and-upgrade-behavior).
 
 TOTP route behavior:
 
@@ -594,9 +596,21 @@ re-authenticate; Arlen does not verify that it did.
 ### Defaults and Upgrade Behavior
 
 When any real OIDC provider is enabled, local password login and the stub
-provider default off. Explicit `localPassword.enabled` or
-`providers.stub.enabled` overrides are honored. Without real OIDC providers,
-the existing local-password and stub defaults remain enabled for compatibility.
+provider default off. Explicit `localPassword.enabled` overrides are honored.
+Without real OIDC providers, local-password login stays enabled for
+compatibility.
+
+The stub provider signs a visitor in without any credentials, so it is a
+development and test convenience only:
+
+- In the `development` and `test` environments it defaults on when no real
+  OIDC provider is enabled, and `providers.stub.enabled` is honored either way.
+- In every other environment (`production`, `staging`, or any custom name) it
+  defaults off. Setting `providers.stub.enabled = YES` there makes auth module
+  configuration fail, so the app refuses to start. There is no override.
+- Even if a stub route is reached outside `development`/`test`, it answers 404
+  and the stub identity never creates or signs in a user.
+
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login
 page remains available and shows provider buttons without a password form.
