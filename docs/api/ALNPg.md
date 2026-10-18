@@ -32,6 +32,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |
 | `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNPg`. |
+| `sessionResetPolicy` | `ALNPgSessionResetPolicy` | `nonatomic, assign` | Public `sessionResetPolicy` property available on `ALNPg`. |
 
 ## Methods
 

@@ -63,6 +63,21 @@ typedef NS_ENUM(NSInteger, ALNPgPreparedStatementReusePolicy) {
   ALNPgPreparedStatementReusePolicyAlways = 2,
 };
 
+/// What the pool resets when a connection is released, so one borrower's
+/// session state never reaches the next. A connection released inside a
+/// transaction is always closed, whatever the policy.
+typedef NS_ENUM(NSInteger, ALNPgSessionResetPolicy) {
+  /// Default. One round trip: `RESET ALL`, `SET SESSION AUTHORIZATION
+  /// DEFAULT`, `CLOSE ALL`, `DISCARD TEMP`, `UNLISTEN *` and
+  /// `pg_advisory_unlock_all()`. Keeps the pool's cached prepared statements.
+  ALNPgSessionResetPolicySession = 0,
+  /// `DISCARD ALL`, which also drops every prepared statement (the pool's
+  /// statement cache is cleared to match).
+  ALNPgSessionResetPolicyDiscardAll = 1,
+  /// No reset. Only for code that manages session state itself.
+  ALNPgSessionResetPolicyNone = 2,
+};
+
 typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *event);
 
 @interface ALNPgConnection : NSObject <ALNDatabaseConnection>
@@ -158,6 +173,9 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 /// `ALNPgErrorPoolExhausted`; a positive value fails with the same error once
 /// the wait runs out.
 @property(nonatomic, assign) NSTimeInterval acquireTimeout;
+/// Session state reset applied when a connection goes back to the pool.
+/// Default `ALNPgSessionResetPolicySession`.
+@property(nonatomic, assign) ALNPgSessionResetPolicy sessionResetPolicy;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -166,12 +184,18 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
                                              error:(NSError *_Nullable *_Nullable)error;
 
 - (nullable ALNPgConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
+/// Returns a connection to the pool. A connection still inside a transaction
+/// (begun with `-beginTransaction:` or by sending `BEGIN`) is closed rather
+/// than re-pooled; otherwise its session state is reset per
+/// `sessionResetPolicy`, and it is closed if the reset fails.
 - (void)releaseConnection:(ALNPgConnection *)connection;
 /// Pool occupancy and wait counters: `max_connections`, `in_use_connections`,
 /// `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-/// `acquire_wait_seconds_total`, `pool_exhausted_count`, and
+/// `acquire_wait_seconds_total`, `pool_exhausted_count`,
 /// `connection_retry_count` (statements retried after a pooled connection
-/// turned out to have been closed by the server).
+/// turned out to have been closed by the server),
+/// `released_in_transaction_count` (connections closed because they were
+/// released inside a transaction), and `session_reset_failure_count`.
 - (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;

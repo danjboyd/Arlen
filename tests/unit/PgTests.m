@@ -25,6 +25,7 @@
 - (BOOL)isConnectionUsable;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)hasActiveTransaction;
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll;
 - (NSTimeInterval)poolIdleSince;
 - (void)setPoolIdleSince:(NSTimeInterval)poolIdleSince;
 - (NSUInteger)livenessCheckCount;
@@ -57,6 +58,8 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 @property(nonatomic, assign) BOOL simulatedOpen;
 @property(nonatomic, assign) BOOL simulatedUsable;
 @property(nonatomic, assign) NSInteger closeCount;
+@property(nonatomic, assign) NSInteger resetCount;
+@property(nonatomic, assign) BOOL simulatedInTransaction;
 @end
 
 @implementation ALNFakePgConnection
@@ -78,7 +81,13 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 }
 
 - (BOOL)hasActiveTransaction {
-  return NO;
+  return self.simulatedInTransaction;
+}
+
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll {
+  (void)discardAll;
+  self.resetCount += 1;
+  return self.simulatedUsable;
 }
 
 - (void)close {
@@ -161,6 +170,40 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertNil(acquireError);
   XCTAssertEqual(reused, (ALNPgConnection *)good,
                  @"a usable connection must be reused, not discarded");
+}
+
+// A connection handed back mid-transaction must never reach the next borrower:
+// its statements would run inside (and be lost with) the first borrower's
+// transaction.
+- (void)testReleaseConnectionClosesAConnectionStillInsideATransaction {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:2
+                         error:&error];
+  XCTAssertNil(error);
+
+  ALNFakePgConnection *open = [ALNFakePgConnection new];
+  open.simulatedOpen = YES;
+  open.simulatedUsable = YES;
+  open.simulatedInTransaction = YES;
+  [pool releaseConnection:open];
+  XCTAssertEqual((NSInteger)1, open.closeCount);
+  XCTAssertEqual((NSInteger)0, open.resetCount);
+  XCTAssertEqualObjects(@1, [pool poolDiagnostics][@"released_in_transaction_count"]);
+
+  ALNFakePgConnection *idle = [ALNFakePgConnection new];
+  idle.simulatedOpen = YES;
+  idle.simulatedUsable = YES;
+  [pool releaseConnection:idle];
+  XCTAssertEqual((NSInteger)0, idle.closeCount);
+  XCTAssertEqual((NSInteger)1, idle.resetCount, @"an idle connection is reset before it is pooled");
+
+  pool.sessionResetPolicy = ALNPgSessionResetPolicyNone;
+  ALNPgConnection *reused = [pool acquireConnection:&error];
+  XCTAssertEqual(reused, (ALNPgConnection *)idle);
+  [pool releaseConnection:reused];
+  XCTAssertEqual((NSInteger)1, idle.resetCount, @"ALNPgSessionResetPolicyNone skips the reset");
 }
 
 // On-borrow liveness checks are the only thing that catches a connection that
@@ -735,6 +778,104 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   rows = [database executeQuery:@"SELECT length($1::bytea) AS n" parameters:@[ bytes ] error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@4, rows.firstObject[@"n"]);
+}
+
+- (void)testReleasedConnectionStartsTheNextBorrowerWithACleanSession {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  ALNPg *observer = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+
+  ALNPgConnection *first = [database acquireConnection:&error];
+  XCTAssertNotNil(first);
+  NSString *user = [first executeQuery:@"SELECT current_user AS u" parameters:@[] error:&error].firstObject[@"u"];
+  NSString *defaultPath =
+      [first executeQuery:@"SELECT current_setting('search_path') AS p" parameters:@[] error:&error].firstObject[@"p"];
+  XCTAssertNotNil([first executeQuery:@"SELECT set_config('app.tenant_id', 'tenant-A', false)" parameters:@[] error:&error]);
+  XCTAssertNotNil([first executeQuery:@"SELECT pg_advisory_lock(424242)" parameters:@[] error:&error]);
+  NSArray<NSString *> *commands = @[
+    @"SET search_path TO pg_catalog",
+    [NSString stringWithFormat:@"SET ROLE \"%@\"", user],
+    @"CREATE TEMP TABLE arlen_leaked_temp (x int)",
+    @"LISTEN arlen_leaked_channel",
+  ];
+  for (NSString *sql in commands) {
+    XCTAssertGreaterThanOrEqual([first executeCommand:sql parameters:@[] error:&error], 0, @"%@: %@", sql, error);
+  }
+  [database releaseConnection:first];
+
+  ALNPgConnection *second = [database acquireConnection:&error];
+  XCTAssertEqual(first, second, @"the test needs the same pooled connection back");
+  NSDictionary *state =
+      [second executeQuery:@"SELECT coalesce(current_setting('app.tenant_id', true), '') AS tenant, "
+                           "current_setting('search_path') AS path, current_setting('role') AS role, "
+                           "to_regclass('pg_temp.arlen_leaked_temp') IS NULL AS temp_gone, "
+                           "(SELECT count(*) FROM pg_listening_channels()) AS listens"
+                parameters:@[]
+                     error:&error].firstObject;
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"", state[@"tenant"]);
+  XCTAssertEqualObjects(defaultPath, state[@"path"]);
+  XCTAssertEqualObjects(@"none", state[@"role"]);
+  XCTAssertEqualObjects(@YES, state[@"temp_gone"]);
+  XCTAssertEqualObjects(@0, state[@"listens"]);
+  NSArray *locked = [observer executeQuery:@"SELECT pg_try_advisory_lock(424242) AS ok" parameters:@[] error:&error];
+  XCTAssertEqualObjects(@YES, locked.firstObject[@"ok"], @"the advisory lock is released with the session reset");
+  [observer executeQuery:@"SELECT pg_advisory_unlock(424242)" parameters:@[] error:&error];
+  [database releaseConnection:second];
+}
+
+- (void)testConnectionReleasedInsideAHandOpenedTransactionIsClosed {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_opentx"];
+  NSString *createSQL = [NSString stringWithFormat:@"CREATE TABLE %@ (id int)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:createSQL parameters:@[] error:&error], 0);
+
+  ALNPgConnection *first = [database acquireConnection:&error];
+  XCTAssertGreaterThanOrEqual([first executeCommand:@"BEGIN" parameters:@[] error:&error], 0);
+  NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ VALUES (1)", table];
+  XCTAssertGreaterThanOrEqual([first executeCommand:insertSQL parameters:@[] error:&error], 0);
+  [database releaseConnection:first];
+  XCTAssertEqualObjects(@1, [database poolDiagnostics][@"released_in_transaction_count"]);
+
+  ALNPgConnection *second = [database acquireConnection:&error];
+  XCTAssertNotEqual(first, second, @"a connection released mid-transaction is not reused");
+  NSArray *rows = [second executeQuery:[NSString stringWithFormat:@"SELECT count(*) AS n FROM %@", table]
+                            parameters:@[]
+                                 error:&error];
+  XCTAssertEqualObjects(@0, rows.firstObject[@"n"], @"the abandoned transaction was rolled back");
+  [second executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:&error];
+  [database releaseConnection:second];
+}
+
+- (void)testPreparedStatementsKeepWorkingAcrossSessionResets {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  for (NSNumber *policy in @[ @(ALNPgSessionResetPolicySession), @(ALNPgSessionResetPolicyDiscardAll) ]) {
+    NSError *error = nil;
+    ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+    XCTAssertNotNil(database);
+    database.preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAlways;
+    database.sessionResetPolicy = (ALNPgSessionResetPolicy)[policy integerValue];
+    for (NSInteger round = 0; round < 3; round++) {
+      NSArray *rows = [database executeQuery:@"SELECT $1::int + 1 AS n" parameters:@[ @(round) ] error:&error];
+      XCTAssertNil(error, @"policy %@ round %ld", policy, (long)round);
+      XCTAssertEqualObjects(@(round + 1), rows.firstObject[@"n"]);
+    }
+    XCTAssertEqualObjects(@0, [database poolDiagnostics][@"session_reset_failure_count"]);
+  }
 }
 
 - (void)testConnectionAndPreparedStatements {

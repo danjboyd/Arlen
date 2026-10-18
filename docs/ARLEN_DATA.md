@@ -687,6 +687,41 @@ other idle connections are closed first):
 are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.
 
+## Connection pool session reset
+
+`ALNPg` resets a connection's session state when it goes back to the pool, so
+one request's settings never reach the next borrower. This matters most for
+row-level security or tenancy implemented with
+`set_config('app.tenant_id', ...)`: without a reset, a request that skips the
+`set_config` would run as the previous request's tenant.
+
+- A connection still inside a transaction when it is released, whether
+  started with `beginTransaction:` or by sending `BEGIN` by hand, is closed
+  rather than reused. Closing it rolls the transaction back on the server.
+  `released_in_transaction_count` in `poolDiagnostics` counts these.
+- Otherwise `sessionResetPolicy` decides what is reset:
+  - `ALNPgSessionResetPolicySession` (default): one round trip running
+    `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`, `CLOSE ALL`,
+    `DISCARD TEMP`, `UNLISTEN *` and `pg_advisory_unlock_all()`. Settings
+    (including `search_path` and `SET ROLE`), cursors, temporary tables,
+    `LISTEN`s and session advisory locks are cleared. The pool's own cached
+    prepared statements are kept.
+  - `ALNPgSessionResetPolicyDiscardAll`: `DISCARD ALL`, which also drops
+    every prepared statement; the pool's statement cache is cleared and
+    statements are prepared again on next use.
+  - `ALNPgSessionResetPolicyNone`: no reset, for code that manages session
+    state itself.
+- If the reset fails, the connection is closed instead of reused
+  (`session_reset_failure_count`).
+
+The default reset costs one extra round trip per release. On a local socket
+that measured about 40 µs per pooled request (54 µs without a reset, 94 µs
+with it, 116 µs with `DISCARD ALL`).
+
+```objc
+database.sessionResetPolicy = ALNPgSessionResetPolicyDiscardAll;
+```
+
 ## Text parameters and NUL
 
 PostgreSQL `text` cannot hold U+0000, and libpq reads text parameters as C

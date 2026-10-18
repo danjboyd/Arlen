@@ -2022,6 +2022,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll;
 
 @end
 
@@ -2340,6 +2341,33 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   [self.preparedStatementNamesByKey removeAllObjects];
   [self.preparedStatementCacheOrder removeAllObjects];
   self.preparedStatementSequence = 0;
+}
+
+// Called by the pool before a released connection is reused, so settings,
+// role, temp tables, cursors, LISTENs and advisory locks from one borrower do
+// not reach the next. The session reset keeps this connection's cached
+// prepared statements (they belong to the pool, not to a borrower); DISCARD ALL
+// drops them, so the cache is cleared to match. NO means the reset failed and
+// the connection must not be reused.
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll {
+  if (_conn == NULL || !self.isOpen) {
+    return NO;
+  }
+  const char *sql = discardAll ? "DISCARD ALL"
+                               : "RESET ALL; SET SESSION AUTHORIZATION DEFAULT; CLOSE ALL; DISCARD TEMP; "
+                                 "UNLISTEN *; SELECT pg_advisory_unlock_all()";
+  PGresult *result = ALNPQexec(_conn, sql);
+  int status = (result != NULL) ? ALNPQresultStatus(result) : -1;
+  if (result != NULL) {
+    ALNPQclear(result);
+  }
+  BOOL ok = (status == ALNPGRES_COMMAND_OK || status == ALNPGRES_TUPLES_OK) &&
+            ALNPQstatus(_conn) == ALNConnectionOK;
+  if (ok && discardAll) {
+    [self.preparedStatementNamesByKey removeAllObjects];
+    [self.preparedStatementCacheOrder removeAllObjects];
+  }
+  return ok;
 }
 
 - (BOOL)shouldUsePreparedStatementForParameterCount:(NSUInteger)parameterCount {
@@ -3585,6 +3613,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
 @property(nonatomic, assign) NSUInteger poolExhaustedCount;
 @property(nonatomic, assign) NSUInteger connectionRetryCount;
+@property(nonatomic, assign) NSUInteger releasedInTransactionCount;
+@property(nonatomic, assign) NSUInteger sessionResetFailureCount;
 
 @end
 
@@ -3859,12 +3889,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return;
   }
   BOOL reusable = NO;
+  BOOL closedInTransaction = NO;
+  BOOL resetFailed = NO;
   @try {
-    if (connection.isOpen && [connection hasActiveTransaction]) {
-      NSError *rollbackError = nil;
-      if (![connection rollbackTransaction:&rollbackError]) {
-        [connection close];
-      }
+    // A connection still inside a transaction (an unfinished -beginTransaction:
+    // or a BEGIN sent by hand) is closed, which rolls the transaction back
+    // server-side. Re-pooling it would put the next borrower's statements into
+    // this borrower's transaction.
+    if (connection.isOpen && ([connection hasActiveTransaction] || [connection isInsideTransaction])) {
+      [connection close];
+      closedInTransaction = YES;
     }
     // Gate re-pooling on the real libpq socket status, not the cached
     // `isOpen` flag. A connection whose socket died while checked out (server
@@ -3872,12 +3906,23 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     // here poisons the pool and every subsequent borrower fails the same way
     // until the worker is restarted. isConnectionUsable asks libpq directly,
     // so a dead connection is torn down instead of recirculated.
-    reusable = [connection isConnectionUsable];
-    if (!reusable) {
+    reusable = !closedInTransaction && [connection isConnectionUsable];
+    if (reusable && self.sessionResetPolicy != ALNPgSessionResetPolicyNone &&
+        ![connection resetSessionStateDiscardingAll:(self.sessionResetPolicy == ALNPgSessionResetPolicyDiscardAll)]) {
+      reusable = NO;
+      resetFailed = YES;
+    }
+    if (!reusable && !closedInTransaction) {
       [connection close];
     }
   } @finally {
     [self.poolCondition lock];
+    if (closedInTransaction) {
+      self.releasedInTransactionCount += 1;
+    }
+    if (resetFailed) {
+      self.sessionResetFailureCount += 1;
+    }
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
     }
@@ -4067,6 +4112,8 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
       @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
       @"pool_exhausted_count" : @(self.poolExhaustedCount),
       @"connection_retry_count" : @(self.connectionRetryCount),
+      @"released_in_transaction_count" : @(self.releasedInTransactionCount),
+      @"session_reset_failure_count" : @(self.sessionResetFailureCount),
     };
   } @finally {
     [self.poolCondition unlock];
