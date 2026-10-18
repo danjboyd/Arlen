@@ -1,0 +1,29 @@
+# Third-party DLLs bundled into build/dll/ of the windows-x64 release zip (#200).
+#
+# Only DLLs the gnustep-cli toolchain does not ship. A DLL's own imports must be
+# bundled here, present in that toolchain's clang64/bin, or Windows system DLLs;
+# package_framework.sh checks this and fails otherwise.
+#
+# One section per toolchain. A `toolchain` line starts a section, and the zip
+# bundles the `dll` lines of the section whose version AND artifact sha256 match
+# the toolchain it is built against (state/cli-state.json). A build against any
+# other toolchain fails until a section for it is added: derive the packages
+# from the package set that toolchain was locked against, and check the DLLs'
+# imports against that toolchain's own DLLs.
+#
+# toolchain <toolchain_version> <toolchain_artifact_sha256>
+# dll <package_url> <package_sha256> <member> <member_sha256>
+
+# gnustep-cli v0.1.0. postgresql 18.2-1 is the clang64 entry in that toolchain's
+# pacman sync database (2026-05-04); libpq links against its openssl 3.6.2-2
+# libssl/libcrypto and its libintl/libiconv.
+toolchain 0.1.0 a459f954c5796e8fc0c1bdfeed1dafaf95693fed0a66fb8be74981a64a3d9851
+dll https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-postgresql-18.2-1-any.pkg.tar.zst 14a0b83bef36a0fdf7f5562b08b04713b105735aa0487526a9c55d574da821d3 clang64/bin/libpq.dll 5a9500a8bba1edae3017a24a2147c881220db466044e951d595f5ba6eaf2a7f8
+
+# gnustep-cli v0.1.1 (published for validation as v0.1.1-rc.2; the bits v0.1.1
+# ships). Its root carries the 2026-10-16 clang64.db its package lock came from,
+# and postgresql 18.6-4 is the clang64 entry there; libpq links against its
+# openssl 3.6.5 libssl/libcrypto and its libintl/libiconv with no missing
+# symbols (gnustep-cli-new, checked against the toolchain's own DLLs).
+toolchain 0.1.1 07d57993b2d5364578aff0392fede18d5a427f9f5dd22a03df1ec56c28f98dba
+dll https://repo.msys2.org/mingw/clang64/mingw-w64-clang-x86_64-postgresql-18.6-4-any.pkg.tar.zst af0e4f0cadd6282eb0709f22907f2181f2c4b25206c855ebbf46b8bcdd29f7a4 clang64/bin/libpq.dll a4199cffe3b446e666891a8dee47e2f6d2edfc71b0b145bb5ee03a79f5caf40f
