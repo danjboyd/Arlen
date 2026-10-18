@@ -55,33 +55,31 @@ MSYS2 at `C:\msys64`. Arlen's runtime uses the same search order to find
 ### Toolchain from gnustep-cli
 
 The public way to get a `CLANG64` GNUstep toolchain is the gnustep-cli
-PowerShell bootstrap. Pass the stable manifest explicitly; the bootstrap
-script at the `v0.1.0` tag otherwise selects `0.1.0-dev`:
+PowerShell bootstrap. Arlen 0.3.0 needs gnustep-cli `v0.1.1`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/release-manifest.json
+iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/release-manifest.json
 ```
 
-It installs to `%LOCALAPPDATA%\gnustep-cli`, which is itself an MSYS2 root
-with `pacman`. It does not include libcurl; install it inside that root:
-
-```sh
-pacman -S --noconfirm --needed mingw-w64-clang-x86_64-curl
-```
+It installs to `%LOCALAPPDATA%\gnustep-cli` (pass `--root DIR` for another
+location), which is itself an MSYS2 root. `v0.1.1` includes libcurl (with TLS
+and asynchronous DNS), so nothing else needs to be installed into it. The
+prebuilt Windows release bundles `libpq.dll`.
 
 Never run `pacman -Sy` or `pacman -Syu` against the managed root, and don't
-install anything else into it. The managed root is a pinned toolchain: a
-database refresh makes later installs partial upgrades (one left the root's
-`python3` newer than its `expat`, so `import pyexpat` failed), and the live
-repository's current clang breaks the shipped gnustep-base headers.
+install anything into it. The managed root is a pinned toolchain: a database
+refresh makes later installs partial upgrades (one left the root's `python3`
+newer than its `expat`, so `import pyexpat` failed), and the live repository's
+current clang breaks the shipped gnustep-base headers.
 
-Known issues in the `v0.1.0` Windows toolchain, worked around by Arlen's
-build: libdispatch's `os/generic_win_base.h` redefines `mode_t` (Arlen
-compiles with `-DHAVE_MODE_T=1`) and `pthread_attr_t` (Arlen sources avoid
-`<pthread.h>`); the shipped gnustep-base predates
-`+dataWithContentsOfFile:options:error:` (use `ALNPlatformMappedFileData`);
-and drives mount under `/cygdrive/c` rather than `/c`. Fixes for the first two
-are queued for the next gnustep-cli Windows republish.
+`v0.1.1` fixes the `v0.1.0` toolchain's libdispatch header clashes over
+`mode_t` and `pthread_attr_t`. Arlen's build keeps its workarounds
+(`-DHAVE_MODE_T=1`, no `<pthread.h>` in Arlen sources), which are harmless on
+`v0.1.1`. Arlen also avoids `+dataWithContentsOfFile:options:error:`, which
+the `v0.1.0` gnustep-base lacked (it uses `ALNPlatformMappedFileData`). The
+managed root mounts drives under `/cygdrive/c` rather than `/c`, so Arlen's
+scripts convert paths with `cygpath`.
 
 For Windows runner provisioning, Arlen pins `gnustep-cli-new` as a submodule
 at `vendor/gnustep-cli-new`. Use that checkout as the source of truth for the
@@ -210,8 +208,9 @@ Minimum assumptions that still remain external on Windows:
 
 Planned for 0.4.0:
 
-- `propane`. Its prefork worker model assumes POSIX `fork`, which Windows
-  lacks, so it needs its own design.
+- `propane` as a production manager. `arlen propane` starts from a Windows
+  console, but its worker supervision, reloads and signal handling are not
+  validated on Windows yet.
 - Supervised `jobs-worker` processes and Windows service deploys
   (`arlen deploy` targets).
 

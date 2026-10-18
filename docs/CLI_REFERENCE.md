@@ -69,7 +69,9 @@ the zip's `toolchain_sha256=`, or when the root has no gnustep-cli state file.
 `arlen.cmd` works from cmd.exe and PowerShell under any execution policy. It
 runs `bin\arlen-clang64.ps1`, which enters `CLANG64` the same way
 `scripts\run_clang64.ps1` does, exports `ARLEN_FRAMEWORK_ROOT` (unless already
-set), and passes the arguments to `bin/arlen`. Set `ARLEN_HOME` to run a
+set), passes the toolchain root it chose on as `ARLEN_MSYS_ROOT`, and passes
+the arguments to `bin/arlen`. Ctrl-C or closing the window stops the command
+and everything it started. Set `ARLEN_HOME` to run a
 different installed version, and `ARLEN_MSYS_ROOT` to use a different
 toolchain root.
 
@@ -871,7 +873,7 @@ Run production manager (`propane`) for the current app root.
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
-- Windows: not supported until 0.4.0. `propane`'s prefork worker model assumes POSIX `fork`, which Windows lacks
+- Windows: not supported for production until 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
 
 ### `arlen routes`
 

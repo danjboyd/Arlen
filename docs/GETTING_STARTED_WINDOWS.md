@@ -58,7 +58,8 @@ machine.
 
 The prebuilt tools are tied to the toolchain they were built with. If your
 toolchain's version differs from the one the release was built against, the
-installer stops and tells you to rerun the gnustep-cli bootstrap `setup`.
+installer stops and prints the gnustep-cli bootstrap `setup` command to run
+(with `--root` if your toolchain is not in the default location).
 
 The installer unpacks to `%LOCALAPPDATA%\Arlen\<version>`, points the
 `%LOCALAPPDATA%\Arlen\current` junction at it, and writes an `arlen.cmd`
@@ -96,7 +97,11 @@ arlen boomhauer --port 3000
 
 Open <http://localhost:3000/>. `boomhauer` rebuilds and restarts the app when
 you change its sources, and shows build errors in the browser. The app binary
-is `.boomhauer\build\boomhauer-app.exe`.
+is `.boomhauer\build\boomhauer-app.exe`. Press Ctrl-C, or close the window,
+to stop `boomhauer` and the app together.
+
+`arlen test --app` builds and runs the app's XCTest bundle, as on Linux and
+macOS.
 
 ## 4. Work From a Source Checkout
 
@@ -123,9 +128,11 @@ To run one command without an interactive shell:
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make all"
 ```
 
-`run_clang64.ps1` and the `arlen` launcher look for the toolchain in this
-order: `ARLEN_MSYS_ROOT`, `%LOCALAPPDATA%\gnustep-cli`,
-`%ProgramFiles%\gnustep-cli`, then a stock MSYS2 at `C:\msys64`.
+`run_clang64.ps1` looks for the toolchain in this order: `ARLEN_MSYS_ROOT`,
+`%LOCALAPPDATA%\gnustep-cli`, `%ProgramFiles%\gnustep-cli`, then a stock MSYS2
+at `C:\msys64`. The installed `arlen` launcher checks `ARLEN_MSYS_ROOT`, then
+the toolchain the installer found, then the two gnustep-cli locations, and
+passes the one it uses on to `boomhauer` and your app.
 
 The repository's `.gitattributes` keeps shell scripts and makefiles on LF line
 endings, but it doesn't apply to the submodules under `vendor/`. With Git for
@@ -153,12 +160,13 @@ More detail on the `CLANG64` lanes and the packaged-release contract is in
   app directories short; `%LOCALAPPDATA%\Arlen` is fine.
 - **Symlinks:** a standard user cannot create symlinks on Windows. Arlen uses
   junctions instead, for example `%LOCALAPPDATA%\Arlen\current`.
+- **Stopping the server:** Ctrl-C and closing the window stop `boomhauer` and
+  the app. Force-killing the console host (`conhost.exe` in Task Manager)
+  does not, because Windows sends no close event; end `boomhauer-app.exe`
+  there too.
 - **First run:** the first command in a new MSYS2 home prints "MSYS2 is
   starting for the first time" while it copies skeleton files. That is
   harmless.
-- **Quoting:** Windows PowerShell 5.1 can mangle double quotes embedded in
-  arguments passed to `arlen`. Prefer plain arguments, or use single quotes
-  around the whole argument.
 
 ## 6. Read Next
 
