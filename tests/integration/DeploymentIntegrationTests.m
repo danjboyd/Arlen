@@ -373,6 +373,91 @@ static NSString *ALNHostDeployProfile(void) {
   }
 }
 
+// A directory `arlen build`/`arlen check` accept as ARLEN_FRAMEWORK_ROOT. Its
+// `all` target writes to stdout and then drops ran.txt; `check` writes and
+// fails, so the tests see output, side effects and the exit code.
+- (BOOL)writeFakeMakeFrameworkRoot:(NSString *)root {
+  NSString *makefile = @"all:\n"
+                        "\t@echo arlen-build-stdout\n"
+                        "\t@echo ran > ran.txt\n"
+                        "check:\n"
+                        "\t@echo arlen-check-stdout\n"
+                        "\t@exit 3\n";
+  return [self writeFile:[root stringByAppendingPathComponent:@"GNUmakefile"] content:makefile] &&
+         [self writeFile:[root stringByAppendingPathComponent:@"tools/boomhauer.m"] content:@""] &&
+         [self writeFile:[root stringByAppendingPathComponent:@"src/Arlen/ArlenServer.h"] content:@""];
+}
+
+- (void)testArlenShellCommandsQuoteRootAndReturnExitCodeThroughPipes {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-pipe"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+  @try {
+    // A space, a single quote and a $ in the root: arlen ShellQuotes it into
+    // `cd <root> && make ...`, which must reach bash unchanged.
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"fake root 'q' $x"];
+    XCTAssertTrue([self writeFakeMakeFrameworkRoot:frameworkRoot]);
+    NSString *prefix = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ ", ALNTestShellQuote(workRoot),
+                                                  ALNTestShellQuote(frameworkRoot),
+                                                  ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"build/arlen"])];
+    int code = -1;
+    NSString *output = [self runShellCapture:[prefix stringByAppendingString:@"build"] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"arlen-build-stdout"], @"%@", output);
+    XCTAssertTrue([[NSFileManager defaultManager]
+        fileExistsAtPath:[frameworkRoot stringByAppendingPathComponent:@"ran.txt"]]);
+
+    output = [self runShellCapture:[prefix stringByAppendingString:@"check"] exitCode:&code];
+    XCTAssertEqual(2, code, @"make's exit code reaches arlen's caller: %@", output);
+    XCTAssertTrue([output containsString:@"arlen-check-stdout"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testArlenShellCommandsWriteToARealConsoleOnWindows {
+#if !defined(_WIN32)
+  XCTSkipUnless(NO, @"console handles are a Windows concern");
+#else
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-console"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+  @try {
+    // GNUstep's NSTask started bash without a console, so under a console
+    // window bash's stdout was invalid and its first echo failed (boomhauer
+    // exited 1: "echo: write error: Bad file descriptor"). Start-Process
+    // without redirection gives arlen.exe a new console of its own.
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"fake root"];
+    XCTAssertTrue([self writeFakeMakeFrameworkRoot:frameworkRoot]);
+    NSString *script = [workRoot stringByAppendingPathComponent:@"run-in-console.ps1"];
+    XCTAssertTrue([self writeFile:script
+                          content:@"$p = Start-Process -FilePath $env:ALN_TEST_ARLEN -ArgumentList 'build' "
+                                   "-WorkingDirectory $env:ALN_TEST_WORK -PassThru -Wait\n"
+                                   "exit $p.ExitCode\n"]);
+    NSString *command = [NSString
+        stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ALN_TEST_ARLEN=%@ ALN_TEST_WORK=%@ "
+                          "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$(cygpath -w %@)\"",
+                         ALNTestShellQuote(frameworkRoot),
+                         ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"build/arlen.exe"]),
+                         ALNTestShellQuote(workRoot), ALNTestShellQuote(script)];
+    int code = -1;
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([[NSFileManager defaultManager]
+                      fileExistsAtPath:[frameworkRoot stringByAppendingPathComponent:@"ran.txt"]],
+                  @"make stopped at the console echo: %@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+#endif
+}
+
 - (void)testArlenUmbrellaHeaderCompilesAgainstTrackedSourceTreeOnly {
 #if defined(_WIN32)
   XCTSkip(@"runs git ls-files, and git is not on the Windows CLANG64 PATH");

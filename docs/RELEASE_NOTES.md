@@ -12,6 +12,16 @@
   file mapped. Also on Windows, static and `renderFileAtPath:` ETags now use
   the NTFS file index and 100 ns write/change times: a same-size rewrite within
   a second used to keep its ETag, so a changed file could answer 304.
+- On Windows, `arlen boomhauer`, `arlen propane`, `arlen jobs worker` and the
+  other commands that run a shell step (`arlen build`, `check`, `test`,
+  `perf`) work from a console window. They used to exit 1 at once with
+  "echo: write error: Bad file descriptor": `arlen` started `bash` through
+  `NSTask`, which gives the child no console, while passing it the console's
+  handles. They worked only when output went to a pipe or file (CI, `| tee`).
+  `arlen` now starts `bash` on its own console and returns its exit code.
+  Ctrl-C stops the whole command (`bash`, the server and the app) and `arlen`
+  exits 130; closing the window or ending `arlen` stops it too, so nothing is
+  left holding the port.
 - Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
   managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
   toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming
