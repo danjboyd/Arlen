@@ -130,8 +130,10 @@ Run bootstrap environment diagnostics without requiring a framework build.
 - in an app root, warns (`module_outdated`) for each vendored
  `modules/<id>` whose `version` is lower than the framework checkout's
  `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
- `arlen module migrate`, then rebuild (a version-string comparison only;
- `arlen module doctor` also compares file contents)
+ `arlen module migrate`, then rebuild (a numeric `MAJOR.MINOR[.PATCH]`
+ comparison only; a copy whose version has a suffix such as `-rc1`, which
+ module manifests don't allow, is skipped; `arlen module doctor` also compares
+ file contents)
 - with `--env production`, warns (`operability_endpoints`) when `/metrics` and
  `/clusterz` are anonymous, i.e. neither `observability.operabilityToken` /
  `ARLEN_OPERABILITY_TOKEN` nor `observability.operabilityLoopbackOnly` /

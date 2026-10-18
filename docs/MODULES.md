@@ -122,7 +122,11 @@ app keeps running the old module code until you re-vendor each module:
 vendored module whose framework copy has a newer version, and the app logs
 `vendored module is older than the framework copy` at startup (outside the
 `test` environment) when it runs under `boomhauer`, `propane` or
-`jobs-worker`, which export `ARLEN_FRAMEWORK_ROOT` to it.
+`jobs-worker`, which export `ARLEN_FRAMEWORK_ROOT` to it. The check compares
+numeric versions component by component (`1.10.0` is newer than `1.9.0`).
+Module versions must be plain `MAJOR.MINOR[.PATCH]` numbers: the module system
+refuses a `module.plist` with a pre-release suffix such as `1.2.0-rc1`, and the
+doctors skip a copy whose version they can't read rather than guess.
 
 Re-run it for every installed module whenever you move your framework pin.
 First-party module sources can change without a `version` bump, so `upgrade`

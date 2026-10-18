@@ -541,6 +541,11 @@
                           content:@"{\n  identifier = \"alpha\";\n  version = \"1.2.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
     XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
                           content:@"{\n  identifier = \"beta\";\n  version = \"2.0.0\";\n  principalClass = \"BetaModule\";\n}\n"]);
+    // A pre-release suffix isn't a valid module version; the doctor skips it rather than guess.
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.1.0-rc1\";\n  principalClass = \"GammaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.0.0\";\n  principalClass = \"GammaModule\";\n}\n"]);
 
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
                           content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);

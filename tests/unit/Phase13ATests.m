@@ -377,6 +377,14 @@
       XCTAssertTrue([entry[@"detail"] containsString:@"arlen module migrate"], @"%@", entry);
     }
 
+    // A framework copy with a pre-release suffix is not a valid manifest, so it is skipped, not compared.
+    NSString *manifestPrerelease = [NSString stringWithFormat:manifest, @"9.0.0-rc1"];
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"] content:manifestPrerelease]);
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:frameworkRoot
+                                                                   compareContent:YES]);
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"] content:manifest120]);
+
     // A vendored copy newer than the framework's is not outdated.
     XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"module.plist"]
                           content:manifest130]);
