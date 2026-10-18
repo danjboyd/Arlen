@@ -5,7 +5,7 @@
 - Auth module (`auth` 1.6.0): the stub OIDC provider is now available only in
   the `development` and `test` environments. Elsewhere it defaults off, its
   routes are not registered, and setting `authModule.providers.stub.enabled =
-  YES` makes the app refuse to start. Apps that relied on the stub outside
+  YES` is refused (the auth module's configuration is rejected). Apps that relied on the stub outside
   development or test must configure a real provider or local passwords.
 - Auth module: password-reset and email-verification links are single-use
   even under concurrent requests; only one request can consume a given link.

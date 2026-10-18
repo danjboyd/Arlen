@@ -824,6 +824,44 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertTrue([message[@"textBody"] containsString:@"/auth/password/reset?token="]);
 }
 
+- (void)testTrustedEmailClaimUsesConfiguredPublicBaseURLOverCallerBaseURL {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : @{ @"publicBaseURL" : @"https://public.example.test" },
+  }];
+  ALNInMemoryMailAdapter *mailAdapter =
+      [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_claim_public_mail"];
+  [app setMailAdapter:mailAdapter];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  [app registerRouteMethod:@"POST"
+                      path:@"/claim"
+                      name:@"phase13e_claim_public"
+           controllerClass:[Phase16TrustedEmailClaimController class]
+                     action:@"claim"];
+
+  NSString *email = [NSString stringWithFormat:@"claimed-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSData *body = [NSJSONSerialization dataWithJSONObject:@{ @"email" : email, @"send_password_setup_email" : @YES }
+                                                 options:0
+                                                   error:NULL];
+  ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                                  path:@"/claim"
+                                                               headers:@{
+                                                                 @"Accept" : @"application/json",
+                                                                 @"Content-Type" : @"application/json",
+                                                               }
+                                                                  body:body]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSArray *deliveries = [mailAdapter deliveriesSnapshot];
+  XCTAssertEqual((NSUInteger)1, [deliveries count]);
+  NSDictionary *delivery = [deliveries.firstObject isKindOfClass:[NSDictionary class]] ? deliveries.firstObject : @{};
+  NSDictionary *message = [delivery[@"message"] isKindOfClass:[NSDictionary class]] ? delivery[@"message"] : @{};
+  NSString *text = [message[@"textBody"] isKindOfClass:[NSString class]] ? message[@"textBody"] : @"";
+  XCTAssertTrue([text containsString:@"https://public.example.test/auth/password/reset?token="], @"%@", text);
+  XCTAssertFalse([text containsString:@"claim.example.test"], @"%@", text);
+}
+
 - (void)testAuthStylesheetNormalizesSharedActionTypography {
   NSString *repoRoot = [self repoRoot];
   NSString *stylesheetPath =
@@ -1119,7 +1157,8 @@ static ALNContext *ALNTestStandInContext(void) {
 
 - (void)testPublicBaseURLIsValidatedAndNormalized {
   for (NSString *invalid in @[ @"app.example.test", @"ftp://app.example.test", @"https://app.example.test/?next=1",
-                               @"https://app.example.test/#frag", @"https://user@app.example.test", @"https://" ]) {
+                               @"https://app.example.test/#frag", @"https://user@app.example.test", @"https://",
+                               @"https://app.example.test:99999", @"https://app.example.test:0" ]) {
     NSError *error = nil;
     XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
                                                                   environment:@"production"
@@ -1132,6 +1171,10 @@ static ALNContext *ALNTestStandInContext(void) {
                                             environment:@"production"
                                                   error:NULL]);
   XCTAssertEqualObjects(@"https://app.example.test/accounts", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"HTTPS://App.Example.TEST:8443/Accounts/" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://app.example.test:8443/Accounts", runtime.publicBaseURL);
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
   XCTAssertEqualObjects(@"", runtime.publicBaseURL);
 }

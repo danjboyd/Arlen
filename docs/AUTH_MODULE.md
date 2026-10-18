@@ -354,6 +354,11 @@ sendPasswordSetupEmail:YES
                 error:&error];
 ```
 
+`baseURL` is used for the password setup link only when
+`authModule.publicBaseURL` is unset; a configured `publicBaseURL` always wins.
+Pass a fixed, configured value here, never one built from the request's `Host`
+or forwarding headers, because the link carries a password setup token.
+
 This flow is intended for app-owned invite-claim or verified email-link pages.
 It will:
 
@@ -687,8 +692,8 @@ development and test convenience only:
 - In the `development` and `test` environments it defaults on when no real
   OIDC provider is enabled, and `providers.stub.enabled` is honored either way.
 - In every other environment (`production`, `staging`, or any custom name) it
-  defaults off. Setting `providers.stub.enabled = YES` there makes auth module
-  configuration fail, so the app refuses to start. There is no override.
+  defaults off. Setting `providers.stub.enabled = YES` there is refused: the
+  auth module's configuration is rejected. There is no override.
 - Even if a stub route is reached outside `development`/`test`, it answers 404
   and the stub identity never creates or signs in a user.
 

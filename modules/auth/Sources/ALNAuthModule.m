@@ -168,22 +168,28 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
   }
   NSURLComponents *components = (trimmed != nil) ? [NSURLComponents componentsWithString:trimmed] : nil;
   NSString *scheme = [components.scheme lowercaseString];
+  NSInteger port = (components.port != nil) ? [components.port integerValue] : 0;
   BOOL valid = (components != nil) && ([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) &&
                [components.host length] > 0 && components.user == nil && components.password == nil &&
-               components.query == nil && components.fragment == nil;
+               components.query == nil && components.fragment == nil &&
+               (components.port == nil || (port >= 1 && port <= 65535));
   if (!valid) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
-                       @"authModule.publicBaseURL must be an absolute http(s) URL without a query or fragment, "
-                       @"for example \"https://app.example.com\"",
+                       @"authModule.publicBaseURL must be an absolute http(s) URL with a valid port and no query "
+                       @"or fragment, for example \"https://app.example.com\"",
                        @{ @"key_path" : @"authModule.publicBaseURL" });
     }
     return nil;
   }
-  while ([trimmed hasSuffix:@"/"]) {
-    trimmed = [trimmed substringToIndex:[trimmed length] - 1];
+  // Scheme and host are case-insensitive; store them lowercased.
+  components.scheme = scheme;
+  components.host = [components.host lowercaseString];
+  NSString *normalized = components.string ?: trimmed;
+  while ([normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
   }
-  return trimmed;
+  return normalized;
 }
 
 static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
@@ -1448,6 +1454,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if ([self.publicBaseURL length] == 0 && ![self isDevelopmentOrTestEnvironment] && self.localPasswordEnabled &&
       self.mailAdapter != nil) {
     [self.logger warn:@"authModule.publicBaseURL is not set; password-reset and email-verification links will not be sent"
+               fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                         @"key_path" : @"authModule.publicBaseURL" }];
+  }
+  if ([self.publicBaseURL hasPrefix:@"http://"] && ![self isDevelopmentOrTestEnvironment]) {
+    [self.logger warn:@"authModule.publicBaseURL uses http; password-reset and verification links will carry tokens "
+                       "over plain HTTP. Use an https URL."
                fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
                          @"key_path" : @"authModule.publicBaseURL" }];
   }
@@ -3249,7 +3261,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       }
       return nil;
     }
-    NSString *resolvedBaseURL = AMTrimmedString(baseURL);
+    // A configured authModule.publicBaseURL takes precedence; the caller's
+    // baseURL is used only when it is unset, so callers must not derive it
+    // from request headers.
+    NSString *resolvedBaseURL =
+        ([self.publicBaseURL length] > 0) ? self.publicBaseURL : AMTrimmedString(baseURL);
     if ([resolvedBaseURL length] == 0) {
       if (error != NULL) {
         *error = AMError(ALNAuthModuleErrorValidationFailed,

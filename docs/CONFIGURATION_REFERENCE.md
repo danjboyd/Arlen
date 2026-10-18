@@ -645,9 +645,13 @@ Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartField
 `authModule.publicBaseURL` is the absolute `http(s)` URL that links in
 password-reset and email-verification mail start with, for example
 `"https://app.example.com"` (a path prefix such as
-`"https://example.com/app"` is allowed; a trailing slash is dropped; a query,
-fragment or user info fails startup). The module never builds these links from
-the request's `Host` header when it is set.
+`"https://example.com/app"` is allowed; a trailing slash is dropped and the
+scheme and host are lowercased; a query, fragment, user info or a port outside
+1-65535 is rejected as invalid auth module configuration). Outside
+`development` and `test`, an `http://` value logs a warning at startup; use
+`https`. The module never builds these links from the request's `Host` header
+when it is set, and it also takes precedence over the `baseURL` an app passes
+to `claimTrustedEmail:`.
 
 When it is not set, the `development` and `test` environments fall back to the
 request's scheme and `Host` header so local sign-up keeps working. Every other
@@ -690,7 +694,8 @@ linking or user creation on this path.
 enabled, true otherwise; an explicit value overrides that default.
 `authModule.providers.stub.enabled` follows the same default in the
 `development` and `test` environments only. In any other environment the stub
-provider defaults off, and an explicit `YES` fails startup. Older copied
+provider defaults off, and an explicit `YES` is refused (the auth module's
+configuration is rejected). Older copied
 manifests may explicitly enable stub; turn it off in application configuration.
 The same choices apply to HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
 injection, primarily for deterministic tests.
