@@ -147,6 +147,23 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 @end
 
+@interface ALNAuthModuleRuntime (Phase13ETokenAccess)
+- (nullable NSDictionary *)createLocalUserWithEmail:(NSString *)email
+                                        displayName:(NSString *)displayName
+                                           password:(NSString *)password
+                                             source:(NSString *)source
+                                              error:(NSError **)error;
+- (nullable NSString *)issueVerificationTokenForUserID:(NSString *)userID error:(NSError **)error;
+- (nullable NSString *)issuePasswordResetTokenForUserID:(NSString *)userID error:(NSError **)error;
+- (BOOL)consumeVerificationToken:(NSString *)token user:(NSDictionary **)user error:(NSError **)error;
+- (BOOL)consumePasswordResetToken:(NSString *)token
+                         password:(NSString *)password
+                             user:(NSDictionary **)user
+                            error:(NSError **)error;
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash forUserID:(NSString *)userID error:(NSError **)error;
+- (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email password:(NSString *)password error:(NSError **)error;
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -988,6 +1005,114 @@ static ALNContext *ALNTestStandInContext(void) {
                                                        error:&error];
   XCTAssertNil(descriptor);
   XCTAssertEqual((NSInteger)ALNAuthModuleErrorPolicyRejected, error.code);
+}
+
+#pragma mark - Single-use tokens
+
+- (ALNAuthModuleRuntime *)configuredRuntimeWithTokenUser:(NSDictionary **)user email:(NSString **)email {
+  ALNApplication *app = [self applicationWithConfig:@{ @"csrf" : @{ @"enabled" : @NO } }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSString *address = [NSString stringWithFormat:@"tokens-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSDictionary *created = [runtime createLocalUserWithEmail:address
+                                                displayName:@"Token User"
+                                                   password:@"original-password"
+                                                     source:@"test"
+                                                      error:&error];
+  XCTAssertNotNil(created, @"%@", error);
+  if (user != NULL) *user = created;
+  if (email != NULL) *email = address;
+  return runtime;
+}
+
+- (void)testPasswordResetTokenIsSingleUseAndRetiresOlderTokens {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  NSString *email = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:&email];
+  NSString *userID = user[@"id"];
+  NSError *error = nil;
+  NSString *older = [runtime issuePasswordResetTokenForUserID:userID error:&error];
+  NSString *newer = [runtime issuePasswordResetTokenForUserID:userID error:&error];
+  XCTAssertTrue([older length] > 0 && [newer length] > 0, @"%@", error);
+
+  XCTAssertTrue([runtime consumePasswordResetToken:newer password:@"first-new-password" user:NULL error:&error], @"%@", error);
+  XCTAssertNotNil([runtime authenticateLocalEmail:email password:@"first-new-password" error:NULL]);
+
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:newer password:@"second-new-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:older password:@"third-new-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+  XCTAssertNotNil([runtime authenticateLocalEmail:email password:@"first-new-password" error:NULL]);
+  XCTAssertNil([runtime authenticateLocalEmail:email password:@"second-new-password" error:NULL]);
+  XCTAssertNil([runtime authenticateLocalEmail:email password:@"third-new-password" error:NULL]);
+}
+
+- (void)testConcurrentPasswordResetConsumptionHasExactlyOneWinner {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  NSString *email = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:&email];
+  NSString *token = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+
+  const size_t attempts = 4;
+  __block NSInteger successes = 0;
+  NSMutableArray *winners = [NSMutableArray array];
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(attempts, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    NSString *password = [NSString stringWithFormat:@"concurrent-password-%zu", index];
+    BOOL ok = [runtime consumePasswordResetToken:token password:password user:NULL error:NULL];
+    if (ok) {
+      [lock lock];
+      successes += 1;
+      [winners addObject:password];
+      [lock unlock];
+    }
+  });
+  XCTAssertEqual((NSInteger)1, successes);
+  if ([winners count] == 1) {
+    XCTAssertNotNil([runtime authenticateLocalEmail:email password:winners[0] error:NULL]);
+  }
+}
+
+- (void)testPasswordChangeRetiresOutstandingResetTokens {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:NULL];
+  NSString *token = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+  NSError *error = nil;
+  XCTAssertTrue([runtime updateLocalPasswordHash:@"$argon2id$placeholder" forUserID:user[@"id"] error:&error], @"%@", error);
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:token password:@"after-change-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+}
+
+- (void)testVerificationTokenIsSingleUse {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:NULL];
+  NSString *token = [runtime issueVerificationTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+
+  __block NSInteger successes = 0;
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(4, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    (void)index;
+    if ([runtime consumeVerificationToken:token user:NULL error:NULL]) {
+      [lock lock];
+      successes += 1;
+      [lock unlock];
+    }
+  });
+  XCTAssertEqual((NSInteger)1, successes);
+  NSError *error = nil;
+  XCTAssertFalse([runtime consumeVerificationToken:token user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
 }
 
 @end

@@ -821,6 +821,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                                   error:(NSError **)error;
 - (BOOL)markEmailVerifiedForUserID:(NSString *)userID
                              error:(NSError **)error;
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash
+                      forUserID:(NSString *)userID
+                          error:(NSError **)error;
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary *_Nullable *_Nullable)user
                            error:(NSError **)error;
@@ -2149,6 +2152,34 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return (updated >= 0);
 }
 
+// Any password change retires every outstanding reset token for the user, so a
+// link issued before the change cannot be used afterwards.
+- (BOOL)invalidatePasswordResetTokensForUserID:(NSString *)userID
+                                    connection:(ALNPgConnection *)connection
+                                         error:(NSError **)error {
+  NSInteger invalidated = [connection executeCommand:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
+                                                 "WHERE user_id = $1 AND consumed_at IS NULL"
+                                           parameters:@[ userID ?: @"" ]
+                                                error:error];
+  return (invalidated >= 0);
+}
+
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash
+                      forUserID:(NSString *)userID
+                          error:(NSError **)error {
+  NSString *normalizedUserID = AMTrimmedString(userID);
+  return [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    NSInteger updated = [connection executeCommand:@"UPDATE auth_local_credentials "
+                                               "SET password_hash = $2, updated_at = NOW() WHERE user_id = $1"
+                                         parameters:@[ normalizedUserID, encodedHash ?: @"" ]
+                                              error:txError];
+    if (updated < 0) {
+      return NO;
+    }
+    return [self invalidatePasswordResetTokensForUserID:normalizedUserID connection:connection error:txError];
+  } error:error];
+}
+
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary **)user
                            error:(NSError **)error {
@@ -2170,11 +2201,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
-    NSInteger marked = [connection executeCommand:@"UPDATE auth_verification_tokens SET consumed_at = NOW() "
-                                              "WHERE token = $1 AND consumed_at IS NULL"
-                                        parameters:@[ normalizedToken ]
-                                             error:txError];
-    if (marked < 0) {
+    // The conditional UPDATE is the single-use gate: of several concurrent
+    // requests with one token, only one sees a row come back.
+    NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_verification_tokens SET consumed_at = NOW() "
+                                                     "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
+                                                     "RETURNING user_id::text AS user_id"
+                                             parameters:@[ normalizedToken ]
+                                                  error:txError];
+    if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
+      if (txError != NULL && *txError == nil) {
+        *txError = AMError(ALNAuthModuleErrorNotFound, @"Verification token is invalid or expired", nil);
+      }
       return NO;
     }
     NSInteger updated = [connection executeCommand:@"UPDATE auth_users SET email_verified_at = NOW(), updated_at = NOW() "
@@ -2229,11 +2266,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
-    NSInteger marked = [connection executeCommand:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
-                                              "WHERE token = $1 AND consumed_at IS NULL"
-                                        parameters:@[ normalizedToken ]
-                                             error:txError];
-    if (marked < 0) {
+    // The conditional UPDATE is the single-use gate: of several concurrent
+    // requests with one token, only one sees a row come back and goes on to
+    // change the password.
+    NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
+                                                     "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
+                                                     "RETURNING user_id::text AS user_id"
+                                             parameters:@[ normalizedToken ]
+                                                  error:txError];
+    if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
+      if (txError != NULL && *txError == nil) {
+        *txError = AMError(ALNAuthModuleErrorNotFound, @"Password reset token is invalid or expired", nil);
+      }
       return NO;
     }
     NSInteger updated = [connection executeCommand:@"INSERT INTO auth_local_credentials "
@@ -2243,7 +2287,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                "SET password_hash = EXCLUDED.password_hash, updated_at = NOW()"
                                          parameters:@[ userID, encodedHash ]
                                               error:txError];
-    return (updated >= 0);
+    if (updated < 0) {
+      return NO;
+    }
+    return [self invalidatePasswordResetTokensForUserID:userID connection:connection error:txError];
   } error:error];
   if (ok && user != NULL) {
     *user = [self userForSubject:AMTrimmedString(row[@"subject"]) error:NULL];
@@ -4062,11 +4109,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : updateError.localizedDescription ?: @"Failed to hash password" };
   }
-  NSInteger command = [self.runtime.database executeCommand:@"UPDATE auth_local_credentials "
-                                                        "SET password_hash = $2, updated_at = NOW() WHERE user_id = $1"
-                                                  parameters:@[ AMTrimmedString(user[@"id"]), encodedHash ]
-                                                       error:&updateError];
-  if (command < 0) {
+  if (![self.runtime updateLocalPasswordHash:encodedHash forUserID:AMTrimmedString(user[@"id"]) error:&updateError]) {
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : updateError.localizedDescription ?: @"Failed to update password" };
   }

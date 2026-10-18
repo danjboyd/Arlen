@@ -7,6 +7,10 @@
   routes are not registered, and setting `authModule.providers.stub.enabled =
   YES` makes the app refuse to start. Apps that relied on the stub outside
   development or test must configure a real provider or local passwords.
+- Auth module: password-reset and email-verification links are single-use
+  even under concurrent requests; only one request can consume a given link.
+  A successful password change (by reset link or the change-password route)
+  now retires every other outstanding reset link for that user.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

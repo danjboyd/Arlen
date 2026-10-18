@@ -79,6 +79,11 @@ email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
 the account exists. (Registration still reports an already-registered email.)
 
+Password-reset links expire after 30 minutes and email-verification links after
+one day. Each link works once, even when several requests present it at the same
+time. Any successful password change, through a reset link or the authenticated
+change-password route, retires all of that user's other outstanding reset links.
+
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
 provider CTA disappears and the stub provider routes are not registered. The
