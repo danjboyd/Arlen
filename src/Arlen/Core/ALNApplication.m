@@ -730,9 +730,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 // error can be fixed with the app running; every other environment refuses to
 // start rather than serve without the module.
 static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
-  NSString *name = [[environment ?: @"" lowercaseString]
-      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  return [name isEqualToString:@"development"] || [name isEqualToString:@"test"];
+  return ALNEnvironmentIsDevelopmentLike(environment);
 }
 
 @implementation ALNApplication
@@ -3940,8 +3938,7 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   // Only development and test get the detailed page (reason, stack, paths);
   // staging, preview and other environments are treated like production (#215).
   NSString *environment = application.environment ?: @"";
-  BOOL production = !([environment isEqualToString:@"development"] ||
-                      [environment isEqualToString:@"test"]);
+  BOOL production = !ALNEnvironmentIsDevelopmentLike(environment);
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 

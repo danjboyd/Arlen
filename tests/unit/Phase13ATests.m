@@ -5,6 +5,7 @@
 #import <string.h>
 
 #import "ALNApplication.h"
+#import "ALNConfig.h"
 #import "ALNModuleSystem.h"
 #import "../shared/ALNTestSupport.h"
 
@@ -59,6 +60,19 @@
 
 @end
 
+// The error Phase13AFailingModule returns; tests replace it to cover the
+// config-key spellings modules use.
+static NSError *Phase13AFailingModuleError = nil;
+
+static NSError *Phase13ADefaultFailingModuleError(void) {
+  return [NSError errorWithDomain:@"Phase13AFailingModule"
+                             code:7
+                         userInfo:@{
+                           NSLocalizedDescriptionKey : @"beta.secret is required",
+                           @"key_path" : @"beta.secret",
+                         }];
+}
+
 @interface Phase13AFailingModule : NSObject <ALNModule>
 @end
 
@@ -71,12 +85,7 @@
 - (BOOL)registerWithApplication:(ALNApplication *)application error:(NSError **)error {
   (void)application;
   if (error != NULL) {
-    *error = [NSError errorWithDomain:@"Phase13AFailingModule"
-                                 code:7
-                             userInfo:@{
-                               NSLocalizedDescriptionKey : @"beta.secret is required",
-                               @"key_path" : @"beta.secret",
-                             }];
+    *error = Phase13AFailingModuleError ?: Phase13ADefaultFailingModuleError();
   }
   return NO;
 }
@@ -410,7 +419,7 @@
   }
 
   @try {
-    for (NSString *environment in @[ @"development", @"test" ]) {
+    for (NSString *environment in @[ @"development", @"test", @"Development", @" TEST " ]) {
       ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{
         @"appRoot" : appRoot,
         @"environment" : environment,
@@ -455,6 +464,68 @@
     XCTAssertEqual((NSUInteger)0, [codes(@{ @"session" : @{ @"enabled" : @YES } }) count]);
     XCTAssertEqual((NSUInteger)0, [codes(@{}) count]);
   } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+
+- (void)testEnvironmentClassifierIgnoresCaseAndWhitespace {
+  XCTAssertEqual(ALNEnvironmentKindDevelopment, ALNEnvironmentKindForName(@"development"));
+  XCTAssertEqual(ALNEnvironmentKindDevelopment, ALNEnvironmentKindForName(@"Development"));
+  XCTAssertEqual(ALNEnvironmentKindDevelopment, ALNEnvironmentKindForName(@" DEVELOPMENT\n"));
+  XCTAssertEqual(ALNEnvironmentKindTest, ALNEnvironmentKindForName(@"Test"));
+  XCTAssertEqual(ALNEnvironmentKindProduction, ALNEnvironmentKindForName(@"production"));
+  XCTAssertEqual(ALNEnvironmentKindProduction, ALNEnvironmentKindForName(@"staging"));
+  XCTAssertEqual(ALNEnvironmentKindProduction, ALNEnvironmentKindForName(@"dev"));
+  XCTAssertEqual(ALNEnvironmentKindProduction, ALNEnvironmentKindForName(@""));
+  XCTAssertEqual(ALNEnvironmentKindProduction, ALNEnvironmentKindForName(nil));
+  XCTAssertTrue(ALNEnvironmentIsDevelopmentLike(@"Development"));
+  XCTAssertTrue(ALNEnvironmentIsDevelopmentLike(@"test"));
+  XCTAssertFalse(ALNEnvironmentIsDevelopmentLike(@"Production"));
+  XCTAssertFalse(ALNEnvironmentIsDevelopmentLike(@"preview"));
+}
+
+- (void)testModuleLoadFailureFindsTheConfigKeyWhateverItIsCalled {
+  NSString *appRoot = [self writeAppWithFailingMiddleModule];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  NSError *nested = [NSError errorWithDomain:@"Inner" code:1 userInfo:@{ @"key_path" : @"beta.inner" }];
+  NSArray<NSArray *> *cases = @[
+    @[ @{ NSLocalizedDescriptionKey : @"bad value", @"config_key" : @"storageModule.signingSecret" },
+       @"storageModule.signingSecret" ],
+    @[ @{ NSLocalizedDescriptionKey : @"bad value", @"keyPath" : @"beta.camel" }, @"beta.camel" ],
+    @[ @{ NSLocalizedDescriptionKey : @"bad value", @"Config-Path" : @"beta.scanned" }, @"beta.scanned" ],
+    @[ @{ NSLocalizedDescriptionKey : @"bad value", NSUnderlyingErrorKey : nested }, @"beta.inner" ],
+  ];
+  @try {
+    for (NSArray *testCase in cases) {
+      Phase13AFailingModuleError = [NSError errorWithDomain:@"Phase13AFailingModule" code:8 userInfo:testCase[0]];
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{
+        @"appRoot" : appRoot,
+        @"environment" : @"production",
+        @"logFormat" : @"json",
+      }];
+      NSError *loadError = application.moduleLoadError;
+      XCTAssertEqualObjects(testCase[1], loadError.userInfo[@"key_path"]);
+      NSString *expected = [NSString stringWithFormat:@"(config key %@)", testCase[1]];
+      XCTAssertTrue([loadError.localizedDescription containsString:expected], @"%@", loadError.localizedDescription);
+    }
+
+    Phase13AFailingModuleError = [NSError errorWithDomain:@"Phase13AFailingModule"
+                                                     code:9
+                                                 userInfo:@{ NSLocalizedDescriptionKey : @"no key here" }];
+    ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{
+      @"appRoot" : appRoot,
+      @"environment" : @"production",
+      @"logFormat" : @"json",
+    }];
+    XCTAssertNil(application.moduleLoadError.userInfo[@"key_path"]);
+    XCTAssertEqualObjects(@"module beta failed to load: no key here", application.moduleLoadError.localizedDescription);
+  } @finally {
+    Phase13AFailingModuleError = nil;
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
 }

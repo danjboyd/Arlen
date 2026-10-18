@@ -1119,9 +1119,42 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
   return loaded;
 }
 
-// Names the module that failed, keeps the module's own error (and its
-// key_path) as the underlying error, and lists the modules that were not
-// loaded because loading stopped there.
+// The config key a module error refers to. Modules spell it key_path,
+// config_key or keyPath (and some only on an underlying error), so accept any
+// of those, then any userInfo key that reads as one of them.
+static NSString *ALNModuleErrorConfigKey(NSError *error, NSUInteger depth) {
+  if (error == nil || depth > 4) {
+    return nil;
+  }
+  NSDictionary *info = error.userInfo ?: @{};
+  for (NSString *name in @[ @"key_path", @"config_key", @"keyPath", @"configKey" ]) {
+    id value = info[name];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+      return value;
+    }
+  }
+  for (id name in [[info allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    if (![name isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *folded = [[name lowercaseString] stringByReplacingOccurrencesOfString:@"_" withString:@""];
+    folded = [folded stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    if (![folded isEqualToString:@"keypath"] && ![folded isEqualToString:@"configkey"] &&
+        ![folded isEqualToString:@"configkeypath"] && ![folded isEqualToString:@"configpath"]) {
+      continue;
+    }
+    id value = info[name];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+      return value;
+    }
+  }
+  id underlying = info[NSUnderlyingErrorKey];
+  return [underlying isKindOfClass:[NSError class]] ? ALNModuleErrorConfigKey(underlying, depth + 1) : nil;
+}
+
+// Names the module that failed, keeps the module's own error (and its config
+// key) as the underlying error, and lists the modules that were not loaded
+// because loading stopped there.
 static NSError *ALNModuleLoadFailure(ALNModuleDefinition *definition,
                                      NSError *underlying,
                                      NSArray<ALNModuleDefinition *> *definitions,
@@ -1132,13 +1165,16 @@ static NSError *ALNModuleLoadFailure(ALNModuleDefinition *definition,
   }
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
   NSString *reason = underlying.localizedDescription ?: @"unknown error";
+  NSString *keyPath = ALNModuleErrorConfigKey(underlying, 0);
+  NSString *keyNote = ([keyPath length] > 0 && ![reason containsString:keyPath])
+                          ? [NSString stringWithFormat:@" (config key %@)", keyPath]
+                          : @"";
   userInfo[NSLocalizedDescriptionKey] =
-      [NSString stringWithFormat:@"module %@ failed to load: %@", definition.identifier ?: @"", reason];
+      [NSString stringWithFormat:@"module %@ failed to load: %@%@", definition.identifier ?: @"", reason, keyNote];
   userInfo[@"module"] = definition.identifier ?: @"";
   userInfo[@"reason"] = reason;
   userInfo[@"not_loaded"] = notLoaded;
-  id keyPath = underlying.userInfo[@"key_path"];
-  if ([keyPath isKindOfClass:[NSString class]] && [keyPath length] > 0) {
+  if ([keyPath length] > 0) {
     userInfo[@"key_path"] = keyPath;
   }
   if (underlying != nil) {

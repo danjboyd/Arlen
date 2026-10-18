@@ -373,6 +373,24 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   };
 }
 
+ALNEnvironmentKind ALNEnvironmentKindForName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  if ([trimmed isEqualToString:@"development"]) {
+    return ALNEnvironmentKindDevelopment;
+  }
+  if ([trimmed isEqualToString:@"test"]) {
+    return ALNEnvironmentKindTest;
+  }
+  return ALNEnvironmentKindProduction;
+}
+
+BOOL ALNEnvironmentIsDevelopmentLike(NSString *name) {
+  return ALNEnvironmentKindForName(name) != ALNEnvironmentKindProduction;
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
