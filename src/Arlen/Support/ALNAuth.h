@@ -46,6 +46,11 @@ typedef NS_ENUM(NSInteger, ALNAuthErrorCode) {
 + (NSArray *)rolesFromClaims:(NSDictionary *)claims;
 + (BOOL)context:(ALNContext *)context hasRequiredScopes:(NSArray *)scopes;
 + (BOOL)context:(ALNContext *)context hasRequiredRoles:(NSArray *)roles;
+/// YES when the context holds at least one of `roles`; NO for an empty list.
+/// Reads `-[ALNContext authRoles]`, the same source as the route contract: the
+/// current roles when a session refresh middleware (such as the auth module's)
+/// has resolved them for this request.
++ (BOOL)context:(ALNContext *)context hasAnyRole:(NSArray *)roles;
 
 @end
 

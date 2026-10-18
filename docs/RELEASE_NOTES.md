@@ -58,6 +58,10 @@
   is renewed by use. Without migration 003, signing out still clears the
   cookie and one warning names the migration. See
   [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- `search` (`1.1.0`): the operator/admin guard on drilldown and reindex routes
+  and `role_gated` resources check roles through the new
+  `+[ALNAuth context:hasAnyRole:]`, so they use the user's current roles like
+  the other modules.
 - admin-ui (`1.1.0`, requires auth `1.6.0`): revoking the admin role through
   the users resource also ends that user's existing sessions (once the auth
   stamp migration is applied).

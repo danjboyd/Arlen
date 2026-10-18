@@ -9,11 +9,12 @@
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
 #import "ALNPg.h"
+#import "ALNSearchModule.h"
 #import "ALNTOTP.h"
 #import "ALNTestClient.h"
 
 // Session roles follow the auth_users row on every request: module API guards
-// (admin-ui, jobs, ops) see the current roles, not the ones stored in the
+// (admin-ui, jobs, ops, search) see the current roles, not the ones stored in the
 // signed session cookie at sign-in. Signing out, password changes and the
 // absolute session lifetime end sessions server-side. Runs in-process against
 // ARLEN_PG_TEST_DSN.
@@ -100,11 +101,19 @@
     @"authModule" : authModule,
     @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
   }];
+  if (search) {
+    config[@"searchModule"] = @{
+      @"adminUI" : @{ @"autoResources" : @YES, @"resourceProviderClass" : @"ALNSearchAdminResourceProvider" },
+    };
+  }
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   XCTAssertTrue([[[ALNAdminUIModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  if (search) {
+    XCTAssertTrue([[[ALNSearchModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  }
   XCTAssertTrue([[[ALNOpsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   ALNTestClient *client = [[ALNTestClient alloc] initWithApplication:app error:&error];
   XCTAssertNotNil(client, @"%@", error);
@@ -594,6 +603,64 @@
     XCTAssertEqualObjects(@"1", [self scalar:@"SELECT session_stamp::text FROM auth_users WHERE subject = $1"
                                   parameters:@[ subject ]]);
   }];
+}
+
+#pragma mark - Search
+
+- (void)testSearchGuardsAndRoleGatedResourcesFollowCurrentRoles {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSString *token = [[[[NSUUID UUID] UUIDString] lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  NSString *email = [NSString stringWithFormat:@"search-roles-%@@example.test", token];
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[ email ] authConfig:nil search:YES];
+  NSString *subject = [self registerAndStepUp:client email:email];
+
+  NSDictionary *metadata = [[ALNSearchModuleRuntime sharedRuntime] resourceMetadataForIdentifier:@"users"];
+  XCTAssertEqualObjects(@"role_gated", metadata[@"queryPolicy"]);
+  XCTAssertEqualObjects(@[ @"admin" ], metadata[@"queryRoles"]);
+
+  ALNResponse *reindex = [client post:@"/search/api/resources/users/reindex" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, reindex.statusCode, @"%@", [reindex bodyText]);
+  ALNResponse *worker = [client post:@"/jobs/api/run-worker" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, worker.statusCode, @"%@", [worker bodyText]);
+
+  NSDictionary *query = @{ @"q" : token };
+  NSDictionary *accept = @{ @"accept" : @"application/json" };
+  ALNResponse *scoped = [client get:@"/search/api/resources/users/query" query:query headers:accept];
+  XCTAssertEqual((NSInteger)200, scoped.statusCode, @"%@", [scoped bodyText]);
+  XCTAssertTrue([[scoped bodyText] containsString:email], @"%@", [scoped bodyText]);
+  ALNResponse *drilldown = [client get:@"/search/api/resources/users" query:nil headers:accept];
+  XCTAssertEqual((NSInteger)200, drilldown.statusCode, @"%@", [drilldown bodyText]);
+  ALNResponse *resources = [client get:@"/search/api/resources" query:nil headers:accept];
+  XCTAssertTrue([[resources bodyText] containsString:@"\"users\""], @"%@", [resources bodyText]);
+
+  // Revoked in the database; the session keeps its cookie and stamp.
+  [self execute:@"UPDATE auth_users SET roles_json = '[\"user\"]' WHERE subject = $1 RETURNING id"
+     parameters:@[ subject ]];
+  XCTAssertEqualObjects(@YES, [self sessionState:client][@"authenticated"]);
+
+  drilldown = [client get:@"/search/api/resources/users" query:nil headers:accept];
+  XCTAssertEqual((NSInteger)403, drilldown.statusCode, @"%@", [drilldown bodyText]);
+  ALNResponse *reindexAll = [client post:@"/search/api/reindex" JSON:@{}];
+  XCTAssertEqual((NSInteger)403, reindexAll.statusCode, @"%@", [reindexAll bodyText]);
+  ALNResponse *reindexHTML = [client post:@"/search/reindex" form:@{}];
+  XCTAssertEqual((NSInteger)403, reindexHTML.statusCode, @"%@", [reindexHTML bodyText]);
+
+  scoped = [client get:@"/search/api/resources/users/query" query:query headers:accept];
+  XCTAssertEqual((NSInteger)403, scoped.statusCode, @"%@", [scoped bodyText]);
+  XCTAssertFalse([[scoped bodyText] containsString:email]);
+  ALNResponse *unscoped = [client get:@"/search/api/query" query:query headers:accept];
+  XCTAssertFalse([[unscoped bodyText] containsString:email], @"%@", [unscoped bodyText]);
+  resources = [client get:@"/search/api/resources" query:nil headers:accept];
+  XCTAssertEqual((NSInteger)200, resources.statusCode, @"%@", [resources bodyText]);
+  XCTAssertFalse([[resources bodyText] containsString:@"\"users\""], @"%@", [resources bodyText]);
+
+  // Granted again: applies without signing in.
+  [self execute:@"UPDATE auth_users SET roles_json = '[\"user\",\"admin\"]' WHERE subject = $1 RETURNING id"
+     parameters:@[ subject ]];
+  drilldown = [client get:@"/search/api/resources/users" query:nil headers:accept];
+  XCTAssertEqual((NSInteger)200, drilldown.statusCode, @"%@", [drilldown bodyText]);
 }
 
 @end

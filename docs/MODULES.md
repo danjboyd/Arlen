@@ -254,7 +254,8 @@ too (GitHub issue 264).
 - `search`: an unscoped query from a caller who may query no registered
   resource returns no results, and auto-indexed `admin-ui` resources are
   searchable only by callers the `admin-ui` policy admits (new
-  `queryMinimumAuthAssuranceLevel` resource metadata).
+  `queryMinimumAuthAssuranceLevel` resource metadata); its role checks use
+  `+[ALNAuth context:hasAnyRole:]` and so the user's current roles.
 - `admin-ui`: reports its access policy (`accessRoles`,
   `minimumAuthAssuranceLevel`) and ends a user's sessions when the admin role
   is revoked; it requires `auth` `>= 1.6.0`.

@@ -3,6 +3,7 @@
 #import "ALNDataCompat.h"
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
+#import "ALNAuth.h"
 #import "ALNAuthModule.h"
 #import "ALNContext.h"
 #import "ALNController.h"
@@ -637,14 +638,10 @@ static NSDictionary *STFormParametersFromBody(NSData *body) {
   return parameters;
 }
 
-static BOOL STRolesAllowAccess(NSArray *grantedRoles, NSArray *configuredRoles) {
-  NSSet *granted = [NSSet setWithArray:[grantedRoles isKindOfClass:[NSArray class]] ? grantedRoles : @[]];
-  for (NSString *role in [configuredRoles isKindOfClass:[NSArray class]] ? configuredRoles : @[]) {
-    if ([granted containsObject:role]) {
-      return YES;
-    }
-  }
-  return NO;
+// Every role decision in this module goes through one helper, which reads the
+// request's current roles (see ALNAuth +context:hasAnyRole:).
+static BOOL STContextHasAnyRole(ALNContext *context, NSArray *roles) {
+  return [ALNAuth context:context hasAnyRole:[roles isKindOfClass:[NSArray class]] ? roles : @[]];
 }
 
 static NSString *STStringifyValue(id value) {
@@ -6687,7 +6684,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   context[@"csrfToken"] = [self csrfToken] ?: @"";
   context[@"searchSummary"] = [self.runtime dashboardSummary] ?: @{};
   context[@"searchResources"] = [self.runtime registeredResources] ?: @[];
-  context[@"searchAdminAllowed"] = @(STRolesAllowAccess([self authRoles], self.runtime.accessRoles) &&
+  context[@"searchAdminAllowed"] = @(STContextHasAnyRole(self.context, self.runtime.accessRoles) &&
                                      [self.context authAssuranceLevel] >= self.runtime.minimumAuthAssuranceLevel);
   if ([extra isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extra];
@@ -6824,7 +6821,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       return NO;
     }
     NSArray *requiredRoles = STNormalizeArray(metadata[@"queryRoles"]);
-    if (STRolesAllowAccess([ctx authRoles], requiredRoles)) {
+    if (STContextHasAnyRole(ctx, requiredRoles)) {
       return YES;
     }
     if (error != NULL) {
@@ -6989,7 +6986,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     [self redirectTo:location status:302];
     return NO;
   }
-  if (!STRolesAllowAccess([ctx authRoles], self.runtime.accessRoles)) {
+  if (!STContextHasAnyRole(ctx, self.runtime.accessRoles)) {
     [self setStatus:403];
     [self renderTemplate:@"modules/search/result/index"
                  context:[self pageContextWithTitle:@"Search Access"
@@ -7014,7 +7011,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     [self renderAPIErrorWithStatus:401 code:@"unauthorized" message:@"Authentication required" meta:nil];
     return NO;
   }
-  if (!STRolesAllowAccess([ctx authRoles], self.runtime.accessRoles)) {
+  if (!STContextHasAnyRole(ctx, self.runtime.accessRoles)) {
     [self renderAPIErrorWithStatus:403
                               code:@"forbidden"
                            message:@"Missing operator/admin role"
