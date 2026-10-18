@@ -106,7 +106,7 @@ metrics_auth=()
 if [[ -n "${ARLEN_OPERABILITY_TOKEN:-}" ]]; then
   metrics_auth=(-H "Authorization: Bearer ${ARLEN_OPERABILITY_TOKEN}")
 fi
-metrics_status="$(curl -sS -o /dev/null -w '%{http_code}' "${metrics_auth[@]}" "${trimmed_base}/metrics")"
+metrics_status="$(curl -sS -o /dev/null -w '%{http_code}' ${metrics_auth[@]+"${metrics_auth[@]}"} "${trimmed_base}/metrics")"
 if [[ "$metrics_status" == "404" ]]; then
   # Production serves /metrics only once access is configured
   # (observability.operabilityToken, operabilityLoopbackOnly or operabilityAnonymous).
@@ -117,7 +117,7 @@ fi
 
 metrics_text=""
 for _ in $(seq 1 10); do
-  metrics_text="$(curl -fsS "${metrics_auth[@]}" "${trimmed_base}/metrics")"
+  metrics_text="$(curl -fsS ${metrics_auth[@]+"${metrics_auth[@]}"} "${trimmed_base}/metrics")"
   if printf '%s' "$metrics_text" | grep -q "aln_http_requests_total"; then
     break
   fi
