@@ -208,6 +208,12 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
       host = (colon.location == NSNotFound) ? authority : [authority substringToIndex:colon.location];
       portText = (colon.location == NSNotFound) ? nil : [authority substringFromIndex:NSMaxRange(colon)];
     }
+    BOOL pathValid = YES;
+    for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
+      if ([segment isEqualToString:@"."] || [segment isEqualToString:@".."]) {
+        pathValid = NO;
+      }
+    }
     BOOL portValid = YES;
     if (portText != nil) {
       NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
@@ -216,7 +222,7 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
                   [portText integerValue] >= 1 && [portText integerValue] <= 65535;
     }
     if (([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) && noQueryOrFragment &&
-        authorityValid && portValid && AMHostCharactersValid(host, bracketed)) {
+        authorityValid && portValid && pathValid && AMHostCharactersValid(host, bracketed)) {
       NSString *lowerHost = [host lowercaseString];
       NSString *hostPart = bracketed ? [NSString stringWithFormat:@"[%@]", lowerHost] : lowerHost;
       NSString *portPart = (portText != nil) ? [NSString stringWithFormat:@":%ld", (long)[portText integerValue]] : @"";
@@ -227,7 +233,7 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
     if (error != NULL) {
       *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
                        @"authModule.publicBaseURL must be an absolute http(s) URL with a valid host and port and no "
-                       @"user info, query or fragment, for example \"https://app.example.com\"",
+                       @"user info, query, fragment or dot segments, for example \"https://app.example.com\"",
                        @{ @"key_path" : @"authModule.publicBaseURL" });
     }
     return nil;

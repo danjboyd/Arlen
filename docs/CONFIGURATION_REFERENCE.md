@@ -646,8 +646,9 @@ Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartField
 password-reset and email-verification mail start with, for example
 `"https://app.example.com"` (a path prefix such as
 `"https://example.com/app"` is allowed; a trailing slash is dropped and the
-scheme and host are lowercased; a query, fragment, user info or a port outside
-1-65535 is rejected as invalid auth module configuration). Outside
+scheme and host are lowercased; a query, fragment, user info, `.`/`..` path
+segments or a port outside 1-65535 is rejected as invalid auth module
+configuration). Outside
 `development` and `test`, an `http://` value logs a warning at startup; use
 `https`. The module never builds these links from the request's `Host` header
 when it is set, and it also takes precedence over the `baseURL` an app passes
