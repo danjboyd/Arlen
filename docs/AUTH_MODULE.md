@@ -141,8 +141,9 @@ These need auth module migration `004_auth_totp_limits` (run
   different session, so one code cannot complete step-up twice.
 - a verified enrollment also accepts one of its recovery codes in the `code`
   field of `POST /auth/mfa/totp/verify` and `POST /auth/api/mfa/totp/verify`.
-  Each recovery code works once. The session records the method as
-  `recovery_code` instead of `totp`.
+  Each recovery code works once, and two different codes used at the same
+  time both succeed. The session records the method as `recovery_code`
+  instead of `totp`.
 - TOTP and recovery-code checks share one failure counter per account
   (`auth_attempt_limits`, scope `mfa`). When an account reaches
   `mfa.maxFailures` consecutive failures it is locked for `lockoutSeconds`.

@@ -297,6 +297,39 @@
   XCTAssertEqual((NSInteger)200, unlocked.statusCode, @"%@", [unlocked bodyText]);
 }
 
+
+- (void)testTwoDifferentRecoveryCodesUsedAtOnceBothSucceed {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{ @"mfa" : @{ @"maxFailures" : @3 } }];
+  NSString *email = [self uniqueEmail];
+  NSString *password = @"mfa-limits-password-123";
+  NSArray *recoveryCodes = nil;
+  (void)[self enrolledUserWithEmail:email password:password client:[self clientForApplication:app] recoveryCodes:&recoveryCodes];
+  ALNTestClient *first = [self clientForApplication:app];
+  ALNTestClient *second = [self clientForApplication:app];
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password client:first].statusCode);
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password client:second].statusCode);
+
+  NSArray *clients = @[ first, second ];
+  NSMutableArray *statuses = [NSMutableArray arrayWithObjects:@0, @0, nil];
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(2, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    ALNResponse *response = [self verifyCode:recoveryCodes[index] client:clients[index]];
+    [lock lock];
+    statuses[index] = @(response.statusCode);
+    [lock unlock];
+  });
+  XCTAssertEqualObjects((@[ @200, @200 ]), statuses);
+  XCTAssertEqualObjects(@"0", [self attemptRowForEmail:email scope:@"mfa"][@"failure_count"]);
+  NSArray *rows = [[self database] executeQuery:@"SELECT recovery_codes_json FROM auth_mfa_enrollments e "
+                                                "JOIN auth_users u ON u.id = e.user_id WHERE lower(u.email) = $1"
+                                     parameters:@[ [email lowercaseString] ]
+                                          error:NULL];
+  NSData *json = [[rows firstObject][@"recovery_codes_json"] dataUsingEncoding:NSUTF8StringEncoding];
+  NSArray *remaining = json ? [NSJSONSerialization JSONObjectWithData:json options:0 error:NULL] : nil;
+  XCTAssertEqual((NSUInteger)4, [remaining count]);
+}
+
 #pragma mark - Password sign-in delays
 
 - (ALNResponse *)loginEmail:(NSString *)email
@@ -465,6 +498,21 @@
   }
   // The unknown email still spends a (dummy) Argon2 verification per counted attempt.
   XCTAssertEqual(dummyBefore + 2U, [[ALNAuthModuleRuntime sharedRuntime] dummyPasswordVerificationCount]);
+
+  // After the wait, both fail the same way again and both waits double.
+  [self expirePasswordDelayForEmail:known address:address];
+  [self expirePasswordDelayForEmail:unknown address:address];
+  ALNResponse *knownAgain = [self loginEmail:known password:@"wrong-password" fromAddress:address app:app];
+  ALNResponse *unknownAgain = [self loginEmail:unknown password:@"wrong-password" fromAddress:address app:app];
+  XCTAssertEqual((NSInteger)401, knownAgain.statusCode);
+  XCTAssertEqual(knownAgain.statusCode, unknownAgain.statusCode);
+  XCTAssertEqualObjects([knownAgain bodyText], [unknownAgain bodyText]);
+  XCTAssertNil([knownAgain headerForName:@"Retry-After"]);
+  XCTAssertNil([unknownAgain headerForName:@"Retry-After"]);
+  NSInteger knownDelay = [[self passwordRowForEmail:known address:address][@"delay_remaining"] integerValue];
+  NSInteger unknownDelay = [[self passwordRowForEmail:unknown address:address][@"delay_remaining"] integerValue];
+  XCTAssertTrue(knownDelay > 50 && knownDelay <= 60, @"delay %ld", (long)knownDelay);
+  XCTAssertTrue(ABS(knownDelay - unknownDelay) <= 1, @"%ld vs %ld", (long)knownDelay, (long)unknownDelay);
 }
 
 - (void)testPasswordAttemptPruningDropsExpiredRowsAndCapsGrowth {

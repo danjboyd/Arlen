@@ -2632,27 +2632,45 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return YES;
 }
 
+// Removes `code` from the enrollment's stored recovery codes with a
+// compare-and-set update. When another request changed the stored set first
+// (it used a different code), the set is read again and the update retried,
+// up to three times, so two different valid codes used at once both succeed.
 - (BOOL)consumeRecoveryCode:(NSString *)code
                  enrollment:(NSDictionary *)enrollment
                       error:(NSError **)error {
+  NSString *enrollmentID = AMTrimmedString(enrollment[@"id"]) ?: @"";
   NSString *storedJSON = AMTrimmedString(enrollment[@"recovery_codes_json"]) ?: @"[]";
-  NSArray *hashes = AMJSONStringArrayFromJSONString(storedJSON);
-  NSArray *remaining = nil;
-  BOOL consumed = ([hashes count] > 0) &&
-                  [ALNRecoveryCodes consumeCode:(code ?: @"")
-                           againstEncodedHashes:hashes
-                         remainingEncodedHashes:&remaining
-                                          error:NULL];
-  if (consumed) {
+  for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      NSError *readError = nil;
+      NSArray *rows = [self.database executeQuery:@"SELECT COALESCE(recovery_codes_json, '[]') AS recovery_codes_json "
+                                                  "FROM auth_mfa_enrollments WHERE id = $1::bigint"
+                                       parameters:@[ enrollmentID ]
+                                            error:&readError];
+      if (rows == nil) {
+        if (error != NULL) {
+          *error = readError;
+        }
+        return NO;
+      }
+      storedJSON = AMTrimmedString([rows firstObject][@"recovery_codes_json"]) ?: @"[]";
+    }
+    NSArray *hashes = AMJSONStringArrayFromJSONString(storedJSON);
+    NSArray *remaining = nil;
+    BOOL matched = ([hashes count] > 0) &&
+                   [ALNRecoveryCodes consumeCode:(code ?: @"")
+                            againstEncodedHashes:hashes
+                          remainingEncodedHashes:&remaining
+                                           error:NULL];
+    if (!matched) {
+      break;
+    }
     NSError *dbError = nil;
     NSInteger updated = [self.database executeCommand:@"UPDATE auth_mfa_enrollments SET recovery_codes_json = $2, "
                                                       "updated_at = NOW() "
                                                       "WHERE id = $1::bigint AND COALESCE(recovery_codes_json, '[]') = $3"
-                                           parameters:@[
-                                             AMTrimmedString(enrollment[@"id"]) ?: @"",
-                                             AMJSONString(remaining ?: @[]),
-                                             storedJSON,
-                                           ]
+                                           parameters:@[ enrollmentID, AMJSONString(remaining ?: @[]), storedJSON ]
                                                 error:&dbError];
     if (updated < 0) {
       if (error != NULL) {
@@ -2660,14 +2678,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       }
       return NO;
     }
-    // Zero rows: another request used a code from this set first; retry against
-    // the current set rather than accept a code twice.
-    consumed = (updated == 1);
+    if (updated == 1) {
+      return YES;
+    }
   }
-  if (!consumed && error != NULL) {
+  if (error != NULL) {
     *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid authenticator or recovery code", nil);
   }
-  return consumed;
+  return NO;
 }
 
 #pragma mark - Password attempt delays
