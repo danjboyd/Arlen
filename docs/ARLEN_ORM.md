@@ -300,8 +300,13 @@ A persisted model's primary key can't change: a changeset or
 `setObject:forFieldName:error:` that writes a different value fails with
 `ALNORMErrorReadOnlyMutation`, and an unchanged value (a client echoing its
 `id`) is accepted. `UPDATE` and `DELETE` always target the primary key as it
-was loaded or last saved. The Dataverse ORM applies the same rule to a
-persisted record's primary ID.
+was loaded or last saved. A model loaded without its primary key (a
+`selectFields:` that leaves it out) can't be given one, and saving or deleting
+it fails with `ALNORMErrorMissingField`, so select the key for rows you will
+write back. The Dataverse ORM applies the same rules to a persisted record's
+primary ID (`persistedPrimaryIDValue`), and
+`-[ALNORMDataverseChangeset applyInputValues:permittedFields:error:]` is the
+permit-list form for Dataverse input.
 
 When a new SQL model relies on a database-generated primary key default, Arlen
 now requests the generated key back through the adapter's `returning_mode`

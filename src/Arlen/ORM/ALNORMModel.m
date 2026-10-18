@@ -45,6 +45,9 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
 @property(nonatomic, weak, readwrite) ALNORMContext *context;
 @property(nonatomic, copy, readwrite) NSSet<NSString *> *loadedRelationNames;
 @property(nonatomic, copy) NSDictionary<NSString *, id> *cleanFieldValues;
+// YES once a row was loaded or the model was saved, so cleanFieldValues is the
+// database's view of the row (and may lack fields a narrow select left out).
+@property(nonatomic, assign) BOOL hasPersistedSnapshot;
 @property(nonatomic, copy) NSDictionary<NSString *, NSNumber *> *relationAccessStrategies;
 @property(nonatomic, copy) NSDictionary<NSString *, NSArray<NSDictionary<NSString *, id> *> *> *relationPivotRows;
 
@@ -351,6 +354,7 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
 
   self.fieldValues = values;
   self.cleanFieldValues = [values copy];
+  self.hasPersistedSnapshot = YES;
   self.dirtyFieldNames = [NSSet set];
   self.state = ALNORMModelStateLoaded;
   return YES;
@@ -358,6 +362,7 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
 
 - (void)markClean {
   self.cleanFieldValues = [self.fieldValues copy] ?: @{};
+  self.hasPersistedSnapshot = YES;
   self.dirtyFieldNames = [NSSet set];
   self.state = ALNORMModelStateLoaded;
 }
@@ -539,13 +544,19 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
 
 // A primary key that was loaded or saved names the row; writing a different
 // value would retarget UPDATE/DELETE at another row. Unchanged writes (a
-// client echoing its id) are fine.
+// client echoing its id) are fine. A persisted model whose key was not loaded
+// (a narrow selectFields:) can't be given one either: nothing says which row
+// it came from.
 - (BOOL)allowsPrimaryKeyValue:(id)storedValue forField:(ALNORMFieldDescriptor *)field {
-  id persisted = self.cleanFieldValues[field.name];
-  if (persisted == nil || persisted == [NSNull null]) {
+  if (!self.hasPersistedSnapshot) {
     return YES;
   }
-  return [persisted isEqual:ALNORMStoredValue(storedValue)];
+  id candidate = ALNORMStoredValue(storedValue);
+  id persisted = self.cleanFieldValues[field.name];
+  if (persisted == nil || persisted == [NSNull null]) {
+    return candidate == [NSNull null];
+  }
+  return [persisted isEqual:candidate];
 }
 
 - (BOOL)allowsPrimaryKeyValue:(id)value forFieldName:(NSString *)fieldName {
@@ -559,10 +570,11 @@ NSString *ALNORMModelStateName(ALNORMModelState state) {
 - (NSDictionary<NSString *, id> *)persistedPrimaryKeyValues {
   NSMutableDictionary *values = [NSMutableDictionary dictionary];
   for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
-    id persisted = self.cleanFieldValues[fieldName];
-    id value = (persisted != nil && persisted != [NSNull null]) ? ALNORMPublicValue(persisted)
-                                                               : [self objectForFieldName:fieldName];
-    if (value != nil) {
+    // Once persisted, only the snapshot counts; a key missing from it stays
+    // missing so writes refuse to guess the row.
+    id value = self.hasPersistedSnapshot ? ALNORMPublicValue(self.cleanFieldValues[fieldName])
+                                         : [self objectForFieldName:fieldName];
+    if (value != nil && value != [NSNull null]) {
       values[fieldName] = value;
     }
   }

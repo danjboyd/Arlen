@@ -52,7 +52,19 @@
     the listed fields and drops other input keys. Use it for request payloads
     so clients can't mass-assign foreign keys or role fields;
     `docs/ARLEN_ORM.md` now shows it.
-  - `persistedPrimaryKeyValues` is now a reserved generated-property name.
+  - `persistedPrimaryKeyValues` and `hasPersistedSnapshot` are now reserved
+    generated-property names.
+  - A model loaded without its primary key (a `selectFields:` that leaves it
+    out) can't be given one: the setter and changesets refuse, and
+    `saveModel:` and `deleteModel:` fail with `ALNORMErrorMissingField`
+    instead of targeting whatever key the model holds. Select the key when
+    you mean to write the row back.
+  - Dataverse: `saveModel:`, `deleteModel:` and `saveModelsInBatch:` PATCH and
+    DELETE the new `persistedPrimaryIDValue` (the ID as loaded). A persisted
+    record loaded without its ID refuses those writes with
+    `ALNORMErrorMissingField`; before, a save created a duplicate record. New
+    `-[ALNORMDataverseChangeset applyInputValues:permittedFields:error:]`
+    matches the SQL changeset.
 - The `storage` module (now `1.2.0`) keeps one consistent catalog across
   processes that share its state file, such as propane workers and the jobs
   worker:

@@ -296,6 +296,25 @@
   return [self saveModel:model changeset:nil error:error];
 }
 
+// A persisted record loaded without its primary ID (a narrow $select) can't
+// say which record it is, so writes refuse instead of creating a duplicate or
+// targeting an ID supplied later.
+- (BOOL)requirePersistedPrimaryID:(id)primaryID operation:(NSString *)operation error:(NSError **)error {
+  if (primaryID != nil && primaryID != [NSNull null]) {
+    return YES;
+  }
+  if (error != NULL) {
+    *error = ALNORMMakeError(ALNORMErrorMissingField,
+                             [NSString stringWithFormat:@"cannot %@ a Dataverse record whose primary ID was not loaded",
+                                                        operation ?: @"write"],
+                             @{
+                               @"field_name" : self.descriptor.primaryIDAttribute ?: @"",
+                               @"entity_name" : self.descriptor.logicalName ?: @"",
+                             });
+  }
+  return NO;
+}
+
 - (BOOL)saveModel:(ALNORMDataverseModel *)model changeset:(ALNORMDataverseChangeset *)changeset error:(NSError **)error {
   if (error != NULL) {
     *error = nil;
@@ -309,7 +328,12 @@
     return NO;
   }
 
-  id primaryID = [model primaryIDValue];
+  // A persisted record is PATCHed by the ID it was loaded with, never by
+  // whatever ID the model holds now.
+  id primaryID = [model persistedPrimaryIDValue];
+  if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"update" error:error]) {
+    return NO;
+  }
   if (primaryID == nil || primaryID == [NSNull null] || !model.isPersisted) {
     [self.context appendEvent:@{
       @"event_kind" : @"dataverse_create",
@@ -415,7 +439,10 @@
   if (error != NULL) {
     *error = nil;
   }
-  id primaryID = [model primaryIDValue];
+  id primaryID = [model persistedPrimaryIDValue];
+  if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"delete" error:error]) {
+    return NO;
+  }
   if (primaryID == nil || primaryID == [NSNull null]) {
     if (error != NULL) {
       *error = ALNORMMakeError(ALNORMErrorDeleteFailed,
@@ -453,7 +480,10 @@
 
     NSString *method = @"POST";
     NSString *relativePath = self.descriptor.entitySetName ?: @"";
-    id primaryID = [model primaryIDValue];
+    id primaryID = [model persistedPrimaryIDValue];
+    if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"update" error:error]) {
+      return NO;
+    }
     if (primaryID != nil && primaryID != [NSNull null] && model.isPersisted) {
       method = @"PATCH";
       NSString *path = [ALNDataverseClient recordPathForEntitySet:self.descriptor.entitySetName

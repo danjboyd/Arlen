@@ -192,6 +192,78 @@ static ALNORMDataverseModelDescriptor *ALNORMDataverseDescriptorNamed(NSString *
   BOOL moved = [changeset applyInputValues:payload error:&error] && [changeset applyToModel:&error];
   XCTAssertFalse(moved, @"a changeset must not move a persisted record to another ID");
   XCTAssertEqualObjects(@"account-2", [account primaryIDValue]);
+  XCTAssertEqualObjects(@"account-2", [account persistedPrimaryIDValue]);
+}
+
+// A record loaded with a $select that left out its primary ID can't be told
+// which record it is: no setter or changeset may supply one, and saves and
+// deletes refuse instead of creating a duplicate or hitting another record.
+- (void)testDataverseRecordLoadedWithoutItsIDRefusesWrites {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:[[ALNFakeDataverseTokenProvider alloc] init]
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNotNil(client, @"%@", error);
+  ALNORMDataverseContext *context = [[ALNORMDataverseContext alloc] initWithClient:client];
+  ALNORMDataverseRepository *accounts = [context repositoryForModelClass:[ALNORMDVAccount class]];
+
+  ALNDataverseRecord *record = [ALNDataverseRecord recordWithDictionary:@{ @"name" : @"Beta" } error:&error];
+  ALNORMDVAccount *account = [[ALNORMDVAccount alloc] init];
+  XCTAssertTrue([account applyRecord:record error:&error], @"%@", error);
+  XCTAssertTrue(account.isPersisted);
+  XCTAssertNil([account persistedPrimaryIDValue]);
+
+  error = nil;
+  XCTAssertFalse([account setObject:@"account-9" forFieldName:@"accountid" error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  ALNORMDataverseChangeset *retarget = [ALNORMDataverseChangeset changesetWithModel:account];
+  NSDictionary *payload = @{ @"accountid" : @"account-9", @"name" : @"Defaced" };
+  XCTAssertFalse([retarget applyInputValues:payload error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  XCTAssertTrue([account setObject:@"Renamed" forFieldName:@"name" error:&error], @"%@", error);
+  XCTAssertFalse([accounts saveModel:account error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  error = nil;
+  XCTAssertFalse([accounts deleteModel:account error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  error = nil;
+  NSArray *models = @[ account ];
+  XCTAssertFalse([accounts saveModelsInBatch:models changesets:@[] error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+}
+
+- (void)testDataversePermittedFieldsDropUnlistedInput {
+  NSError *error = nil;
+  ALNDataverseRecord *record =
+      [ALNDataverseRecord recordWithDictionary:@{ @"accountid" : @"account-2", @"name" : @"Beta" } error:&error];
+  ALNORMDVAccount *account = [[ALNORMDVAccount alloc] init];
+  XCTAssertTrue([account applyRecord:record error:&error], @"%@", error);
+
+  ALNORMDataverseChangeset *changeset = [ALNORMDataverseChangeset changesetWithModel:account];
+  NSDictionary *payload = @{ @"accountid" : @"account-9", @"name" : @"Renamed", @"accountnumber" : @"Z-9" };
+  NSArray *permitted = @[ @"name" ];
+  XCTAssertTrue([changeset applyInputValues:payload permittedFields:permitted error:&error], @"%@", error);
+  XCTAssertEqualObjects((@[ @"name" ]), [changeset changedFieldNames]);
+  XCTAssertEqualObjects(@"Renamed", changeset.values[@"name"]);
+  XCTAssertNil(changeset.values[@"accountid"]);
+  XCTAssertNil(changeset.values[@"accountnumber"]);
+
+  error = nil;
+  NSArray *unknown = @[ @"nope" ];
+  BOOL appliedUnknown = [[ALNORMDataverseChangeset changesetWithModel:account] applyInputValues:@{}
+                                                                                 permittedFields:unknown
+                                                                                           error:&error];
+  XCTAssertFalse(appliedUnknown);
+  XCTAssertEqual(ALNORMErrorInvalidArgument, error.code);
 }
 
 - (void)testDataverseChangesetsSaveUpsertDeleteAndBatchThroughClientContracts {

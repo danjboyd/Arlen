@@ -1162,6 +1162,30 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   return YES;
 }
 
+// The key UPDATE/DELETE target. A model loaded without its primary key (a
+// narrow selectFields:) can't say which row it is, so writes refuse rather
+// than target whatever key the model holds now.
+- (nullable NSDictionary<NSString *, id> *)persistedPrimaryKeyValuesForModel:(ALNORMModel *)model
+                                                                   operation:(NSString *)operation
+                                                                       error:(NSError **)error {
+  NSDictionary<NSString *, id> *keys = [model persistedPrimaryKeyValues];
+  for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
+    if (keys[fieldName] == nil) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorMissingField,
+                                 [NSString stringWithFormat:@"cannot %@ a model whose primary key was not loaded",
+                                                            operation ?: @"write"],
+                                 @{
+                                   @"field_name" : fieldName ?: @"",
+                                   @"entity_name" : self.descriptor.entityName ?: @"",
+                                 });
+      }
+      return nil;
+    }
+  }
+  return keys;
+}
+
 - (BOOL)updateModel:(ALNORMModel *)model
             options:(ALNORMWriteOptions *)options
               error:(NSError **)error {
@@ -1195,9 +1219,14 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   if (values == nil) {
     return NO;
   }
-  ALNSQLBuilder *builder = [ALNSQLBuilder updateTable:self.descriptor.qualifiedTableName values:values];
   // Target the row that was loaded, not whatever the primary key holds now.
-  NSDictionary<NSString *, id> *persistedKeys = [model persistedPrimaryKeyValues];
+  NSDictionary<NSString *, id> *persistedKeys = [self persistedPrimaryKeyValuesForModel:model
+                                                                               operation:@"update"
+                                                                                   error:error];
+  if (persistedKeys == nil) {
+    return NO;
+  }
+  ALNSQLBuilder *builder = [ALNSQLBuilder updateTable:self.descriptor.qualifiedTableName values:values];
   for (NSString *fieldName in self.descriptor.primaryKeyFieldNames ?: @[]) {
     ALNORMFieldDescriptor *field = [self.descriptor fieldNamed:fieldName];
     [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:persistedKeys[field.name]];
@@ -1327,8 +1356,12 @@ static NSArray *ALNORMRepositoryUniqueValues(NSArray *values) {
   __weak typeof(self) weakSelf = self;
   return [self.context withTransactionUsingBlock:^BOOL(NSError **blockError) {
            __strong typeof(self) strongSelf = weakSelf;
+           NSDictionary<NSString *, id> *persistedKeys =
+               [strongSelf persistedPrimaryKeyValuesForModel:model operation:@"delete" error:blockError];
+           if (persistedKeys == nil) {
+             return NO;
+           }
            ALNSQLBuilder *builder = [ALNSQLBuilder deleteFrom:strongSelf.descriptor.qualifiedTableName];
-           NSDictionary<NSString *, id> *persistedKeys = [model persistedPrimaryKeyValues];
            for (NSString *fieldName in strongSelf.descriptor.primaryKeyFieldNames ?: @[]) {
              ALNORMFieldDescriptor *field = [strongSelf.descriptor fieldNamed:fieldName];
              [builder whereField:ALNSQLDialectIdentifierComponent(field.columnName) equals:persistedKeys[field.name]];

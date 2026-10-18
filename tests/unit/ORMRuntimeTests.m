@@ -647,6 +647,46 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertTrue([fresh setObject:@"user-9" forFieldName:@"id" error:&error], @"%@", error);
 }
 
+// A narrow selectFields: can load a model without its primary key. Nothing
+// then says which row it is, so a payload must not supply the key and writes
+// must refuse rather than target whatever key the model holds.
+- (void)testModelLoadedWithoutItsPrimaryKeyRefusesWrites {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  [adapter.queuedRowSets addObject:@[
+    @{ @"email" : @"owner@example.com", @"display_name" : @"Owner" },
+  ]];
+  ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+  ALNORMRepository *repository = [context repositoryForModelClass:[ALNORMRuntimePublicUsersModel class]];
+  NSError *error = nil;
+  ALNORMRuntimePublicUsersModel *user = [[repository all:&error] firstObject];
+  XCTAssertNotNil(user, @"%@", error);
+  XCTAssertNil([user objectForFieldName:@"id"]);
+  XCTAssertEqual(ALNORMModelStateLoaded, user.state);
+  NSUInteger statementsAfterLoad = [adapter.executedSQL count];
+
+  error = nil;
+  XCTAssertFalse([user setObject:@"user-2" forFieldName:@"id" error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:user];
+  NSDictionary *payload = @{ @"id" : @"user-2", @"displayName" : @"defaced" };
+  XCTAssertFalse([changeset applyInputValues:payload error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  XCTAssertTrue([user setObject:@"Renamed" forFieldName:@"displayName" error:&error], @"%@", error);
+  XCTAssertFalse([repository saveModel:user options:nil error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  error = nil;
+  XCTAssertFalse([repository deleteModel:user error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  for (NSUInteger index = statementsAfterLoad; index < [adapter.executedSQL count]; index++) {
+    NSString *sql = adapter.executedSQL[index];
+    XCTAssertFalse([sql hasPrefix:@"UPDATE"] || [sql hasPrefix:@"DELETE"], @"%@", sql);
+  }
+}
+
 - (void)testPermittedFieldsDropUnlistedInput {
   ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
   ALNORMRepository *repository = nil;
