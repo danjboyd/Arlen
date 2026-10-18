@@ -3939,6 +3939,12 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
         BOOL parked = NO;
         @try {
           parked = [self serveClient:clientFd resumed:resumed allowPark:YES];
+        } @catch (NSException *exception) {
+          // Last resort: an exception that escaped request handling closes
+          // this connection only; the worker keeps serving others.
+          parked = NO;
+          [self.application.logger error:@"http connection exception"
+                                   fields:@{ @"exception" : exception.description ?: @"" }];
         } @finally {
           // A parked connection now belongs to the idle-connection watcher.
           if (!parked) {
@@ -5149,6 +5155,9 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
           @autoreleasepool {
             [self handleClient:clientFd];
           }
+        } @catch (NSException *exception) {
+          [self.application.logger error:@"http connection exception"
+                                   fields:@{ @"exception" : exception.description ?: @"" }];
         } @finally {
           [self releaseHTTPSessionReservation];
           ALNSocketClose(clientFd);

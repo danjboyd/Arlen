@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- An exception raised in middleware, or in the request or auth contract
+  stages before the controller, now answers that request with a 500 (the
+  normal error page or JSON; no exception details outside development and
+  test) and is logged as `middleware exception`, `request_contract exception`
+  or `auth_contract exception`. Before, only controller exceptions were
+  caught, and one raised earlier ended the server process. As a last resort,
+  an exception that escapes request handling now closes only that connection.
 - Pipelined HTTP/1.1 requests on one connection each keep their own headers.
   On the llhttp parser, headers outside the small set copied at parse time
   (Host, Authorization, Origin, Content-Type, User-Agent and others) were read
