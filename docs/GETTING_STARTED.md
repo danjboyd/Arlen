@@ -353,8 +353,8 @@ application's `ALNORMCodegen` generation step and rebuild. Current output safely
 initializes each model descriptor on concurrent first use; older generated code
 must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
 
-After upgrading the `auth` module, run `arlen module migrate` before serving
-signed-in traffic. The module reads each signed-in user's current roles from the
+After upgrading the `auth` module, running `arlen module migrate` is
+recommended; it enables ending a user's sessions by stamp. The module reads each signed-in user's current roles from the
 database on every request, so a role change takes effect without signing in
 again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
 

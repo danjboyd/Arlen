@@ -236,9 +236,17 @@ current roles:
   `auth_users` subject, call `recordSessionStampForContext:error:` after
   establishing it.
 
-If the lookup fails (for example the database is unreachable, or the auth
-migrations have not been applied), the request fails instead of continuing with
-the stored roles. After upgrading the module, run `arlen module migrate`.
+Running `arlen module migrate` after upgrading is recommended: it applies
+`002_auth_session_stamp.sql`, which enables ending sessions by stamp. Until it
+runs, roles are still read live and deleted users are still signed out; only
+the stamp is skipped. The stamp comparison is not made, sign-ins do not record
+a stamp, `bumpSessionStampForSubject:error:` returns success without changing
+anything (so admin-ui revocation still succeeds and the revoked role is still
+denied), and the module logs one warning per process naming the migration.
+
+Any other lookup failure (for example the database is unreachable, or the
+`auth_users` table is missing) fails the request instead of continuing with the
+stored roles.
 
 The auth module always requires `database.connectionString`. Applications that
 do not install it and establish sessions with `ALNAuthSession` directly keep the

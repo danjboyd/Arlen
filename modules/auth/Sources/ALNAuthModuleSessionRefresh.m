@@ -4,7 +4,10 @@
 #import "ALNAuthModuleOIDC.h"
 #import "ALNAuthSession.h"
 #import "ALNContext.h"
+#import "ALNLogger.h"
 #import "ALNPg.h"
+
+#import <dispatch/dispatch.h>
 
 // Per-request session resolution for the auth module. Sessions are signed
 // cookies, so the roles written at sign-in would otherwise stay in force until
@@ -74,6 +77,51 @@ static NSError *ARTranslatedQueryError(NSError *error, NSString *environmentName
   return ARError(ALNAuthModuleErrorInvalidConfiguration, message, error);
 }
 
+// True only when the error is PostgreSQL undefined_column for
+// auth_users.session_stamp: the database predates 002_auth_session_stamp.sql.
+// Roles and user existence can still be read live; only the stamp is skipped.
+static BOOL ARErrorIsMissingSessionStampColumn(NSError *error) {
+  if (![error.domain isEqualToString:ALNPgErrorDomain] ||
+      ![ARTrimmedString(error.userInfo[ALNPgErrorSQLStateKey]) isEqualToString:@"42703"]) {
+    return NO;
+  }
+  if ([[error localizedDescription] containsString:@"session_stamp"]) {
+    return YES;
+  }
+  for (id value in [error.userInfo allValues]) {
+    if ([value isKindOfClass:[NSString class]] && [(NSString *)value containsString:@"session_stamp"]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static void ARWarnMissingSessionStampColumn(ALNLogger *logger, NSString *environmentName) {
+  static BOOL warned = NO;
+  static NSLock *lock = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    lock = [[NSLock alloc] init];
+  });
+  [lock lock];
+  BOOL alreadyWarned = warned;
+  warned = YES;
+  [lock unlock];
+  if (alreadyWarned) {
+    return;
+  }
+  NSString *environment = [ARTrimmedString(environmentName) length] > 0 ? ARTrimmedString(environmentName)
+                                                                        : @"development";
+  NSString *message = [NSString stringWithFormat:
+      @"auth_users.session_stamp is missing; roles are still read from the database on each request, "
+       "but sessions cannot be ended by stamp. Run ./bin/arlen module migrate --env %@.", environment];
+  if (logger != nil) {
+    [logger warn:message fields:@{ @"module" : @"auth", @"migration" : @"002_auth_session_stamp.sql" }];
+  } else {
+    NSLog(@"auth module: %@", message);
+  }
+}
+
 @interface ALNAuthModuleRuntime (ALNAuthModuleSessionRefreshPrivate)
 - (nullable ALNPg *)database;
 - (nullable NSString *)environmentName;
@@ -121,6 +169,10 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
                                                  "FROM auth_users WHERE subject = $1 LIMIT 1"
                                      parameters:@[ subject ]
                                           error:&queryError];
+  if (rows == nil && ARErrorIsMissingSessionStampColumn(queryError)) {
+    ARWarnMissingSessionStampColumn(context.logger, [self environmentName]);
+    return YES;
+  }
   if (rows == nil) {
     if (error != NULL) {
       *error = ARTranslatedQueryError(queryError, [self environmentName]);
@@ -160,6 +212,11 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
                                                  "updated_at = NOW() WHERE subject = $1 RETURNING id::text AS id"
                                      parameters:@[ normalizedSubject ]
                                           error:&queryError];
+  if (rows == nil && ARErrorIsMissingSessionStampColumn(queryError)) {
+    // Nothing to bump yet; current roles are still enforced on every request.
+    ARWarnMissingSessionStampColumn(nil, [self environmentName]);
+    return YES;
+  }
   if (rows == nil) {
     if (error != NULL) {
       *error = ARTranslatedQueryError(queryError, [self environmentName]);
@@ -220,15 +277,25 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
     return YES;
   }
 
+  NSString *userColumns = @"SELECT id::text AS id, subject, email, COALESCE(display_name, '') AS display_name, "
+                          "COALESCE(roles_json, '[]') AS roles_json, "
+                          "CASE WHEN email_verified_at IS NULL THEN '' ELSE email_verified_at::text END AS email_verified_at";
   NSError *queryError = nil;
   NSArray *rows = [[self database]
-      executeQuery:@"SELECT id::text AS id, subject, email, COALESCE(display_name, '') AS display_name, "
-                    "COALESCE(roles_json, '[]') AS roles_json, "
-                    "CASE WHEN email_verified_at IS NULL THEN '' ELSE email_verified_at::text END AS email_verified_at, "
-                    "session_stamp::text AS session_stamp "
-                    "FROM auth_users WHERE subject = $1 LIMIT 1"
+      executeQuery:[userColumns stringByAppendingString:@", session_stamp::text AS session_stamp "
+                                                         "FROM auth_users WHERE subject = $1 LIMIT 1"]
         parameters:@[ subject ]
              error:&queryError];
+  BOOL stampAvailable = YES;
+  if (rows == nil && ARErrorIsMissingSessionStampColumn(queryError)) {
+    // Migration 002 not applied yet: keep reading roles and existence live.
+    ARWarnMissingSessionStampColumn(context.logger, [self environmentName]);
+    stampAvailable = NO;
+    queryError = nil;
+    rows = [[self database] executeQuery:[userColumns stringByAppendingString:@" FROM auth_users WHERE subject = $1 LIMIT 1"]
+                              parameters:@[ subject ]
+                                   error:&queryError];
+  }
   if (rows == nil) {
     if (error != NULL) {
       *error = ARTranslatedQueryError(queryError, [self environmentName]);
@@ -243,7 +310,7 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
   // Sessions without a record (issued before stamps existed, or established
   // outside the module) belong to the initial generation.
   NSString *sessionStamp = recordMatchesSubject ? ARTrimmedString(record[@"stamp"]) : @"0";
-  if (![sessionStamp isEqualToString:ARTrimmedString(row[@"session_stamp"])]) {
+  if (stampAvailable && ![sessionStamp isEqualToString:ARTrimmedString(row[@"session_stamp"])]) {
     [self signOutSessionForContext:context];
     return YES;
   }

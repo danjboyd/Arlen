@@ -246,4 +246,63 @@
                                 parameters:@[ operatorSubject ]]);
 }
 
+// Before migration 002 is applied (auth_users without session_stamp), roles are
+// still read live, nothing fails, and revocation through the admin API succeeds.
+- (void)testRolesStayLiveWithoutTheSessionStampColumn {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *admin = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(admin, @"%@", error);
+  NSString *schema = [NSString stringWithFormat:@"auth_no_stamp_%@",
+                      [[[[NSUUID UUID] UUIDString] lowercaseString] stringByReplacingOccurrencesOfString:@"-" withString:@""]];
+  NSArray *noParameters = @[];
+  NSInteger created = [admin executeCommand:[NSString stringWithFormat:@"CREATE SCHEMA %@", schema]
+                                 parameters:noParameters
+                                      error:&error];
+  XCTAssertTrue(created >= 0, @"%@", error);
+  @try {
+    NSString *separator = [dsn containsString:@"?"] ? @"&" : @"?";
+    NSString *schemaDSN = [NSString stringWithFormat:@"%@%@options=-csearch_path%%3D%@", dsn, separator, schema];
+    XCTAssertTrue([self applyAuthMigrationsWithDSN:schemaDSN]);
+    XCTAssertTrue([self.database executeCommand:@"ALTER TABLE auth_users DROP COLUMN session_stamp"
+                                     parameters:noParameters
+                                          error:&error] >= 0, @"%@", error);
+
+    NSString *operatorEmail = [self uniqueEmail:@"nostamp-operator"];
+    NSString *targetEmail = [self uniqueEmail:@"nostamp-target"];
+    ALNTestClient *operatorClient = [self clientWithDSN:schemaDSN bootstrapAdmins:@[ operatorEmail, targetEmail ]];
+    [self registerAndStepUp:operatorClient email:operatorEmail];
+    ALNTestClient *targetClient = [[ALNTestClient alloc] initWithApplication:operatorClient.application error:NULL];
+    NSString *targetSubject = [self registerAndStepUp:targetClient email:targetEmail];
+    [self assertModuleAPIsReturn:200 client:targetClient];
+
+    // Revoked in the database: denied, still signed in, no server error.
+    [self execute:@"UPDATE auth_users SET roles_json = '[\"user\"]' WHERE subject = $1 RETURNING id"
+       parameters:@[ targetSubject ]];
+    [self assertModuleAPIsReturn:403 client:targetClient];
+    XCTAssertEqualObjects(@YES, [self sessionState:targetClient][@"authenticated"]);
+
+    // Granted again: applies without signing in.
+    [self execute:@"UPDATE auth_users SET roles_json = '[\"user\",\"admin\"]' WHERE subject = $1 RETURNING id"
+       parameters:@[ targetSubject ]];
+    [self assertModuleAPIsReturn:200 client:targetClient];
+
+    // Revoked through the admin API: succeeds without the stamp; roles deny.
+    NSString *revokePath = [NSString stringWithFormat:@"/admin/api/users/%@/actions/revoke_admin",
+                                                      [self encodedSubject:targetSubject]];
+    ALNResponse *revoke = [operatorClient post:revokePath JSON:@{}];
+    XCTAssertEqual((NSInteger)200, revoke.statusCode, @"%@", [revoke bodyText]);
+    [self assertModuleAPIsReturn:403 client:targetClient];
+    XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] bumpSessionStampForSubject:targetSubject error:&error], @"%@", error);
+
+    // A deleted user is still signed out.
+    [self execute:@"DELETE FROM auth_users WHERE subject = $1 RETURNING id" parameters:@[ targetSubject ]];
+    XCTAssertEqualObjects(@NO, [self sessionState:targetClient][@"authenticated"]);
+  } @finally {
+    self.database = nil;
+    [admin executeCommand:[NSString stringWithFormat:@"DROP SCHEMA IF EXISTS %@ CASCADE", schema] parameters:noParameters error:NULL];
+  }
+}
+
 @end

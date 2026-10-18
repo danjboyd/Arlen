@@ -240,8 +240,8 @@ preference validation (GitHub issue 227).
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
 `auth` moved to `1.5.4` to resolve session roles from the current user record
-on every request (new migration `002_auth_session_stamp.sql`; run
-`arlen module migrate`), and `admin-ui` to `1.0.4`, which requires it, to end a
+on every request (new migration `002_auth_session_stamp.sql`, recommended for ending sessions
+by stamp; roles are read live without it), and `admin-ui` to `1.0.4`, which requires it, to end a
 user's sessions when the admin role is revoked.
 
 ## MCP tools
