@@ -166,7 +166,9 @@ These need auth module migration `004_auth_totp_limits` (run
     the email across all addresses. Beyond `accountMaxFailures` failures within
     `accountWindowSeconds`, every further failure adds a wait for that email
     (`accountDelaySeconds`, doubling, up to `maxDelaySeconds`). The wait ends
-    on its own; nothing needs to be unlocked.
+    on its own; nothing needs to be unlocked. Only failures arm it: a
+    successful sign-in never adds to, extends or re-arms the account-wide
+    wait, so after it expires the owner's correct passwords keep working.
   - known devices: an (email, address) pair that signed in successfully within
     the last `trustedPairDays` days (default 30; `0` turns this off) is not
     subject to the account-wide ceiling, and its failures do not count toward

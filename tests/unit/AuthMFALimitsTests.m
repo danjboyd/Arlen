@@ -340,6 +340,79 @@
   XCTAssertEqual((NSUInteger)4, [remaining count]);
 }
 
+
+- (void)testSuccessNeverRearmsTheAccountCeiling {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"password" : @{
+      @"maxFailures" : @10,
+      @"accountMaxFailures" : @3,
+      @"accountDelaySeconds" : @60,
+      @"trustedPairDays" : @0,
+    },
+  }
+                                               csrfEnabled:NO];
+  NSString *password = @"mfa-limits-password-123";
+  NSString *email = [self registeredEmailWithPassword:password app:app];
+  for (NSString *address in @[ @"203.0.113.21", @"203.0.113.22", @"203.0.113.23", @"203.0.113.24" ]) {
+    XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:address app:app].statusCode);
+  }
+  XCTAssertEqual((NSInteger)429, [self loginEmail:email password:password fromAddress:@"203.0.113.30" app:app].statusCode);
+
+  [self expirePasswordDelayForEmail:email address:@"*"];
+  NSString *fresh = @"203.0.113.31";
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:fresh app:app].statusCode);
+  XCTAssertEqualObjects(@"0", [self passwordRowForEmail:email address:@"*"][@"delay_remaining"]);
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:fresh app:app].statusCode);
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password fromAddress:@"203.0.113.32" app:app].statusCode);
+  XCTAssertEqualObjects(@"0", [self passwordRowForEmail:email address:@"*"][@"delay_remaining"]);
+  // Failures still re-arm it.
+  XCTAssertEqual((NSInteger)401, [self loginEmail:email password:@"wrong-password" fromAddress:@"203.0.113.25" app:app].statusCode);
+  XCTAssertTrue([[self passwordRowForEmail:email address:@"*"][@"delay_remaining"] integerValue] > 0);
+}
+
+- (void)testSuccessAfterMFALockExpiryDoesNotRelock {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithAttemptLimits:@{
+    @"mfa" : @{ @"maxFailures" : @3, @"lockoutSeconds" : @60 },
+  }];
+  NSString *email = [self uniqueEmail];
+  NSString *password = @"mfa-limits-password-123";
+  ALNTestClient *client = [self clientForApplication:app];
+  NSArray *recoveryCodes = nil;
+  NSString *secret = [self enrolledUserWithEmail:email password:password client:client recoveryCodes:&recoveryCodes];
+  NSString *wrongCode = [[self codeForSecret:secret stepOffset:0] isEqualToString:@"000000"] ? @"111111" : @"000000";
+
+  for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+    XCTAssertEqual((NSInteger)422, [self verifyCode:wrongCode client:client].statusCode);
+  }
+  XCTAssertEqual((NSInteger)429, [self verifyCode:[self codeForSecret:secret stepOffset:0] client:client].statusCode);
+  [self expireLockForEmail:email scope:@"mfa"];
+  XCTAssertEqual((NSInteger)200, [self verifyCode:[self codeForSecret:secret stepOffset:0] client:client].statusCode);
+  XCTAssertEqual((NSInteger)200, [self verifyCode:recoveryCodes[0] client:client].statusCode);
+  XCTAssertEqualObjects(@"0", [self attemptRowForEmail:email scope:@"mfa"][@"lock_remaining"]);
+
+  // Two correct codes at the moment a lock expires: the lock does not come back.
+  for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+    XCTAssertEqual((NSInteger)422, [self verifyCode:wrongCode client:client].statusCode);
+  }
+  [self expireLockForEmail:email scope:@"mfa"];
+  ALNTestClient *second = [self clientForApplication:app];
+  XCTAssertEqual((NSInteger)200, [self loginEmail:email password:password client:second].statusCode);
+  NSArray *clients = @[ client, second ];
+  NSMutableArray *statuses = [NSMutableArray arrayWithObjects:@0, @0, nil];
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(2, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    ALNResponse *response = [self verifyCode:recoveryCodes[1 + index] client:clients[index]];
+    [lock lock];
+    statuses[index] = @(response.statusCode);
+    [lock unlock];
+  });
+  XCTAssertTrue([statuses containsObject:@200], @"%@", statuses);
+  XCTAssertEqualObjects(@"0", [self attemptRowForEmail:email scope:@"mfa"][@"lock_remaining"]);
+  XCTAssertEqual((NSInteger)200, [self verifyCode:recoveryCodes[3] client:client].statusCode);
+}
+
 #pragma mark - Password sign-in delays
 
 - (ALNResponse *)loginEmail:(NSString *)email

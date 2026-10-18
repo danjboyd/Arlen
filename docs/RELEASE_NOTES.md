@@ -13,7 +13,8 @@
   after 50 failures in an hour from all addresses. Password counters are keyed
   by the submitted email, so known and unknown emails behave the same. A pair
   that signed in successfully in the last 30 days skips the account-wide
-  ceiling (`trustedPairDays`). Waiting requests answer `429` with
+  ceiling (`trustedPairDays`), and a successful sign-in never re-arms the
+  account-wide wait. Waiting requests answer `429` with
   `Retry-After`. Forgot-password is never held back by these delays; it has
   its own send limit (5 per email and 20 per address per hour by default,
   under `authModule.attemptLimits.mail`), beyond which it replies as usual but

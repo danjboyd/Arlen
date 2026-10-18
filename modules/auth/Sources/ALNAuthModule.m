@@ -2203,9 +2203,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *emailKey = AMPasswordAttemptKeyForEmail(normalizedEmail);
   NSString *address = AMPasswordAttemptAddress(clientAddress);
   BOOL countedOnAccount = NO;
+  NSString *armedAccountDelay = nil;
   if (![self reservePasswordAttemptForEmailKey:emailKey
                                  clientAddress:address
                               countedOnAccount:&countedOnAccount
+                             armedAccountDelay:&armedAccountDelay
                                          error:error]) {
     return nil;
   }
@@ -2244,7 +2246,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  [self recordPasswordSuccessForEmailKey:emailKey clientAddress:address countedOnAccount:countedOnAccount];
+  [self recordPasswordSuccessForEmailKey:emailKey
+                          clientAddress:address
+                       countedOnAccount:countedOnAccount
+                      armedAccountDelay:armedAccountDelay];
   return AMUserDictionaryFromRow(row);
 }
 
@@ -2855,9 +2860,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (BOOL)reservePasswordAttemptForEmailKey:(NSString *)emailKey
                             clientAddress:(NSString *)address
                          countedOnAccount:(BOOL *)countedOnAccount
+                       armedAccountDelay:(NSString **)armedAccountDelay
                                     error:(NSError **)error {
   if (countedOnAccount != NULL) {
     *countedOnAccount = NO;
+  }
+  if (armedAccountDelay != NULL) {
+    *armedAccountDelay = nil;
   }
   if (self.passwordMaxFailures == 0 || self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
     return YES;
@@ -2872,6 +2881,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSUInteger trustedSeconds = self.passwordTrustedPairDays * 86400U;
   __block NSUInteger retryAfter = 0;
   __block BOOL accountCounted = NO;
+  __block NSString *accountDelayArmed = nil;
   NSError *dbError = nil;
   BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
     if ([connection executeCommand:@"INSERT INTO auth_password_attempts (key_hash, client_ip) VALUES ($1, $2) "
@@ -2958,19 +2968,26 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     NSUInteger accountDelay =
         (accountNext > accountMax) ? AMDoublingDelay(accountDelayBase, accountNext - accountMax - 1U, maxDelay) : 0U;
     accountCounted = YES;
-    return [connection executeCommand:@"UPDATE auth_password_attempts SET failure_count = $2::integer, "
-                                      "window_started_at = CASE WHEN $4::boolean THEN NOW() ELSE window_started_at END, "
-                                      "last_failure_at = NOW(), "
-                                      "delayed_until = CASE WHEN $3::integer > 0 "
-                                      "THEN NOW() + ($3::integer * INTERVAL '1 second') ELSE NULL END, "
-                                      "updated_at = NOW() WHERE key_hash = $1 AND client_ip = '*'"
-                           parameters:@[
-                             emailKey,
-                             [NSString stringWithFormat:@"%lu", (unsigned long)accountNext],
-                             [NSString stringWithFormat:@"%lu", (unsigned long)accountDelay],
-                             newWindow ? @"true" : @"false",
-                           ]
-                                error:txError] >= 0;
+    NSArray *armed = [connection executeQuery:@"UPDATE auth_password_attempts SET failure_count = $2::integer, "
+                                              "window_started_at = CASE WHEN $4::boolean THEN NOW() ELSE window_started_at END, "
+                                              "last_failure_at = NOW(), "
+                                              "delayed_until = CASE WHEN $3::integer > 0 "
+                                              "THEN NOW() + ($3::integer * INTERVAL '1 second') ELSE NULL END, "
+                                              "updated_at = NOW() WHERE key_hash = $1 AND client_ip = '*' "
+                                              "RETURNING COALESCE(delayed_until::text, '') AS delayed_until"
+                                   parameters:@[
+                                     emailKey,
+                                     [NSString stringWithFormat:@"%lu", (unsigned long)accountNext],
+                                     [NSString stringWithFormat:@"%lu", (unsigned long)accountDelay],
+                                     newWindow ? @"true" : @"false",
+                                   ]
+                                        error:txError];
+    if (armed == nil) {
+      return NO;
+    }
+    NSString *armedValue = AMTrimmedString([armed firstObject][@"delayed_until"]);
+    accountDelayArmed = ([armedValue length] > 0) ? armedValue : nil;
+    return YES;
   } error:&dbError];
   if (!ok) {
     if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
@@ -2994,15 +3011,22 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (countedOnAccount != NULL) {
     *countedOnAccount = accountCounted;
   }
+  if (armedAccountDelay != NULL) {
+    *armedAccountDelay = accountDelayArmed;
+  }
   return YES;
 }
 
-// A successful sign-in clears its own pair, records when it succeeded (which
-// exempts the pair from the account-wide ceiling for passwordTrustedPairDays),
-// and takes back the account-wide count it reserved, if any.
+// A successful sign-in clears its own pair and records when it succeeded
+// (which exempts the pair from the account-wide ceiling for
+// passwordTrustedPairDays). On the account-wide row it only takes back the
+// count it reserved and removes the wait its own reservation armed, if any
+// (matched exactly, so a wait set by another attempt is kept). It never adds
+// to, extends or re-arms that row's wait.
 - (void)recordPasswordSuccessForEmailKey:(NSString *)emailKey
                            clientAddress:(NSString *)address
-                        countedOnAccount:(BOOL)countedOnAccount {
+                        countedOnAccount:(BOOL)countedOnAccount
+                       armedAccountDelay:(NSString *)armedAccountDelay {
   if (self.passwordMaxFailures == 0 || self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
     return;
   }
@@ -3024,13 +3048,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   (void)[self.database executeCommand:@"UPDATE auth_password_attempts SET "
                                       "failure_count = GREATEST(failure_count - 1, 0), "
-                                      "delayed_until = CASE WHEN GREATEST(failure_count - 1, 0) <= $2::integer "
-                                      "THEN NULL ELSE delayed_until END, updated_at = NOW() "
+                                      "delayed_until = CASE WHEN $2 <> '' AND delayed_until::text = $2 "
+                                      "THEN NULL ELSE delayed_until END "
                                       "WHERE key_hash = $1 AND client_ip = '*'"
-                           parameters:@[
-                             emailKey,
-                             [NSString stringWithFormat:@"%lu", (unsigned long)self.passwordAccountMaxFailures],
-                           ]
+                           parameters:@[ emailKey, armedAccountDelay ?: @"" ]
                                 error:NULL];
 }
 
