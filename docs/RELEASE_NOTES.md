@@ -109,12 +109,25 @@
   - Downloads and variant jobs verify the attachment's size and SHA-256
     against the object record and answer 404 on a mismatch.
   - A change waits at most `storageModule.persistence.lockTimeoutSeconds`
-    (default 10) for the state lock, then fails with an error.
+    (default 10) for the state lock, blocking on it rather than polling, and
+    then fails with the new `ALNStorageModuleErrorStateBusy` (HTTP 503). Only
+    the catalog update runs under the lock: attachment data is written and
+    hashed first, and deleted again if the catalog update fails.
+  - Startup waits up to `persistence.startupLockTimeoutSeconds` (default 60)
+    for its cleanup pass, and starts anyway, with a warning, if the lock is
+    still busy.
+  - Deletes remove an attachment only when its size and SHA-256 match the
+    record.
+  - The state file is written `0600` whatever the umask.
+  - With persistence off and `propaneAccessories.workerCount > 1`, startup
+    (outside `test` and `development`), `propane` and `arlen module doctor`
+    warn that each worker keeps its own catalog.
 - `ALNApplication.usesDefaultAttachmentAdapter` reports whether the
   attachment adapter is still the in-memory default, and the in-memory
   attachment adapter reports `processLocal = YES` in its capabilities.
   `ALNPlatformOpenExclusiveLockWithTimeout()` waits for a lock for at most a
-  given time, and both lock functions retry interrupted waits.
+  given time (a blocking wait on a helper thread, started only when the lock
+  is contended), and both lock functions retry interrupted waits.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

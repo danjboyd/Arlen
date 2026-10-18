@@ -421,6 +421,9 @@ print(f"config_worker_fd_critical_percent={as_int(accessories.get('workerFDCriti
 print(f"config_worker_fd_retire_percent={as_int(accessories.get('workerFDRetirePercent', 0), 0, 0)}")
 print(f"config_worker_fd_retire_count={as_int(accessories.get('workerFDRetireCount', 0), 0, 0)}")
 print(f"config_worker_fd_check_seconds={as_int(accessories.get('workerFDCheckSeconds', 15), 15, 1)}")
+storage_persistence = (cfg.get("storageModule") or {}).get("persistence") or {}
+storage_unshared = "enabled" in storage_persistence and not as_bool(storage_persistence.get("enabled"), True)
+print(f"config_storage_unshared={1 if storage_unshared else 0}")
 PY
 }
 
@@ -449,6 +452,7 @@ while IFS='=' read -r key value; do
     config_worker_fd_retire_percent) config_worker_fd_retire_percent="$value" ;;
     config_worker_fd_retire_count) config_worker_fd_retire_count="$value" ;;
     config_worker_fd_check_seconds) config_worker_fd_check_seconds="$value" ;;
+    config_storage_unshared) config_storage_unshared="$value" ;;
   esac
 done < <(emit_config_values "$config_json")
 
@@ -695,6 +699,9 @@ describe_wait_status() {
   fi
 }
 
+if [[ "${config_storage_unshared:-0}" == "1" && "$worker_count" -gt 1 ]]; then
+  echo "propane: warning: storageModule.persistence.enabled = NO with workerCount=$worker_count; each worker keeps its own storage catalog, so most downloads and variant jobs will not find their objects. Enable storage persistence or run one worker." >&2
+fi
 echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
 echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
 echo "propane: cluster enabled=$cluster_enabled name=$cluster_name nodeID=$cluster_node_id expectedNodes=$cluster_expected_nodes"

@@ -1103,6 +1103,34 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     }
   }
 
+  // Without persistence the storage catalog lives in each process, so with
+  // several propane workers most downloads (and jobs-worker variants) miss.
+  if ([installed containsObject:@"storage"]) {
+    NSDictionary *storageConfig =
+        [merged[@"storageModule"] isKindOfClass:[NSDictionary class]] ? merged[@"storageModule"] : @{};
+    NSDictionary *storagePersistence =
+        [storageConfig[@"persistence"] isKindOfClass:[NSDictionary class]] ? storageConfig[@"persistence"] : @{};
+    BOOL storagePersistent = ![storagePersistence[@"enabled"] respondsToSelector:@selector(boolValue)] ||
+                             [storagePersistence[@"enabled"] boolValue];
+    NSDictionary *propane =
+        [merged[@"propaneAccessories"] isKindOfClass:[NSDictionary class]] ? merged[@"propaneAccessories"] : @{};
+    NSInteger workerCount = [propane[@"workerCount"] respondsToSelector:@selector(integerValue)]
+                                ? [propane[@"workerCount"] integerValue]
+                                : 1;
+    if (!storagePersistent && workerCount > 1) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"storage_unshared_state",
+          @"storage",
+          [NSString stringWithFormat:@"storage persistence is off but propaneAccessories.workerCount = %ld; each worker "
+                                     @"keeps its own catalog, so most downloads and variant jobs will not find their objects",
+                                     (long)workerCount],
+          @"Enable storageModule.persistence (the default) or run a single worker.",
+          @"storageModule.persistence.enabled");
+    }
+  }
+
   ALNModuleAppendDiagnostic(diagnostics,
                             @"pass",
                             @"modules_loaded",

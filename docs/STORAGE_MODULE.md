@@ -56,9 +56,17 @@ delegates on one host) stay consistent:
 - Object and upload-session IDs are random (`obj-<32 hex>`,
   `upload-<32 hex>`), not per-process counters. Download tokens are bound to
   the object they were issued for, not just to its ID.
+- Only the catalog update runs under the lock. Attachment data is written and
+  hashed before it, and an attachment whose catalog update fails is deleted
+  again.
 - A change that can't get the lock within
-  `persistence.lockTimeoutSeconds` (default `10`) fails with an error instead
-  of waiting forever behind a hung process.
+  `persistence.lockTimeoutSeconds` (default `10`) fails with
+  `ALNStorageModuleErrorStateBusy` (HTTP 503) instead of waiting forever
+  behind a hung process. Waiting blocks on the lock rather than polling it.
+- At startup the module waits up to `persistence.startupLockTimeoutSeconds`
+  (default `60`) for its cleanup pass. If the lock is still busy it logs a
+  warning and starts anyway; the catalog was already loaded.
+- The state file is written owner-only (`0600`), whatever the umask.
 
 The state file must be on a local filesystem that honours those locks, and
 every process must see the same file: this is single-host shared state, not
@@ -76,6 +84,13 @@ attachments by ID:
   Configure a filesystem or object-store adapter, or turn persistence off.
 - Downloads and variant jobs check the attachment's size and SHA-256 against
   the object record, and answer 404 rather than serve bytes that don't match.
+  A delete removes only attachments whose bytes match the record.
+
+With persistence off, each process keeps its own catalog. That suits one
+process, but with `propaneAccessories.workerCount > 1` most downloads and
+jobs-worker variants would miss their objects, so startup logs a
+`storage_unshared_state` warning outside `test` and `development`, `propane`
+prints a warning, and `arlen module doctor` reports it.
 
 Runtime access is available through `ALNStorageModuleRuntime`.
 

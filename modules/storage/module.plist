@@ -24,6 +24,7 @@
           enabled = YES;
           path = "";
           lockTimeoutSeconds = 10;
+          startupLockTimeoutSeconds = 60;
         };
         attachments = {
           path = "";
