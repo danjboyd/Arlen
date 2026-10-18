@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "accepted": [
+    {
+      "file": "modules/admin-ui/Sources/ALNAdminUIModule.m",
+      "line": 1751,
+      "type": "Dead initialization",
+      "category": "Unused code",
+      "function": "exportPayloadForResourceIdentifier:format:parameters:error:",
+      "message": "Value stored to 'bodyData' during its initialization is never read",
+      "hash": "ec514426a02215d84d8ebca16f22c0b6",
+      "key": "modules/admin-ui/Sources/ALNAdminUIModule.m|Dead initialization|exportPayloadForResourceIdentifier:format:parameters:error:|ec514426a02215d84d8ebca16f22c0b6",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    },
+    {
+      "file": "modules/jobs/Sources/ALNJobsModule.m",
+      "line": 1672,
+      "type": "Dead initialization",
+      "category": "Unused code",
+      "function": "requestParameters",
+      "message": "Value stored to 'bodyParameters' during its initialization is never read",
+      "hash": "8261ad648f35b8cf04000c1f3964ec7b",
+      "key": "modules/jobs/Sources/ALNJobsModule.m|Dead initialization|requestParameters|8261ad648f35b8cf04000c1f3964ec7b",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    },
+    {
+      "file": "modules/search/Sources/ALNSearchModule.m",
+      "line": 4531,
+      "type": "Dead initialization",
+      "category": "Unused code",
+      "function": "normalizedMetadataForDefinition:source:error:",
+      "message": "Value stored to 'queryRoles' during its initialization is never read",
+      "hash": "71d7ca83b0ab249118adea2151b84690",
+      "key": "modules/search/Sources/ALNSearchModule.m|Dead initialization|normalizedMetadataForDefinition:source:error:|71d7ca83b0ab249118adea2151b84690",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    },
+    {
+      "file": "src/Arlen/HTTP/ALNHTTPServer.m",
+      "line": 1731,
+      "type": "Dead assignment",
+      "category": "Unused code",
+      "function": "ALNSendFileDescriptor",
+      "message": "Value stored to 'transientRetries' is never read",
+      "hash": "9a896b1a1897740b992cc7bcbd1e54b5",
+      "key": "src/Arlen/HTTP/ALNHTTPServer.m|Dead assignment|ALNSendFileDescriptor|9a896b1a1897740b992cc7bcbd1e54b5",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    },
+    {
+      "file": "src/Arlen/MVC/Template/ALNEOCTranspiler.m",
+      "line": 656,
+      "type": "Dead assignment",
+      "category": "Unused code",
+      "function": "tokensForTemplateString:logicalPath:error:",
+      "message": "Value stored to 'index' is never read",
+      "hash": "b4dbc58a915225b9ac5d31859d3a5d8a",
+      "key": "src/Arlen/MVC/Template/ALNEOCTranspiler.m|Dead assignment|tokensForTemplateString:logicalPath:error:|b4dbc58a915225b9ac5d31859d3a5d8a",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    },
+    {
+      "file": "src/Arlen/ORM/ALNORMRepository.m",
+      "line": 306,
+      "type": "Bad return type when passing NSError**",
+      "category": "Coding conventions (Apple)",
+      "function": "applyJoinedRelations:toRow:rootModel:error:",
+      "message": "Method accepting NSError** should have a non-void return value to indicate whether or not an error occurred",
+      "hash": "b1a9100a26b113cc2eb06a0ff48b322f",
+      "key": "src/Arlen/ORM/ALNORMRepository.m|Bad return type when passing NSError**|applyJoinedRelations:toRow:rootModel:error:|b1a9100a26b113cc2eb06a0ff48b322f",
+      "reason": "osx.cocoa.NSError coding-convention check (void method with an NSError** out-parameter); accepted as-is."
+    },
+    {
+      "file": "tools/arlen.m",
+      "line": 7046,
+      "type": "Dead initialization",
+      "category": "Unused code",
+      "function": "CommandDeploy",
+      "message": "Value stored to 'releaseItems' during its initialization is never read",
+      "hash": "42776395154597c6e0896f1913cc97d3",
+      "key": "tools/arlen.m|Dead initialization|CommandDeploy|42776395154597c6e0896f1913cc97d3",
+      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
+    }
+  ]
+}

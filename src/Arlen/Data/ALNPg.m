@@ -1368,8 +1368,12 @@ NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length) {
   unsigned char *out = [data mutableBytes];
   const unsigned char *in = (const unsigned char *)text;
   for (NSUInteger idx = 0; idx < byteCount; idx++) {
+    // The table is deliberately signed: -1 marks a non-hex byte. The index is
+    // already unsigned char, so the signed-char widening below is intended.
+    // NOLINTBEGIN(bugprone-signed-char-misuse,cert-str34-c)
     int high = table[in[idx * 2]];
     int low = table[in[(idx * 2) + 1]];
+    // NOLINTEND(bugprone-signed-char-misuse,cert-str34-c)
     if (high < 0 || low < 0) {
       return nil;
     }
