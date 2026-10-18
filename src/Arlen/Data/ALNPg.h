@@ -42,6 +42,10 @@ extern NSString *const ALNPgQueryEventErrorDomainKey;
 extern NSString *const ALNPgQueryEventErrorCodeKey;
 extern NSString *const ALNPgQueryEventSQLKey;
 
+// userInfo key (NSNumber YES) on an ALNPgErrorConnectionFailed error raised
+// because the server closed the connection while a statement ran on it.
+extern NSString *const ALNPgErrorConnectionLostKey;
+
 typedef NS_ENUM(NSInteger, ALNPgErrorCode) {
   ALNPgErrorConnectionFailed = 1,
   ALNPgErrorQueryFailed = 2,
@@ -162,7 +166,9 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (void)releaseConnection:(ALNPgConnection *)connection;
 /// Pool occupancy and wait counters: `max_connections`, `in_use_connections`,
 /// `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-/// `acquire_wait_seconds_total`, `pool_exhausted_count`.
+/// `acquire_wait_seconds_total`, `pool_exhausted_count`, and
+/// `connection_retry_count` (statements retried after a pooled connection
+/// turned out to have been closed by the server).
 - (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;

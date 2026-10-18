@@ -8,6 +8,7 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNTestClient.h"
+#import "../shared/ALNTestWait.h"
 
 // A busy or unreachable auth database answers 503 with Retry-After; it never
 // turns a valid session into a 401 or signs the user out. Needs ARLEN_PG_TEST_DSN.
@@ -150,6 +151,112 @@
   }
   XCTAssertTrue([statuses containsObject:@200], @"statuses %@", statuses);
   XCTAssertEqual((NSInteger)200, [client get:@"/auth/api/mfa/totp"].statusCode);
+}
+
+- (void)terminateAllTestDatabaseBackends {
+  NSError *error = nil;
+  ALNPgConnection *admin = [[ALNPgConnection alloc] initWithConnectionString:[self pgTestDSN] error:&error];
+  XCTAssertNotNil(admin, @"%@", error);
+  XCTAssertNotNil([admin executeQuery:@"SELECT pg_terminate_backend(pid)::text AS terminated FROM pg_stat_activity "
+                                      "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                                      "AND backend_type = 'client backend'"
+                           parameters:@[]
+                                error:&error],
+               @"%@", error);
+  XCTAssertTrue(ALNTestWaitUntil(10.0, 0.05, ^BOOL {
+    NSArray *rows = [admin executeQuery:@"SELECT COUNT(*)::text AS total FROM pg_stat_activity "
+                                        "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                                        "AND backend_type = 'client backend'"
+                             parameters:@[]
+                                  error:NULL];
+    return [[rows firstObject][@"total"] isEqualToString:@"0"];
+  }));
+  [admin close];
+}
+
+- (NSArray<ALNResponse *> *)concurrentRequests:(NSUInteger)count
+                                        cookie:(NSString *)cookie
+                                           app:(ALNApplication *)app {
+  NSMutableArray *responses = [NSMutableArray array];
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(count, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    (void)index;
+    ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET"
+                                                        path:@"/auth/api/mfa/totp"
+                                                 queryString:@""
+                                                     headers:@{ @"accept" : @"application/json", @"cookie" : cookie }
+                                                        body:[NSData data]];
+    request.remoteAddress = @"127.0.0.1";
+    request.effectiveRemoteAddress = @"127.0.0.1";
+    ALNResponse *response = [app dispatchRequest:request];
+    [lock lock];
+    [responses addObject:response];
+    [lock unlock];
+  });
+  return responses;
+}
+
+- (void)assertNoDriverTextIn:(ALNResponse *)response {
+  NSString *body = [response bodyText];
+  for (NSString *fragment in @[ @"execution failed", @"server closed", @"terminating connection", @"libpq",
+                                @"connection pool" ]) {
+    XCTAssertFalse([body containsString:fragment], @"%@", body);
+  }
+}
+
+- (void)testServerClosedConnectionsNeverSignUsersOut {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithPoolSize:8];
+  NSString *email = [NSString stringWithFormat:@"pool-%@@example.test", [[[NSUUID UUID] UUIDString] lowercaseString]];
+  NSString *password = @"pool-password-123";
+  ALNTestClient *client = [self signedInClientForApplication:app email:email password:password];
+  NSString *cookie = [self cookieHeaderForClient:client];
+  // Fill the pool with idle connections, then have the server close them all.
+  for (ALNResponse *response in [self concurrentRequests:16 cookie:cookie app:app]) {
+    XCTAssertTrue(response.statusCode == 200 || response.statusCode == 503);
+  }
+  [self terminateAllTestDatabaseBackends];
+
+  NSArray *responses = [self concurrentRequests:16 cookie:cookie app:app];
+  NSMutableArray *statuses = [NSMutableArray array];
+  for (ALNResponse *response in responses) {
+    [statuses addObject:@(response.statusCode)];
+    XCTAssertTrue(response.statusCode == 200 || response.statusCode == 503, @"statuses %@", statuses);
+    [self assertNoDriverTextIn:response];
+  }
+  XCTAssertTrue([statuses containsObject:@200], @"statuses %@", statuses);
+
+  [self terminateAllTestDatabaseBackends];
+  ALNTestClient *other = [[ALNTestClient alloc] initWithApplication:app error:NULL];
+  ALNResponse *login = [other post:@"/auth/api/login" JSON:@{ @"email" : email, @"password" : password }];
+  XCTAssertTrue(login.statusCode == 200 || login.statusCode == 503, @"%ld %@", (long)login.statusCode, [login bodyText]);
+  [self assertNoDriverTextIn:login];
+}
+
+- (void)testUnreachableDatabaseAnswers503WithoutDriverText {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithPoolSize:2];
+  NSString *email = [NSString stringWithFormat:@"pool-%@@example.test", [[[NSUUID UUID] UUIDString] lowercaseString]];
+  NSString *password = @"pool-password-123";
+  ALNTestClient *client = [self signedInClientForApplication:app email:email password:password];
+  // Point the module at a port nothing listens on: every connection is refused.
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  ALNPg *unreachable = [[ALNPg alloc] initWithConnectionString:@"postgresql://postgres@127.0.0.1:1/unreachable"
+                                                maxConnections:2
+                                                         error:NULL];
+  XCTAssertNotNil(unreachable);
+  [runtime setValue:unreachable forKey:@"database"];
+  for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+    ALNResponse *busy = [client get:@"/auth/api/mfa/totp"];
+    XCTAssertEqual((NSInteger)503, busy.statusCode, @"%@", [busy bodyText]);
+    [self assertNoDriverTextIn:busy];
+    ALNResponse *login = [[[ALNTestClient alloc] initWithApplication:app error:NULL]
+        post:@"/auth/api/login"
+        JSON:@{ @"email" : email, @"password" : password }];
+    XCTAssertEqual((NSInteger)503, login.statusCode, @"%@", [login bodyText]);
+    [self assertNoDriverTextIn:login];
+  }
+  XCTAssertTrue([[client session][@"_auth"][@"subject"] length] > 0);
 }
 
 @end

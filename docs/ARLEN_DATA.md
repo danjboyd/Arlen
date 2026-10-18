@@ -592,7 +592,8 @@ database.acquireTimeout = 2.0;  // seconds; 0 (default) fails immediately
   seconds) and avoid nested acquisition.
 - `poolDiagnostics` returns `max_connections`, `in_use_connections`,
   `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-  `acquire_wait_seconds_total` and `pool_exhausted_count`. A rising
+  `acquire_wait_seconds_total`, `pool_exhausted_count` and
+  `connection_retry_count` (see below). A rising
   `pool_exhausted_count` or `acquire_wait_seconds_total` means the pool is too
   small for the load.
 - `acquireTimeout` is an optional `ALNDatabaseAdapter` property; `ALNGDL2Adapter`
@@ -629,8 +630,26 @@ database.connectionLivenessChecksEnabled = NO;         // never probe
 ```
 
 Before the threshold existed, every reuse ran `SELECT 1`. Set the threshold to
-`0` to get that back. If the server ends a session that was used within the
-threshold (for example a restart in the middle of traffic), the next statement
-on that connection fails. The failure closes the connection, so the pool does
-not reuse it. The instance `capabilityMetadata` reports the setting as
+`0` to get that back.
+
+If the server ends a session that was used within the threshold (a restart,
+failover, idle timeout or `pg_terminate_backend` in the middle of traffic),
+the next statement on that connection fails without a server answer. `ALNPg`
+then:
+
+- reports the failure as `ALNPgErrorConnectionFailed` with
+  `ALNPgErrorConnectionLostKey` set to `YES` in `userInfo`, whatever the last
+  result said, and closes the connection so the pool does not reuse it;
+- for a pooled `executeQuery`, `executeQueryResult`, `executeCommand`,
+  `executeBuilderQuery` or `executeBuilderCommand` on a connection reused from
+  the idle list, closes the other idle connections and runs the statement once
+  more on a new connection. A statement on a newly opened connection is never
+  retried, so it is not sent twice;
+- for `withTransaction`, restarts the transaction once on a new connection
+  when `BEGIN` (the first statement, before your block runs) is what failed.
+  A failure after the block has started is returned to the caller.
+
+`connection_retry_count` in `poolDiagnostics` counts those retries.
+`executeCommandBatch` and statements on a connection you acquired yourself
+are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.

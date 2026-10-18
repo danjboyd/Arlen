@@ -23,6 +23,16 @@
   `arlen module migrate` to apply the new auth migration
   `004_auth_totp_limits`; until it is applied, verification works as before and
   the module logs one warning.
+- `ALNPg` recovers from connections the server closed while they were idle
+  (restart, failover, idle timeout, `pg_terminate_backend`). Such a failure is
+  reported as `ALNPgErrorConnectionFailed` with the new
+  `ALNPgErrorConnectionLostKey`, whatever SQLSTATE (or none) the result
+  carried, and the connection is closed. Pooled single statements on a reused
+  connection, and transactions whose `BEGIN` failed, are retried once on a new
+  connection; `poolDiagnostics` adds `connection_retry_count`. The auth module
+  treats these failures, and any database failure without a SQLSTATE, as the
+  database being unavailable (`503` with `Retry-After`), never as a failed
+  sign-in, and no longer passes driver messages to clients.
 - The auth module's connection pool size is now configurable
   (`authModule.database.maxConnections`, default 8, was a fixed 4), and a busy
   pool waits up to `authModule.database.acquireTimeoutSeconds` (default 2) for

@@ -18,6 +18,7 @@
 #endif
 
 NSString *const ALNPgErrorDomain = @"Arlen.Data.Pg.Error";
+NSString *const ALNPgErrorConnectionLostKey = @"connection_lost";
 NSString *const ALNPgErrorDiagnosticsKey = @"pg_diagnostics";
 NSString *const ALNPgErrorSQLStateKey = @"sqlstate";
 NSString *const ALNPgErrorServerDetailKey = @"server_detail";
@@ -1957,8 +1958,12 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 // many SELECT 1 liveness probes it has run. Read by the pool and by tests.
 @property(nonatomic, assign) NSTimeInterval poolIdleSince;
 @property(nonatomic, assign) NSUInteger livenessCheckCount;
+// YES when the pool handed this connection out from its idle list (it may have
+// been closed by the server while idle); NO for a freshly opened connection.
+@property(nonatomic, assign) BOOL reusedFromPool;
 
 - (BOOL)hasActiveTransaction;
+- (void)reportConnectionLossForError:(NSError **)error;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
@@ -2131,6 +2136,23 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   if (_conn != NULL && ALNPQstatus(_conn) != ALNConnectionOK) {
     [self close];
   }
+}
+
+// After a failed statement: when libpq reports the connection dead (the server
+// closed it, restarted or failed over), report the failure as
+// ALNPgErrorConnectionFailed with ALNPgErrorConnectionLostKey = YES, whatever
+// SQLSTATE (or none) the last result carried, and close the connection so the
+// pool discards it instead of reusing it.
+- (void)reportConnectionLossForError:(NSError **)error {
+  if (_conn == NULL || ALNPQstatus(_conn) == ALNConnectionOK) {
+    return;
+  }
+  if (error != NULL && *error != nil) {
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:(*error).userInfo ?: @{}];
+    userInfo[ALNPgErrorConnectionLostKey] = @YES;
+    *error = [NSError errorWithDomain:ALNPgErrorDomain code:ALNPgErrorConnectionFailed userInfo:userInfo];
+  }
+  [self close];
 }
 
 - (BOOL)checkConnectionLiveness:(NSError **)error {
@@ -2473,6 +2495,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                               detail,
                               sql);
     }
+    [self reportConnectionLossForError:error];
     return NO;
   }
   ALNExecStatusType status = ALNPQresultStatus(result);
@@ -2487,6 +2510,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              sql,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return NO;
   }
   ALNPQclear(result);
@@ -2538,7 +2562,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                               detail,
                               sql);
     }
-    [self closeIfConnectionLost];
+    [self reportConnectionLossForError:error];
     return NULL;
   }
 
@@ -2573,7 +2597,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                               detail,
                               sql);
     }
-    [self closeIfConnectionLost];
+    [self reportConnectionLossForError:error];
     return NULL;
   }
 
@@ -2622,6 +2646,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                             @"prepared statement execution failed",
                             detail,
                             name);
+  }
+  if (result == NULL) {
+    [self reportConnectionLossForError:error];
   }
   return result;
 }
@@ -2678,6 +2705,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              sql,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return nil;
   }
 
@@ -2718,6 +2746,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              sql,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return nil;
   }
 
@@ -2747,6 +2776,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              sql,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return -1;
   }
 
@@ -2782,6 +2812,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              name,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return nil;
   }
 
@@ -2811,6 +2842,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                              name,
                                              diagnostics);
     }
+    [self reportConnectionLossForError:error];
     return -1;
   }
 
@@ -3407,6 +3439,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign) NSUInteger acquireWaitCount;
 @property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
 @property(nonatomic, assign) NSUInteger poolExhaustedCount;
+@property(nonatomic, assign) NSUInteger connectionRetryCount;
 
 @end
 
@@ -3647,6 +3680,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
           return nil;
         }
         [self configurePooledConnection:connection];
+        connection.reusedFromPool = NO;
         handedOut = YES;
         return connection;
       }
@@ -3661,6 +3695,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
         NSError *livenessError = nil;
         if (![self shouldProbeIdleConnection:candidate] ||
             [candidate checkConnectionLiveness:&livenessError]) {
+          candidate.reusedFromPool = YES;
           handedOut = YES;
           return candidate;
         }
@@ -3710,6 +3745,68 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   }
 }
 
+// Closes every idle connection. Called when one pooled connection turns out to
+// have been closed by the server: the others very likely were too (restart,
+// failover), so they are reopened on demand rather than tried one by one.
+- (void)discardIdleConnections {
+  NSArray *idle = nil;
+  [self.poolCondition lock];
+  idle = [self.idleConnections copy];
+  [self.idleConnections removeAllObjects];
+  [self.poolCondition broadcast];
+  [self.poolCondition unlock];
+  for (ALNPgConnection *connection in idle) {
+    [connection close];
+  }
+}
+
+static BOOL ALNPgErrorIsConnectionLost(NSError *error) {
+  return [error.domain isEqualToString:ALNPgErrorDomain] && error.code == ALNPgErrorConnectionFailed &&
+         [error.userInfo[ALNPgErrorConnectionLostKey] boolValue];
+}
+
+// Runs `work` on a pooled connection. When a connection reused from the idle
+// list turns out to have been closed by the server, the statement could not
+// have run, so it is retried once on a newly opened connection (idle
+// connections are discarded first). A freshly opened connection is never
+// retried, so a statement is not sent twice.
+- (BOOL)runOnPooledConnection:(BOOL (^)(ALNPgConnection *connection, NSError **error))work
+                        error:(NSError **)error {
+  for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+    NSError *acquireError = nil;
+    ALNPgConnection *connection = [self acquireConnection:&acquireError];
+    if (connection == nil) {
+      if (error != NULL) {
+        *error = acquireError;
+      }
+      return NO;
+    }
+    BOOL reused = connection.reusedFromPool;
+    NSError *runError = nil;
+    BOOL ok = NO;
+    @try {
+      ok = work(connection, &runError);
+    } @finally {
+      [self releaseConnection:connection];
+    }
+    if (ok) {
+      return YES;
+    }
+    if (attempt == 0 && reused && ALNPgErrorIsConnectionLost(runError)) {
+      [self.poolCondition lock];
+      self.connectionRetryCount += 1;
+      [self.poolCondition unlock];
+      [self discardIdleConnections];
+      continue;
+    }
+    if (error != NULL) {
+      *error = runError;
+    }
+    return NO;
+  }
+  return NO;
+}
+
 - (NSDictionary<NSString *, id> *)poolDiagnostics {
   [self.poolCondition lock];
   @try {
@@ -3721,6 +3818,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
       @"acquire_wait_count" : @(self.acquireWaitCount),
       @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
       @"pool_exhausted_count" : @(self.poolExhaustedCount),
+      @"connection_retry_count" : @(self.connectionRetryCount),
     };
   } @finally {
     [self.poolCondition unlock];
@@ -3741,21 +3839,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
   ALNPgClearError(error);
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return nil;
-  }
-
-  NSArray *rows = nil;
-  @try {
-    rows = [connection executeQuery:sql parameters:parameters ?: @[] error:error];
-  } @finally {
-    [self releaseConnection:connection];
-  }
+  __block NSArray *rows = nil;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    rows = [connection executeQuery:sql parameters:parameters ?: @[] error:runError];
+    return rows != nil;
+  } error:error];
   return rows;
 }
 
@@ -3763,41 +3851,22 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                                parameters:(NSArray *)parameters
                                     error:(NSError **)error {
   ALNPgClearError(error);
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return nil;
-  }
-  ALNDatabaseResult *result = nil;
-  @try {
-    result = [connection executeQueryResult:sql parameters:parameters ?: @[] error:error];
-  } @finally {
-    [self releaseConnection:connection];
-  }
+  __block ALNDatabaseResult *result = nil;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    result = [connection executeQueryResult:sql parameters:parameters ?: @[] error:runError];
+    return result != nil;
+  } error:error];
   return result;
 }
 
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
   ALNPgClearError(error);
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return nil;
-  }
-
-  NSArray *rows = nil;
-  @try {
-    rows = [connection executeBuilderQuery:builder error:error];
-  } @finally {
-    [self releaseConnection:connection];
-  }
+  __block NSArray *rows = nil;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    rows = [connection executeBuilderQuery:builder error:runError];
+    return rows != nil;
+  } error:error];
   return rows;
 }
 
@@ -3805,21 +3874,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
                  parameters:(NSArray *)parameters
                       error:(NSError **)error {
   ALNPgClearError(error);
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return -1;
-  }
-
-  NSInteger affected = -1;
-  @try {
-    affected = [connection executeCommand:sql parameters:parameters ?: @[] error:error];
-  } @finally {
-    [self releaseConnection:connection];
-  }
+  __block NSInteger affected = -1;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    affected = [connection executeCommand:sql parameters:parameters ?: @[] error:runError];
+    return affected >= 0;
+  } error:error];
   return affected;
 }
 
@@ -3848,21 +3907,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 - (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
                              error:(NSError **)error {
   ALNPgClearError(error);
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return -1;
-  }
-
-  NSInteger affected = -1;
-  @try {
-    affected = [connection executeBuilderCommand:builder error:error];
-  } @finally {
-    [self releaseConnection:connection];
-  }
+  __block NSInteger affected = -1;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    affected = [connection executeBuilderCommand:builder error:runError];
+    return affected >= 0;
+  } error:error];
   return affected;
 }
 
@@ -3879,47 +3928,62 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return NO;
   }
 
-  NSError *acquireError = nil;
-  ALNPgConnection *connection = [self acquireConnection:&acquireError];
-  if (connection == nil) {
-    if (error != NULL) {
-      *error = acquireError;
-    }
-    return NO;
-  }
-
-  BOOL success = NO;
-  NSError *blockError = nil;
-  @try {
-    NSError *beginError = nil;
-    if (![connection beginTransaction:&beginError]) {
+  for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+    NSError *acquireError = nil;
+    ALNPgConnection *connection = [self acquireConnection:&acquireError];
+    if (connection == nil) {
       if (error != NULL) {
-        *error = beginError;
+        *error = acquireError;
       }
       return NO;
     }
 
-    success = block(connection, &blockError);
-    if (success) {
-      NSError *commitError = nil;
-      if (![connection commitTransaction:&commitError]) {
-        success = NO;
-        if (error != NULL) {
-          *error = commitError;
+    BOOL reused = connection.reusedFromPool;
+    BOOL retry = NO;
+    BOOL success = NO;
+    NSError *blockError = nil;
+    @try {
+      NSError *beginError = nil;
+      if (![connection beginTransaction:&beginError]) {
+        // BEGIN is the first statement, so a connection the server closed
+        // while it sat idle fails here, before the block has run: restart
+        // the transaction once on a new connection.
+        if (attempt == 0 && reused && ALNPgErrorIsConnectionLost(beginError)) {
+          retry = YES;
+        } else if (error != NULL) {
+          *error = beginError;
+        }
+      } else {
+        success = block(connection, &blockError);
+        if (success) {
+          NSError *commitError = nil;
+          if (![connection commitTransaction:&commitError]) {
+            success = NO;
+            if (error != NULL) {
+              *error = commitError;
+            }
+          }
+        } else {
+          NSError *rollbackError = nil;
+          (void)[connection rollbackTransaction:&rollbackError];
+          if (error != NULL) {
+            *error = blockError ?: rollbackError;
+          }
         }
       }
-    } else {
-      NSError *rollbackError = nil;
-      (void)[connection rollbackTransaction:&rollbackError];
-      if (error != NULL) {
-        *error = blockError ?: rollbackError;
-      }
+    } @finally {
+      [self releaseConnection:connection];
     }
-  } @finally {
-    [self releaseConnection:connection];
+    if (retry) {
+      [self.poolCondition lock];
+      self.connectionRetryCount += 1;
+      [self.poolCondition unlock];
+      [self discardIdleConnections];
+      continue;
+    }
+    return success;
   }
-
-  return success;
+  return NO;
 }
 
 - (BOOL)withTransactionUsingBlock:(BOOL (^)(id<ALNDatabaseConnection> connection,

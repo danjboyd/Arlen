@@ -127,6 +127,11 @@ the message `The sign-in service is temporarily unavailable. Try again
 shortly.` They never answer `401` for that reason and never clear the session,
 so clients should keep the session and retry. A password sign-in that cannot
 reach the database also answers `503`, not `Invalid email or password`.
+Connections the server closed while idle (restart, failover, idle timeout) are
+replaced and the statement retried once (see
+[Arlen Data](ARLEN_DATA.md#connection-pool-liveness-checks)); only if that
+fails too does the route answer `503`. Database driver messages never reach
+the client: responses carry a generic message and the detail is logged.
 Size `maxConnections` for the number of auth requests you expect at once,
 within the database's own connection limit.
 

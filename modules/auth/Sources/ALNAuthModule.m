@@ -239,6 +239,12 @@ static BOOL AMErrorIsDatabaseUnavailable(NSError *error) {
       if ([sqlState hasPrefix:@"08"] || [sqlState hasPrefix:@"57P"] || [sqlState isEqualToString:@"53300"]) {
         return YES;
       }
+      // A statement that failed without a SQLSTATE never got a server answer
+      // (the connection broke): not a query error and not a failed sign-in.
+      if ([sqlState length] == 0 &&
+          (current.code == ALNPgErrorQueryFailed || current.code == ALNPgErrorTransactionFailed)) {
+        return YES;
+      }
     }
     current = current.userInfo[NSUnderlyingErrorKey];
   }
@@ -247,6 +253,18 @@ static BOOL AMErrorIsDatabaseUnavailable(NSError *error) {
 
 static NSString *const AMDatabaseUnavailableMessage =
     @"The sign-in service is temporarily unavailable. Try again shortly.";
+
+// YES when the error came from the database driver; its text is for logs only.
+static BOOL AMErrorInvolvesDatabase(NSError *error) {
+  NSError *current = error;
+  for (NSUInteger depth = 0; depth < 4 && [current isKindOfClass:[NSError class]]; depth++) {
+    if ([current.domain isEqualToString:ALNPgErrorDomain]) {
+      return YES;
+    }
+    current = current.userInfo[NSUnderlyingErrorKey];
+  }
+  return NO;
+}
 
 static NSError *AMRateLimitedError(NSUInteger retryAfterSeconds, NSString *message) {
   return AMError(ALNAuthModuleErrorRateLimited,
@@ -4415,6 +4433,29 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 // 429 with Retry-After for a locked account; otherwise `fallbackStatus`.
+// Text for the client. Database driver errors never reach the client: they
+// get a generic message and the detail goes to the log.
+- (NSString *)clientMessageForError:(NSError *)error fallback:(NSString *)fallback {
+  if (error == nil) {
+    return fallback;
+  }
+  // Messages the module wrote itself (for example the missing-migration
+  // guidance, which wraps the driver error) are safe to show.
+  BOOL moduleMessage = [error.domain isEqualToString:ALNAuthModuleErrorDomain] &&
+                       error.code != ALNAuthModuleErrorDatabaseUnavailable;
+  if (AMErrorIsDatabaseUnavailable(error) || (!moduleMessage && AMErrorInvolvesDatabase(error))) {
+    [self.context.logger warn:@"auth module request failed on a database error"
+                       fields:@{
+                         @"error" : error.localizedDescription ?: @"",
+                         @"code" : @(error.code),
+                         @"sqlstate" : AMTrimmedString(error.userInfo[ALNPgErrorSQLStateKey]) ?: @"",
+                       }];
+    return AMErrorIsDatabaseUnavailable(error) ? AMDatabaseUnavailableMessage
+                                               : @"The request could not be completed. Try again shortly.";
+  }
+  return error.localizedDescription ?: fallback;
+}
+
 - (void)setStatusForAuthError:(NSError *)error fallbackStatus:(NSInteger)fallbackStatus {
   if ([error.domain isEqualToString:ALNAuthModuleErrorDomain] && error.code == ALNAuthModuleErrorRateLimited) {
     NSUInteger retryAfter = ALNUnsignedIntegerValueOrDefault(error.userInfo[ALNAuthModuleRetryAfterSecondsKey], 1U);
@@ -4450,8 +4491,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   return @[ @{
     @"field" : field ?: @"",
-    @"message" : AMErrorIsDatabaseUnavailable(error) ? AMDatabaseUnavailableMessage
-                                                     : (error.localizedDescription ?: @"Request failed"),
+    @"message" : [self clientMessageForError:error fallback:@"Request failed"],
   } ];
 }
 
@@ -4592,7 +4632,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
   if (session == nil) {
     [self setStatus:500];
-    return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Failed to create session" };
+    return @{ @"status" : @"error", @"message" : [self clientMessageForError:error fallback:@"Failed to create session"] };
   }
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx
                                                                   user:user
@@ -4747,7 +4787,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
   if (session == nil) {
     [self setStatus:500];
-    return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Failed to create session" };
+    return @{ @"status" : @"error", @"message" : [self clientMessageForError:error fallback:@"Failed to create session"] };
   }
   NSString *redirectTarget = [self.runtime postLoginRedirectForContext:ctx user:user defaultRedirect:returnTo];
   ctx.session[ALNAuthModuleVerificationNoticeSessionKey] = @"Account created. Check your email for a verification link.";
@@ -4767,7 +4807,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *error = nil;
   NSDictionary *user = nil;
   BOOL ok = [self.runtime consumeVerificationToken:parameters[@"token"] user:&user error:&error];
-  NSString *message = ok ? @"Your email address has been verified." : (error.localizedDescription ?: @"Verification failed.");
+  NSString *message = ok ? @"Your email address has been verified." : ([self clientMessageForError:error fallback:@"Verification failed."]);
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     [self setStatus:ok ? 200 : 422];
     return @{
@@ -4963,7 +5003,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                                error:&authError];
   if (authenticated == nil) {
     [self setStatusForAuthError:authError fallbackStatus:401];
-    return @{ @"status" : @"error", @"message" : authError.localizedDescription ?: @"Current password is invalid" };
+    return @{ @"status" : @"error", @"message" : [self clientMessageForError:authError fallback:@"Current password is invalid"] };
   }
   NSError *updateError = nil;
   NSString *passwordMessage = nil;
@@ -4976,7 +5016,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                         error:&updateError];
   if ([encodedHash length] == 0) {
     [self setStatus:500];
-    return @{ @"status" : @"error", @"message" : updateError.localizedDescription ?: @"Failed to hash password" };
+    return @{ @"status" : @"error", @"message" : [self clientMessageForError:updateError fallback:@"Failed to hash password"] };
   }
   NSInteger command = [self.runtime.database executeCommand:@"UPDATE auth_local_credentials "
                                                         "SET password_hash = $2, updated_at = NOW() WHERE user_id = $1"
@@ -4984,7 +5024,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                        error:&updateError];
   if (command < 0) {
     [self setStatus:500];
-    return @{ @"status" : @"error", @"message" : updateError.localizedDescription ?: @"Failed to update password" };
+    return @{ @"status" : @"error", @"message" : [self clientMessageForError:updateError fallback:@"Failed to update password"] };
   }
   return @{ @"status" : @"ok" };
 }
@@ -5038,7 +5078,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     NSDictionary *payload = [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:&error];
     if (payload == nil) {
       [self setStatus:404];
-      return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"SMS factor unavailable" };
+      return @{ @"status" : @"error", @"message" : [self clientMessageForError:error fallback:@"SMS factor unavailable"] };
     }
     return payload;
   }
@@ -5051,7 +5091,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:404];
     [self renderAuthPageIdentifier:@"provider_result"
                              title:@"SMS Challenge"
-                           message:error.localizedDescription ?: @"SMS factor unavailable"
+                           message:[self clientMessageForError:error fallback:@"SMS factor unavailable"]
                             errors:nil
                           formData:nil
                           extraCtx:@{
@@ -5067,7 +5107,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   [self renderAuthPageIdentifier:@"sms_challenge"
                            title:@"Verify by Text Message"
                          message:(error != nil
-                                      ? (error.localizedDescription ?: @"Use the code we sent to your phone.")
+                                      ? ([self clientMessageForError:error fallback:@"Use the code we sent to your phone."])
                                       : ([fragmentCtx[@"authSMSChallengeMessage"] isKindOfClass:[NSString class]]
                                              ? fragmentCtx[@"authSMSChallengeMessage"]
                                              : @"Use the code we sent to your phone."))
@@ -5101,7 +5141,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
       payload[@"status"] = @"error";
-      payload[@"message"] = error.localizedDescription ?: @"Unable to send SMS code";
+      payload[@"message"] = [self clientMessageForError:error fallback:@"Unable to send SMS code"];
       return payload;
     }
     NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
@@ -5156,7 +5196,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
       payload[@"status"] = @"error";
-      payload[@"message"] = error.localizedDescription ?: @"Unable to resend SMS code";
+      payload[@"message"] = [self clientMessageForError:error fallback:@"Unable to resend SMS code"];
       return payload;
     }
     NSDictionary *fragmentCtx = nil;
@@ -5301,7 +5341,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
       payload[@"status"] = @"error";
-      payload[@"message"] = error.localizedDescription ?: @"Unable to remove SMS factor";
+      payload[@"message"] = [self clientMessageForError:error fallback:@"Unable to remove SMS factor"];
       return payload;
     }
     NSDictionary *fragmentCtx = [self.runtime mfaManagementFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
@@ -5467,7 +5507,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   if (!result && [error.domain isEqual:ALNAuthModuleOIDCErrorDomain] &&
       error.code == ALNAuthModuleOIDCErrorAdmissionDenied) {
-    NSString *message = error.localizedDescription ?: @"This account is not permitted to sign in.";
+    NSString *message = [self clientMessageForError:error fallback:@"This account is not permitted to sign in."];
     if ([self shouldReturnJSON:ctx]) {
       [self setStatus:403];
       return @{ @"status": @"error", @"code": @"admission_denied", @"message": message };
@@ -5583,11 +5623,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (result == nil) {
     [self setStatus:422];
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
-      return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Provider login failed" };
+      return @{ @"status" : @"error", @"message" : [self clientMessageForError:error fallback:@"Provider login failed"] };
     }
     [self renderAuthPageIdentifier:@"provider_result"
                              title:@"Provider Login"
-                           message:error.localizedDescription ?: @"Provider login failed"
+                           message:[self clientMessageForError:error fallback:@"Provider login failed"]
                             errors:nil
                           formData:nil
                           extraCtx:@{
