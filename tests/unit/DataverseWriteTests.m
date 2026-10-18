@@ -333,4 +333,93 @@
   XCTAssertEqual((NSUInteger)2, [transport.capturedRequests count]);
 }
 
+- (void)testHeaderValuesWithLineBreaksAreRejectedBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *injected = @"W/\"1\"\r\nMSCRM.CallerObjectId: 11111111-2222-3333-4444-555555555555";
+
+  XCTAssertNil([client updateRecordInEntitySet:@"accounts"
+                                      recordID:@"00000000-0000-0000-0000-000000000010"
+                                        values:@{ @"name" : @"x" }
+                                       ifMatch:injected
+                           returnRepresentation:NO
+                                         error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertFalse([client deleteRecordInEntitySet:@"accounts"
+                                        recordID:@"00000000-0000-0000-0000-000000000010"
+                                         ifMatch:@"W/\"1\"\nIf-Match: *"
+                                           error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+
+  NSArray<NSDictionary *> *badHeaders = @[
+    @{ @"X-Note" : @"a\r\nMSCRM.BypassCustomPluginExecution: true" },
+    @{ @"X-Note" : [NSString stringWithFormat:@"nul%Cbyte", (unichar)0] },
+    @{ @"X Bad" : @"value" },
+    @{ @"X-Bad:\r\nInjected" : @"value" },
+  ];
+  for (NSDictionary *headers in badHeaders) {
+    error = nil;
+    XCTAssertNil([client performRequestWithMethod:@"GET"
+                                             path:@"accounts"
+                                            query:nil
+                                          headers:headers
+                                       bodyObject:nil
+                           includeFormattedValues:NO
+                             returnRepresentation:NO
+                                 consistencyCount:NO
+                                            error:&error],
+                 @"%@", headers);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", headers);
+  }
+
+  NSArray<ALNDataverseBatchRequest *> *badParts = @[
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:@{ @"If-Match" : injected }
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:nil
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1\r\nMSCRM.CallerObjectId: 1111"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(1) HTTP/1.1\r\nIf-Match: *\r\nX-Pad: ("
+                                        headers:nil
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH /x HTTP/1.1\r\nIf-Match: *\r\nX"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:nil
+                                     bodyObject:nil
+                                      contentID:@"1"],
+  ];
+  for (ALNDataverseBatchRequest *part in badParts) {
+    error = nil;
+    XCTAssertNil([client executeBatchRequests:@[ part ] error:&error], @"%@", part.contentID);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", part.contentID);
+  }
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+
+  // The curl transport checks the request it is handed too, before staging
+  // any file or starting curl.
+  ALNDataverseCurlTransport *curl = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:1];
+  ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:@"GET"
+                                                                   URLString:@"http://127.0.0.1:9/api/data/v9.2/accounts"
+                                                                     headers:@{ @"If-Match" : injected }
+                                                                    bodyData:nil];
+  error = nil;
+  XCTAssertNil([curl executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+}
+
 @end

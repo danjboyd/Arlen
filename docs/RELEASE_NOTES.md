@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Dataverse: header names must be tokens, and header values must not contain
+  control characters other than a tab. That covers caller headers, `ifMatch:`,
+  and `$batch` part headers. In a `$batch` part, the method must be a token,
+  the path must not contain whitespace or control characters, and the
+  Content-ID must not contain control characters. Requests that break these
+  rules fail with `ALNDataverseErrorInvalidArgument` before anything is sent.
+  `ALNDataverseCurlTransport` checks the headers it is handed too.
 - Dataverse: `invokeFunctionNamed:` percent-encodes parameter values inside
   their OData literal, the same way as alternate keys. Function and action
   names must be identifiers (optionally namespace-qualified, such as

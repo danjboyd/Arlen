@@ -569,6 +569,51 @@ static NSString *ALNDataverseValidatedBoundPath(NSString *boundPath, NSError **e
   return path;
 }
 
+// Header names are RFC 9110 tokens.
+static BOOL ALNDataverseHeaderNameIsValid(NSString *name) {
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return NO;
+  }
+  static NSCharacterSet *tokenCharacters = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    tokenCharacters = [NSCharacterSet characterSetWithCharactersInString:
+                                          @"!#$%&'*+-.^_`|~0123456789"
+                                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+  });
+  return [[name stringByTrimmingCharactersInSet:tokenCharacters] length] == 0;
+}
+
+// Header values (and other text written into a request head) must not carry
+// control characters other than a tab: a CR or LF would end the line and let
+// the value add headers of its own.
+static BOOL ALNDataverseTextHasControlCharacters(NSString *value) {
+  NSUInteger length = [value length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar character = [value characterAtIndex:idx];
+    if ((character < 0x20 && character != '\t') || character == 0x7f) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL ALNDataverseValidateHeaders(NSDictionary *headers, NSError **error) {
+  for (id key in headers ?: @{}) {
+    id value = headers[key];
+    if (![key isKindOfClass:[NSString class]] || ![value isKindOfClass:[NSString class]] ||
+        !ALNDataverseHeaderNameIsValid(key) || ALNDataverseTextHasControlCharacters(value)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse header names must be tokens and values must not contain control characters",
+                                       @{ @"header" : [key description] ?: @"" });
+      }
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static NSString *ALNDataverseODataLiteral(id value, NSError **error) {
   if (error != NULL) {
     *error = nil;
@@ -1161,6 +1206,10 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                                      @"Dataverse transport request is required",
                                      nil);
     }
+    return nil;
+  }
+  // curl writes an embedded CR/LF from --header onto the wire as another line.
+  if (!ALNDataverseValidateHeaders(request.headers, error)) {
     return nil;
   }
 
@@ -1768,6 +1817,9 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   }
   if (consistencyCount) {
     requestHeaders[@"ConsistencyLevel"] = @"eventual";
+  }
+  if (!ALNDataverseValidateHeaders(headers, error)) {
+    return nil;
   }
   for (NSString *key in headers ?: @{}) {
     NSString *value = headers[key];
@@ -2414,6 +2466,25 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   NSString *boundary = [NSString stringWithFormat:@"batch_%@", [[[NSUUID UUID] UUIDString] lowercaseString]];
   NSMutableString *body = [NSMutableString string];
   for (ALNDataverseBatchRequest *request in requests) {
+    // Each part is a hand-written HTTP request, so everything placed in its
+    // head must stay on its own line.
+    NSString *method = request.method ?: @"GET";
+    NSString *relativePath = request.relativePath ?: @"";
+    NSString *contentID = request.contentID ?: @"";
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    if (!ALNDataverseHeaderNameIsValid(method) || ALNDataverseTextHasControlCharacters(relativePath) ||
+        [relativePath rangeOfCharacterFromSet:whitespace].location != NSNotFound ||
+        ALNDataverseTextHasControlCharacters(contentID)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse batch request method, path or Content-ID contains forbidden characters",
+                                       @{ @"contentID" : contentID });
+      }
+      return nil;
+    }
+    if (!ALNDataverseValidateHeaders(request.headers, error)) {
+      return nil;
+    }
     [body appendFormat:@"--%@\r\n", boundary];
     [body appendString:@"Content-Type: application/http\r\n"];
     [body appendString:@"Content-Transfer-Encoding: binary\r\n"];
