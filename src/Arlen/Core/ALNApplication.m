@@ -671,6 +671,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
 @property(nonatomic, strong) ALNRoute *spaFallbackRoute;
 @property(nonatomic, strong) NSError *spaFallbackConfigError;
+@property(nonatomic, strong, readwrite, nullable) NSError *moduleLoadError;
 @property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
@@ -724,6 +725,15 @@ static BOOL ALNInvokeRouteAction(id controller,
                                    rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
 @end
+
+// Development and test keep serving after a module fails to load, so the
+// error can be fixed with the app running; every other environment refuses to
+// start rather than serve without the module.
+static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
+  NSString *name = [[environment ?: @"" lowercaseString]
+      stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  return [name isEqualToString:@"development"] || [name isEqualToString:@"test"];
+}
 
 @implementation ALNApplication
 
@@ -4495,17 +4505,29 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+// A module that fails to load stops module loading. Outside development and
+// test, -startWithError: then refuses to start; in development and test the
+// app keeps serving and the failure is logged as an error.
 - (void)loadConfiguredModules {
   NSError *error = nil;
-  NSArray<id<ALNModule>> *modules = [ALNModuleSystem loadModulesForApplication:self error:&error];
-  if (modules == nil) {
-    if (error != nil) {
-      [self.logger warn:@"module load skipped"
-                 fields:@{
-                   @"error" : error.localizedDescription ?: @"unknown",
-                 }];
+  NSMutableArray<id<ALNModule>> *modules = [NSMutableArray array];
+  BOOL loaded = [ALNModuleSystem loadModulesForApplication:self loadedModules:modules error:&error];
+  if (!loaded) {
+    self.moduleLoadError = error ?: [NSError errorWithDomain:ALNModuleSystemErrorDomain
+                                                        code:24
+                                                    userInfo:@{
+                                                      NSLocalizedDescriptionKey : @"module load failed",
+                                                    }];
+    NSDictionary *info = self.moduleLoadError.userInfo ?: @{};
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    fields[@"error"] = self.moduleLoadError.localizedDescription ?: @"unknown";
+    for (NSString *key in @[ @"module", @"key_path", @"not_loaded" ]) {
+      if (info[key] != nil) {
+        fields[key] = info[key];
+      }
     }
-    return;
+    fields[@"environment"] = self.environment ?: @"";
+    [self.logger error:@"module load failed" fields:fields];
   }
 
   for (id<ALNModule> module in modules) {
@@ -5215,6 +5237,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return [json writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
+- (BOOL)moduleLoadErrorPreventsStartup {
+  return self.moduleLoadError != nil && !ALNModuleLoadFailureIsTolerated(self.environment);
+}
+
 - (BOOL)startWithError:(NSError **)error {
   if (self.isStarted) {
     return YES;
@@ -5244,6 +5270,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (self.spaFallbackConfigError != nil) {
     if (error != NULL) {
       *error = self.spaFallbackConfigError;
+    }
+    return NO;
+  }
+  if ([self moduleLoadErrorPreventsStartup]) {
+    if (error != NULL) {
+      *error = self.moduleLoadError;
     }
     return NO;
   }

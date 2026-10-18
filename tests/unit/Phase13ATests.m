@@ -59,6 +59,30 @@
 
 @end
 
+@interface Phase13AFailingModule : NSObject <ALNModule>
+@end
+
+@implementation Phase13AFailingModule
+
+- (NSString *)moduleIdentifier {
+  return @"beta";
+}
+
+- (BOOL)registerWithApplication:(ALNApplication *)application error:(NSError **)error {
+  (void)application;
+  if (error != NULL) {
+    *error = [NSError errorWithDomain:@"Phase13AFailingModule"
+                                 code:7
+                             userInfo:@{
+                               NSLocalizedDescriptionKey : @"beta.secret is required",
+                               @"key_path" : @"beta.secret",
+                             }];
+  }
+  return NO;
+}
+
+@end
+
 @interface Phase13ANotAModule : NSObject
 @end
 
@@ -309,6 +333,127 @@
     XCTAssertEqual((NSUInteger)2, [records count]);
     XCTAssertEqualObjects(@"sha256:abc", records[0][@"contentDigest"]);
     XCTAssertEqualObjects(@"", records[1][@"contentDigest"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+
+- (NSString *)writeAppWithFailingMiddleModule {
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13a-load-failure"];
+  if (appRoot == nil) {
+    return nil;
+  }
+  BOOL ok = [self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                    content:@"{\n"
+                            "  modules = (\n"
+                            "    { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; },\n"
+                            "    { identifier = \"beta\"; path = \"modules/beta\"; enabled = YES; },\n"
+                            "    { identifier = \"gamma\"; path = \"modules/gamma\"; enabled = YES; }\n"
+                            "  );\n"
+                            "}\n"];
+  ok = ok && [self writeFile:[appRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                     content:@"{ identifier = \"alpha\"; version = \"1.0.0\"; principalClass = \"Phase13AAlphaModule\"; }\n"];
+  ok = ok && [self writeFile:[appRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                     content:@"{ identifier = \"beta\"; version = \"1.0.0\"; principalClass = \"Phase13AFailingModule\";\n"
+                              "  dependencies = ( { identifier = \"alpha\"; version = \">= 1.0.0\"; } ); }\n"];
+  ok = ok && [self writeFile:[appRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                     content:@"{ identifier = \"gamma\"; version = \"1.0.0\"; principalClass = \"Phase13AGammaModule\";\n"
+                              "  dependencies = ( { identifier = \"beta\"; version = \">= 1.0.0\"; } ); }\n"];
+  if (!ok) {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    return nil;
+  }
+  return appRoot;
+}
+
+- (void)testModuleLoadFailureNamesTheModuleAndRefusesStartupOutsideDevelopment {
+  NSString *appRoot = [self writeAppWithFailingMiddleModule];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    for (NSString *environment in @[ @"production", @"staging" ]) {
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{
+        @"appRoot" : appRoot,
+        @"environment" : environment,
+        @"logFormat" : @"json",
+      }];
+      NSError *loadError = application.moduleLoadError;
+      XCTAssertNotNil(loadError, @"%@", environment);
+      XCTAssertEqualObjects(ALNModuleSystemErrorDomain, loadError.domain);
+      XCTAssertEqualObjects(@"beta", loadError.userInfo[@"module"]);
+      XCTAssertEqualObjects(@"beta.secret", loadError.userInfo[@"key_path"]);
+      XCTAssertEqualObjects((@[ @"beta", @"gamma" ]), loadError.userInfo[@"not_loaded"]);
+      XCTAssertTrue([loadError.localizedDescription containsString:@"module beta failed to load"]);
+      XCTAssertTrue([loadError.localizedDescription containsString:@"beta.secret is required"]);
+      XCTAssertEqualObjects((@[ @"alpha" ]), [application.modules valueForKey:@"moduleIdentifier"]);
+      XCTAssertTrue([application moduleLoadErrorPreventsStartup], @"%@", environment);
+
+      NSError *startError = nil;
+      XCTAssertFalse([application startWithError:&startError], @"%@", environment);
+      XCTAssertEqualObjects(@"beta", startError.userInfo[@"module"]);
+      XCTAssertFalse(application.isStarted);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testModuleLoadFailureKeepsDevelopmentAndTestServing {
+  NSString *appRoot = [self writeAppWithFailingMiddleModule];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    for (NSString *environment in @[ @"development", @"test" ]) {
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{
+        @"appRoot" : appRoot,
+        @"environment" : environment,
+        @"logFormat" : @"json",
+      }];
+      XCTAssertNotNil(application.moduleLoadError, @"%@", environment);
+      XCTAssertEqualObjects(@"beta", application.moduleLoadError.userInfo[@"module"]);
+      XCTAssertFalse([application moduleLoadErrorPreventsStartup], @"%@", environment);
+      NSError *startError = nil;
+      XCTAssertTrue([application startWithError:&startError], @"%@: %@", environment, startError);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testDoctorWarnsWhenAppConfigDisablesSessionsAModuleNeeds {
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13a-sessions-doctor"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{ modules = ( { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; } ); }\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{ identifier = \"alpha\"; version = \"1.0.0\"; principalClass = \"Phase13AAlphaModule\";\n"
+                                  "  config = { defaults = { session = { enabled = YES; }; }; }; }\n"]);
+
+    NSArray<NSDictionary *> *(^codes)(NSDictionary *) = ^NSArray<NSDictionary *> *(NSDictionary *config) {
+      NSArray<NSDictionary *> *diagnostics =
+          [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:config error:NULL] ?: @[];
+      return [diagnostics filteredArrayUsingPredicate:
+                              [NSPredicate predicateWithFormat:@"code == %@", @"module_sessions_disabled"]];
+    };
+
+    NSArray<NSDictionary *> *pinned = codes(@{ @"session" : @{ @"enabled" : @NO } });
+    XCTAssertEqual((NSUInteger)1, [pinned count]);
+    XCTAssertEqualObjects(@"warning", pinned.firstObject[@"status"]);
+    XCTAssertEqualObjects(@"alpha", pinned.firstObject[@"module"]);
+    XCTAssertEqual((NSUInteger)0, [codes(@{ @"session" : @{ @"enabled" : @YES } }) count]);
+    XCTAssertEqual((NSUInteger)0, [codes(@{}) count]);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }

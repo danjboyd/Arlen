@@ -41,7 +41,11 @@ static int ALNRunJobsWorker(ALNApplication *application,
                             BOOL runScheduler,
                             NSTimeInterval pollIntervalSeconds,
                             NSTimeInterval schedulerIntervalSeconds) {
-  (void)application;
+  if ([application moduleLoadErrorPreventsStartup]) {
+    fprintf(stderr, "jobs worker: startup failed: %s\n",
+            [[application.moduleLoadError localizedDescription] UTF8String]);
+    return 1;
+  }
   Class runtimeClass = NSClassFromString(@"ALNJobsModuleRuntime");
   if (runtimeClass == Nil || ![runtimeClass respondsToSelector:@selector(sharedRuntime)]) {
     fprintf(stderr, "jobs worker: ALNJobsModuleRuntime is unavailable in this app binary\n");

@@ -553,6 +553,12 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
    framework checkout, or the running `arlen` binary's checkout), typically
    after moving the framework pin without re-running `module upgrade`
+ - `module_sessions_disabled`: an installed module's defaults enable sessions,
+   but `config/app.plist` sets `session.enabled = NO` (the `arlen new`
+   app.plist does), so the module's sessions never turn on
+- does not run module code: a module that fails to configure when the app
+  starts stops startup outside `development` and `test` (see
+  [Modules](MODULES.md#3-list-and-validate))
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 

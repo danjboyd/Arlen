@@ -71,6 +71,23 @@ Use these commands early:
 - public mount precedence
 - vendored files that were edited locally, lack a recorded `contentDigest`, or
   differ from the framework checkout's copy of the module (warnings)
+- a module whose defaults enable sessions while `config/app.plist` sets
+  `session.enabled = NO`, as the `arlen new` app.plist does
+  (`module_sessions_disabled`, a warning): remove that line before relying on
+  the module's sessions
+
+`module doctor` validates configuration statically. The app itself loads and
+configures each module when it starts, in dependency order:
+
+- If a module fails to load or configure (a missing required setting, an
+  invalid value), loading stops at that module. The error names the module,
+  the config key when the module reports one, and the modules that were not
+  loaded after it.
+- Outside the `development` and `test` environments, the app then refuses to
+  start: the server (`boomhauer`, `propane` workers) and `jobs-worker` exit
+  non-zero with `startup failed: module <id> failed to load: <reason>`.
+- In `development` and `test`, the app keeps serving so you can fix the
+  config, and logs `module load failed` at error level with the same fields.
 
 ## 4. Run Module Migrations
 

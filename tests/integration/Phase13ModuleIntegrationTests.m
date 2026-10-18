@@ -522,6 +522,103 @@
   }
 }
 
+// GitHub issue 294: a module that fails to configure stops a production app
+// (and its jobs worker) from starting, naming the module and key.
+- (void)testModuleConfigurationFailureStopsProductionStartup {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-load-failure-app"];
+  NSString *modulesRoot = [self createTempDirectoryWithPrefix:@"phase13-module-load-failure-src"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(modulesRoot);
+  if (appRoot == nil || modulesRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "#import \"ALNContext.h\"\n"
+                                  "#import \"ALNController.h\"\n\n"
+                                  "@interface Phase13LoadFailureController : ALNController\n"
+                                  "@end\n\n"
+                                  "@implementation Phase13LoadFailureController\n"
+                                  "- (id)index:(ALNContext *)ctx { (void)ctx; [self renderText:@\"ok\\n\"]; return nil; }\n"
+                                  "@end\n\n"
+                                  "static void RegisterRoutes(ALNApplication *app) {\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[Phase13LoadFailureController class] action:@\"index\"];\n"
+                                  "}\n\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                  "}\n"]);
+
+    NSString *brokenSource = [modulesRoot stringByAppendingPathComponent:@"broken-v1"];
+    XCTAssertTrue([self writeFile:[brokenSource stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{\n  identifier = \"broken\";\n  version = \"1.0.0\";\n  principalClass = \"BrokenModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[brokenSource stringByAppendingPathComponent:@"Sources/BrokenModule.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ALNApplication.h\"\n"
+                                  "#import \"ALNModuleSystem.h\"\n\n"
+                                  "@interface BrokenModule : NSObject <ALNModule>\n"
+                                  "@end\n\n"
+                                  "@implementation BrokenModule\n"
+                                  "- (NSString *)moduleIdentifier { return @\"broken\"; }\n"
+                                  "- (BOOL)registerWithApplication:(ALNApplication *)application error:(NSError **)error {\n"
+                                  "  (void)application;\n"
+                                  "  if (error != NULL) {\n"
+                                  "    *error = [NSError errorWithDomain:@\"BrokenModule\" code:1 userInfo:@{\n"
+                                  "      NSLocalizedDescriptionKey : @\"brokenModule.token is required\",\n"
+                                  "      @\"key_path\" : @\"brokenModule.token\",\n"
+                                  "    }];\n"
+                                  "  }\n"
+                                  "  return NO;\n"
+                                  "}\n"
+                                  "@end\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *addBroken = [self runJSONCommand:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add broken --source %@ --json",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), ALNTestShellQuote(repoRoot),
+        ALNTestShellQuote(brokenSource)]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", addBroken);
+
+    // Guards a regression that would leave the server running.
+    NSString *timeoutPrefix = @"$(command -v timeout >/dev/null 2>&1 && printf 'timeout 300 ')";
+    NSString *serverOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/boomhauer --no-watch --env production 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix, ALNTestShellQuote(repoRoot)]
+                                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", serverOutput);
+    XCTAssertNotEqual(124, code, @"server kept running: %@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"startup failed: module broken failed to load"], @"%@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"brokenModule.token is required"], @"%@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"module load failed"], @"%@", serverOutput);
+
+    NSString *workerOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/jobs-worker --env production --once 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix,
+        ALNTestShellQuote(repoRoot)]
+                                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", workerOutput);
+    XCTAssertTrue([workerOutput containsString:@"jobs worker: startup failed: module broken failed to load"],
+                  @"%@", workerOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:modulesRoot error:nil];
+  }
+}
+
 - (void)testBoomhauerIgnoresStaleGeneratedModuleSourcesOutsideCurrentTemplateInventory {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-stale-generated-module-app"];

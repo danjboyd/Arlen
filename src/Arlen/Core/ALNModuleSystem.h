@@ -91,6 +91,13 @@ extern NSString *const ALNModuleSystemFrameworkVersion;
                                                            error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSArray<id<ALNModule>> *)loadModulesForApplication:(ALNApplication *)application
                                                          error:(NSError *_Nullable *_Nullable)error;
+// Loads modules in dependency order into `loadedModules`, stopping at the
+// first module that fails; on failure the error names that module (`module`,
+// `key_path` when the module reported one, `not_loaded`) and the modules loaded
+// before it stay in `loadedModules`.
++ (BOOL)loadModulesForApplication:(ALNApplication *)application
+                    loadedModules:(NSMutableArray<id<ALNModule>> *)loadedModules
+                            error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSArray<NSDictionary *> *)migrationPlansAtAppRoot:(NSString *)appRoot
                                                        config:(nullable NSDictionary *)config
                                                         error:(NSError *_Nullable *_Nullable)error;

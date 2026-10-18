@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Breaking (production):** an app whose configured module fails to load or
+  configure now refuses to start outside the `development` and `test`
+  environments. The server and `jobs-worker` exit non-zero with
+  `startup failed: module <id> failed to load: <reason>`. Before, the app logged
+  one `module load skipped` warning, loaded no modules at all, and kept serving
+  its own routes. In `development` and `test` the app keeps serving and logs
+  `module load failed` at error level, naming the module, its config key and
+  the modules not loaded; modules loaded before the failing one stay loaded.
+  `arlen module doctor` adds a `module_sessions_disabled` warning for a module
+  that needs sessions while `config/app.plist` sets `session.enabled = NO`
+  (#294).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
