@@ -387,10 +387,16 @@ Policy keys:
   headers, but only when the direct peer matches `security.trustedProxies`
 
 Proxy behavior is fail-closed for protected routes. Without trusted proxies,
-Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen only
-uses `Forwarded` or `X-Forwarded-For` when the immediate peer is trusted; public
-clients cannot opt into those headers themselves. If Arlen cannot resolve a
-client IP for a protected allowlist check, the request is denied.
+Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen
+reads the forwarded client only when the immediate peer is trusted, and then
+takes the right-most `X-Forwarded-For` hop that is not itself a trusted proxy.
+Hops to its left were sent by the client and are ignored. If Arlen cannot
+resolve a client IP for a protected allowlist check, the request is denied.
+
+- `security.forwardedClientIPHeader` (default `"X-Forwarded-For"`): the one
+  header route policies read the client from. Set `"Forwarded"` only when your
+  proxy writes RFC 7239 `Forwarded`. The header that is not selected is ignored,
+  since a proxy passes through whichever one it does not set.
 
 Denied route-policy requests return `403`, set
 `X-Arlen-Policy-Denial-Reason`, and log `route_policy.denied` with distinct

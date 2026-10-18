@@ -6,10 +6,14 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 
+// Distinct clients tracked at once by default; see -evictEntriesForNewKeyAtTime:.
+static const NSUInteger ALNRateLimitDefaultMaxEntries = 65536;
+
 @interface ALNRateLimitMiddleware ()
 
 @property(nonatomic, assign) NSUInteger maxRequests;
 @property(nonatomic, assign) NSUInteger windowSeconds;
+@property(nonatomic, assign) NSUInteger maxEntries;
 @property(nonatomic, strong) NSMutableDictionary *entries;
 @property(nonatomic, assign) NSUInteger seenRequests;
 @property(nonatomic, strong) NSLock *entriesLock;
@@ -24,6 +28,7 @@
   if (self) {
     _maxRequests = (maxRequests > 0) ? maxRequests : 120;
     _windowSeconds = (windowSeconds > 0) ? windowSeconds : 60;
+    _maxEntries = ALNRateLimitDefaultMaxEntries;
     _entries = [[NSMutableDictionary alloc] init];
     _seenRequests = 0;
     // Created before the middleware is shared; libobjc2's first
@@ -50,6 +55,30 @@
   }
 }
 
+// Holds the table at maxEntries however many distinct clients
+// arrive within one window: drop expired windows first, then the oldest
+// eighth of what is left.
+- (void)evictEntriesForNewKeyAtTime:(NSTimeInterval)now {
+  if ([self.entries count] < self.maxEntries) {
+    return;
+  }
+  NSMutableArray *expired = [NSMutableArray array];
+  for (NSString *key in self.entries) {
+    if ((now - [self.entries[key][@"start"] doubleValue]) >= (NSTimeInterval)self.windowSeconds) {
+      [expired addObject:key];
+    }
+  }
+  [self.entries removeObjectsForKeys:expired];
+  if ([self.entries count] < self.maxEntries) {
+    return;
+  }
+  NSArray *byStart = [self.entries keysSortedByValueUsingComparator:^NSComparisonResult(id left, id right) {
+    return [left[@"start"] compare:right[@"start"]];
+  }];
+  NSUInteger evict = MAX((NSUInteger)1, [byStart count] / 8);
+  [self.entries removeObjectsForKeys:[byStart subarrayWithRange:NSMakeRange(0, evict)]];
+}
+
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   (void)error;
   NSString *key = context.request.effectiveRemoteAddress;
@@ -71,6 +100,7 @@
   @try {
     NSMutableDictionary *entry = [self.entries[key] mutableCopy];
     if (entry == nil) {
+      [self evictEntriesForNewKeyAtTime:now];
       entry = [NSMutableDictionary dictionaryWithDictionary:@{
         @"start" : @(now),
         @"count" : @(0),

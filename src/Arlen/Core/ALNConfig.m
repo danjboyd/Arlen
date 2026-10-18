@@ -1,4 +1,5 @@
 #import "ALNConfig.h"
+#import "ALNClientAddressInternal.h"
 #import "ALNDataCompat.h"
 #import "ALNModuleSystem.h"
 #import "ALNPositiveInteger.h"
@@ -238,6 +239,16 @@ static NSString *ALNNormalizeTrustedProxyCIDREntry(id rawValue) {
       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
   if ([trimmed length] == 0) {
     return nil;
+  }
+  if ([trimmed rangeOfString:@":"].location != NSNotFound) {
+    // IPv6: "address" or "address/prefix", address in canonical form.
+    if (!ALNClientAddressCIDRIsValid(trimmed)) {
+      return nil;
+    }
+    NSArray *parts = [trimmed componentsSeparatedByString:@"/"];
+    NSString *address = ALNClientAddressCanonicalIP(parts[0]);
+    NSInteger prefix = ([parts count] == 2) ? [parts[1] integerValue] : 128;
+    return [NSString stringWithFormat:@"%@/%ld", address, (long)prefix];
   }
 
   NSString *addressPart = trimmed;

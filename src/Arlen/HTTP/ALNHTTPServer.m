@@ -46,6 +46,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #import "ALNApplication.h"
+#import "ALNClientAddressInternal.h"
 #import "ALNEventStream.h"
 #import "ALNFileResponseInternal.h"
 #import "ALNLogger.h"
@@ -2692,98 +2693,6 @@ static NSString *ALNTrimmedString(NSString *value) {
   return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
-static NSString *ALNFirstForwardedFor(NSString *value) {
-  if ([value length] == 0) {
-    return @"";
-  }
-  NSArray *parts = [value componentsSeparatedByString:@","];
-  if ([parts count] == 0) {
-    return @"";
-  }
-  return ALNTrimmedString(parts[0]);
-}
-
-static BOOL ALNParseIPv4HostAddress(NSString *value, uint32_t *hostAddressOut) {
-  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
-    return NO;
-  }
-  struct in_addr address;
-  if (ALNInetPton(AF_INET, [value UTF8String], &address) != 1) {
-    return NO;
-  }
-  if (hostAddressOut != NULL) {
-    *hostAddressOut = ntohl(address.s_addr);
-  }
-  return YES;
-}
-
-static BOOL ALNParseTrustedProxyCIDR(NSString *value,
-                                     uint32_t *networkAddressOut,
-                                     NSUInteger *prefixLengthOut) {
-  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
-    return NO;
-  }
-  NSString *trimmed =
-      [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([trimmed length] == 0) {
-    return NO;
-  }
-
-  NSString *addressPart = trimmed;
-  NSInteger prefixLength = 32;
-  NSRange slash = [trimmed rangeOfString:@"/"];
-  if (slash.location != NSNotFound) {
-    addressPart = [trimmed substringToIndex:slash.location];
-    NSString *prefixPart = [trimmed substringFromIndex:(slash.location + 1)];
-    NSScanner *scanner = [NSScanner scannerWithString:prefixPart];
-    NSInteger parsedPrefix = -1;
-    if (![scanner scanInteger:&parsedPrefix] || ![scanner isAtEnd] ||
-        parsedPrefix < 0 || parsedPrefix > 32) {
-      return NO;
-    }
-    prefixLength = parsedPrefix;
-  }
-
-  uint32_t hostAddress = 0;
-  if (!ALNParseIPv4HostAddress(addressPart, &hostAddress)) {
-    return NO;
-  }
-
-  uint32_t mask =
-      (prefixLength == 0) ? 0u : (0xFFFFFFFFu << (32 - (uint32_t)prefixLength));
-  if (networkAddressOut != NULL) {
-    *networkAddressOut = hostAddress & mask;
-  }
-  if (prefixLengthOut != NULL) {
-    *prefixLengthOut = (NSUInteger)prefixLength;
-  }
-  return YES;
-}
-
-static BOOL ALNRemoteAddressMatchesTrustedProxyCIDRs(NSString *remoteAddress, NSArray *trustedProxyCIDRs) {
-  if (![trustedProxyCIDRs isKindOfClass:[NSArray class]] || [trustedProxyCIDRs count] == 0) {
-    return NO;
-  }
-  uint32_t remoteHostAddress = 0;
-  if (!ALNParseIPv4HostAddress(remoteAddress, &remoteHostAddress)) {
-    return NO;
-  }
-
-  for (id value in trustedProxyCIDRs) {
-    uint32_t networkAddress = 0;
-    NSUInteger prefixLength = 32;
-    if (!ALNParseTrustedProxyCIDR(value, &networkAddress, &prefixLength)) {
-      continue;
-    }
-    uint32_t mask =
-        (prefixLength == 0) ? 0u : (0xFFFFFFFFu << (32 - (uint32_t)prefixLength));
-    if ((remoteHostAddress & mask) == networkAddress) {
-      return YES;
-    }
-  }
-  return NO;
-}
-
 static BOOL ALNProxyForwardingEnabled(NSDictionary *config, NSArray *trustedProxyCIDRs) {
   if ([trustedProxyCIDRs isKindOfClass:[NSArray class]] && [trustedProxyCIDRs count] > 0) {
     return YES;
@@ -2801,17 +2710,20 @@ static void ALNApplyProxyMetadata(ALNRequest *request, NSDictionary *config) {
   if (!ALNProxyForwardingEnabled(config, trustedProxyCIDRs)) {
     return;
   }
-  if (!ALNRemoteAddressMatchesTrustedProxyCIDRs(request.remoteAddress, trustedProxyCIDRs)) {
+  if (!ALNClientAddressMatchesAnyCIDR(request.remoteAddress, trustedProxyCIDRs)) {
     return;
   }
 
-  NSString *forwardedFor = [request headerValueForName:@"x-forwarded-for"];
-  NSString *forwardedProto = [request headerValueForName:@"x-forwarded-proto"];
-
-  NSString *effectiveAddress = ALNFirstForwardedFor(forwardedFor);
+  // The right-most X-Forwarded-For hop that is not a trusted proxy: clients
+  // control everything to its left. When the chain can't be read, the
+  // request keeps the proxy's address.
+  NSArray *hops = ALNClientAddressXForwardedForHops([request headerValueForName:@"x-forwarded-for"]);
+  NSString *effectiveAddress = ALNClientAddressFromForwardedHops(request.remoteAddress, hops, trustedProxyCIDRs, NULL);
   if ([effectiveAddress length] > 0) {
     request.effectiveRemoteAddress = effectiveAddress;
   }
+
+  NSString *forwardedProto = [request headerValueForName:@"x-forwarded-proto"];
 
   NSString *proto = [[ALNTrimmedString(forwardedProto) lowercaseString] copy];
   if ([proto isEqualToString:@"http"] || [proto isEqualToString:@"https"]) {

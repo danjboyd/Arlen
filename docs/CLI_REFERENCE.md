@@ -1144,6 +1144,7 @@ Behavior:
  - `ALNAuthProviderSessionBridge`
 - `make phase12-confidence` runs the auth confidence gate and writes artifacts under `build/release_confidence/phase12`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
+ - the effective client address (used by the rate limiter) is the right-most `X-Forwarded-For` hop that is not in `trustedProxyCIDRs`; hops to its left are client-supplied and ignored, and an unreadable chain leaves the proxy's own address
  - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
  - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
  - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
@@ -1201,7 +1202,7 @@ Environment:
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_TRUSTED_PROXY` (legacy compatibility toggle for forwarded-header handling; when set to `1` with no explicit CIDRs, Arlen falls back to `127.0.0.1/32`; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
-- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
+- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 or IPv6 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)

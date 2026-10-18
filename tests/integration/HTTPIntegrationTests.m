@@ -4402,6 +4402,24 @@
   XCTAssertTrue([body containsString:@"https"]);
 }
 
+// nginx-style appending: the client's own X-Forwarded-For comes first and the
+// proxy adds the peer it saw. The server must take the right-most untrusted
+// hop, not the client-chosen left-most one.
+- (void)testTrustedProxyUsesRightMostUntrustedForwardedHop {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,192.0.2.0/24"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 10.1.1.1, 203.0.113.9, 192.0.2.7' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"effectiveRemoteAddress\":\"203.0.113.9\""], @"%@", body);
+}
+
 - (void)testTrustedProxyCIDRListEnablesForwardedMetadataWithoutLegacyToggle {
   int curlCode = 0;
   int serverCode = 0;

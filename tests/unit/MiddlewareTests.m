@@ -4,10 +4,15 @@
 #import <openssl/hmac.h>
 
 #import "ALNApplication.h"
+#import "ALNClientAddressInternal.h"
 #import "ALNContext.h"
 #import "ALNController.h"
+#import "ALNLogger.h"
+#import "ALNPerf.h"
+#import "ALNRateLimitMiddleware.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNRoutePolicyMiddleware.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNSessionMiddleware.h"
 #import "../shared/ALNWebTestSupport.h"
@@ -252,9 +257,10 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
 }
 
-- (void)testRoutePolicyTrustedProxyUsesForwardedClientIP {
+- (void)testRoutePolicyTrustedProxyUsesForwardedClientIPWhenConfigured {
   NSDictionary *security = @{
     @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"forwardedClientIPHeader" : @"Forwarded",
     @"routePolicies" : @{
       @"admin" : @{
         @"pathPrefixes" : @[ @"/admin" ],
@@ -293,9 +299,115 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
                                                        path:@"/admin"
                                               remoteAddress:@"127.0.0.1"
                                                     headers:@{
-                                                      @"X-Forwarded-For" : @"203.0.113.10, 198.51.100.2",
+                                                      @"X-Forwarded-For" : @"198.51.100.2, 203.0.113.10",
                                                     }];
   ALNAssertResponseStatus(response, 200);
+}
+
+// An appending proxy (nginx $proxy_add_x_forwarded_for) puts the real peer
+// after whatever the client sent, so a client-chosen left-most value must not
+// pass the allowlist.
+- (void)testRoutePolicyIgnoresClientSuppliedLeftMostXForwardedForHop {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *spoofed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"127.0.0.1"
+                                                   headers:@{
+                                                     @"X-Forwarded-For" : @"10.1.1.1, 203.0.113.9",
+                                                   }];
+  ALNAssertResponseStatus(spoofed, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [spoofed headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  // Hops through further trusted proxies are skipped from the right.
+  NSMutableDictionary *chained = [security mutableCopy];
+  chained[@"trustedProxies"] = @[ @"127.0.0.1/32", @"192.0.2.0/24" ];
+  ALNApplication *chainedApp = [self routePolicyApplicationWithSecurity:chained route:@"/admin" policies:nil];
+  XCTAssertTrue([chainedApp startWithError:NULL]);
+  ALNResponse *viaLoadBalancer = [self dispatchPolicyRequestForApp:chainedApp
+                                                              path:@"/admin"
+                                                     remoteAddress:@"127.0.0.1"
+                                                           headers:@{
+                                                             @"X-Forwarded-For" : @"203.0.113.9, 10.1.1.1, 192.0.2.7",
+                                                           }];
+  ALNAssertResponseStatus(viaLoadBalancer, 200);
+}
+
+// A proxy that sets only X-Forwarded-For passes a client's Forwarded header
+// through untouched, so Forwarded is not read unless configured.
+- (void)testRoutePolicyIgnoresForwardedHeaderByDefault {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *response = [self dispatchPolicyRequestForApp:app
+                                                       path:@"/admin"
+                                              remoteAddress:@"127.0.0.1"
+                                                    headers:@{
+                                                      @"Forwarded" : @"for=10.1.1.1",
+                                                      @"X-Forwarded-For" : @"203.0.113.9",
+                                                    }];
+  ALNAssertResponseStatus(response, 403);
+  XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyIPv6ForwardedClientIP {
+  NSDictionary *security = @{
+    @"trustedProxies" : @[ @"::1/128" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"2001:db8::/32" ],
+      }
+    }
+  };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+
+  ALNResponse *allowed = [self dispatchPolicyRequestForApp:app
+                                                      path:@"/admin"
+                                             remoteAddress:@"::1"
+                                                   headers:@{ @"X-Forwarded-For" : @"2001:db9::1, [2001:db8::42]:5000" }];
+  ALNAssertResponseStatus(allowed, 200);
+
+  ALNResponse *denied = [self dispatchPolicyRequestForApp:app
+                                                     path:@"/admin"
+                                            remoteAddress:@"::1"
+                                                  headers:@{ @"X-Forwarded-For" : @"2001:db8::42, 2001:db9::1" }];
+  ALNAssertResponseStatus(denied, 403);
+}
+
+- (void)testRoutePolicyRejectsUnsupportedForwardedClientIPHeader {
+  NSError *error = [ALNRoutePolicyMiddleware validateSecurityConfiguration:@{
+    @"security" : @{ @"forwardedClientIPHeader" : @"X-Real-IP" }
+  }];
+  XCTAssertNotNil(error);
+  NSArray *details = error.userInfo[@"details"];
+  XCTAssertEqualObjects(@"security.forwardedClientIPHeader", [details firstObject][@"field"]);
+  XCTAssertNil([ALNRoutePolicyMiddleware validateSecurityConfiguration:@{
+    @"security" : @{ @"forwardedClientIPHeader" : @"forwarded" }
+  }]);
 }
 
 - (void)testRoutePolicyIPv6CIDRAllowsAndDeniesDeterministically {
@@ -327,6 +439,7 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
 - (void)testRoutePolicyDeniesMalformedForwardedClientFromTrustedProxy {
   NSDictionary *security = @{
     @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"forwardedClientIPHeader" : @"Forwarded",
     @"routePolicies" : @{
       @"admin" : @{
         @"pathPrefixes" : @[ @"/admin" ],
@@ -347,6 +460,28 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   ALNAssertResponseStatus(response, 403);
   XCTAssertEqualObjects(@"forwarded_client_unresolved",
                         [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  // An unreadable X-Forwarded-For hop where the client should be is not
+  // replaced by the proxy's own (allowlisted) address.
+  NSDictionary *xff = @{
+    @"trustedProxies" : @[ @"127.0.0.1/32" ],
+    @"routePolicies" : @{
+      @"admin" : @{
+        @"pathPrefixes" : @[ @"/admin" ],
+        @"trustForwardedClientIP" : @(YES),
+        @"sourceIPAllowlist" : @[ @"127.0.0.1/32", @"203.0.113.10/32" ],
+      }
+    }
+  };
+  ALNApplication *xffApp = [self routePolicyApplicationWithSecurity:xff route:@"/admin" policies:nil];
+  XCTAssertTrue([xffApp startWithError:NULL]);
+  ALNResponse *unreadable = [self dispatchPolicyRequestForApp:xffApp
+                                                         path:@"/admin"
+                                                remoteAddress:@"127.0.0.1"
+                                                      headers:@{ @"X-Forwarded-For" : @"203.0.113.10, unknown" }];
+  ALNAssertResponseStatus(unreadable, 403);
+  XCTAssertEqualObjects(@"forwarded_client_unresolved",
+                        [unreadable headerForName:@"X-Arlen-Policy-Denial-Reason"]);
 }
 
 - (void)testRoutePolicyDeniesWhenDirectPeerCannotBeResolved {
@@ -931,6 +1066,62 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   ALNResponse *second = [harness dispatchMethod:@"GET" path:@"/ping"];
   ALNAssertResponseStatus(second, 429);
   XCTAssertNotNil([second headerForName:@"Retry-After"]);
+}
+
+- (ALNWebTestHarness *)rateLimitHarnessAllowing:(NSUInteger)requests {
+  return [ALNWebTestHarness harnessWithConfig:@{
+    @"environment" : @"test",
+    @"logFormat" : @"json",
+    @"rateLimit" : @{
+      @"enabled" : @(YES),
+      @"requests" : @(requests),
+      @"windowSeconds" : @(60),
+    }
+  }
+                                  routeMethod:@"GET"
+                                         path:@"/ping"
+                                    routeName:@"ping"
+                              controllerClass:[MiddlewareFormController class]
+                                       action:@"ping"
+                                  middlewares:nil];
+}
+
+// The server sets effectiveRemoteAddress, which the limiter keys on, from the
+// right-most untrusted X-Forwarded-For hop. A client rotating the left-most
+// value behind an appending proxy stays one client.
+- (void)testRateLimitHoldsWhenClientRotatesLeftMostForwardedHop {
+  ALNWebTestHarness *harness = [self rateLimitHarnessAllowing:3];
+  NSMutableArray *statuses = [NSMutableArray array];
+  for (NSUInteger idx = 0; idx < 6; idx++) {
+    NSString *header = [NSString stringWithFormat:@"10.0.0.%lu, 203.0.113.9", (unsigned long)idx];
+    ALNRequest *request = [self requestWithMethod:@"GET" path:@"/ping" headers:@{ @"X-Forwarded-For" : header }];
+    request.remoteAddress = @"127.0.0.1";
+    request.effectiveRemoteAddress = ALNClientAddressFromForwardedHops(
+        request.remoteAddress, ALNClientAddressXForwardedForHops(header), @[ @"127.0.0.1/32" ], NULL);
+    XCTAssertEqualObjects(@"203.0.113.9", request.effectiveRemoteAddress);
+    [statuses addObject:@([harness dispatchRequest:request recycleCookies:NO].statusCode)];
+  }
+  XCTAssertEqualObjects((@[ @200, @200, @200, @429, @429, @429 ]), statuses);
+}
+
+- (void)testRateLimitEntryTableIsBounded {
+  ALNRateLimitMiddleware *limiter = [[ALNRateLimitMiddleware alloc] initWithMaxRequests:5 windowSeconds:60];
+  [limiter setValue:@(8) forKey:@"maxEntries"];
+  for (NSUInteger idx = 0; idx < 50; idx++) {
+    ALNRequest *request = [self requestWithMethod:@"GET" path:@"/ping" headers:@{}];
+    request.remoteAddress = [NSString stringWithFormat:@"198.51.100.%lu", (unsigned long)idx];
+    ALNContext *context = [[ALNContext alloc] initWithRequest:request
+                                                     response:[[ALNResponse alloc] init]
+                                                       params:@{}
+                                                        stash:[NSMutableDictionary dictionary]
+                                                       logger:[[ALNLogger alloc] initWithFormat:@"json"]
+                                                    perfTrace:[[ALNPerfTrace alloc] initWithEnabled:NO]
+                                                    routeName:@"ping"
+                                               controllerName:@"MiddlewareFormController"
+                                                   actionName:@"ping"];
+    XCTAssertTrue([limiter processContext:context error:NULL]);
+  }
+  XCTAssertLessThanOrEqual([[limiter valueForKey:@"entries"] count], (NSUInteger)8);
 }
 
 - (void)testSecurityHeadersAreAppliedByDefault {

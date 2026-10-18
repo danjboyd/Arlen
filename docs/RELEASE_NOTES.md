@@ -8,6 +8,23 @@
   sent; use the `alternateKeyValues:` methods for alternate keys. Alternate-key
   values are percent-encoded inside their OData literal. The curl transport
   passes `--path-as-is`.
+- Forwarded client IPs: behind a trusted proxy, the client is now the
+  right-most `X-Forwarded-For` hop that is not itself a trusted proxy. Proxies
+  append the peer they saw, so the left-most value is whatever the client sent.
+  It used to be the left-most value. This applies to both the request's
+  `effectiveRemoteAddress` (and so the rate limiter) and route-policy
+  `sourceIPAllowlist` checks, which now share one parser.
+  - Hops must be IP addresses. An unreadable chain leaves the proxy's address
+    on the request, and denies a protected allowlist check.
+  - Route policies no longer read a `Forwarded` header unless
+    `security.forwardedClientIPHeader = "Forwarded"` is set. They used to
+    prefer it over `X-Forwarded-For`.
+  - `trustedProxyCIDRs` and `ARLEN_TRUSTED_PROXY_CIDRS` accept IPv6 ranges.
+  - The rate limiter tracks at most 65,536 clients at once.
+  - **Upgrade:** with more than one proxy in front of Arlen (for example a load
+    balancer and then nginx), list every proxy in `security.trustedProxies` and
+    `trustedProxyCIDRs`.
+
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

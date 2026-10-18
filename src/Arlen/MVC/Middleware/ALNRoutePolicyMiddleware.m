@@ -1,18 +1,11 @@
 #import "ALNRoutePolicyMiddleware.h"
 
+#import "ALNClientAddressInternal.h"
 #import "ALNContext.h"
 #import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
-
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#endif
-#include <string.h>
 
 NSString *const ALNContextRoutePolicyNamesStashKey = @"aln.route_policies.names";
 NSString *const ALNContextRoutePolicyDecisionStashKey = @"aln.route_policies.decision";
@@ -96,202 +89,6 @@ static BOOL ALNPathMatchesPolicyPrefix(NSString *path, NSString *prefix) {
   return [normalizedPath hasPrefix:prefixWithSlash];
 }
 
-static NSString *ALNNormalizeIPAddressCandidate(NSString *value) {
-  NSString *trimmed = ALNTrimmedPolicyString(value);
-  if ([trimmed length] == 0) {
-    return @"";
-  }
-  if ([trimmed hasPrefix:@"["]) {
-    NSRange closing = [trimmed rangeOfString:@"]"];
-    if (closing.location != NSNotFound && closing.location > 1) {
-      return [trimmed substringWithRange:NSMakeRange(1, closing.location - 1)];
-    }
-  }
-  NSRange percent = [trimmed rangeOfString:@"%"];
-  if (percent.location != NSNotFound) {
-    trimmed = [trimmed substringToIndex:percent.location];
-  }
-  NSUInteger colonCount = 0;
-  for (NSUInteger idx = 0; idx < [trimmed length]; idx++) {
-    if ([trimmed characterAtIndex:idx] == ':') {
-      colonCount += 1;
-    }
-  }
-  if (colonCount == 1 && [trimmed rangeOfString:@"."].location != NSNotFound) {
-    NSArray *parts = [trimmed componentsSeparatedByString:@":"];
-    if ([parts count] == 2 && [parts[0] length] > 0 && [parts[1] length] > 0) {
-      return parts[0];
-    }
-  }
-  return trimmed;
-}
-
-static BOOL ALNParseIPAddressBytes(NSString *value, int *familyOut, uint8_t bytesOut[16]) {
-  if (familyOut != NULL) {
-    *familyOut = 0;
-  }
-  if (bytesOut != NULL) {
-    memset(bytesOut, 0, 16);
-  }
-  NSString *candidate = ALNNormalizeIPAddressCandidate(value);
-  if ([candidate length] == 0 || bytesOut == NULL) {
-    return NO;
-  }
-  const char *raw = [candidate UTF8String];
-  if (raw == NULL) {
-    return NO;
-  }
-  struct in_addr ipv4;
-  memset(&ipv4, 0, sizeof(ipv4));
-  if (inet_pton(AF_INET, raw, &ipv4) == 1) {
-    memcpy(bytesOut, &ipv4, 4);
-    if (familyOut != NULL) {
-      *familyOut = AF_INET;
-    }
-    return YES;
-  }
-  struct in6_addr ipv6;
-  memset(&ipv6, 0, sizeof(ipv6));
-  if (inet_pton(AF_INET6, raw, &ipv6) == 1) {
-    memcpy(bytesOut, &ipv6, 16);
-    if (familyOut != NULL) {
-      *familyOut = AF_INET6;
-    }
-    return YES;
-  }
-  return NO;
-}
-
-static BOOL ALNStringIsUnsignedInteger(NSString *value, NSUInteger *parsedOut) {
-  NSString *trimmed = ALNTrimmedPolicyString(value);
-  if ([trimmed length] == 0) {
-    return NO;
-  }
-  NSScanner *scanner = [NSScanner scannerWithString:trimmed];
-  long long parsed = 0;
-  if (![scanner scanLongLong:&parsed] || ![scanner isAtEnd] || parsed < 0) {
-    return NO;
-  }
-  if (parsedOut != NULL) {
-    *parsedOut = (NSUInteger)parsed;
-  }
-  return YES;
-}
-
-static BOOL ALNCIDRIsValid(NSString *cidr) {
-  NSString *trimmed = ALNTrimmedPolicyString(cidr);
-  if ([trimmed length] == 0) {
-    return NO;
-  }
-  NSArray *parts = [trimmed componentsSeparatedByString:@"/"];
-  if ([parts count] > 2) {
-    return NO;
-  }
-  int family = 0;
-  uint8_t bytes[16];
-  if (!ALNParseIPAddressBytes(parts[0], &family, bytes)) {
-    return NO;
-  }
-  if ([parts count] == 1) {
-    return YES;
-  }
-  NSUInteger prefix = 0;
-  if (!ALNStringIsUnsignedInteger(parts[1], &prefix)) {
-    return NO;
-  }
-  return (family == AF_INET) ? (prefix <= 32) : (prefix <= 128);
-}
-
-static BOOL ALNIPAddressMatchesCIDR(NSString *ip, NSString *cidr) {
-  NSString *trimmed = ALNTrimmedPolicyString(cidr);
-  NSArray *parts = [trimmed componentsSeparatedByString:@"/"];
-  if ([parts count] > 2) {
-    return NO;
-  }
-  int ipFamily = 0;
-  int cidrFamily = 0;
-  uint8_t ipBytes[16];
-  uint8_t cidrBytes[16];
-  if (!ALNParseIPAddressBytes(ip, &ipFamily, ipBytes) ||
-      !ALNParseIPAddressBytes(parts[0], &cidrFamily, cidrBytes) ||
-      ipFamily != cidrFamily) {
-    return NO;
-  }
-  NSUInteger prefix = (ipFamily == AF_INET) ? 32 : 128;
-  if ([parts count] == 2 && !ALNStringIsUnsignedInteger(parts[1], &prefix)) {
-    return NO;
-  }
-  NSUInteger maxPrefix = (ipFamily == AF_INET) ? 32 : 128;
-  if (prefix > maxPrefix) {
-    return NO;
-  }
-  NSUInteger fullBytes = prefix / 8;
-  NSUInteger remainingBits = prefix % 8;
-  if (fullBytes > 0 && memcmp(ipBytes, cidrBytes, fullBytes) != 0) {
-    return NO;
-  }
-  if (remainingBits == 0) {
-    return YES;
-  }
-  uint8_t mask = (uint8_t)(0xFF << (8 - remainingBits));
-  return (ipBytes[fullBytes] & mask) == (cidrBytes[fullBytes] & mask);
-}
-
-static BOOL ALNIPMatchesAnyCIDR(NSString *ip, NSArray *cidrs) {
-  if ([ip length] == 0) {
-    return NO;
-  }
-  for (NSString *cidr in cidrs ?: @[]) {
-    if (ALNIPAddressMatchesCIDR(ip, cidr)) {
-      return YES;
-    }
-  }
-  return NO;
-}
-
-static NSString *ALNFirstForwardedForValue(NSString *header) {
-  NSString *trimmed = ALNTrimmedPolicyString(header);
-  if ([trimmed length] == 0) {
-    return @"";
-  }
-  NSArray *entries = [trimmed componentsSeparatedByString:@","];
-  for (NSString *entry in entries) {
-    NSArray *pairs = [entry componentsSeparatedByString:@";"];
-    for (NSString *pair in pairs) {
-      NSString *candidate = ALNTrimmedPolicyString(pair);
-      NSRange equals = [candidate rangeOfString:@"="];
-      if (equals.location == NSNotFound) {
-        continue;
-      }
-      NSString *key = [[ALNTrimmedPolicyString([candidate substringToIndex:equals.location]) lowercaseString] copy];
-      if (![key isEqualToString:@"for"]) {
-        continue;
-      }
-      NSString *value = ALNTrimmedPolicyString([candidate substringFromIndex:equals.location + 1]);
-      if ([value hasPrefix:@"\""] && [value hasSuffix:@"\""] && [value length] >= 2) {
-        value = [value substringWithRange:NSMakeRange(1, [value length] - 2)];
-      }
-      return ALNNormalizeIPAddressCandidate(value);
-    }
-  }
-  return @"";
-}
-
-static NSString *ALNFirstXForwardedForValue(NSString *header) {
-  NSString *trimmed = ALNTrimmedPolicyString(header);
-  if ([trimmed length] == 0) {
-    return @"";
-  }
-  NSArray *parts = [trimmed componentsSeparatedByString:@","];
-  for (NSString *part in parts) {
-    NSString *candidate = ALNNormalizeIPAddressCandidate(part);
-    if ([candidate length] > 0) {
-      return candidate;
-    }
-  }
-  return @"";
-}
-
 static NSDictionary *ALNSecurityDictionary(NSDictionary *config) {
   NSDictionary *security = [config[@"security"] isKindOfClass:[NSDictionary class]] ? config[@"security"] : @{};
   return security;
@@ -306,6 +103,23 @@ static NSDictionary *ALNRoutePoliciesDictionary(NSDictionary *config) {
 
 static NSArray *ALNTrustedProxyCIDRs(NSDictionary *config) {
   return ALNPolicyStringArray(ALNSecurityDictionary(config)[@"trustedProxies"]);
+}
+
+// The header trusted proxies report the client in: X-Forwarded-For unless
+// security.forwardedClientIPHeader names "Forwarded" (RFC 7239). Only that one
+// header is read; a proxy that sets one passes the other through from the
+// client untouched.
+static NSString *ALNForwardedClientIPHeader(NSDictionary *config) {
+  NSString *header = ALNTrimmedPolicyString(ALNSecurityDictionary(config)[@"forwardedClientIPHeader"]);
+  return ([[header lowercaseString] isEqualToString:@"forwarded"]) ? @"Forwarded" : @"X-Forwarded-For";
+}
+
+static BOOL ALNForwardedClientIPHeaderIsValid(id value) {
+  if (value == nil) {
+    return YES;
+  }
+  NSString *header = [ALNTrimmedPolicyString(value) lowercaseString];
+  return [header isEqualToString:@"x-forwarded-for"] || [header isEqualToString:@"forwarded"];
 }
 
 static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
@@ -335,27 +149,27 @@ static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
 }
 
 static NSDictionary *ALNResolvedClientIP(ALNContext *context, BOOL trustForwardedClientIP) {
-  NSString *directPeer = ALNNormalizeIPAddressCandidate(context.request.remoteAddress ?: @"");
-  int family = 0;
-  uint8_t bytes[16];
-  if (!ALNParseIPAddressBytes(directPeer, &family, bytes)) {
+  NSString *directPeer = ALNClientAddressCanonicalIP(context.request.remoteAddress);
+  if (directPeer == nil) {
     return @{ @"status" : @"unresolved", @"reason" : @"direct_peer_unresolved" };
   }
 
-  NSArray *trustedProxyCIDRs = ALNTrustedProxyCIDRs([context application].config ?: @{});
+  NSDictionary *config = [context application].config ?: @{};
+  NSArray *trustedProxyCIDRs = ALNTrustedProxyCIDRs(config);
   if (!trustForwardedClientIP || [trustedProxyCIDRs count] == 0) {
     return @{ @"status" : @"ok", @"client_ip" : directPeer, @"source" : @"direct" };
   }
 
-  if (!ALNIPMatchesAnyCIDR(directPeer, trustedProxyCIDRs)) {
+  NSString *headerName = ALNForwardedClientIPHeader(config);
+  NSString *headerValue = [context.request headerValueForName:headerName];
+  NSArray *hops = [headerName isEqualToString:@"Forwarded"] ? ALNClientAddressForwardedHops(headerValue)
+                                                            : ALNClientAddressXForwardedForHops(headerValue);
+  BOOL unresolved = NO;
+  NSString *forwarded = ALNClientAddressFromForwardedHops(directPeer, hops, trustedProxyCIDRs, &unresolved);
+  if (forwarded == nil && !unresolved) {
     return @{ @"status" : @"ok", @"client_ip" : directPeer, @"source" : @"direct_untrusted_proxy_headers_ignored" };
   }
-
-  NSString *forwarded = ALNFirstForwardedForValue([context.request headerValueForName:@"Forwarded"]);
-  if ([forwarded length] == 0) {
-    forwarded = ALNFirstXForwardedForValue([context.request headerValueForName:@"X-Forwarded-For"]);
-  }
-  if (!ALNParseIPAddressBytes(forwarded, &family, bytes)) {
+  if (forwarded == nil) {
     return @{
       @"status" : @"unresolved",
       @"reason" : @"forwarded_client_unresolved",
@@ -410,13 +224,21 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
   NSMutableArray *details = [NSMutableArray array];
   NSArray *trustedProxies = ALNPolicyStringArray(ALNSecurityDictionary(config)[@"trustedProxies"]);
   for (NSString *cidr in trustedProxies) {
-    if (!ALNCIDRIsValid(cidr)) {
+    if (!ALNClientAddressCIDRIsValid(cidr)) {
       [details addObject:@{
         @"field" : @"security.trustedProxies",
         @"code" : @"invalid_cidr",
         @"value" : cidr ?: @"",
       }];
     }
+  }
+
+  if (!ALNForwardedClientIPHeaderIsValid(ALNSecurityDictionary(config)[@"forwardedClientIPHeader"])) {
+    [details addObject:@{
+      @"field" : @"security.forwardedClientIPHeader",
+      @"code" : @"unsupported_forwarded_header",
+      @"value" : [ALNSecurityDictionary(config)[@"forwardedClientIPHeader"] description] ?: @"",
+    }];
   }
 
   NSDictionary *policies = ALNRoutePoliciesDictionary(config);
@@ -461,7 +283,7 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
       }
     }
     for (NSString *cidr in ALNPolicyStringArray(policy[@"sourceIPAllowlist"])) {
-      if (!ALNCIDRIsValid(cidr)) {
+      if (!ALNClientAddressCIDRIsValid(cidr)) {
         [details addObject:@{
           @"field" : [NSString stringWithFormat:@"security.routePolicies.%@.sourceIPAllowlist", name],
           @"code" : @"invalid_cidr",
@@ -531,7 +353,7 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
         return NO;
       }
       context.request.effectiveRemoteAddress = clientIP;
-      if (!ALNIPMatchesAnyCIDR(clientIP, allowlist)) {
+      if (!ALNClientAddressMatchesAnyCIDR(clientIP, allowlist)) {
         [self applyDenial:ALNRoutePolicyDenial(name, @"source_ip_denied", clientIP, source)
                   context:context];
         return NO;

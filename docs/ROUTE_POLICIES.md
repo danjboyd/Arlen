@@ -41,8 +41,9 @@ Supported policy fields:
 - `pathPrefixes`: paths protected by this policy.
 - `sourceIPAllowlist`: IPv4 and IPv6 CIDR ranges. A bare IP is treated as an
   exact host match.
-- `trustForwardedClientIP`: when true, `Forwarded` or `X-Forwarded-For` may be
-  used only if the direct peer matches `security.trustedProxies`.
+- `trustForwardedClientIP`: when true, the client IP comes from
+  `X-Forwarded-For` (or `Forwarded`, see below), but only if the direct peer
+  matches `security.trustedProxies`.
 - `requireAuth`: deny when the resolved context has no authenticated subject.
 
 ## Proxy Resolution
@@ -53,13 +54,27 @@ Default behavior is deterministic and fail-closed:
 - With trusted proxies configured, forwarded headers are used only when the
   immediate peer IP matches `security.trustedProxies`.
 - If the immediate peer is not trusted, forwarded headers are ignored.
-- If a protected allowlist check cannot resolve a usable client IP, the request
+- The client is the **right-most** `X-Forwarded-For` hop that is not itself in
+  `security.trustedProxies`. Proxies such as nginx
+  (`$proxy_add_x_forwarded_for`), HAProxy (`option forwardfor`) and most load
+  balancers append the peer they saw to whatever the client sent. So every hop
+  left of the ones your proxies added is client-controlled and is never used.
+  With several proxies in a chain, list all of them in `security.trustedProxies`
+  and Arlen skips them from the right.
+- Only one header is read. By default it is `X-Forwarded-For`, and a `Forwarded`
+  header is ignored, because a proxy that sets only `X-Forwarded-For` passes a
+  client's `Forwarded` header through untouched. If your proxy sets RFC 7239
+  `Forwarded` instead, set `security.forwardedClientIPHeader = "Forwarded";`
+  (the other accepted value is `"X-Forwarded-For"`; anything else fails
+  startup).
+- If a protected allowlist check cannot resolve a usable client IP (no header,
+  or a hop that is not an IP address where the client should be), the request
   is denied.
 
 Behind nginx, configure `security.trustedProxies` to include only the private
 address or subnet of the nginx peer that connects to Arlen. Do not include broad
-public ranges. Public clients can set `X-Forwarded-For` themselves; Arlen only
-trusts that header after the direct peer has already been verified.
+public ranges. Clients can send any `X-Forwarded-For` value they like; Arlen
+uses only the hops your trusted proxies appended.
 
 ## `/admin`
 

@@ -867,6 +867,19 @@
   XCTAssertEqualObjects(@"interactive", openapi[@"docsUIStyle"]);
 }
 
+- (void)testTrustedProxyCIDRsAcceptIPv6 {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_TRUSTED_PROXY_CIDRS", "127.0.0.1/32, ::1, 2001:DB8::/32, 2001:db8::/129, junk", 1);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  unsetenv("ARLEN_TRUSTED_PROXY_CIDRS");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"::1/128", @"2001:db8::/32" ]), config[@"trustedProxyCIDRs"]);
+}
+
 - (void)testSecurityProfilePresetsApplyDeterministicDefaults {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
