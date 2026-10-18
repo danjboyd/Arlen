@@ -111,8 +111,13 @@ The management JSON routes are included in module OpenAPI output.
 ### Download Headers
 
 The download response uses the content type recorded at upload, which the
-uploader declared; the bytes are not checked against it. To keep stored files
-from running as pages on the app's origin, the download sets:
+uploader declared; the bytes are not checked against it. The declared type
+must be exactly one media type (`type/subtype` with optional token
+parameters); lists, quoted strings and control characters are rejected at
+upload. It is stored normalized (lowercase `type/subtype`, plus a `charset`
+parameter if one was given), and the download sends only that normalized
+type. To keep stored files from running as pages on the app's origin, the
+download sets:
 
 - `Content-Disposition: attachment; filename="..."` by default. The quoted
   filename is the object name reduced to ASCII letters, digits and `._-`, with

@@ -170,6 +170,41 @@
   XCTAssertEqualObjects(@"nosniff", [response headerForName:@"X-Content-Type-Options"]);
 }
 
+- (void)testDeclaredContentTypeMustBeASingleMediaType {
+  ALNStorageModuleRuntime *runtime = [ALNStorageModuleRuntime sharedRuntime];
+  NSData *data = [@"<script>alert(1)</script>" dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSString *declared in @[
+         @"application/pdf;x=,text/html", @"video/mp4,text/html", @"application/pdf, text/html",
+         @"application/pdf; name=\"a,b\"", @"application/pdf;\ttext/html", @"application/pdf\r\nX-Evil: 1",
+         @"application/pdf; x", @"application/pdf; =v", @"application/pdf/x", @"application", @"application/pdf;;",
+         @"image/pngé"
+       ]) {
+    NSError *error = nil;
+    XCTAssertNil([runtime storeObjectInCollection:@"files" name:@"f" contentType:declared data:data metadata:nil error:&error],
+                 @"%@", declared);
+    XCTAssertEqualObjects(@"contentType", error.userInfo[@"field"], @"%@", declared);
+    error = nil;
+    XCTAssertNil([runtime createUploadSessionForCollection:@"files"
+                                                      name:@"f"
+                                               contentType:declared
+                                                 sizeBytes:4
+                                                  metadata:nil
+                                                 expiresIn:60
+                                                     error:&error],
+                 @"%@", declared);
+  }
+}
+
+- (void)testDownloadSendsOnlyTheNormalizedMediaType {
+  ALNResponse *text = [self downloadObjectNamed:@"notes.txt" contentType:@"Text/Plain; Charset=UTF-8; x=1" body:@"hi"];
+  XCTAssertEqualObjects(@"text/plain; charset=utf-8", [text headerForName:@"Content-Type"]);
+  XCTAssertEqualObjects(@"sandbox", [text headerForName:@"Content-Security-Policy"]);
+
+  ALNResponse *pdf = [self downloadObjectNamed:@"guide.pdf" contentType:@"application/PDF; version=1" body:@"%PDF"];
+  XCTAssertEqualObjects(@"application/pdf", [pdf headerForName:@"Content-Type"]);
+  XCTAssertEqualObjects(@"inline; filename=\"guide.pdf\"", [pdf headerForName:@"Content-Disposition"]);
+}
+
 - (void)testPDFAndVideoDownloadsAreInline {
   ALNResponse *pdf = [self downloadObjectNamed:@"guide.pdf" contentType:@"application/pdf" body:@"%PDF"];
   XCTAssertEqualObjects(@"inline; filename=\"guide.pdf\"", [pdf headerForName:@"Content-Disposition"]);
