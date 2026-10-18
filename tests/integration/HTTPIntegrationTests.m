@@ -168,6 +168,12 @@
   NSString *command = [NSString stringWithFormat:@"python3 %@ 2>&1", [self shellQuoted:scriptPath]];
   NSString *output = [self runShellCapture:command exitCode:exitCode];
   [[NSFileManager defaultManager] removeItemAtPath:scriptPath error:NULL];
+#if defined(_WIN32)
+  // Native Windows python3 writes text-mode stdout with \r\n, and splitting on
+  // newlineCharacterSet turns each \r\n into two lines. Only the scripts'
+  // printed lines are normalized; raw HTTP captures keep their \r\n.
+  output = [output stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+#endif
   return output;
 }
 
@@ -3997,6 +4003,9 @@
 // range, 304 and HEAD, plus a static mount) leave the worker's descriptor count
 // and its /dev/null descriptors where they started, in both dispatch modes.
 - (void)testFileResponsesKeepWorkerDescriptorsStable_Issue67 {
+#if defined(_WIN32)
+  XCTSkip(@"counts worker descriptors with lsof, which Windows does not have");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-fd-stability"];
   XCTAssertNotNil(appRoot);
@@ -4528,6 +4537,12 @@
         createSymbolicLinkAtPath:[appRoot stringByAppendingPathComponent:@"public/assets/escape.txt"]
              withDestinationPath:@"../../private/secret.txt"
                            error:&symlinkError];
+#if defined(_WIN32)
+    if (!linked) {
+      // Creating symlinks needs SeCreateSymbolicLinkPrivilege or Developer Mode.
+      XCTSkip(@"cannot create a symlink on this Windows host: %@", symlinkError);
+    }
+#endif
     XCTAssertTrue(linked);
     XCTAssertNil(symlinkError);
 
@@ -4666,6 +4681,9 @@
 }
 
 - (void)testBoomhauerPrintRoutesRebuildsSanitizedExternalFrameworkArtifacts {
+#if defined(_WIN32)
+  XCTSkip(@"creates a git worktree, and git is not on the Windows CLANG64 PATH");
+#endif
   ALNSkipOnApple(@"GNU make sanitizer build of an external framework root");
   // Rebuilds framework artifacts; well past the lane default per-test limit.
   ALNTestSetExecutionTimeAllowance(self, 900);
@@ -5013,6 +5031,9 @@
 }
 
 - (void)testPropaneServesRequestsAndHandlesReloadSignal {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5076,6 +5097,9 @@
 }
 
 - (void)testPropaneRespawnsWorkerAfterCrash {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5170,6 +5194,9 @@
 }
 
 - (void)testPropaneClusterOverridesApplyToWorkers {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5257,6 +5284,9 @@
 }
 
 - (void)testPropaneSupervisesAsyncWorkersAndRespawnsOnCrash {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5341,6 +5371,9 @@
 }
 
 - (void)testPropaneRestartLoopRemainsStableUnderActiveTraffic {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
 
@@ -5446,6 +5479,9 @@
 }
 
 - (void)testPropaneGracefulShutdownDrainsInflightQueuedAndKeepAliveConnections {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5586,6 +5622,9 @@
 }
 
 - (void)testPropaneLifecycleDiagnosticsCoverChurnReloadAndMixedSignals {
+#if defined(_WIN32)
+  XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");
+#endif
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
   int port = [self randomPort];
@@ -5800,9 +5839,13 @@
 
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  // Run the script through bash: Windows cannot launch a script by its path.
+  server.launchPath = ALNTestBashPath();
   server.currentDirectoryPath = appRoot;
-  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.arguments = @[
+    [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"], @"--watch", @"--port",
+    [NSString stringWithFormat:@"%d", port]
+  ];
   NSMutableDictionary *env =
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;
@@ -6005,9 +6048,13 @@
 
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
-  server.launchPath = [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"];
+  // Run the script through bash: Windows cannot launch a script by its path.
+  server.launchPath = ALNTestBashPath();
   server.currentDirectoryPath = appRoot;
-  server.arguments = @[ @"--watch", @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.arguments = @[
+    [repoRoot stringByAppendingPathComponent:@"bin/boomhauer"], @"--watch", @"--port",
+    [NSString stringWithFormat:@"%d", port]
+  ];
   NSMutableDictionary *env =
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   env[@"ARLEN_FRAMEWORK_ROOT"] = repoRoot;

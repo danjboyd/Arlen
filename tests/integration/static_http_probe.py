@@ -104,9 +104,15 @@ def main():
         base = "/static/" + root.name
         (root / "index.html").write_text("index\n")
         (root / "private.secret").write_text("secret\n")
-        (root / "link.css").symlink_to(asset.resolve())
-        for target in (base + "/missing.css", base + "/private.secret",
-                       base + "/link.css", base + "/../sample.txt"):
+        denied_targets = [base + "/missing.css", base + "/private.secret", base + "/../sample.txt"]
+        try:
+            (root / "link.css").symlink_to(asset.resolve())
+            denied_targets.append(base + "/link.css")
+        except OSError as exc:
+            # Windows needs SeCreateSymbolicLinkPrivilege or Developer Mode
+            # (WinError 1314); the other access checks still run.
+            print(f"static HTTP contract: skipping the symlink check: {exc}")
+        for target in denied_targets:
             denied = request({"If-None-Match": "*", "Range": "bytes=0-1"},
                              target=target, status=404, body=b"not found\n")
             assert "etag" not in denied
