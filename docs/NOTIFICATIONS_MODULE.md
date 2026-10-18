@@ -87,12 +87,18 @@ Requested channels are validated against the notification definition before queu
   address requires the admin role and AAL2`. That covers a `recipient` or
   `recipientSubject` other than the caller, any `recipients` entry other than
   the caller, and an `email` other than their own
+- keys that commonly name a delivery target are removed from the payload at
+  every depth before it reaches your definition: `to`, `cc`, `bcc`,
+  `address`, `addresses`, `phone`, `webhookURL`, `url`, `target`,
+  `recipient`, `recipients`, `recipientSubject`, and any key ending in
+  `Email` or `Emails` (case-insensitive). The module then sets `recipient`
+  (and `recipientSubject` when the caller sent one) and `email` as above
 - callers with the `admin` role at AAL2 (the test-send policy) can queue for
   any recipient or address; their payload is passed through unchanged
 
 The rest of the payload reaches your definition as the caller sent it, so
-treat it as user input. In particular, do not take webhook URLs or
-other delivery targets from it for notifications users can queue.
+treat it as user input. Do not take delivery targets for notifications users
+can queue from keys outside that list.
 
 App code that calls `ALNNotificationsModuleRuntime`
 (`queueNotificationIdentifier:...`) is not affected: it addresses whoever the

@@ -30,7 +30,9 @@
   `email` to their own address, and answers `403` when the payload names
   another `recipient`, `recipientSubject`, `recipients` entry or `email`.
   Queueing for others over HTTP needs the `admin` role at AAL2, like
-  test-send. `ALNNotificationsModuleRuntime` calls from app code are
+  test-send. Below that, other payload keys that look like delivery targets
+  (`to`, `cc`, `bcc`, `address`, `phone`, `webhookURL`, `url`, `target`, keys
+  ending in `Email`, and so on) are removed at every depth. `ALNNotificationsModuleRuntime` calls from app code are
   unchanged.
 - Signing in and completing step-up (`ALNAuthSession`
   establish/elevate, used by the auth module and the `ALNController` helpers)

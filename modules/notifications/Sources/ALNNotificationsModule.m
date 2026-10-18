@@ -3100,10 +3100,44 @@ static BOOL NMPayloadTargetsOnlySubject(NSDictionary *payload, NSString *subject
   return YES;
 }
 
+// Keys that commonly name a delivery target. Below admin + AAL2 they are
+// removed from the queued payload at every depth, so a definition that reads
+// one cannot be pointed somewhere else over HTTP.
+static BOOL NMIsDeliveryTargetKey(NSString *key) {
+  NSString *lower = [key lowercaseString];
+  NSArray *names = @[
+    @"to", @"cc", @"bcc", @"address", @"addresses", @"phone", @"webhookurl", @"url", @"target",
+    @"recipient", @"recipients", @"recipientsubject",
+  ];
+  return [names containsObject:lower] || [lower hasSuffix:@"email"] || [lower hasSuffix:@"emails"];
+}
+
+static id NMWithoutDeliveryTargets(id value) {
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *kept = [NSMutableDictionary dictionary];
+    for (id key in (NSDictionary *)value) {
+      if ([key isKindOfClass:[NSString class]] && NMIsDeliveryTargetKey(key)) {
+        continue;
+      }
+      kept[key] = NMWithoutDeliveryTargets(((NSDictionary *)value)[key]);
+    }
+    return kept;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *kept = [NSMutableArray array];
+    for (id entry in (NSArray *)value) {
+      [kept addObject:NMWithoutDeliveryTargets(entry)];
+    }
+    return kept;
+  }
+  return value;
+}
+
 // The HTTP queue route lets a signed-in user queue notifications only for
 // themselves: `recipient` is forced to their subject and `email` to their own
 // address. Naming anyone else (`recipient`, `recipientSubject`, `recipients`
-// or `email`) needs the admin role at AAL2, like test-send. Returns nil after
+// or `email`) needs the admin role at AAL2, like test-send; other
+// delivery-target keys are dropped (NMIsDeliveryTargetKey). Returns nil after
 // rendering an error response.
 - (NSDictionary *)queuePayloadForContext:(ALNContext *)ctx payload:(NSDictionary *)rawPayload {
   NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:rawPayload ?: @{}];
@@ -3131,15 +3165,14 @@ static BOOL NMPayloadTargetsOnlySubject(NSDictionary *payload, NSString *subject
                                error:NULL];
     return nil;
   }
-  [payload removeObjectForKey:@"recipients"];
+  BOOL namedRecipientSubject = [payload[@"recipientSubject"] isKindOfClass:[NSString class]];
+  payload = NMWithoutDeliveryTargets(payload);
   payload[@"recipient"] = subject;
-  if ([payload[@"recipientSubject"] isKindOfClass:[NSString class]]) {
+  if (namedRecipientSubject) {
     payload[@"recipientSubject"] = subject;
   }
   if ([ownEmail length] > 0) {
     payload[@"email"] = ownEmail;
-  } else {
-    [payload removeObjectForKey:@"email"];
   }
   return payload;
 }

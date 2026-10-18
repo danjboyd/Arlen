@@ -21,6 +21,8 @@ static NSMutableArray<NSString *> *Phase14IntegrationExecutions(void) {
 static NSString *gPhase14IntegrationSubject = @"user-77";
 static NSArray<NSString *> *gPhase14IntegrationRoles = nil;
 static NSInteger gPhase14IntegrationAAL = 2;
+// Last payload the in-app-only definition received.
+static NSDictionary *gPhase14IntegrationInboxPayload = nil;
 
 @interface Phase14IntegrationAuthMiddleware : NSObject <ALNMiddleware>
 @end
@@ -207,6 +209,7 @@ static NSInteger gPhase14IntegrationAAL = 2;
                                                     error:(NSError **)error {
   (void)runtime;
   (void)error;
+  gPhase14IntegrationInboxPayload = [payload copy];
   return @{
     @"recipient" : payload[@"recipient"] ?: @"",
     @"title" : @"Integration Inbox",
@@ -431,6 +434,45 @@ static NSInteger gPhase14IntegrationAAL = 2;
   XCTAssertEqual(mailBefore + 1, [deliveries count]);
   NSDictionary *message = [[deliveries lastObject] isKindOfClass:[NSDictionary class]] ? [deliveries lastObject][@"message"] : @{};
   XCTAssertEqualObjects((@[ @"member@external.test" ]), message[@"to"]);
+}
+
+- (void)testQueueRouteDropsDeliveryTargetKeysBelowAdminAAL2 {
+  ALNApplication *app = [self registeredNotificationsApplication];
+  NSString *subject = [NSString stringWithFormat:@"user-%@", [[NSUUID UUID] UUIDString]];
+  gPhase14IntegrationSubject = subject;
+  gPhase14IntegrationRoles = @[];
+  gPhase14IntegrationAAL = 1;
+  NSDictionary *payload = @{
+    @"recipient" : subject,
+    @"to" : @"someone@external.test",
+    @"workEmail" : @"someone@external.test",
+    @"url" : @"https://external.test/",
+    @"target" : @{ @"email" : @"someone@external.test" },
+    @"details" : @{ @"webhookURL" : @"https://external.test/hook", @"phone" : @"+15550100", @"label" : @"kept" },
+    @"items" : @[ @{ @"cc" : @"someone@external.test", @"name" : @"kept" } ],
+    @"name" : @"kept",
+  };
+  gPhase14IntegrationInboxPayload = nil;
+  XCTAssertEqual((NSInteger)200, [self queueNotification:@"phase14integration.inbox" payload:payload app:app].statusCode);
+  NSError *error = nil;
+  XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:20 error:&error]);
+  NSDictionary *received = gPhase14IntegrationInboxPayload;
+  XCTAssertNotNil(received);
+  NSDictionary *expected = @{
+    @"recipient" : subject,
+    @"details" : @{ @"label" : @"kept" },
+    @"items" : @[ @{ @"name" : @"kept" } ],
+    @"name" : @"kept",
+  };
+  XCTAssertEqualObjects(expected, received);
+
+  // Admins at AAL2 are passed through unchanged.
+  gPhase14IntegrationRoles = @[ @"admin" ];
+  gPhase14IntegrationAAL = 2;
+  gPhase14IntegrationInboxPayload = nil;
+  XCTAssertEqual((NSInteger)200, [self queueNotification:@"phase14integration.inbox" payload:payload app:app].statusCode);
+  XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:20 error:&error]);
+  XCTAssertEqualObjects(payload, gPhase14IntegrationInboxPayload);
 }
 
 @end
