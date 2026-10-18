@@ -242,6 +242,9 @@ too (GitHub issue 264).
 `storage` moved to `1.2.0` so downloads are attachments with a sandbox policy
 unless the type is a passive image, PDF, audio or video type, and so wildcard
 accepted types no longer match HTML or SVG (a security fix).
+`search` moved to `1.1.0` to encode engine URL path segments with only
+unreserved characters and reject empty, `.` and `..` record identifiers and
+index names (a security fix).
 
 ## MCP tools
 

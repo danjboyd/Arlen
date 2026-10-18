@@ -588,11 +588,34 @@ static NSString *STPercentEncodedQueryComponent(NSString *value) {
   return [STTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:blocked] ?: @"";
 }
 
-static NSString *STPercentEncodedPathComponent(NSString *value) {
-  NSCharacterSet *allowed = [NSCharacterSet URLPathAllowedCharacterSet];
-  NSMutableCharacterSet *blocked = [allowed mutableCopy];
-  [blocked removeCharactersInString:@"/?#%"];
-  return [STTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:blocked] ?: @"";
+NSString *ALNSearchEnginePathComponent(NSString *value, NSError **error) {
+  NSString *trimmed = STTrimmedString(value);
+  // "." and ".." are dot segments: an HTTP client or server may resolve them
+  // and send the request to the parent path (the whole index) instead.
+  if ([trimmed length] == 0 || [trimmed isEqualToString:@"."] || [trimmed isEqualToString:@".."]) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search engine path component cannot be empty, \".\" or \"..\"",
+                       @{ @"value" : trimmed ?: @"" });
+    }
+    return nil;
+  }
+  static NSCharacterSet *unreserved = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    unreserved = [NSCharacterSet
+        characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"];
+  });
+  NSString *encoded = [trimmed stringByAddingPercentEncodingWithAllowedCharacters:unreserved];
+  if ([encoded length] == 0) {
+    if (error != NULL) {
+      *error = STError(ALNSearchModuleErrorValidationFailed,
+                       @"search engine path component could not be encoded",
+                       @{ @"value" : trimmed ?: @"" });
+    }
+    return nil;
+  }
+  return encoded;
 }
 
 static NSDictionary *STJSONParametersFromBody(NSData *body) {
@@ -3192,9 +3215,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if ([primaryKey length] == 0) {
     primaryKey = @"recordID";
   }
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return NO;
+  }
   NSDictionary *headers = [self meilisearchHeaders];
   NSString *indexesPath = [NSString stringWithFormat:@"%@/indexes", baseURL];
-  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", indexesPath, STPercentEncodedPathComponent(indexName)];
+  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", indexesPath, encodedIndexName];
   if ([self jsonRequestWithMethod:@"DELETE"
                              path:indexPath
                           headers:headers
@@ -3259,9 +3286,11 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   (void)snapshot;
   NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
   NSString *indexName = [self externalIndexNameForMetadata:metadata];
-  NSString *indexPath = [NSString stringWithFormat:@"%@/indexes/%@",
-                                                   baseURL,
-                                                   STPercentEncodedPathComponent(indexName)];
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return NO;
+  }
+  NSString *indexPath = [NSString stringWithFormat:@"%@/indexes/%@", baseURL, encodedIndexName];
   NSDictionary *headers = [self meilisearchHeaders];
   NSString *identifierField = STLowerTrimmedString(metadata[@"identifierField"]);
   if ([identifierField length] == 0) {
@@ -3279,10 +3308,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
     return NO;
   }
+  NSString *encodedRecordID = ALNSearchEnginePathComponent(recordID, error);
+  if (encodedRecordID == nil) {
+    return NO;
+  }
   if ([[STLowerTrimmedString(operation) lowercaseString] isEqualToString:@"delete"]) {
-    NSString *path = [NSString stringWithFormat:@"%@/documents/%@",
-                                                indexPath,
-                                                STPercentEncodedPathComponent(recordID)];
+    NSString *path = [NSString stringWithFormat:@"%@/documents/%@", indexPath, encodedRecordID];
     return ([self jsonRequestWithMethod:@"DELETE"
                                    path:path
                                 headers:headers
@@ -3325,9 +3356,11 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
-  NSString *path = [NSString stringWithFormat:@"%@/indexes/%@/search",
-                                              baseURL,
-                                              STPercentEncodedPathComponent(indexName)];
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return nil;
+  }
+  NSString *path = [NSString stringWithFormat:@"%@/indexes/%@/search", baseURL, encodedIndexName];
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"q"] = STTrimmedString(query);
   payload[@"limit"] = @(MAX((NSUInteger)1U, limit));
@@ -3621,7 +3654,11 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                               error:(NSError **)error {
   NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
   NSString *indexName = [self externalIndexNameForMetadata:metadata];
-  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", baseURL, STPercentEncodedPathComponent(indexName)];
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return NO;
+  }
+  NSString *indexPath = [NSString stringWithFormat:@"%@/%@", baseURL, encodedIndexName];
   NSDictionary *headers = [self openSearchHeaders];
   if ([self jsonRequestWithMethod:@"DELETE"
                              path:indexPath
@@ -3734,10 +3771,18 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
     return NO;
   }
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return NO;
+  }
+  NSString *encodedRecordID = ALNSearchEnginePathComponent(recordID, error);
+  if (encodedRecordID == nil) {
+    return NO;
+  }
   NSString *documentPath = [NSString stringWithFormat:@"%@/%@/_doc/%@?refresh=true",
                                                       baseURL,
-                                                      STPercentEncodedPathComponent(indexName),
-                                                      STPercentEncodedPathComponent(recordID)];
+                                                      encodedIndexName,
+                                                      encodedRecordID];
   if ([[STLowerTrimmedString(operation) lowercaseString] isEqualToString:@"delete"]) {
     return ([self jsonRequestWithMethod:@"DELETE"
                                    path:documentPath
@@ -3778,9 +3823,11 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSString *baseURL = [self.serviceURL stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]];
-  NSString *path = [NSString stringWithFormat:@"%@/%@/_search",
-                                              baseURL,
-                                              STPercentEncodedPathComponent(indexName)];
+  NSString *encodedIndexName = ALNSearchEnginePathComponent(indexName, error);
+  if (encodedIndexName == nil) {
+    return nil;
+  }
+  NSString *path = [NSString stringWithFormat:@"%@/%@/_search", baseURL, encodedIndexName];
   NSString *mode = [self normalizedQueryModeFromOptions:options metadata:metadata];
   NSMutableDictionary *payload = [NSMutableDictionary dictionary];
   payload[@"size"] = @(MAX((NSUInteger)1U, limit));

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Search module `1.1.0`: the Meilisearch and OpenSearch adapters encode
+  record identifiers and index names in request URLs with only unreserved
+  characters, and reject an identifier or index name that is empty, `.` or
+  `..` with a validation error instead of sending the request. A record whose
+  identifier was `..` used to turn a live-sync document delete into a request
+  for the whole index (`DELETE /<index>/`). Arlen's libcurl HTTP transport
+  (GNUstep) now sets `CURLOPT_PATH_AS_IS`, so it never collapses `.`/`..`
+  path segments.
 - Storage module `1.2.0`: `GET /storage/api/download/:token` now sends
   `Content-Disposition: attachment` with a sanitized filename,
   `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.

@@ -301,6 +301,15 @@ query can cost:
   query/sync translation, cursor pagination, and required live confidence
   validation.
 
+When the Meilisearch or OpenSearch adapter puts a record identifier or index
+name in a request URL, it percent-encodes every character except
+`A-Z a-z 0-9 - . _ ~` (`ALNSearchEnginePathComponent`). An identifier or index
+name that is empty, `.` or `..` is rejected with
+`ALNSearchModuleErrorValidationFailed` and no request is sent, because a dot
+segment would address the parent path (the whole index) instead of one
+document. Arlen's libcurl transport also sends request paths as given and
+never collapses dot segments.
+
 
 ## PostgreSQL typo matching
 
