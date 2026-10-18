@@ -615,22 +615,28 @@
                   @"%@", workerOutput);
 
     // propane prints the startup error once, backs off, and gives up with
-    // status 3 after startupFailureLimit identical failures.
+    // status 3 after startupFailureLimit consecutive startup failures, with
+    // the default worker count and an async worker.
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
                           content:@"{\n  propaneAccessories = {\n    respawnDelayMs = 50;\n"
                                   "    startupFailureLimit = 3;\n    respawnBackoffMaxMs = 200;\n  };\n}\n"]);
     NSString *pidFile = [appRoot stringByAppendingPathComponent:@"tmp/propane.pid"];
     NSString *propaneOutput = [self runShellCapture:[NSString stringWithFormat:
-        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/propane --env production --workers 1 "
-         "--pid-file %@ 2>&1",
+        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/propane --env production --workers 4 "
+         "--job-worker-count 1 --job-worker-cmd %@ --pid-file %@ 2>&1",
         ALNTestShellQuote(appRoot), ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix,
-        ALNTestShellQuote(repoRoot), ALNTestShellQuote(pidFile)]
+        ALNTestShellQuote(repoRoot),
+        ALNTestShellQuote([NSString stringWithFormat:@"%@/bin/jobs-worker --env production", repoRoot]),
+        ALNTestShellQuote(pidFile)]
                                            exitCode:&code];
     XCTAssertEqual(3, code, @"%@", propaneOutput);
     NSString *firstLine = @"propane: worker startup failed: boomhauer: startup failed: module broken failed to load";
     XCTAssertEqual((NSUInteger)2, [[propaneOutput componentsSeparatedByString:firstLine] count], @"%@", propaneOutput);
     XCTAssertTrue([propaneOutput containsString:@"worker startup failed (same error) x3"], @"%@", propaneOutput);
-    XCTAssertTrue([propaneOutput containsString:@"giving up after 3 consecutive identical worker startup failures"],
+    XCTAssertTrue([propaneOutput containsString:@"consecutive_failures=3"], @"%@", propaneOutput);
+    // All four boot workers can be reaped in one pass, so propane may give up
+    // at a count above the limit.
+    XCTAssertTrue([propaneOutput containsString:@"consecutive worker startup failures; last: boomhauer: startup failed"],
                   @"%@", propaneOutput);
     XCTAssertTrue([propaneOutput containsString:@"next_respawn_delay_ms=200"], @"%@", propaneOutput);
   } @finally {

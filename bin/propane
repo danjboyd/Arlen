@@ -748,8 +748,8 @@ sleep_ms_interruptible() {
 # its error there and exits, instead of printing it. propane prints each
 # distinct error once, backs off exponentially from the respawn delay up to
 # respawnBackoffMaxMs, and exits non-zero after startupFailureLimit
-# consecutive identical startup failures so the service manager sees a failed
-# unit. A worker exit that is not a startup failure resets the streak.
+# consecutive startup failures (of any error) so the service manager sees a
+# failed unit. A worker exit that is not a startup failure resets the streak.
 startup_failure_dir="$(mktemp -d "${TMPDIR:-/tmp}/propane-startup.XXXXXX")"
 startup_failure_seq=0
 startup_failure_pids=()
@@ -763,11 +763,12 @@ async_startup_last=""
 startup_failure_give_up=0
 next_respawn_delay_ms=0
 
+# Sets new_failure_file. Runs in the calling shell (never in $(...)), so the
+# sequence number advances and every worker gets its own file.
 new_startup_failure_file() {
   startup_failure_seq=$((startup_failure_seq + 1))
-  local path="$startup_failure_dir/worker-$startup_failure_seq"
-  : > "$path"
-  printf '%s' "$path"
+  new_failure_file="$startup_failure_dir/worker-$startup_failure_seq"
+  : > "$new_failure_file"
 }
 
 remember_startup_failure_file() {
@@ -845,7 +846,7 @@ note_worker_exit() {
   done
   next_respawn_delay_ms="$delay"
   emit_lifecycle_event "${role}_worker_startup_failed" "role=$role" "consecutive_failures=$streak" "same_error_count=$same" "next_respawn_delay_ms=$delay"
-  if (( startup_failure_limit > 0 && same >= startup_failure_limit )); then
+  if (( startup_failure_limit > 0 && streak >= startup_failure_limit )); then
     startup_failure_give_up=1
   fi
 }
@@ -1039,8 +1040,8 @@ check_worker_fd_pressure() {
 
 spawn_worker() {
   local start_reason="${1:-boot}"
-  local failure_file
-  failure_file="$(new_startup_failure_file)"
+  new_startup_failure_file
+  local failure_file="$new_failure_file"
   ARLEN_STARTUP_FAILURE_FILE="$failure_file" "$app_binary" ${worker_args[@]+"${worker_args[@]}"} &
   local pid=$!
   remember_startup_failure_file "$pid" "$failure_file"
@@ -1054,8 +1055,8 @@ spawn_job_worker() {
   if (( job_worker_count < 1 )) || [[ -z "$job_worker_command" ]]; then
     return
   fi
-  local failure_file
-  failure_file="$(new_startup_failure_file)"
+  new_startup_failure_file
+  local failure_file="$new_failure_file"
   ARLEN_STARTUP_FAILURE_FILE="$failure_file" bash -lc "$job_worker_command" &
   local pid=$!
   remember_startup_failure_file "$pid" "$failure_file"
@@ -1267,7 +1268,7 @@ while (( shutting_down == 0 )); do
     if (( startup_failure_give_up == 1 )); then
       manager_exit=3
       shutdown_reason="worker_startup_failed"
-      echo "propane: giving up after $http_startup_same consecutive identical worker startup failures: $http_startup_last" >&2
+      echo "propane: giving up after $http_startup_streak consecutive worker startup failures; last: $http_startup_last" >&2
       emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
       shutting_down=1
       continue
@@ -1337,7 +1338,7 @@ while (( shutting_down == 0 )); do
     if (( startup_failure_give_up == 1 )); then
       manager_exit=3
       shutdown_reason="async_worker_startup_failed"
-      echo "propane: giving up after $async_startup_same consecutive identical async worker startup failures: $async_startup_last" >&2
+      echo "propane: giving up after $async_startup_streak consecutive async worker startup failures; last: $async_startup_last" >&2
       emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
       shutting_down=1
       continue

@@ -584,7 +584,7 @@ Other scaffolded sections:
 - `propaneAccessories.gracefulShutdownSeconds`
 - `propaneAccessories.respawnDelayMs`
 - `propaneAccessories.startupFailureLimit` (default `5`; propane exits after
-  this many consecutive identical worker startup failures, `0` disables)
+  this many consecutive worker startup failures, `0` disables)
 - `propaneAccessories.respawnBackoffMaxMs` (default `30000`; cap for the
   exponential respawn backoff after worker startup failures)
 - `propaneAccessories.reloadOverlapSeconds`

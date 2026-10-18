@@ -97,7 +97,7 @@ propane tells each worker where to report that error
   consecutive startup failure, up to `respawnBackoffMaxMs`. This gives a
   transient startup error (a lock held by another process, a database that is
   still starting) room to clear.
-- After `startupFailureLimit` consecutive startup failures with the same error,
+- After `startupFailureLimit` consecutive startup failures (any error),
   propane stops its workers and exits with status `3`, so systemd or launchd
   reports a failed unit. `0` disables the limit.
 - A worker exit that is not a startup failure (a worker that started and later

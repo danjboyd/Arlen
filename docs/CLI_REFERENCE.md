@@ -1282,7 +1282,7 @@ Behavior:
 - worker startup failures (a worker that exits before serving, e.g. a module
   that fails to load) are printed once per distinct error, respawned with
   exponential backoff up to the `respawnBackoffMaxMs` propane accessory, and
-  after `startupFailureLimit` consecutive identical failures (propane
+  after `startupFailureLimit` consecutive startup failures (propane
   accessory, default `5`) propane exits with status `3`; see
   [Propane](PROPANE.md#propane-accessories)
 
