@@ -852,6 +852,9 @@ enum {
 // Text codecs for timestamp/date and bytea values. Not static so unit tests
 // can call them without a live database; they are not public API.
 NSString *ALNPgHexStringFromData(NSData *data);
+// In ALNSQLBuilder.m (not public API): trusted expressions compiled so far on
+// this thread.
+extern NSUInteger ALNSQLBuilderTrustedExpressionCompileCount(void);
 NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length);
 NSData *ALNPgDataFromByteaString(NSString *value);
 NSString *ALNPgTimestampStringFromDate(NSDate *value);
@@ -1800,6 +1803,27 @@ static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer) {
   buffer->count = 0;
 }
 
+// libpq takes SQL text and statement names as C strings, so a U+0000 inside
+// one would silently end it early. Callers refuse such text up front.
+static BOOL ALNPgTextContainsNUL(NSString *text) {
+  return [text isKindOfClass:[NSString class]] &&
+         [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
+             NSNotFound;
+}
+
+static BOOL ALNPgFailIfTextContainsNUL(NSString *text, NSString *what, NSError **error) {
+  if (!ALNPgTextContainsNUL(text)) {
+    return NO;
+  }
+  if (error != NULL) {
+    *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                            [NSString stringWithFormat:@"%@ contains a NUL character (U+0000)", what],
+                            nil,
+                            nil);
+  }
+  return YES;
+}
+
 static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
                                        NSString *sql,
                                        ALNPgExecParamsBuffer *buffer,
@@ -2014,6 +2038,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 // YES when the pool handed this connection out from its idle list (it may have
 // been closed by the server while idle); NO for a freshly opened connection.
 @property(nonatomic, assign) BOOL reusedFromPool;
+// YES once this borrower ran SQL the pool did not generate itself: any
+// executeQuery/executeCommand/script/prepare with caller SQL, a transaction,
+// or a builder statement that spliced trusted expression text. Only a dirty
+// connection needs the session reset on release. builderExecutionDepth is
+// non-zero while a purely generated builder statement runs through the
+// public entry points, so those do not mark the connection.
+@property(nonatomic, assign) BOOL sessionStateDirty;
+@property(nonatomic, assign) NSUInteger builderExecutionDepth;
 
 - (BOOL)hasActiveTransaction;
 - (void)reportConnectionLossForError:(NSError **)error;
@@ -2023,6 +2055,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 - (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
 - (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll;
+- (BOOL)discardQueuedNotifications;
+- (void)noteCallerStatement;
 
 @end
 
@@ -2343,31 +2377,115 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   self.preparedStatementSequence = 0;
 }
 
+- (void)noteCallerStatement {
+  if (self.builderExecutionDepth == 0) {
+    self.sessionStateDirty = YES;
+  }
+}
+
+// The SQL text the statement cache believes each of its names was prepared
+// with. Cache keys are "operation|parameterCount|sql".
+- (NSDictionary<NSString *, NSString *> *)cachedPreparedStatementSQLByName {
+  NSMutableDictionary<NSString *, NSString *> *byName = [NSMutableDictionary dictionary];
+  [self.preparedStatementNamesByKey enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *name, BOOL *stop) {
+    (void)stop;
+    NSRange first = [key rangeOfString:@"|"];
+    NSRange second = (first.location == NSNotFound)
+                         ? first
+                         : [key rangeOfString:@"|" options:0 range:NSMakeRange(NSMaxRange(first), [key length] - NSMaxRange(first))];
+    byName[name] = (second.location == NSNotFound) ? @"" : [key substringFromIndex:NSMaxRange(second)];
+  }];
+  return byName;
+}
+
 // Called by the pool before a released connection is reused, so settings,
-// role, temp tables, cursors, LISTENs and advisory locks from one borrower do
-// not reach the next. The session reset keeps this connection's cached
-// prepared statements (they belong to the pool, not to a borrower); DISCARD ALL
-// drops them, so the cache is cleared to match. NO means the reset failed and
-// the connection must not be reused.
+// role, temp tables, cursors, sequences, LISTENs, queued notifications and
+// advisory locks from one borrower do not reach the next. A connection that
+// only ran SQL the pool generated itself (sessionStateDirty == NO) cannot
+// have changed any of that and is reused as is.
+//
+// The session reset keeps the pool's cached prepared statements, but checks
+// them in the same round trip: a borrower who ran its own SQL could have
+// DEALLOCATEd a cached name and PREPAREd different SQL under it, so the next
+// borrower would run that instead. Any statement the cache does not know,
+// any statement created by SQL PREPARE, any text that differs from the
+// cached SQL, or a cached name that is gone, drops every prepared statement
+// and clears the cache. DISCARD ALL drops them unconditionally. NO means the
+// reset failed and the connection must not be reused.
 - (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll {
   if (_conn == NULL || !self.isOpen) {
     return NO;
   }
+  if (!self.sessionStateDirty) {
+    return YES;
+  }
   const char *sql = discardAll ? "DISCARD ALL"
                                : "RESET ALL; SET SESSION AUTHORIZATION DEFAULT; CLOSE ALL; DISCARD TEMP; "
-                                 "UNLISTEN *; SELECT pg_advisory_unlock_all()";
+                                 "DISCARD SEQUENCES; UNLISTEN *; SELECT pg_advisory_unlock_all(); "
+                                 "SELECT name, statement, from_sql FROM pg_prepared_statements";
   PGresult *result = ALNPQexec(_conn, sql);
   int status = (result != NULL) ? ALNPQresultStatus(result) : -1;
+  BOOL ok = (status == ALNPGRES_COMMAND_OK || status == ALNPGRES_TUPLES_OK) &&
+            ALNPQstatus(_conn) == ALNConnectionOK;
+  BOOL cacheTrusted = !discardAll;
+  if (ok && !discardAll && status == ALNPGRES_TUPLES_OK) {
+    NSDictionary<NSString *, NSString *> *expected = [self cachedPreparedStatementSQLByName];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    int rows = ALNPQntuples(result);
+    for (int row = 0; row < rows && cacheTrusted; row++) {
+      NSString *name = [NSString stringWithUTF8String:ALNPQgetvalue(result, row, 0) ?: ""] ?: @"";
+      NSString *statement = [NSString stringWithUTF8String:ALNPQgetvalue(result, row, 1) ?: ""] ?: @"";
+      const char *fromSQL = ALNPQgetvalue(result, row, 2);
+      BOOL createdBySQL = (fromSQL != NULL && fromSQL[0] == 't');
+      NSString *cachedSQL = expected[name];
+      if (createdBySQL || cachedSQL == nil || ![cachedSQL isEqualToString:statement]) {
+        cacheTrusted = NO;
+      }
+      [seen addObject:name];
+    }
+    if ([seen count] != [expected count]) {
+      cacheTrusted = NO;
+    }
+  }
   if (result != NULL) {
     ALNPQclear(result);
   }
-  BOOL ok = (status == ALNPGRES_COMMAND_OK || status == ALNPGRES_TUPLES_OK) &&
-            ALNPQstatus(_conn) == ALNConnectionOK;
-  if (ok && discardAll) {
+  if (ok && !cacheTrusted) {
+    if (!discardAll) {
+      PGresult *deallocate = ALNPQexec(_conn, "DEALLOCATE ALL");
+      int deallocateStatus = (deallocate != NULL) ? ALNPQresultStatus(deallocate) : -1;
+      if (deallocate != NULL) {
+        ALNPQclear(deallocate);
+      }
+      ok = (deallocateStatus == ALNPGRES_COMMAND_OK) && ALNPQstatus(_conn) == ALNConnectionOK;
+    }
     [self.preparedStatementNamesByKey removeAllObjects];
     [self.preparedStatementCacheOrder removeAllObjects];
   }
+  if (ok) {
+    ok = [self discardQueuedNotifications];
+  }
+  if (ok) {
+    self.sessionStateDirty = NO;
+  }
   return ok;
+}
+
+// Notifications for a borrower's LISTENs can still be queued in libpq or
+// unread on the socket after it releases the connection. Read and drop them
+// (no round trip) so the next borrower's waitForNotifications does not see
+// them. NO means the connection turned out to be unusable.
+- (BOOL)discardQueuedNotifications {
+  if (_conn == NULL) {
+    return NO;
+  }
+  if (ALNPQconsumeInput != NULL && ALNPQconsumeInput(_conn) == 0) {
+    return NO;
+  }
+  if (ALNPQnotifies != NULL && ALNPQfreemem != NULL) {
+    (void)[self drainNotifications];
+  }
+  return YES;
 }
 
 - (BOOL)shouldUsePreparedStatementForParameterCount:(NSUInteger)parameterCount {
@@ -2451,12 +2569,23 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
       if (cacheHit != NULL) {
         *cacheHit = YES;
       }
+      if ([cached[@"trusted_sql"] boolValue]) {
+        self.sessionStateDirty = YES;
+      }
       return cached;
     }
   }
 
+  NSUInteger trustedBefore = ALNSQLBuilderTrustedExpressionCompileCount();
   NSError *buildError = nil;
   NSDictionary *built = [builder buildWithDialect:[ALNPostgresDialect sharedDialect] error:&buildError];
+  // Trusted expressions are app SQL text, which can change session state even
+  // inside a plain SELECT (set_config, advisory locks, nextval), so a
+  // statement that holds one marks the connection for a reset on release.
+  BOOL trustedSQL = ALNSQLBuilderTrustedExpressionCompileCount() != trustedBefore;
+  if (trustedSQL) {
+    self.sessionStateDirty = YES;
+  }
   if (built == nil) {
     if (error != NULL) {
       *error = buildError ?: ALNPgMakeError(ALNPgErrorQueryFailed,
@@ -2482,6 +2611,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   NSDictionary *normalized = @{
     @"sql" : sql,
     @"parameters" : [NSArray arrayWithArray:parameters],
+    @"trusted_sql" : @(trustedSQL),
   };
 
   if ([signature length] > 0 && self.builderCompilationCacheLimit > 0) {
@@ -2640,10 +2770,15 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NO;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql", error) ||
+      ALNPgFailIfTextContainsNUL(name, @"statement name", error)) {
+    return NO;
+  }
 
   if ([self failIfConnectionClosedBeforeSend:error]) {
     return NO;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQprepare(_conn,
                                [name UTF8String],
                                [sql UTF8String],
@@ -2699,6 +2834,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql", error)) {
+    return NULL;
+  }
 
   NSUInteger count = [parameters count];
   ALNPgExecParamsBuffer paramBuffer;
@@ -2710,6 +2848,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     ALNPgFreeExecParamsBuffer(&paramBuffer);
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexecParams(_conn,
                                   [sql UTF8String],
                                   (int)count,
@@ -2753,10 +2892,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql script", error)) {
+    return NULL;
+  }
 
   if ([self failIfConnectionClosedBeforeSend:error]) {
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexec(_conn, [sql UTF8String]);
   if (result == NULL) {
     if (error != NULL) {
@@ -2793,6 +2936,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(name, @"statement name", error)) {
+    return NULL;
+  }
 
   NSUInteger count = [parameters count];
   ALNPgExecParamsBuffer paramBuffer;
@@ -2804,6 +2950,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     ALNPgFreeExecParamsBuffer(&paramBuffer);
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexecPrepared(_conn,
                                     [name UTF8String],
                                     (int)count,
@@ -3090,8 +3237,31 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return NO;
 }
 
+// Generated builder SQL runs through the public statement methods without
+// marking the connection dirty; compiledBuilder: marks it when the statement
+// holds a trusted expression.
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try {
+    return [self aln_executeBuilderQuery:builder error:error];
+  } @finally {
+    self.builderExecutionDepth -= 1;
+  }
+}
+
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                             error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try {
+    return [self aln_executeBuilderCommand:builder error:error];
+  } @finally {
+    self.builderExecutionDepth -= 1;
+  }
+}
+
+- (NSArray<NSDictionary *> *)aln_executeBuilderQuery:(ALNSQLBuilder *)builder
+                                               error:(NSError **)error {
   ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
@@ -3258,8 +3428,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return rows;
 }
 
-- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
-                             error:(NSError **)error {
+- (NSInteger)aln_executeBuilderCommand:(ALNSQLBuilder *)builder
+                                 error:(NSError **)error {
   ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
@@ -3615,6 +3785,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign) NSUInteger connectionRetryCount;
 @property(nonatomic, assign) NSUInteger releasedInTransactionCount;
 @property(nonatomic, assign) NSUInteger sessionResetFailureCount;
+@property(nonatomic, assign) NSUInteger sessionResetCount;
 
 @end
 
@@ -3891,6 +4062,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   BOOL reusable = NO;
   BOOL closedInTransaction = NO;
   BOOL resetFailed = NO;
+  BOOL dirty = NO;
   @try {
     // A connection still inside a transaction (an unfinished -beginTransaction:
     // or a BEGIN sent by hand) is closed, which rolls the transaction back
@@ -3907,10 +4079,17 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     // until the worker is restarted. isConnectionUsable asks libpq directly,
     // so a dead connection is torn down instead of recirculated.
     reusable = !closedInTransaction && [connection isConnectionUsable];
-    if (reusable && self.sessionResetPolicy != ALNPgSessionResetPolicyNone &&
-        ![connection resetSessionStateDiscardingAll:(self.sessionResetPolicy == ALNPgSessionResetPolicyDiscardAll)]) {
+    // A connection that only ran SQL the pool generated is reused without a
+    // reset; the connection skips the round trip itself when it is clean.
+    dirty = connection.sessionStateDirty;
+    if (reusable && self.sessionResetPolicy != ALNPgSessionResetPolicyNone) {
+      if (![connection resetSessionStateDiscardingAll:(self.sessionResetPolicy == ALNPgSessionResetPolicyDiscardAll)]) {
+        reusable = NO;
+        resetFailed = YES;
+      }
+    } else if (reusable && dirty && ![connection discardQueuedNotifications]) {
+      // ALNPgSessionResetPolicyNone still drops queued notifications.
       reusable = NO;
-      resetFailed = YES;
     }
     if (!reusable && !closedInTransaction) {
       [connection close];
@@ -3922,6 +4101,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     if (resetFailed) {
       self.sessionResetFailureCount += 1;
+    } else if (reusable && dirty && self.sessionResetPolicy != ALNPgSessionResetPolicyNone) {
+      self.sessionResetCount += 1;
     }
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
@@ -4114,6 +4295,7 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
       @"connection_retry_count" : @(self.connectionRetryCount),
       @"released_in_transaction_count" : @(self.releasedInTransactionCount),
       @"session_reset_failure_count" : @(self.sessionResetFailureCount),
+      @"session_reset_count" : @(self.sessionResetCount),
     };
   } @finally {
     [self.poolCondition unlock];

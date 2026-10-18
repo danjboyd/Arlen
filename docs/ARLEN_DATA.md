@@ -699,24 +699,46 @@ row-level security or tenancy implemented with
   started with `beginTransaction:` or by sending `BEGIN` by hand, is closed
   rather than reused. Closing it rolls the transaction back on the server.
   `released_in_transaction_count` in `poolDiagnostics` counts these.
-- Otherwise `sessionResetPolicy` decides what is reset:
+- A connection is reset only if the borrower could have changed its session.
+  It is marked when it runs SQL the pool did not generate itself: any
+  `executeQuery`, `executeQueryResult`, `executeCommand`, batch, script or
+  `prepareStatementNamed:` with caller SQL, a transaction, and also a builder
+  statement that contains a trusted expression (`selectExpression:`,
+  `whereExpression:`, `orderByExpression:`, join `onExpression:` and the
+  other expression APIs splice app SQL text, which can call `set_config`,
+  `pg_advisory_lock` or `nextval` inside a plain `SELECT`). A connection that
+  only ran generated builder statements is reused without a reset. ORM
+  repositories run their SQL through `executeQuery`/`executeCommand`, so they
+  mark the connection too.
+- For a marked connection, `sessionResetPolicy` decides what is reset:
   - `ALNPgSessionResetPolicySession` (default): one round trip running
     `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`, `CLOSE ALL`,
-    `DISCARD TEMP`, `UNLISTEN *` and `pg_advisory_unlock_all()`. Settings
-    (including `search_path` and `SET ROLE`), cursors, temporary tables,
-    `LISTEN`s and session advisory locks are cleared. The pool's own cached
-    prepared statements are kept.
+    `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *` and
+    `pg_advisory_unlock_all()`, and reading `pg_prepared_statements`.
+    Settings (including `search_path` and `SET ROLE`), cursors, temporary
+    tables, `currval`/`lastval` state, `LISTEN`s and session advisory locks
+    are cleared. The pool's cached prepared statements are kept only if every
+    one is still the statement the pool prepared: a statement the cache does
+    not know, one made with SQL `PREPARE`, or one whose text differs (a
+    borrower can `DEALLOCATE` a cached name and `PREPARE` other SQL under it)
+    makes the pool run `DEALLOCATE ALL` and clear its cache.
   - `ALNPgSessionResetPolicyDiscardAll`: `DISCARD ALL`, which also drops
     every prepared statement; the pool's statement cache is cleared and
     statements are prepared again on next use.
   - `ALNPgSessionResetPolicyNone`: no reset, for code that manages session
     state itself.
+- Under every policy, notifications still queued for the borrower's
+  `LISTEN`s are read and dropped, so the next borrower's
+  `waitForNotificationsWithTimeout:` cannot see them.
 - If the reset fails, the connection is closed instead of reused
-  (`session_reset_failure_count`).
+  (`session_reset_failure_count`). `session_reset_count` counts releases that
+  ran the reset.
 
-The default reset costs one extra round trip per release. On a local socket
-that measured about 40 µs per pooled request (54 µs without a reset, 94 µs
-with it, 116 µs with `DISCARD ALL`).
+Cost, measured on a local socket over 2,000 pooled requests: a connection that
+ran only generated builder statements pays nothing extra. A marked connection
+pays one round trip, about 95 µs per request (49 µs → 142 µs for a pooled
+`executeQuery`), for the reset, the prepared-statement check and the
+notification drain.
 
 ```objc
 database.sessionResetPolicy = ALNPgSessionResetPolicyDiscardAll;
@@ -733,3 +755,7 @@ validated). Send binary data as `NSData`; it is bound as `bytea`.
 `ALNMSSQL` binds text parameters with their full byte length, so a value with
 an embedded U+0000 reaches SQL Server unchanged (SQL Server stores NUL inside
 `(n)varchar`).
+
+Both adapters also refuse SQL text (and `ALNPg` statement names) that contain
+U+0000 with an invalid-argument error. The drivers take statement text as a C
+string, so the statement would otherwise end silently at the NUL.

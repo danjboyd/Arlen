@@ -173,6 +173,23 @@ static NSString *ALNSQLBuilderShiftPlaceholders(NSString *sql, NSUInteger offset
   return rewritten;
 }
 
+// Counts, per thread, how many trusted expressions (app SQL text spliced into
+// a statement) have been compiled. A database adapter reads it before and
+// after compiling a builder to learn whether the statement holds app SQL,
+// which can change session state even inside a plain SELECT. Not public API.
+static _Thread_local NSUInteger ALNSQLBuilderTrustedExpressionCompiles = 0;
+
+NSUInteger ALNSQLBuilderTrustedExpressionCompileCount(void);
+NSUInteger ALNSQLBuilderTrustedExpressionCompileCount(void) {
+  return ALNSQLBuilderTrustedExpressionCompiles;
+}
+
+// Subclasses that compile trusted expressions themselves call this.
+void ALNSQLBuilderNoteTrustedExpressionCompile(void);
+void ALNSQLBuilderNoteTrustedExpressionCompile(void) {
+  ALNSQLBuilderTrustedExpressionCompiles += 1;
+}
+
 static BOOL ALNSQLBuilderExpressionTokenIsSafe(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return NO;
@@ -1227,6 +1244,7 @@ static NSSet *ALNSQLBuilderAllowedJoinOperators(void) {
                                   intoParameters:(NSMutableArray *)parameters
                                          context:(NSString *)context
                                            error:(NSError **)error {
+  ALNSQLBuilderTrustedExpressionCompiles += 1;
   NSString *expression = ALNSQLBuilderTrimmedString(expressionValue);
   if ([expression length] == 0) {
     if (error != NULL) {

@@ -1171,6 +1171,18 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
   if (statementOut != NULL) {
     *statementOut = SQL_NULL_HSTMT;
   }
+  // The statement text goes to the driver as a C string with SQL_NTS, so a
+  // U+0000 inside it would silently end the statement early.
+  if ([sql rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
+      NSNotFound) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"sql contains a NUL character (U+0000)",
+                                 nil,
+                                 nil);
+    }
+    return NO;
+  }
 
   SQLHSTMT statement = SQL_NULL_HSTMT;
   SQLRETURN rc = ALNSQLAllocHandle(SQL_HANDLE_STMT, connection, (SQLHANDLE *)&statement);

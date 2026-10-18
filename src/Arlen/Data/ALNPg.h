@@ -65,16 +65,21 @@ typedef NS_ENUM(NSInteger, ALNPgPreparedStatementReusePolicy) {
 
 /// What the pool resets when a connection is released, so one borrower's
 /// session state never reaches the next. A connection released inside a
-/// transaction is always closed, whatever the policy.
+/// transaction is always closed, whatever the policy. A connection that only
+/// ran SQL the pool generated itself (builder statements without trusted
+/// expressions) is reused without a reset.
 typedef NS_ENUM(NSInteger, ALNPgSessionResetPolicy) {
   /// Default. One round trip: `RESET ALL`, `SET SESSION AUTHORIZATION
-  /// DEFAULT`, `CLOSE ALL`, `DISCARD TEMP`, `UNLISTEN *` and
-  /// `pg_advisory_unlock_all()`. Keeps the pool's cached prepared statements.
+  /// DEFAULT`, `CLOSE ALL`, `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *`
+  /// and `pg_advisory_unlock_all()`, plus a check of the pool's cached
+  /// prepared statements against `pg_prepared_statements`; they are kept
+  /// unless one was replaced, in which case all are deallocated.
   ALNPgSessionResetPolicySession = 0,
   /// `DISCARD ALL`, which also drops every prepared statement (the pool's
   /// statement cache is cleared to match).
   ALNPgSessionResetPolicyDiscardAll = 1,
-  /// No reset. Only for code that manages session state itself.
+  /// No reset (queued notifications are still dropped). Only for code that
+  /// manages session state itself.
   ALNPgSessionResetPolicyNone = 2,
 };
 
@@ -195,7 +200,8 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 /// `connection_retry_count` (statements retried after a pooled connection
 /// turned out to have been closed by the server),
 /// `released_in_transaction_count` (connections closed because they were
-/// released inside a transaction), and `session_reset_failure_count`.
+/// released inside a transaction), `session_reset_count` (releases that ran
+/// the reset round trip), and `session_reset_failure_count`.
 - (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;

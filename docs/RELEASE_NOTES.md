@@ -3,16 +3,27 @@
 ## Unreleased
 
 - `ALNPg` resets a connection's session state when it goes back to the pool
-  (`RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`, `CLOSE ALL`,
-  `DISCARD TEMP`, `UNLISTEN *`, `pg_advisory_unlock_all()`), so settings such
-  as `search_path`, `SET ROLE` or a `set_config` tenant ID, temporary tables,
-  `LISTEN`s and session advisory locks no longer carry over to the next
-  borrower. A connection released inside a transaction (including one opened
-  by sending `BEGIN` by hand) is now closed instead of reused. The new
-  `sessionResetPolicy` chooses `Session` (default; keeps cached prepared
-  statements), `DiscardAll` or `None`. The default reset costs one round trip
-  per release (about 40 µs on a local socket). `poolDiagnostics` adds
-  `released_in_transaction_count` and `session_reset_failure_count`.
+  after the borrower ran its own SQL (any `executeQuery`/`executeCommand`/
+  script/prepare with caller SQL, a transaction, or a builder statement with a
+  trusted expression): `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`,
+  `CLOSE ALL`, `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *`,
+  `pg_advisory_unlock_all()`. Settings such as `search_path`, `SET ROLE` or a
+  `set_config` tenant ID, temporary tables, `currval`/`lastval`, `LISTEN`s
+  and session advisory locks no longer carry over to the next borrower, and
+  notifications still queued for the old `LISTEN`s are dropped. The pool's
+  cached prepared statements are checked against `pg_prepared_statements` in
+  the same round trip and all deallocated if one was replaced, so a borrower
+  cannot change what a cached statement name runs for later borrowers. A
+  connection released inside a transaction (including one opened by sending
+  `BEGIN` by hand) is now closed instead of reused. A connection that only ran
+  generated builder statements is reused without a reset. The new
+  `sessionResetPolicy` chooses `Session` (default), `DiscardAll` or `None`.
+  The reset costs one round trip (about 95 µs on a local socket).
+  `poolDiagnostics` adds `released_in_transaction_count`,
+  `session_reset_count` and `session_reset_failure_count`.
+- `ALNPg` and `ALNMSSQL` refuse SQL text (and `ALNPg` statement names) that
+  contain U+0000 with an invalid-argument error instead of letting the driver
+  end the statement at the NUL.
 - `ALNMSSQL` binds text parameters with their byte length instead of
   `SQL_NTS`, so a value with an embedded U+0000 reaches SQL Server whole
   instead of being cut short, and multi-byte text declares its UTF-8 length.

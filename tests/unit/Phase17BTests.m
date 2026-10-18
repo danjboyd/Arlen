@@ -381,6 +381,12 @@ extern BOOL ALNMSSQLTestBindLengthsForValue(id value,
                                                   error:&error];
   XCTAssertNil(error);
   XCTAssertEqualObjects(@4, rows.firstObject[@"n"]);
+
+  // A NUL inside the statement text itself is refused, not cut short.
+  error = nil;
+  NSString *sql = [NSString stringWithFormat:@"SELECT 1 AS n%C; SELECT 2", (unichar)0];
+  XCTAssertNil([adapter executeQuery:sql parameters:@[] error:&error]);
+  XCTAssertNotNil(error);
 }
 
 - (void)testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided {
