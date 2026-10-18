@@ -3253,6 +3253,80 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
                            error:nil];
 }
 
+- (void)testMigrationRunnerAppliesLowerNumberedFilesAddedAfterAHigherOne {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_gap"];
+  NSString *root = [self createTempDirectory];
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  NSDictionary<NSString *, NSString *> *initial = @{
+    @"001_create.sql" : [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY)", table],
+    @"004_add_d.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN d TEXT", table],
+  };
+  for (NSString *name in initial) {
+    XCTAssertTrue([initial[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                  atomically:YES
+                                    encoding:NSUTF8StringEncoding
+                                       error:NULL]);
+  }
+  NSArray *applied = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&applied
+                                                    error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)2, [applied count]);
+
+  // A release can add migrations numbered below one a database already has;
+  // the runner tracks applied versions as a set, so they still run, in order.
+  NSDictionary<NSString *, NSString *> *later = @{
+    @"002_add_b.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN b TEXT", table],
+    @"003_add_c.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN c TEXT", table],
+  };
+  for (NSString *name in later) {
+    XCTAssertTrue([later[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                atomically:YES
+                                  encoding:NSUTF8StringEncoding
+                                     error:NULL]);
+  }
+  NSArray *gapFiles = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&gapFiles
+                                                    error:&error], @"%@", error);
+  NSMutableArray *gapNames = [NSMutableArray array];
+  for (NSString *file in gapFiles) {
+    [gapNames addObject:[file lastPathComponent]];
+  }
+  XCTAssertEqualObjects((@[ @"002_add_b.sql", @"003_add_c.sql" ]), gapNames);
+
+  NSArray *columns = [database executeQuery:@"SELECT column_name FROM information_schema.columns "
+                                             "WHERE table_name = $1 ORDER BY column_name"
+                                 parameters:@[ table ]
+                                      error:&error];
+  NSMutableArray *columnNames = [NSMutableArray array];
+  for (NSDictionary *row in columns) {
+    [columnNames addObject:row[@"column_name"] ?: @""];
+  }
+  XCTAssertEqualObjects((@[ @"b", @"c", @"d", @"id" ]), columnNames);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+}
+
 - (void)testMigrationRunnerAppliesMultiStatementFile {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
