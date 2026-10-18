@@ -2495,7 +2495,7 @@ static BOOL ALNOpenAPIEnabled(ALNApplication *application) {
 
 static BOOL ALNOpenAPIDocsUIEnabled(ALNApplication *application) {
   NSDictionary *openapi = ALNOpenAPIConfig(application.config);
-  BOOL defaultEnabled = ![application.environment isEqualToString:@"production"];
+  BOOL defaultEnabled = ALNEnvironmentIsDevelopmentLike(application.environment);
   return ALNBoolConfigValue(openapi[@"docsUIEnabled"], defaultEnabled);
 }
 
@@ -3139,7 +3139,7 @@ static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
 static BOOL ALNReadinessRequiresMigrations(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"readinessRequiresMigrations"],
-                            [application.environment isEqualToString:@"production"]);
+                            !ALNEnvironmentIsDevelopmentLike(application.environment));
 }
 
 static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
@@ -5490,7 +5490,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     } else {
       NSString *cookieName = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
       NSUInteger maxAge = ALNUIntConfigValue(session[@"maxAgeSeconds"], 1209600, 1);
-      BOOL secureDefault = [self.environment isEqualToString:@"production"];
+      BOOL secureDefault = !ALNEnvironmentIsDevelopmentLike(self.environment);
       BOOL secure = ALNBoolConfigValue(session[@"secure"], secureDefault);
       NSString *sameSite = ALNStringConfigValue(session[@"sameSite"], @"Lax");
       [self addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:secret

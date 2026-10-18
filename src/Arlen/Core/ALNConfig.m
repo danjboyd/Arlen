@@ -1096,13 +1096,14 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
     config[@"trustedProxyCIDRs"] = configuredTrustedProxyCIDRs;
   }
   // Stage timing costs CPU on every request, and the X-Arlen-*-Ms response
-  // headers give clients a timing oracle, so production leaves both off
-  // (#215, #244). performanceHeaders only matters while performanceLogging is on.
+  // headers give clients a timing oracle, so production-like environments
+  // (every one but development and test) leave both off (#215, #244).
+  // performanceHeaders only matters while performanceLogging is on.
   if (config[@"performanceLogging"] == nil) {
-    config[@"performanceLogging"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceLogging"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"performanceHeaders"] == nil) {
-    config[@"performanceHeaders"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceHeaders"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"serveStatic"] == nil) {
     config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
@@ -1200,8 +1201,9 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   if (finalSession[@"maxAgeSeconds"] == nil) {
     finalSession[@"maxAgeSeconds"] = @(1209600);
   }
+  // Production-like environments (staging, qa, ...) get Secure cookies too.
   if (finalSession[@"secure"] == nil) {
-    finalSession[@"secure"] = @([env isEqualToString:@"production"]);
+    finalSession[@"secure"] = @(!ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalSession[@"sameSite"] == nil) {
     finalSession[@"sameSite"] = @"Lax";
@@ -1276,7 +1278,7 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
     finalOpenAPI[@"enabled"] = @(YES);
   }
   if (finalOpenAPI[@"docsUIEnabled"] == nil) {
-    finalOpenAPI[@"docsUIEnabled"] = @(![env isEqualToString:@"production"]);
+    finalOpenAPI[@"docsUIEnabled"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalOpenAPI[@"title"] == nil) {
     finalOpenAPI[@"title"] = @"Arlen API";
@@ -1366,9 +1368,10 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
-  // Pending schema migrations fail /readyz by default in production (GitHub issue 90).
+  // Pending schema migrations fail /readyz by default outside development and
+  // test (GitHub issue 90).
   if (finalObservability[@"readinessRequiresMigrations"] == nil) {
-    finalObservability[@"readinessRequiresMigrations"] = @([config[@"environment"] isEqual:@"production"]);
+    finalObservability[@"readinessRequiresMigrations"] = @(!ALNEnvironmentIsDevelopmentLike(config[@"environment"]));
   }
   if (finalObservability[@"metricsEnabled"] == nil) {
     finalObservability[@"metricsEnabled"] = @(YES);

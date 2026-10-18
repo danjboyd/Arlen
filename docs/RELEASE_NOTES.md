@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Breaking (non-development environments other than `production`):**
+  environments other than `development` and `test` (`staging`, `qa`,
+  `preview`, ...) now get the same defaults as `production`: a `Secure` session
+  cookie, no `/openapi` docs UI, no performance timing logs or `X-Arlen-*-Ms`
+  headers, and `/readyz` failing while migrations are pending. Before, only an
+  environment named exactly `production` got them. An explicit setting still
+  wins, e.g. `session.secure = NO` for a staging site served over plain HTTP.
 - **Breaking (production):** an app whose configured module fails to load or
   configure now refuses to start outside the `development` and `test`
   environments. The server and `jobs-worker` exit non-zero with

@@ -31,9 +31,11 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `performanceLogging` (default: on, off in `production`): record per-stage
+- `performanceLogging` (default: on in `development` and `test`, off in every
+  other environment): record per-stage
   request timing in the access log. `ARLEN_PERFORMANCE_LOGGING` overrides it.
-- `performanceHeaders` (default: on, off in `production`): while
+- `performanceHeaders` (default: on in `development` and `test`, off
+  elsewhere): while
   `performanceLogging` is on, also send the timing as `X-Arlen-Total-Ms`,
   `X-Arlen-Parse-Ms`, `X-Arlen-Response-Write-Ms` and `X-Mojo-Total-Ms`
   response headers. They let any client time requests, so keep them off on
@@ -269,8 +271,10 @@ Session config:
 - `session.secret`
 - `session.cookieName`
 - `session.maxAgeSeconds`
-- `session.secure` (default: on in `production`, off elsewhere; generated apps
-  leave it unset so this default applies)
+- `session.secure` (default: off in `development` and `test`, on in every other
+  environment, e.g. `production`, `staging`, `qa`; generated apps leave it unset
+  so this default applies. Set it to `NO` explicitly for a non-development
+  environment served over plain HTTP)
 - `session.sameSite`
 
 CSRF config:
@@ -560,8 +564,9 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
-- `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
-  it unset so `/openapi` is not served in production)
+- `openapi.docsUIEnabled` (default: on in `development` and `test`, off in every
+  other environment; generated apps leave it unset so `/openapi` is not served
+  in production or staging)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`

@@ -432,10 +432,11 @@ Cluster quorum readiness mode:
 - in multi-node mode, `GET /readyz` returns deterministic `503 not_ready` when `cluster.observedNodes < cluster.expectedNodes`
 - JSON readiness payload includes `checks.cluster_quorum` diagnostics (`ok`, `required_for_readyz`, `status`, `observed_nodes`, `expected_nodes`)
 
-Schema migration readiness (on by default in `production`):
+Schema migration readiness (on by default outside `development` and `test`):
 
 - `observability.readinessRequiresMigrations` (or `ARLEN_READINESS_REQUIRES_MIGRATIONS=0|1`)
- defaults to `YES` in the `production` environment and `NO` elsewhere
+ defaults to `NO` in `development` and `test` and `YES` in every other
+ environment (`production`, `staging`, ...)
 - `GET /readyz` returns `503 not_ready` while any migration shipped in the running
  release is not recorded in `arlen_schema_migrations`: the app's `db/migrations`
  and module migrations for the default database target, versioned as

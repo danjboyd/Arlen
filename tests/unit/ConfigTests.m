@@ -9,6 +9,8 @@
 #import "ALNDataverseClient.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
+#import "ALNRequest.h"
+#import "ALNResponse.h"
 
 @interface ConfigTests : XCTestCase
 @end
@@ -987,6 +989,66 @@
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
   }
+}
+
+
+- (void)testEnvironmentsOtherThanDevelopmentAndTestGetProductionSecurityDefaults {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  port = 3000;\n}\n"]);
+    for (NSString *environment in @[ @"production", @"staging", @"qa" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:environment error:&error];
+      XCTAssertNil(error, @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"session"][@"secure"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"openapi"][@"docsUIEnabled"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"performanceLogging"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"performanceHeaders"], @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"observability"][@"readinessRequiresMigrations"], @"%@", environment);
+
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{ @"environment" : environment }];
+      XCTAssertFalse([self responseIsOpenAPIDocsPage:[application dispatchRequest:[self openAPIDocsRequest]]],
+                     @"%@", environment);
+    }
+    for (NSString *environment in @[ @"development", @"test" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:environment error:&error];
+      XCTAssertEqualObjects(@(NO), config[@"session"][@"secure"], @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"openapi"][@"docsUIEnabled"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"observability"][@"readinessRequiresMigrations"], @"%@", environment);
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{ @"environment" : environment }];
+      XCTAssertTrue([self responseIsOpenAPIDocsPage:[application dispatchRequest:[self openAPIDocsRequest]]],
+                    @"%@", environment);
+    }
+
+    // An explicit value still wins, e.g. a staging site served over plain HTTP.
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/staging.plist"]
+                          content:@"{\n  session = { secure = NO; };\n  openapi = { docsUIEnabled = YES; };\n}\n"]);
+    NSError *error = nil;
+    NSDictionary *staging = [ALNConfig loadConfigAtRoot:root environment:@"staging" error:&error];
+    XCTAssertEqualObjects(@(NO), staging[@"session"][@"secure"]);
+    XCTAssertEqualObjects(@(YES), staging[@"openapi"][@"docsUIEnabled"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
+- (BOOL)responseIsOpenAPIDocsPage:(ALNResponse *)response {
+  NSString *contentType = [response headerForName:@"Content-Type"] ?: @"";
+  return response.statusCode == 200 && [contentType hasPrefix:@"text/html"];
+}
+
+- (ALNRequest *)openAPIDocsRequest {
+  return [[ALNRequest alloc] initWithMethod:@"GET"
+                                       path:@"/openapi"
+                                queryString:@""
+                                    headers:@{}
+                                       body:[NSData data]];
 }
 
 @end
