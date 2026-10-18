@@ -43,7 +43,8 @@ typedef NS_ENUM(NSUInteger, ALNHTTPParserBackend) {
 // Server internals for request bodies spooled to disk (requestLimits.spoolThresholdBytes).
 // Parses a complete request head (through CRLF CRLF) with the given backend and
 // no body, then `adoptSpooledBodyAtPath:` maps the spooled file as `body`. The
-// request owns the file and removes it with its other temporary files.
+// request owns the file and removes it with its other temporary files; after
+// `removeTemporaryFiles` a spooled `body` is empty.
 + (nullable ALNRequest *)requestFromHeadData:(NSData *)head
                                      backend:(ALNHTTPParserBackend)backend
                                        error:(NSError *_Nullable *_Nullable)error;

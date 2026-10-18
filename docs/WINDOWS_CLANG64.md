@@ -159,6 +159,12 @@ Windows checkout and shell notes:
 - a shell started by a native process (xctest, an app) sees MSYS2 path
   variables in `C:/...` form; `tools/resolve_gnustep.sh` prints one spelling so
   the framework's build-flags sentinel stays stable across both
+- `arlen test --app` works: `boomhauer --build-tests` builds
+  `.boomhauer/build/tests/AppTests.xctest/AppTests.dll` against the
+  framework's vendored tools-xctest (no XCTest ships in the toolchain), and
+  `tools/run_app_tests.sh` puts its `XCTest-0.dll` on `PATH`
+- the gnustep-cli `v0.1.1` toolchain ships no MSYS2 `perl`; test helpers use
+  coreutils `timeout` instead
 
 ## 4. Packaged Release Contract
 

@@ -196,7 +196,13 @@
     [task waitUntilExit];
     return YES;
   }
+#if defined(_WIN32)
+  // -terminate ends only the bash wrapper; the native server under it would
+  // be orphaned, still listening. Kill the whole tree.
+  (void)ALNTestStopServerTask(task);
+#else
   [task terminate];
+#endif
   if ([self waitForTaskExit:task timeoutSeconds:timeoutSeconds]) {
     return YES;
   }
@@ -669,8 +675,8 @@
       [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
   environment[@"ARLEN_CONNECTION_TIMEOUT_SECONDS"] = @"120";
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -716,8 +722,8 @@
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_HTTP_SESSIONS=1 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -787,8 +793,8 @@
                    @"ARLEN_MAX_QUEUED_HTTP_CONNECTIONS=1 ./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -871,8 +877,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1092,8 +1098,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1147,8 +1153,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1256,8 +1262,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1306,8 +1312,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--env", @"production", @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1361,8 +1367,8 @@
                   @"ARLEN_REQUEST_DISPATCH_MODE=serialized ./build/boomhauer --env production --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1416,8 +1422,8 @@
                   @"ARLEN_REQUEST_DISPATCH_MODE=serialized ./build/boomhauer --env production --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -1517,8 +1523,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = ALNTestBashPath();
   server.arguments = @[ @"-lc", [NSString stringWithFormat:serverCommand ?: @"./build/boomhauer --port %d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = server.standardOutput;
   [server launch];
 
   @try {
@@ -1774,8 +1780,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2047,8 +2053,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2110,8 +2116,8 @@
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_OPENAPI_DOCS_UI_STYLE=swagger ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2225,8 +2231,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2319,8 +2325,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2440,8 +2446,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2501,8 +2507,8 @@
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_WEBSOCKET_SESSIONS=1 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2572,8 +2578,8 @@
                    @"./build/boomhauer --port %d",
                   port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2646,8 +2652,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -2744,8 +2750,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -3055,8 +3061,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -3180,8 +3186,8 @@
       [[NSProcessInfo processInfo] environment]];
   [environment addEntriesFromDictionary:extraEnvironment];
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -3207,8 +3213,8 @@
       [[NSProcessInfo processInfo] environment]];
   environment[@"ARLEN_STATIC_CACHE_CONTROL"] = @"public, max-age=600";
   server.environment = environment;
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
   @try {
     BOOL ready = NO;
@@ -3416,8 +3422,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/boomhauer";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -3643,8 +3649,8 @@
     server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     BOOL ready = NO;
     (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3708,8 +3714,8 @@
       server.launchPath = ALNTestBashPath();
       server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
           [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-      server.standardOutput = [NSPipe pipe];
-      server.standardError = [NSPipe pipe];
+      server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+      server.standardError = [NSFileHandle fileHandleWithNullDevice];
       [server launch];
       BOOL ready = NO;
       (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3761,8 +3767,8 @@
     server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:@"%@ %@ --port %d", envPrefix,
         [self shellQuoted:[appRoot stringByAppendingPathComponent:ALNTestAppBinaryRelativePath()]], port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     BOOL ready = NO;
     (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
@@ -3789,8 +3795,8 @@
     server.launchPath = ALNTestBashPath();
     server.arguments = @[@"-lc", [NSString stringWithFormat:
         @"ARLEN_MAX_BODY_BYTES=115343360 ARLEN_HTTP_PARSER_BACKEND=%@ ./build/boomhauer --port %d", backend, port]];
-    server.standardOutput = [NSPipe pipe];
-    server.standardError = [NSPipe pipe];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = [NSFileHandle fileHandleWithNullDevice];
     [server launch];
     @try {
       BOOL ready = NO;
@@ -4137,8 +4143,8 @@
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_MAX_BODY_BYTES=16 ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -4308,8 +4314,8 @@
     @"-lc",
     [NSString stringWithFormat:@"ARLEN_HTTP_PARSER_BACKEND=legacy ./build/boomhauer --port %d", port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -4637,9 +4643,15 @@
                                                           error:&chmodError]);
     XCTAssertNil(chmodError);
 
+#if defined(_WIN32)
+    // A C:/ entry would split at the drive colon in MSYS2's ':'-separated PATH.
+    NSString *fakeBinPathEntry = [NSString stringWithFormat:@"\"$(cygpath -u %@)\"", [self shellQuoted:fakeBin]];
+#else
+    NSString *fakeBinPathEntry = [self shellQuoted:fakeBin];
+#endif
     NSString *command = [NSString
         stringWithFormat:@"PATH=%@:$PATH ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ %@ --prepare-only 2>&1",
-                         [self shellQuoted:fakeBin],
+                         fakeBinPathEntry,
                          [self shellQuoted:repoRoot],
                          [self shellQuoted:appRoot],
                          [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/boomhauer"]]];
@@ -4832,8 +4844,8 @@
   NSTask *server = [[NSTask alloc] init];
   server.launchPath = @"./build/tech-demo-server";
   server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
   if (environment == nil) {
     environment = [NSMutableDictionary dictionary];
@@ -6117,8 +6129,8 @@
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {
@@ -6167,8 +6179,8 @@
     [NSString stringWithFormat:@"ARLEN_APP_ROOT=examples/auth_primitives ./build/auth-primitives-server --port %d",
                                port]
   ];
-  server.standardOutput = [NSPipe pipe];
-  server.standardError = [NSPipe pipe];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
   [server launch];
 
   @try {

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
+  stop with "--build-tests currently supports GNUstep on Linux only"; the app
+  test bundle is now `AppTests.dll`, built against the framework's vendored
+  tools-xctest.
+- A spooled request body (`request.body` above `requestLimits.spoolThresholdBytes`)
+  reads as empty once the handler returns. On Windows its spool file used to
+  stay on disk after a handler exception, because the leaked request kept the
+  file mapped. Also on Windows, static and `renderFileAtPath:` ETags now use
+  the NTFS file index and 100 ns write/change times: a same-size rewrite within
+  a second used to keep its ETag, so a changed file could answer 304.
 - Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
   managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
   toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming

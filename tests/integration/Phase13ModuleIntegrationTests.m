@@ -607,8 +607,12 @@
                                                          error:&readError];
     XCTAssertNotNil(appMakefile);
     XCTAssertNil(readError);
-    XCTAssertTrue([appMakefile containsString:currentGeneratedPath], @"%@", appMakefile ?: @"");
-    XCTAssertFalse([appMakefile containsString:staleGeneratedPath], @"%@", appMakefile ?: @"");
+    // App-relative: on Windows the makefile spells the app root in MSYS2 form
+    // (/tmp/...), not the C:/ form this process uses.
+    NSString *currentRelativePath = [currentGeneratedPath substringFromIndex:[appRoot length]];
+    NSString *staleRelativePath = [staleGeneratedPath substringFromIndex:[appRoot length]];
+    XCTAssertTrue([appMakefile containsString:currentRelativePath], @"%@", appMakefile ?: @"");
+    XCTAssertFalse([appMakefile containsString:staleRelativePath], @"%@", appMakefile ?: @"");
 #endif
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];

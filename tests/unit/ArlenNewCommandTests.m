@@ -148,10 +148,13 @@
   NSString *output = nil;
   XCTAssertEqual(0, [self runNewWithTarget:@"My App" inDirectory:root output:&output], @"%@", output);
   NSString *appRoot = [root stringByAppendingPathComponent:@"My App"];
+  // The alias goes under the test's own TMPDIR, so it is removed with the test
+  // root instead of being left dangling in the real tmp.
+  NSString *tmp = [root stringByAppendingPathComponent:@"tmp"];
   int exitCode = -1;
-  NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+  NSString *command = [NSString stringWithFormat:@"mkdir -p %@ && cd %@ && TMPDIR=%@ LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
                                                   "ARLEN_FRAMEWORK_ROOT=%@ %@ --prepare-only 2>&1",
-                                                 ALNTestShellQuote(appRoot),
+                                                 ALNTestShellQuote(tmp), ALNTestShellQuote(appRoot), ALNTestShellQuote(tmp),
                                                  ALNTestShellQuote(ALNTestRepoRoot()),
                                                  ALNTestShellQuote(ALNTestPathFromRepoRoot(@"bin/boomhauer"))];
   output = ALNTestRunShellCapture(command, &exitCode);
