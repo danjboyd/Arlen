@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Storage module `1.2.0`: `GET /storage/api/download/:token` now sends
+  `Content-Disposition: attachment` with a sanitized filename,
+  `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+  Only PNG, JPEG, GIF, WebP, AVIF, PDF, audio and video objects are served
+  inline. Downloads used to be served inline with whatever content type the
+  uploader declared, so an HTML or SVG object opened as a page on the app's
+  origin. Wildcard `acceptedContentTypes` (`*/*`, the default, and `image/*`)
+  no longer match `text/html`, `image/svg+xml` or `application/xhtml+xml`;
+  collections that store them must list them exactly.
 - EOC: when no page fills a named slot, `<%@ yield "name" %>` falls back to
   the context value with the same name. That value is now HTML-escaped like
   `<%= %>` output; it used to be written raw, so a controller value such as

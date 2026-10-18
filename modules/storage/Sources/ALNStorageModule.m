@@ -10,6 +10,7 @@
 #import "ALNLogger.h"
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
+#import "ALNResponse.h"
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNStorageModuleErrorDomain = @"Arlen.Modules.Storage.Error";
@@ -256,17 +257,90 @@ static NSString *SMPercentEncodedQueryComponent(NSString *value) {
   return [SMTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
 }
 
+// The media type without parameters, lowercased: "Image/PNG; q=1" -> "image/png".
+static NSString *SMBaseContentType(NSString *contentType) {
+  NSString *type = SMLowerTrimmedString(contentType);
+  NSRange separator = [type rangeOfString:@";"];
+  if (separator.location != NSNotFound) {
+    type = SMTrimmedString([type substringToIndex:separator.location]);
+  }
+  return type;
+}
+
+// Types a browser renders as an active document (markup that can run script).
+// Wildcard patterns such as `*/*` or `image/*` never admit them; a collection
+// must list them explicitly.
+static BOOL SMContentTypeIsActiveDocument(NSString *contentType) {
+  static NSSet<NSString *> *activeTypes = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    activeTypes = [NSSet setWithArray:@[ @"text/html", @"image/svg+xml", @"application/xhtml+xml" ]];
+  });
+  return [activeTypes containsObject:SMBaseContentType(contentType)];
+}
+
 static BOOL SMContentTypeMatches(NSString *candidate, NSString *allowedPattern) {
-  NSString *type = SMLowerTrimmedString(candidate);
-  NSString *pattern = SMLowerTrimmedString(allowedPattern);
+  NSString *type = SMBaseContentType(candidate);
+  NSString *pattern = SMBaseContentType(allowedPattern);
   if ([pattern length] == 0 || [pattern isEqualToString:@"*/*"]) {
-    return YES;
+    return !SMContentTypeIsActiveDocument(type);
   }
   if ([pattern hasSuffix:@"/*"]) {
     NSString *prefix = [pattern substringToIndex:([pattern length] - 1)];
-    return [type hasPrefix:prefix];
+    return [type hasPrefix:prefix] && !SMContentTypeIsActiveDocument(type);
   }
   return [type isEqualToString:pattern];
+}
+
+// Downloads are served inline only for media types browsers display without
+// running script. Everything else is sent as an attachment.
+static BOOL SMContentTypeAllowsInlineDownload(NSString *contentType) {
+  static NSSet<NSString *> *inlineTypes = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    inlineTypes = [NSSet setWithArray:@[
+      @"image/png", @"image/jpeg", @"image/gif", @"image/webp", @"image/avif", @"application/pdf"
+    ]];
+  });
+  NSString *type = SMBaseContentType(contentType);
+  if ([inlineTypes containsObject:type]) {
+    return YES;
+  }
+  return ([type hasPrefix:@"audio/"] || [type hasPrefix:@"video/"]) && [type length] > 6;
+}
+
+// An ASCII filename safe to quote in Content-Disposition: letters, digits and
+// `._-`; anything else becomes `_`. Leading dots are dropped.
+static NSString *SMSafeDownloadFilename(NSString *name) {
+  NSString *base = [SMTrimmedString(name) lastPathComponent] ?: @"";
+  NSMutableString *safe = [NSMutableString string];
+  for (NSUInteger index = 0; index < [base length] && [safe length] < 150; index++) {
+    unichar character = [base characterAtIndex:index];
+    BOOL allowed = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+                   (character >= '0' && character <= '9') || character == '.' || character == '-' ||
+                   character == '_';
+    if (character == '.' && [safe length] == 0) {
+      continue;
+    }
+    [safe appendString:allowed ? [NSString stringWithCharacters:&character length:1] : @"_"];
+  }
+  return ([safe length] > 0) ? [NSString stringWithString:safe] : @"download";
+}
+
+static NSString *SMContentDispositionForDownload(NSString *name, BOOL inlineDisposition) {
+  NSString *fallback = SMSafeDownloadFilename(name);
+  NSString *disposition = [NSString stringWithFormat:@"%@; filename=\"%@\"",
+                                                     inlineDisposition ? @"inline" : @"attachment",
+                                                     fallback];
+  NSString *original = [SMTrimmedString(name) lastPathComponent] ?: @"";
+  NSCharacterSet *unreserved =
+      [NSCharacterSet characterSetWithCharactersInString:
+                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"];
+  NSString *encoded = [original stringByAddingPercentEncodingWithAllowedCharacters:unreserved];
+  if ([encoded length] > 0 && ![encoded isEqualToString:fallback] && [encoded length] <= 600) {
+    disposition = [disposition stringByAppendingFormat:@"; filename*=UTF-8''%@", encoded];
+  }
+  return disposition;
 }
 
 static NSArray<NSString *> *SMNormalizedContentTypes(id rawValue) {
@@ -2058,7 +2132,24 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return nil;
   }
   NSString *contentType = SMTrimmedString(metadata[@"object"][@"contentType"]);
-  [self renderData:data contentType:([contentType length] > 0) ? contentType : @"application/octet-stream"];
+  if ([contentType length] == 0) {
+    contentType = @"application/octet-stream";
+  }
+  // Stored objects carry the uploader-declared content type, so only a small
+  // set of passive media types is displayed inline; everything else is a
+  // download. A sandbox policy keeps any document that is rendered from
+  // running script on the app origin, and nosniff stops type guessing.
+  // Inline PDF keeps the app policy: browser PDF viewers refuse to run in a
+  // sandboxed document.
+  BOOL inlineDisposition = SMContentTypeAllowsInlineDownload(contentType);
+  ALNResponse *response = self.context.response;
+  [response setHeader:@"Content-Disposition"
+                value:SMContentDispositionForDownload(metadata[@"object"][@"name"], inlineDisposition)];
+  [response setHeader:@"X-Content-Type-Options" value:@"nosniff"];
+  if (!(inlineDisposition && [SMBaseContentType(contentType) isEqualToString:@"application/pdf"])) {
+    [response setHeader:@"Content-Security-Policy" value:@"sandbox"];
+  }
+  [self renderData:data contentType:contentType];
   return nil;
 }
 
