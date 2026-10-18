@@ -80,6 +80,13 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *loginPath;
 @property(nonatomic, copy, readonly) NSString *registerPath;
 @property(nonatomic, copy, readonly) NSString *logoutPath;
+/// POST target that signs the current user out on every device
+/// (`authModule.paths.logoutAll`, default `/auth/logout/all`).
+@property(nonatomic, copy, readonly) NSString *logoutAllPath;
+/// `authModule.session.absoluteLifetimeSeconds` (default 1209600, 14 days):
+/// how long after sign-in a module session stays signed in, however often it
+/// is renewed.
+@property(nonatomic, assign, readonly) NSUInteger absoluteSessionLifetimeSeconds;
 @property(nonatomic, copy, readonly) NSString *sessionPath;
 @property(nonatomic, copy, readonly) NSString *verifyPath;
 @property(nonatomic, copy, readonly) NSString *forgotPasswordPath;
@@ -217,6 +224,20 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 /// for `subject` on its next request.
 - (BOOL)bumpSessionStampForSubject:(NSString *)subject
                              error:(NSError *_Nullable *_Nullable)error;
+/// Signs the request's session out and records it as ended
+/// (`auth_revoked_sessions`), so other copies of the same session cookie stop
+/// working while the user's other sessions are unaffected. The session is
+/// always cleared from the context; returns NO with `error` only when the
+/// record could not be written.
+- (BOOL)revokeCurrentSessionForContext:(ALNContext *)context
+                                 error:(NSError *_Nullable *_Nullable)error;
+/// Ends every other session of the signed-in user (bumps the session stamp)
+/// and keeps the request's session signed in by recording the new stamp in it.
+- (BOOL)signOutOtherSessionsForContext:(ALNContext *)context
+                                 error:(NSError *_Nullable *_Nullable)error;
+/// Ends every session of the signed-in user, including the request's own.
+- (BOOL)signOutAllSessionsForContext:(ALNContext *)context
+                               error:(NSError *_Nullable *_Nullable)error;
 @end
 
 /// Adds the per-request middleware that calls

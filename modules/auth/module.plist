@@ -17,6 +17,9 @@
       authModule = {
         defaultRedirect = "/";
         bootstrapAdminEmails = ();
+        session = {
+          absoluteLifetimeSeconds = 1209600;
+        };
         mfa = {
           sms = {
             enabled = NO;

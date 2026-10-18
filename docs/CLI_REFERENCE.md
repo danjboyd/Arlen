@@ -624,8 +624,9 @@ surfaces that setup guidance directly instead of a generic database error.
 Run it again after `arlen module upgrade auth` (recommended): signed-in
 requests read the user's current roles from `auth_users` either way, and the
 newer `002_auth_session_stamp.sql` migration enables ending a user's sessions
-by stamp. Until it is applied, the module logs one warning naming the
-migration (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
+by stamp, and `003_auth_revoked_sessions.sql` lets signing out refuse other
+copies of the session cookie. Until each is applied, the module logs one
+warning naming it (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
 First-party module surfaces after install:
 

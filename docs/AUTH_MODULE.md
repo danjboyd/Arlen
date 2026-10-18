@@ -26,6 +26,7 @@ Interactive HTML routes:
 - `GET /auth/login`
 - `POST /auth/login`
 - `POST /auth/logout`
+- `POST /auth/logout/all`
 - `GET /auth/register`
 - `POST /auth/register`
 - `GET /auth/session`
@@ -49,6 +50,7 @@ Stable API-first aliases:
 - `GET /auth/api/session`
 - `POST /auth/api/login`
 - `POST /auth/api/logout`
+- `POST /auth/api/logout/all`
 - `POST /auth/api/register`
 - `GET /auth/api/verify`
 - `POST /auth/api/password/forgot`
@@ -251,13 +253,60 @@ current roles:
   `auth_users` subject, call `recordSessionStampForContext:error:` after
   establishing it.
 
+Ending sessions:
+
+- Signing out (`POST /auth/logout`, `POST /auth/api/logout`) clears the session
+  and records it in `auth_revoked_sessions` (migration
+  `003_auth_revoked_sessions.sql`). Any other copy of that session cookie is
+  then signed out on its next request, including copies taken before an MFA
+  step-up. The user's sessions on other devices stay signed in. The check is
+  part of the same per-request `auth_users` query. A record is kept only until
+  the cookie would have expired anyway (`session.maxAgeSeconds`, or the
+  absolute lifetime below if that ends sooner); expired records are deleted
+  when someone signs out.
+  `-[ALNAuthModuleRuntime revokeCurrentSessionForContext:error:]` does the same
+  from application code.
+- Sign out everywhere (`POST /auth/logout/all`, `POST /auth/api/logout/all`, or
+  `signOutAllSessionsForContext:error:`) bumps the user's session stamp and
+  signs out the current session, ending every session the user has.
+- Changing the password (`/auth/password/change`) bumps the stamp in the same
+  transaction as the new password, so every other session ends; the session
+  that made the change records the new stamp and stays signed in. A reset by
+  emailed link ends every existing session too, and the resetting browser is
+  signed in with a new session as before. Removing the SMS factor ends the
+  user's other sessions and keeps the current one.
+  `signOutOtherSessionsForContext:error:` does this from application code.
+- Deleting the `auth_users` row signs out every session of that user (see
+  above).
+- `authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days,
+  the same as the default `session.maxAgeSeconds`) limits how long a module or
+  OIDC sign-in lasts. The session cookie renews on use, but once this much time
+  has passed since sign-in (`auth_time`, which step-up does not change) the
+  session is signed out and the user signs in again.
+
+These apply to module sign-ins (local password, email link, stub). Sessions
+from a configured OIDC provider are subject to the absolute lifetime; whether
+they stay valid otherwise is decided by the application resolver (see above),
+so signing out clears them without a server-side record. Sessions application
+code establishes for identities the module does not own are not affected.
+
+Whether `auth_users.session_stamp` and `auth_revoked_sessions` exist is checked
+once per process (per database adapter) and cached, so a database without
+those migrations does not see a failing query on every request. Restart the
+application after running `arlen module migrate` for newly added objects to be
+used.
+
 Running `arlen module migrate` after upgrading is recommended: it applies
-`002_auth_session_stamp.sql`, which enables ending sessions by stamp. Until it
-runs, roles are still read live and deleted users are still signed out; only
-the stamp is skipped. The stamp comparison is not made, sign-ins do not record
-a stamp, `bumpSessionStampForSubject:error:` returns success without changing
-anything (so admin-ui revocation still succeeds and the revoked role is still
-denied), and the module logs one warning per process naming the migration.
+`002_auth_session_stamp.sql`, which enables ending sessions by stamp, and
+`003_auth_revoked_sessions.sql`, which lets a sign-out refuse other copies of
+the session cookie. Until 002 runs, roles are still read live and deleted users
+are still signed out; only the stamp is skipped. The stamp comparison is not
+made, sign-ins do not record a stamp, `bumpSessionStampForSubject:error:` (and
+so password changes, sign out everywhere and admin-ui revocation) succeeds
+without changing it, and the revoked role is still denied. Until 003 runs,
+signing out still clears the session cookie and succeeds, but other copies of
+that cookie are not refused. For each missing migration the module logs one
+warning per process naming it.
 
 Any other lookup failure (for example the database is unreachable, or the
 `auth_users` table is missing) fails the request instead of continuing with the

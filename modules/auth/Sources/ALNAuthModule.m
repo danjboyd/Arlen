@@ -816,6 +816,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *loginPath;
 @property(nonatomic, copy, readwrite) NSString *registerPath;
 @property(nonatomic, copy, readwrite) NSString *logoutPath;
+@property(nonatomic, copy, readwrite) NSString *logoutAllPath;
+@property(nonatomic, assign, readwrite) NSUInteger absoluteSessionLifetimeSeconds;
+@property(nonatomic, assign) NSUInteger sessionCookieMaxAgeSeconds;
 @property(nonatomic, copy, readwrite) NSString *sessionPath;
 @property(nonatomic, copy, readwrite) NSString *verifyPath;
 @property(nonatomic, copy, readwrite) NSString *forgotPasswordPath;
@@ -967,6 +970,14 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (nullable NSString *)emailLinkBaseURLWithRequestBaseURL:(NSString *)requestBaseURL
                                                     event:(NSString *)event;
 
+@end
+
+// Implemented in ALNAuthModuleSessionRefresh.m.
+@interface ALNAuthModuleRuntime (ALNAuthModuleSessionStampInternal)
+- (BOOL)bumpSessionStampForUserID:(NSString *)userID
+                       connection:(ALNPgConnection *)connection
+                            error:(NSError **)error;
+- (BOOL)recordCurrentSessionStampForContext:(ALNContext *)context error:(NSError **)error;
 @end
 
 @interface ALNAuthModuleController : ALNController
@@ -1161,6 +1172,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _loginPath = @"/auth/login";
     _registerPath = @"/auth/register";
     _logoutPath = @"/auth/logout";
+    _logoutAllPath = @"/auth/logout/all";
+    _absoluteSessionLifetimeSeconds = 1209600U;
+    _sessionCookieMaxAgeSeconds = 1209600U;
     _sessionPath = @"/auth/session";
     _verifyPath = @"/auth/verify";
     _forgotPasswordPath = @"/auth/password/forgot";
@@ -1221,6 +1235,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.loginPath = AMConfiguredPath(self.moduleConfig, @"login", @"login");
   self.registerPath = AMConfiguredPath(self.moduleConfig, @"register", @"register");
   self.logoutPath = AMConfiguredPath(self.moduleConfig, @"logout", @"logout");
+  self.logoutAllPath = AMConfiguredPath(self.moduleConfig, @"logoutAll", @"logout/all");
   self.sessionPath = AMConfiguredPath(self.moduleConfig, @"session", @"session");
   self.verifyPath = AMConfiguredPath(self.moduleConfig, @"verify", @"verify");
   self.forgotPasswordPath = AMConfiguredPath(self.moduleConfig, @"forgotPassword", @"password/forgot");
@@ -1279,6 +1294,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.layoutTemplate = ([layoutTemplate length] > 0) ? layoutTemplate : @"modules/auth/layouts/main";
   self.generatedPagePrefix = AMNormalizedTemplatePrefix(uiConfig[@"generatedPagePrefix"]);
   self.partialTemplateOverrides = AMNormalizedTemplateOverrideMap(uiConfig[@"partials"]);
+
+  NSDictionary *sessionConfig =
+      [self.moduleConfig[@"session"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"session"] : @{};
+  self.absoluteSessionLifetimeSeconds = AMConfigUnsignedInteger(sessionConfig[@"absoluteLifetimeSeconds"], 1209600U);
 
   NSDictionary *mfaConfig = [self.moduleConfig[@"mfa"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"mfa"] : @{};
   NSDictionary *smsConfig = [mfaConfig[@"sms"] isKindOfClass:[NSDictionary class]] ? mfaConfig[@"sms"] : @{};
@@ -1481,6 +1500,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
+  NSDictionary *appSessionConfig = [application.config[@"session"] isKindOfClass:[NSDictionary class]]
+                                       ? application.config[@"session"]
+                                       : @{};
+  self.sessionCookieMaxAgeSeconds = AMConfigUnsignedInteger(appSessionConfig[@"maxAgeSeconds"], 1209600U);
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};
@@ -1551,6 +1574,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"generatedPagePrefix" : self.generatedPagePrefix ?: @"auth",
     @"partials" : self.partialTemplateOverrides ?: @{},
     @"contextHook" : self.uiContextHook ? NSStringFromClass([self.uiContextHook class]) : @"",
+  };
+  summary[@"session"] = @{
+    @"absoluteLifetimeSeconds" : @(self.absoluteSessionLifetimeSeconds),
   };
   summary[@"mfa"] = @{
     @"sms" : @{
@@ -2316,6 +2342,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     if (updated < 0) {
       return NO;
     }
+    // A new password ends the user's existing sessions.
+    if (![self bumpSessionStampForUserID:normalizedUserID connection:connection error:txError]) {
+      return NO;
+    }
     return [self invalidatePasswordResetTokensForUserID:normalizedUserID connection:connection error:txError];
   } error:error];
 }
@@ -2428,6 +2458,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                          parameters:@[ userID, encodedHash ]
                                               error:txError];
     if (updated < 0) {
+      return NO;
+    }
+    // A reset ends the user's existing sessions; the reset flow signs the
+    // resetting browser in afresh.
+    if (![self bumpSessionStampForUserID:userID connection:connection error:txError]) {
       return NO;
     }
     return [self invalidatePasswordResetTokensForUserID:userID connection:connection error:txError];
@@ -3220,6 +3255,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   AMSetSMSSessionState(context, nil);
+  // Removing a factor ends the user's other sessions; this one stays signed in.
+  if (deleted > 0 && ![self signOutOtherSessionsForContext:context error:error]) {
+    return NO;
+  }
   return YES;
 }
 
@@ -3895,9 +3934,30 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)logout:(ALNContext *)ctx {
-  (void)ctx;
-  [self clearAuthenticatedSession];
-  if ([self shouldPreferJSONForHeadlessRequest:self.context]) {
+  NSError *error = nil;
+  if (![self.runtime revokeCurrentSessionForContext:ctx error:&error]) {
+    // The session is cleared either way; only the server-side record failed.
+    [ctx.logger error:@"auth logout could not record the ended session"
+               fields:@{ @"module" : @"auth", @"error" : error.localizedDescription ?: @"" }];
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    return @{ @"status" : @"ok" };
+  }
+  [self redirectTo:self.runtime.loginPath status:302];
+  return nil;
+}
+
+- (id)logoutAll:(ALNContext *)ctx {
+  if ([[ctx authSubject] length] == 0) {
+    [self setStatus:401];
+    return @{ @"status" : @"error", @"message" : @"Authentication required" };
+  }
+  NSError *error = nil;
+  if (![self.runtime signOutAllSessionsForContext:ctx error:&error]) {
+    [self setStatus:500];
+    return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Failed to sign out other sessions" };
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return @{ @"status" : @"ok" };
   }
   [self redirectTo:self.runtime.loginPath status:302];
@@ -4263,6 +4323,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self.runtime updateLocalPasswordHash:encodedHash forUserID:AMTrimmedString(user[@"id"]) error:&updateError]) {
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : updateError.localizedDescription ?: @"Failed to update password" };
+  }
+  // The update ended every session of this user; keep this one signed in.
+  if (![self.runtime recordCurrentSessionStampForContext:ctx error:&updateError]) {
+    [ctx.logger warn:@"auth password change could not keep the current session signed in"
+              fields:@{ @"module" : @"auth", @"error" : updateError.localizedDescription ?: @"" }];
   }
   return @{ @"status" : @"ok" };
 }
@@ -4899,6 +4964,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
+  [application registerRouteMethod:@"POST"
+                              path:runtime.logoutAllPath
+                              name:@"auth_logout_all"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"logoutAll"];
   if (![runtime isHeadlessUIMode] && runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"GET"
                                   path:runtime.registerPath
@@ -5052,6 +5122,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_api_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/logout/all"
+                              name:@"auth_api_logout_all"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"logoutAll"];
   if (runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"POST"
                                 path:@"/register"
@@ -5171,6 +5246,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"response" : @{ @"type" : @"object" },
     },
     @"auth_api_logout" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
+    @"auth_api_logout_all" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"auth_api_register" : @{
       @"request" : @{
         @"type" : @"object",

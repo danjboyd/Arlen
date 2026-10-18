@@ -292,6 +292,11 @@ query can cost:
   - authenticated session
   - either `operator` or `admin` role
   - AAL2 step-up
+- role checks (the operator/admin policy and `role_gated` resources) use
+  `+[ALNAuth context:hasAnyRole:]`, which reads the request's current roles;
+  with the auth module installed those come from `auth_users` on every request,
+  so a revoked role is denied on the user's next request (see
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles))
 
 ## Index Lifecycle
 

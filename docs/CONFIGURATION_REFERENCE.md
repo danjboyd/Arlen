@@ -662,6 +662,16 @@ unchanged, no token is issued, and the module logs an error naming
 adapter are configured). Set it in production. `claimTrustedEmail:` keeps
 taking its `baseURL` from the caller.
 
+## Auth Module Sessions
+
+`authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days) is
+how long a sign-in through the auth module (or one of its OIDC providers)
+lasts, measured from sign-in. The session cookie's `session.maxAgeSeconds`
+renews on every response that writes the session; this limit does not, so a
+session in daily use still ends this long after sign-in and the user signs in
+again. Must be a positive whole number. See
+[Auth Module](AUTH_MODULE.md#sessions-and-roles).
+
 ## Auth Module OIDC Providers
 
 Configure `authModule.providers.<identifier>` with `enabled = YES` and
