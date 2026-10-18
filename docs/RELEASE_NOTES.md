@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- `auth` 1.6.0 refuses a TOTP code whose time step was already accepted for the
+  enrollment, even in another session, and limits failed verification attempts
+  per account. Five consecutive failed TOTP or recovery-code checks (or ten
+  failed passwords) lock that check for 30 seconds, doubling with each further
+  failure up to 15 minutes; a success resets the count. Locked requests answer
+  `429` with `Retry-After`. Limits are set under `authModule.attemptLimits`. A
+  verified enrollment now also accepts one of its recovery codes at the TOTP
+  challenge, once each; they were issued but could not be used before. Run
+  `arlen module migrate` to apply the new auth migration
+  `004_auth_totp_limits`; until it is applied, verification works as before and
+  the module logs one warning.
+- `ALNTOTP` adds `matchedTimeStepForCode:...`, which returns the time step a
+  code matched (or `NSNotFound`), so callers can refuse reused codes.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

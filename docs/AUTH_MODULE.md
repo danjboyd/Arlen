@@ -102,6 +102,57 @@ Current MFA factor scope:
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
 
+### TOTP replay protection and attempt limits
+
+These need auth module migration `004_auth_totp_limits` (run
+`./bin/arlen module migrate --env <env>` after upgrading to auth 1.6.0):
+
+- each TOTP enrollment remembers the last time step it accepted
+  (`auth_mfa_enrollments.last_used_step`). A code for that step or an earlier
+  one is refused with `That authenticator code was already used`, even from a
+  different session, so one code cannot complete step-up twice.
+- a verified enrollment also accepts one of its recovery codes in the `code`
+  field of `POST /auth/mfa/totp/verify` and `POST /auth/api/mfa/totp/verify`.
+  Each recovery code works once. The session records the method as
+  `recovery_code` instead of `totp`.
+- TOTP and recovery-code checks share one failure counter per account
+  (`auth_attempt_limits`, scope `mfa`). Local password sign-in has its own
+  counter per account (scope `password`), which also covers the current
+  password check when a signed-in user changes their password.
+- when an account reaches `maxFailures` consecutive failures it is locked for
+  `lockoutSeconds`. Each further failure after a lock ends doubles the lock, up
+  to `maxLockoutSeconds`. A successful check resets the counter, and failures
+  older than 24 hours start over.
+- while locked, the route answers `429` with a `Retry-After` header (seconds)
+  and the error `Too many failed attempts. Try again in N seconds.`, without
+  checking the submitted code or password. HTML routes render the same error on
+  the form.
+- an attempt is counted before the code or password is checked, so parallel
+  requests cannot run more checks than the limit allows.
+
+Defaults (`maxFailures = 0` turns a counter off):
+
+```plist
+authModule = {
+  attemptLimits = {
+    mfa = { maxFailures = 5; lockoutSeconds = 30; maxLockoutSeconds = 900; };
+    password = { maxFailures = 10; lockoutSeconds = 30; maxLockoutSeconds = 900; };
+  };
+};
+```
+
+The password counter is per account, so repeated wrong passwords for an email
+address lock that account's password sign-in for everyone until the lock
+expires. A locked account answers `429` where an unknown email answers `401`.
+Registration already reports whether an email is registered, so this does not
+reveal anything new. Raise `password.maxFailures`, or set it to `0`, if that
+trade-off does not suit your app. Provider (OIDC) sign-in is not counted.
+
+If migration 004 has not been applied, TOTP and password verification keep
+working without replay protection or counters. The module logs one warning
+naming `arlen module migrate` and never fails the request because of the
+missing schema.
+
 ## UI Configuration
 
 ```plist

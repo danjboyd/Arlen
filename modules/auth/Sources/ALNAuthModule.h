@@ -14,6 +14,9 @@
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const ALNAuthModuleErrorDomain;
+// userInfo key on ALNAuthModuleErrorRateLimited errors: seconds (NSNumber) until
+// the account may try again.
+extern NSString *const ALNAuthModuleRetryAfterSecondsKey;
 
 typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
   ALNAuthModuleErrorInvalidConfiguration = 1,
@@ -22,6 +25,7 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
   ALNAuthModuleErrorNotFound = 4,
   ALNAuthModuleErrorAuthenticationFailed = 5,
   ALNAuthModuleErrorPolicyRejected = 6,
+  ALNAuthModuleErrorRateLimited = 7,
 };
 
 @protocol ALNAuthModuleRegistrationPolicy <NSObject>

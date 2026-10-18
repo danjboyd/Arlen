@@ -239,6 +239,10 @@ preference validation (GitHub issue 227).
 `notifications` to `1.1.3`, `search` to `1.0.4` and `storage` to `1.1.2` so
 numbers given as strings (query parameters, old-style plists) are read on Apple
 too (GitHub issue 264).
+`auth` moved to `1.6.0` to refuse reused TOTP codes, limit failed TOTP,
+recovery-code and password attempts per account, and accept recovery codes at
+the TOTP challenge. It adds migration `004_auth_totp_limits`; run
+`arlen module migrate` after upgrading.
 
 ## MCP tools
 

@@ -258,22 +258,54 @@ static NSString *ALNTOTPCodeForCounter(NSData *secretData,
 allowedPastIntervals:(NSUInteger)allowedPastIntervals
 allowedFutureIntervals:(NSUInteger)allowedFutureIntervals
              error:(NSError **)error {
+  return [self matchedTimeStepForCode:code
+                               secret:secret
+                               atDate:date
+                               digits:digits
+                               period:period
+                 allowedPastIntervals:allowedPastIntervals
+               allowedFutureIntervals:allowedFutureIntervals
+                                error:error] != NSNotFound;
+}
+
++ (NSUInteger)matchedTimeStepForCode:(NSString *)code
+                              secret:(NSString *)secret
+                              atDate:(NSDate *)date
+                               error:(NSError **)error {
+  return [self matchedTimeStepForCode:code
+                               secret:secret
+                               atDate:date
+                               digits:6
+                               period:30
+                 allowedPastIntervals:1
+               allowedFutureIntervals:1
+                                error:error];
+}
+
++ (NSUInteger)matchedTimeStepForCode:(NSString *)code
+                              secret:(NSString *)secret
+                              atDate:(NSDate *)date
+                              digits:(NSUInteger)digits
+                              period:(NSUInteger)period
+                allowedPastIntervals:(NSUInteger)allowedPastIntervals
+              allowedFutureIntervals:(NSUInteger)allowedFutureIntervals
+                               error:(NSError **)error {
   NSString *normalizedCode = ALNTOTPTrimmedString(code);
   if (![self validateDigitsAndPeriod:digits period:period error:error]) {
-    return NO;
+    return NSNotFound;
   }
   if ([normalizedCode length] != digits) {
     if (error != NULL) {
       *error = ALNTOTPError(ALNTOTPErrorInvalidCode, @"TOTP code has an invalid length");
     }
-    return NO;
+    return NSNotFound;
   }
   NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
   if ([normalizedCode rangeOfCharacterFromSet:nonDigits].location != NSNotFound) {
     if (error != NULL) {
       *error = ALNTOTPError(ALNTOTPErrorInvalidCode, @"TOTP code must contain only digits");
     }
-    return NO;
+    return NSNotFound;
   }
 
   NSData *secretData = ALNTOTPBase32Decode(secret);
@@ -281,7 +313,7 @@ allowedFutureIntervals:(NSUInteger)allowedFutureIntervals
     if (error != NULL) {
       *error = ALNTOTPError(ALNTOTPErrorInvalidSecret, @"TOTP secret is invalid");
     }
-    return NO;
+    return NSNotFound;
   }
 
   NSDate *effectiveDate = date ?: [NSDate date];
@@ -302,21 +334,21 @@ allowedFutureIntervals:(NSUInteger)allowedFutureIntervals
     }
     NSString *expected = ALNTOTPCodeForCounter(secretData, counter, digits, error);
     if ([expected length] == 0) {
-      return NO;
+      return NSNotFound;
     }
     NSData *expectedData = [expected dataUsingEncoding:NSUTF8StringEncoding];
     if (ALNConstantTimeDataEquals(candidate, expectedData)) {
       if (error != NULL) {
         *error = nil;
       }
-      return YES;
+      return (NSUInteger)counter;
     }
   }
 
   if (error != NULL) {
     *error = nil;
   }
-  return NO;
+  return NSNotFound;
 }
 
 + (BOOL)validateDigitsAndPeriod:(NSUInteger)digits period:(NSUInteger)period error:(NSError **)error {

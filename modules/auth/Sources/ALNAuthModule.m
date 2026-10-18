@@ -10,7 +10,9 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRequest.h"
+#import "ALNResponse.h"
 #import "ALNJSONSerialization.h"
+#import "ALNLogger.h"
 #import "ALNPg.h"
 #import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
@@ -22,6 +24,12 @@
 #include <ctype.h>
 
 NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
+NSString *const ALNAuthModuleRetryAfterSecondsKey = @"retry_after_seconds";
+
+static NSString *const AMAttemptScopeMFA = @"mfa";
+static NSString *const AMAttemptScopePassword = @"password";
+// Failure counts older than this start over at the next failure.
+static const NSTimeInterval AMAttemptFailureWindowSeconds = 86400.0;
 
 static NSString *const ALNAuthModuleProviderStateSessionKey = @"aln.auth_module.stub_provider_state";
 static NSString *const ALNAuthModuleVerificationNoticeSessionKey = @"aln.auth_module.notice.verify";
@@ -203,6 +211,29 @@ static NSError *AMTranslateMissingAuthModuleTablesError(NSError *error,
                  details);
 }
 
+// Migration 004 adds auth_attempt_limits and auth_mfa_enrollments.last_used_step.
+static BOOL AMErrorLooksLikeMissingAttemptLimitSchema(NSError *error) {
+  if (![error isKindOfClass:[NSError class]] || ![error.domain isEqualToString:ALNPgErrorDomain]) {
+    return NO;
+  }
+  NSString *sqlState = AMTrimmedString(error.userInfo[ALNPgErrorSQLStateKey]);
+  return [sqlState isEqualToString:@"42P01"] || [sqlState isEqualToString:@"42703"];
+}
+
+static NSError *AMRateLimitedError(NSUInteger retryAfterSeconds, NSString *message) {
+  return AMError(ALNAuthModuleErrorRateLimited,
+                 message,
+                 @{ ALNAuthModuleRetryAfterSecondsKey : @(MAX(retryAfterSeconds, (NSUInteger)1)) });
+}
+
+static BOOL AMLooksLikeTOTPCode(NSString *code) {
+  if ([code length] != 6) {
+    return NO;
+  }
+  NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+  return [code rangeOfCharacterFromSet:nonDigits].location == NSNotFound;
+}
+
 static NSString *AMJSONString(id object) {
   if (object == nil) {
     return @"{}";
@@ -234,6 +265,20 @@ static NSArray *AMJSONArrayFromJSONString(id value) {
     [normalized addObject:string];
   }
   return [NSArray arrayWithArray:normalized];
+}
+
+// Unlike AMJSONArrayFromJSONString, keeps case and order (encoded hashes are case-sensitive).
+static NSArray *AMJSONStringArrayFromJSONString(id value) {
+  NSString *json = AMTrimmedString(value);
+  NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+  id object = ([data length] > 0) ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+  NSMutableArray *strings = [NSMutableArray array];
+  for (id entry in [object isKindOfClass:[NSArray class]] ? (NSArray *)object : @[]) {
+    if ([entry isKindOfClass:[NSString class]] && [(NSString *)entry length] > 0) {
+      [strings addObject:entry];
+    }
+  }
+  return [NSArray arrayWithArray:strings];
 }
 
 static BOOL AMBoolFromDatabaseValue(id value) {
@@ -761,6 +806,16 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, assign) NSUInteger smsMaxSendAttemptsPerSession;
 @property(nonatomic, assign) NSUInteger smsMaxVerifyAttemptsPerSession;
 @property(nonatomic, copy) NSString *smsLocale;
+@property(nonatomic, assign) NSUInteger mfaMaxFailures;
+@property(nonatomic, assign) NSUInteger mfaLockoutSeconds;
+@property(nonatomic, assign) NSUInteger mfaMaxLockoutSeconds;
+@property(nonatomic, assign) NSUInteger passwordMaxFailures;
+@property(nonatomic, assign) NSUInteger passwordLockoutSeconds;
+@property(nonatomic, assign) NSUInteger passwordMaxLockoutSeconds;
+@property(nonatomic, strong) ALNLogger *logger;
+@property(nonatomic, assign) BOOL attemptLimitSchemaAvailable;
+@property(nonatomic, assign) BOOL attemptLimitSchemaWarningLogged;
+@property(nonatomic, strong) NSLock *attemptLimitSchemaLock;
 @property(nonatomic, strong) ALNAuthModuleTwilioVerifyClient *smsVerifyClient;
 @property(nonatomic, copy) NSDictionary *partialTemplateOverrides;
 @property(nonatomic, copy) NSString *stubProviderEmail;
@@ -1109,6 +1164,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _stubProviderSharedSecret = @"auth-module-stub-provider-secret-0123456789abcdef";
     _bootstrapAdminEmails = @[];
     _environmentName = @"development";
+    _attemptLimitSchemaLock = [[NSLock alloc] init];
+    _mfaMaxFailures = 5U;
+    _mfaLockoutSeconds = 30U;
+    _mfaMaxLockoutSeconds = 900U;
+    _passwordMaxFailures = 10U;
+    _passwordLockoutSeconds = 30U;
+    _passwordMaxLockoutSeconds = 900U;
   }
   return self;
 }
@@ -1189,6 +1251,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.smsMaxSendAttemptsPerSession = AMConfigUnsignedInteger(smsConfig[@"maxSendAttemptsPerSession"], 5U);
   self.smsMaxVerifyAttemptsPerSession = AMConfigUnsignedInteger(smsConfig[@"maxVerifyAttemptsPerSession"], 8U);
   self.smsLocale = AMTrimmedString(smsConfig[@"locale"]) ?: @"";
+  NSDictionary *limitsConfig = [self.moduleConfig[@"attemptLimits"] isKindOfClass:[NSDictionary class]]
+                                   ? self.moduleConfig[@"attemptLimits"]
+                                   : @{};
+  NSDictionary *mfaLimits = [limitsConfig[@"mfa"] isKindOfClass:[NSDictionary class]] ? limitsConfig[@"mfa"] : @{};
+  NSDictionary *passwordLimits =
+      [limitsConfig[@"password"] isKindOfClass:[NSDictionary class]] ? limitsConfig[@"password"] : @{};
+  // maxFailures = 0 turns a scope's limit off; the durations must be positive.
+  self.mfaMaxFailures = ALNUnsignedIntegerValueOrDefault(mfaLimits[@"maxFailures"], 5U);
+  self.mfaLockoutSeconds = AMConfigUnsignedInteger(mfaLimits[@"lockoutSeconds"], 30U);
+  self.mfaMaxLockoutSeconds = MAX(self.mfaLockoutSeconds, AMConfigUnsignedInteger(mfaLimits[@"maxLockoutSeconds"], 900U));
+  self.passwordMaxFailures = ALNUnsignedIntegerValueOrDefault(passwordLimits[@"maxFailures"], 10U);
+  self.passwordLockoutSeconds = AMConfigUnsignedInteger(passwordLimits[@"lockoutSeconds"], 30U);
+  self.passwordMaxLockoutSeconds =
+      MAX(self.passwordLockoutSeconds, AMConfigUnsignedInteger(passwordLimits[@"maxLockoutSeconds"], 900U));
   self.smsVerifyClient.accountSID = AMTrimmedString(smsConfig[@"accountSID"]) ?: @"";
   self.smsVerifyClient.authToken = AMTrimmedString(smsConfig[@"authToken"]) ?: @"";
   self.smsVerifyClient.apiKeySID = AMTrimmedString(smsConfig[@"apiKeySID"]) ?: @"";
@@ -1374,6 +1450,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.mailAdapter = application.mailAdapter;
+  self.logger = application.logger;
+  [self.attemptLimitSchemaLock lock];
+  self.attemptLimitSchemaAvailable = NO;
+  self.attemptLimitSchemaWarningLogged = NO;
+  [self.attemptLimitSchemaLock unlock];
   return YES;
 }
 
@@ -1406,6 +1487,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"maxSendAttemptsPerSession" : @(self.smsMaxSendAttemptsPerSession),
       @"maxVerifyAttemptsPerSession" : @(self.smsMaxVerifyAttemptsPerSession),
       @"locale" : self.smsLocale ?: @"",
+    },
+  };
+  summary[@"attemptLimits"] = @{
+    @"mfa" : @{
+      @"maxFailures" : @(self.mfaMaxFailures),
+      @"lockoutSeconds" : @(self.mfaLockoutSeconds),
+      @"maxLockoutSeconds" : @(self.mfaMaxLockoutSeconds),
+    },
+    @"password" : @{
+      @"maxFailures" : @(self.passwordMaxFailures),
+      @"lockoutSeconds" : @(self.passwordLockoutSeconds),
+      @"maxLockoutSeconds" : @(self.passwordMaxLockoutSeconds),
     },
   };
   return summary;
@@ -1988,6 +2081,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
+  NSString *userID = AMTrimmedString(row[@"id"]);
+  if (![self reserveAttemptForUserID:userID
+                               scope:AMAttemptScopePassword
+                         maxFailures:self.passwordMaxFailures
+                      lockoutSeconds:self.passwordLockoutSeconds
+                   maxLockoutSeconds:self.passwordMaxLockoutSeconds
+                               error:error]) {
+    return nil;
+  }
   NSError *verifyError = nil;
   BOOL verified = [ALNPasswordHash verifyPasswordString:(password ?: @"")
                                      againstEncodedHash:encodedHash
@@ -1998,6 +2100,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
+  [self clearAttemptFailuresForUserID:userID scope:AMAttemptScopePassword];
   return AMUserDictionaryFromRow(row);
 }
 
@@ -2225,6 +2328,247 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return ok;
 }
 
+#pragma mark - Attempt limits and TOTP replay protection
+
+- (BOOL)attemptLimitSchemaIsAvailable {
+  [self.attemptLimitSchemaLock lock];
+  BOOL known = self.attemptLimitSchemaAvailable;
+  [self.attemptLimitSchemaLock unlock];
+  if (known) {
+    return YES;
+  }
+  NSArray *rows = [self.database executeQuery:@"SELECT CASE WHEN to_regclass('auth_attempt_limits') IS NOT NULL "
+                                         "AND EXISTS (SELECT 1 FROM pg_attribute "
+                                         "WHERE attrelid = to_regclass('auth_mfa_enrollments') "
+                                         "AND attname = 'last_used_step' AND NOT attisdropped) "
+                                         "THEN 't' ELSE 'f' END AS available"
+                                   parameters:@[]
+                                        error:NULL];
+  BOOL available = AMBoolFromDatabaseValue([rows firstObject][@"available"]);
+  BOOL shouldWarn = NO;
+  [self.attemptLimitSchemaLock lock];
+  if (available) {
+    self.attemptLimitSchemaAvailable = YES;
+  } else if (!self.attemptLimitSchemaWarningLogged) {
+    self.attemptLimitSchemaWarningLogged = YES;
+    shouldWarn = YES;
+  }
+  [self.attemptLimitSchemaLock unlock];
+  if (shouldWarn) {
+    NSString *fixCommand = [NSString stringWithFormat:@"./bin/arlen module migrate --env %@",
+                                                      AMEffectiveEnvironmentName(self.environmentName)];
+    NSString *message =
+        [NSString stringWithFormat:@"auth module migration 004_auth_totp_limits is not applied; TOTP codes can be "
+                                   "reused within their window and MFA/password attempts are not limited until "
+                                   "you run %@",
+                                   fixCommand];
+    if (self.logger != nil) {
+      [self.logger warn:message fields:@{ @"module" : @"auth", @"fix_command" : fixCommand }];
+    } else {
+      NSLog(@"%@", message);
+    }
+  }
+  return available;
+}
+
+- (void)markAttemptLimitSchemaUnavailable {
+  [self.attemptLimitSchemaLock lock];
+  self.attemptLimitSchemaAvailable = NO;
+  [self.attemptLimitSchemaLock unlock];
+}
+
+// Counts the attempt as a failure before the secret is checked, so parallel
+// requests cannot run more checks than the limit allows; a successful check
+// clears the count. Returns NO with an ALNAuthModuleErrorRateLimited error while
+// the account is locked.
+- (BOOL)reserveAttemptForUserID:(NSString *)userID
+                          scope:(NSString *)scope
+                    maxFailures:(NSUInteger)maxFailures
+                 lockoutSeconds:(NSUInteger)lockoutSeconds
+              maxLockoutSeconds:(NSUInteger)maxLockoutSeconds
+                          error:(NSError **)error {
+  NSString *normalizedUserID = AMTrimmedString(userID);
+  if (maxFailures == 0 || [normalizedUserID length] == 0 || self.database == nil) {
+    return YES;
+  }
+  if (![self attemptLimitSchemaIsAvailable]) {
+    return YES;
+  }
+  __block NSUInteger retryAfter = 0;
+  NSError *dbError = nil;
+  BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    if ([connection executeCommand:@"INSERT INTO auth_attempt_limits (user_id, scope) VALUES ($1::bigint, $2) "
+                                   "ON CONFLICT (user_id, scope) DO NOTHING"
+                        parameters:@[ normalizedUserID, scope ]
+                             error:txError] < 0) {
+      return NO;
+    }
+    NSArray *rows = [connection executeQuery:@"SELECT failure_count::text AS failure_count, "
+                                             "COALESCE(CEIL(EXTRACT(EPOCH FROM (locked_until - NOW()))), 0)::bigint::text "
+                                             "AS lock_remaining, "
+                                             "COALESCE(EXTRACT(EPOCH FROM (NOW() - last_failure_at)), -1)::float8::text "
+                                             "AS since_failure "
+                                             "FROM auth_attempt_limits WHERE user_id = $1::bigint AND scope = $2 "
+                                             "FOR UPDATE"
+                                  parameters:@[ normalizedUserID, scope ]
+                                       error:txError];
+    NSDictionary *row = [rows firstObject];
+    if (row == nil) {
+      return NO;
+    }
+    long long lockRemaining = [AMTrimmedString(row[@"lock_remaining"]) longLongValue];
+    if (lockRemaining > 0) {
+      retryAfter = (NSUInteger)lockRemaining;
+      return YES;
+    }
+    double sinceFailure = [AMTrimmedString(row[@"since_failure"]) doubleValue];
+    long long storedCount = [AMTrimmedString(row[@"failure_count"]) longLongValue];
+    NSUInteger count = (sinceFailure < 0.0 || sinceFailure > AMAttemptFailureWindowSeconds || storedCount < 0)
+                           ? 0U
+                           : (NSUInteger)storedCount;
+    NSUInteger nextCount = count + 1U;
+    NSUInteger lockSeconds = 0;
+    if (nextCount >= maxFailures) {
+      NSUInteger exponent = MIN(nextCount - maxFailures, (NSUInteger)20U);
+      double scaled = (double)lockoutSeconds * pow(2.0, (double)exponent);
+      lockSeconds = (NSUInteger)MIN(scaled, (double)maxLockoutSeconds);
+    }
+    return [connection executeCommand:@"UPDATE auth_attempt_limits SET failure_count = $3::integer, "
+                                      "last_failure_at = NOW(), "
+                                      "locked_until = CASE WHEN $4::integer > 0 "
+                                      "THEN NOW() + ($4::integer * INTERVAL '1 second') ELSE NULL END, "
+                                      "updated_at = NOW() "
+                                      "WHERE user_id = $1::bigint AND scope = $2"
+                           parameters:@[
+                             normalizedUserID,
+                             scope,
+                             [NSString stringWithFormat:@"%lu", (unsigned long)nextCount],
+                             [NSString stringWithFormat:@"%lu", (unsigned long)lockSeconds],
+                           ]
+                                error:txError] >= 0;
+  } error:&dbError];
+  if (!ok) {
+    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+      [self markAttemptLimitSchemaUnavailable];
+      (void)[self attemptLimitSchemaIsAvailable];
+      return YES;
+    }
+    if (error != NULL) {
+      *error = dbError ?: AMError(ALNAuthModuleErrorDatabaseUnavailable, @"Failed to record the verification attempt", nil);
+    }
+    return NO;
+  }
+  if (retryAfter > 0) {
+    if (error != NULL) {
+      *error = AMRateLimitedError(retryAfter,
+                                  [NSString stringWithFormat:@"Too many failed attempts. Try again in %lu seconds.",
+                                                             (unsigned long)retryAfter]);
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (void)clearAttemptFailuresForUserID:(NSString *)userID scope:(NSString *)scope {
+  NSString *normalizedUserID = AMTrimmedString(userID);
+  if ([normalizedUserID length] == 0 || self.database == nil || ![self attemptLimitSchemaIsAvailable]) {
+    return;
+  }
+  NSError *dbError = nil;
+  NSInteger updated = [self.database executeCommand:@"UPDATE auth_attempt_limits SET failure_count = 0, "
+                                                    "last_failure_at = NULL, locked_until = NULL, updated_at = NOW() "
+                                                    "WHERE user_id = $1::bigint AND scope = $2"
+                                         parameters:@[ normalizedUserID, scope ]
+                                              error:&dbError];
+  if (updated < 0 && AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+    [self markAttemptLimitSchemaUnavailable];
+  }
+}
+
+// Stores `step` as the enrollment's last accepted TOTP step. Returns NO and sets
+// *replayed when that step (or a later one) was already accepted.
+- (BOOL)recordAcceptedTOTPStep:(NSUInteger)step
+                  enrollmentID:(NSString *)enrollmentID
+                      replayed:(BOOL *)replayed
+                         error:(NSError **)error {
+  if (replayed != NULL) {
+    *replayed = NO;
+  }
+  if (![self attemptLimitSchemaIsAvailable]) {
+    return YES;
+  }
+  NSError *dbError = nil;
+  NSInteger updated = [self.database executeCommand:@"UPDATE auth_mfa_enrollments SET last_used_step = $2::bigint "
+                                                    "WHERE id = $1::bigint "
+                                                    "AND (last_used_step IS NULL OR last_used_step < $2::bigint)"
+                                         parameters:@[
+                                           AMTrimmedString(enrollmentID) ?: @"",
+                                           [NSString stringWithFormat:@"%lu", (unsigned long)step],
+                                         ]
+                                              error:&dbError];
+  if (updated < 0) {
+    if (AMErrorLooksLikeMissingAttemptLimitSchema(dbError)) {
+      [self markAttemptLimitSchemaUnavailable];
+      (void)[self attemptLimitSchemaIsAvailable];
+      return YES;
+    }
+    if (error != NULL) {
+      *error = dbError;
+    }
+    return NO;
+  }
+  if (updated == 0) {
+    if (replayed != NULL) {
+      *replayed = YES;
+    }
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorAuthenticationFailed,
+                       @"That authenticator code was already used. Wait for the next code and try again.",
+                       nil);
+    }
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)consumeRecoveryCode:(NSString *)code
+                 enrollment:(NSDictionary *)enrollment
+                      error:(NSError **)error {
+  NSString *storedJSON = AMTrimmedString(enrollment[@"recovery_codes_json"]) ?: @"[]";
+  NSArray *hashes = AMJSONStringArrayFromJSONString(storedJSON);
+  NSArray *remaining = nil;
+  BOOL consumed = ([hashes count] > 0) &&
+                  [ALNRecoveryCodes consumeCode:(code ?: @"")
+                           againstEncodedHashes:hashes
+                         remainingEncodedHashes:&remaining
+                                          error:NULL];
+  if (consumed) {
+    NSError *dbError = nil;
+    NSInteger updated = [self.database executeCommand:@"UPDATE auth_mfa_enrollments SET recovery_codes_json = $2, "
+                                                      "updated_at = NOW() "
+                                                      "WHERE id = $1::bigint AND COALESCE(recovery_codes_json, '[]') = $3"
+                                           parameters:@[
+                                             AMTrimmedString(enrollment[@"id"]) ?: @"",
+                                             AMJSONString(remaining ?: @[]),
+                                             storedJSON,
+                                           ]
+                                                error:&dbError];
+    if (updated < 0) {
+      if (error != NULL) {
+        *error = dbError;
+      }
+      return NO;
+    }
+    // Zero rows: another request used a code from this set first; retry against
+    // the current set rather than accept a code twice.
+    consumed = (updated == 1);
+  }
+  if (!consumed && error != NULL) {
+    *error = AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid authenticator or recovery code", nil);
+  }
+  return consumed;
+}
+
 - (NSDictionary *)totpEnrollmentForUserID:(NSString *)userID
                                     error:(NSError **)error {
   NSArray *rows = [self.database executeQuery:@"SELECT id::text AS id, secret, COALESCE(recovery_codes_json, '[]') AS recovery_codes_json, "
@@ -2355,10 +2699,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"fields" : @[
         @{
           @"name" : @"code",
-          @"label" : verified ? @"Authenticator Code" : @"Enter the 6-digit code from your app",
+          @"label" : verified ? @"Authenticator or recovery code" : @"Enter the 6-digit code from your app",
           @"type" : @"text",
           @"autocomplete" : @"one-time-code",
-          @"inputmode" : @"numeric",
+          @"inputmode" : verified ? @"text" : @"numeric",
         },
       ],
     },
@@ -2369,7 +2713,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                              user:(NSDictionary *)user
                           context:(ALNContext *)context
                             error:(NSError **)error {
-  NSDictionary *enrollment = [self totpEnrollmentForUserID:AMTrimmedString(user[@"id"]) error:error];
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  NSDictionary *enrollment = [self totpEnrollmentForUserID:userID error:error];
   NSString *secret = AMTrimmedString(enrollment[@"secret"]);
   if ([secret length] == 0) {
     if (error != NULL) {
@@ -2377,20 +2722,51 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  BOOL verified = [ALNTOTP verifyCode:(code ?: @"")
-                               secret:secret
-                               atDate:[NSDate date]
-                               digits:6
-                               period:30
-                 allowedPastIntervals:1
-               allowedFutureIntervals:1
-                                error:error];
-  if (!verified) {
+  BOOL enrollmentVerified = ([AMTrimmedString(enrollment[@"verified_at"]) length] > 0 || AMBoolFromDatabaseValue(enrollment[@"enabled"]));
+  NSString *submittedCode = AMTrimmedString(code) ?: @"";
+  // A verified enrollment also accepts one of its recovery codes in place of an
+  // authenticator code. Both share the per-account MFA failure counter.
+  BOOL useRecoveryCode = enrollmentVerified && [submittedCode length] > 0 && !AMLooksLikeTOTPCode(submittedCode);
+  if (![self reserveAttemptForUserID:userID
+                               scope:AMAttemptScopeMFA
+                         maxFailures:self.mfaMaxFailures
+                      lockoutSeconds:self.mfaLockoutSeconds
+                   maxLockoutSeconds:self.mfaMaxLockoutSeconds
+                               error:error]) {
     return nil;
   }
+  NSString *method = @"totp";
+  if (useRecoveryCode) {
+    if (![self consumeRecoveryCode:submittedCode enrollment:enrollment error:error]) {
+      return nil;
+    }
+    method = @"recovery_code";
+  } else {
+    NSError *totpError = nil;
+    NSUInteger step = [ALNTOTP matchedTimeStepForCode:submittedCode
+                                               secret:secret
+                                               atDate:[NSDate date]
+                                               digits:6
+                                               period:30
+                                 allowedPastIntervals:1
+                               allowedFutureIntervals:1
+                                                error:&totpError];
+    if (step == NSNotFound) {
+      if (error != NULL) {
+        *error = totpError;
+      }
+      return nil;
+    }
+    if (![self recordAcceptedTOTPStep:step
+                         enrollmentID:AMTrimmedString(enrollment[@"id"])
+                             replayed:NULL
+                                error:error]) {
+      return nil;
+    }
+  }
+  [self clearAttemptFailuresForUserID:userID scope:AMAttemptScopeMFA];
 
   NSArray *plainRecoveryCodes = nil;
-  BOOL enrollmentVerified = ([AMTrimmedString(enrollment[@"verified_at"]) length] > 0 || AMBoolFromDatabaseValue(enrollment[@"enabled"]));
   if (!enrollmentVerified) {
     plainRecoveryCodes = [ALNRecoveryCodes generateCodesWithCount:6 error:error];
     if (plainRecoveryCodes == nil) {
@@ -2410,7 +2786,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
 
-  if (![ALNAuthSession elevateAuthenticatedSessionForMethod:@"totp"
+  if (![ALNAuthSession elevateAuthenticatedSessionForMethod:method
                                              assuranceLevel:2
                                             authenticatedAt:nil
                                                     context:context
@@ -3511,6 +3887,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return [self renderTemplate:templateName context:context layout:layoutName error:error];
 }
 
+// 429 with Retry-After for a locked account; otherwise `fallbackStatus`.
+- (void)setStatusForAuthError:(NSError *)error fallbackStatus:(NSInteger)fallbackStatus {
+  if ([error.domain isEqualToString:ALNAuthModuleErrorDomain] && error.code == ALNAuthModuleErrorRateLimited) {
+    NSUInteger retryAfter = ALNUnsignedIntegerValueOrDefault(error.userInfo[ALNAuthModuleRetryAfterSecondsKey], 1U);
+    [self setStatus:429];
+    [self.context.response setHeader:@"Retry-After"
+                               value:[NSString stringWithFormat:@"%lu", (unsigned long)MAX(retryAfter, (NSUInteger)1)]];
+    return;
+  }
+  [self setStatus:fallbackStatus];
+}
+
 - (NSArray *)errorEntriesForError:(NSError *)error
                             field:(NSString *)field {
   if (error == nil) {
@@ -3603,7 +3991,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *error = nil;
   NSDictionary *user = [self.runtime authenticateLocalEmail:email password:password error:&error];
   if (user == nil) {
-    [self setStatus:401];
+    [self setStatusForAuthError:error fallbackStatus:401];
     NSArray *errors = [self errorEntriesForError:(error ?: AMError(ALNAuthModuleErrorAuthenticationFailed, @"Invalid email or password", nil))
                                            field:@"email"];
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
@@ -4013,7 +4401,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *authError = nil;
   NSDictionary *authenticated = [self.runtime authenticateLocalEmail:user[@"email"] password:parameters[@"current_password"] error:&authError];
   if (authenticated == nil) {
-    [self setStatus:401];
+    [self setStatusForAuthError:authError fallbackStatus:401];
     return @{ @"status" : @"error", @"message" : authError.localizedDescription ?: @"Current password is invalid" };
   }
   NSError *updateError = nil;
@@ -4400,7 +4788,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *payload = [self.runtime verifyTOTPCode:parameters[@"code"] user:user context:ctx error:&error];
   NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   if (payload == nil) {
-    [self setStatus:422];
+    [self setStatusForAuthError:error fallbackStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
     NSDictionary *provisioning = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
