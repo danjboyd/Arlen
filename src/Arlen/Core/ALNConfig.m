@@ -467,6 +467,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
   NSString *requestHeadTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS");
+  NSString *requestBodyTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_TIMEOUT_SECONDS");
+  NSString *requestBodyMinBytesPerSecond = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND");
+  NSString *requestBodyMinRateGraceSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS");
   NSString *maxHTTPSessions =
       ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
@@ -666,6 +669,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
   ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
   ALNApplyIntegerOverride(limits, requestHeadTimeoutSeconds, @"requestHeadTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, requestBodyTimeoutSeconds, @"requestBodyTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, requestBodyMinBytesPerSecond, @"requestBodyMinBytesPerSecond", 0);
+  ALNApplyIntegerOverride(limits, requestBodyMinRateGraceSeconds, @"requestBodyMinRateGraceSeconds", 0);
   config[@"requestLimits"] = limits;
 
   NSMutableDictionary *runtimeLimits =
@@ -1019,6 +1025,15 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   }
   if (finalLimits[@"requestHeadTimeoutSeconds"] == nil) {
     finalLimits[@"requestHeadTimeoutSeconds"] = @(15);
+  }
+  if (finalLimits[@"requestBodyTimeoutSeconds"] == nil) {
+    finalLimits[@"requestBodyTimeoutSeconds"] = @(300);
+  }
+  if (finalLimits[@"requestBodyMinBytesPerSecond"] == nil) {
+    finalLimits[@"requestBodyMinBytesPerSecond"] = @(1024);
+  }
+  if (finalLimits[@"requestBodyMinRateGraceSeconds"] == nil) {
+    finalLimits[@"requestBodyMinRateGraceSeconds"] = @(10);
   }
   NSDictionary *multipartDefaults = @{ @"maxMultipartParts":@128,
       @"maxMultipartFieldBytes":@65536, @"maxMultipartFileBytes":@1048576,

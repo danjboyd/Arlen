@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Request bodies now have bounds too, on both parsers and on the spool path
+  for large bodies. `requestLimits.requestBodyTimeoutSeconds` (default `300`,
+  env `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`) caps the total time to send a body
+  after its head, and after `requestBodyMinRateGraceSeconds` (default `10`)
+  the body must average at least `requestBodyMinBytesPerSecond` (default
+  `1024`). A body that misses either gets `408`, and its spool file is removed.
+  Before, a client trickling a body could hold an HTTP worker indefinitely.
+  **Behavior change:** uploads slower than 1 KiB/s on average, or taking more
+  than 5 minutes, now fail with `408`; raise or set `0` for the limits if your
+  clients need that.
 - New `requestLimits.requestHeadTimeoutSeconds` (default `15`, env
   `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`) bounds the total time to receive a
   request head once its first byte has arrived; a slower head gets `408`.

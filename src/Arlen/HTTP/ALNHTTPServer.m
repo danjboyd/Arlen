@@ -71,6 +71,11 @@ typedef struct {
   // Overall time allowed for a request head once its first byte has arrived
   // (0 = no limit). connectionTimeoutSeconds bounds each read, not the head.
   NSUInteger headTimeoutMilliseconds;
+  // Body transfer bounds, counted from the end of the head (0 = off): a total
+  // time, and after a grace period an average rate the client must sustain.
+  NSUInteger bodyTimeoutMilliseconds;
+  NSUInteger bodyMinBytesPerSecond;
+  NSUInteger bodyMinRateGraceMilliseconds;
   __unsafe_unretained ALNApplication *application;
 } ALNRequestLimits;
 
@@ -607,6 +612,11 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   out.routeBodyLimitsActive = NO;
   NSUInteger headTimeoutSeconds = ALNConfigUInt(limits, @"requestHeadTimeoutSeconds", 15);
   out.headTimeoutMilliseconds = (headTimeoutSeconds > 86400) ? 86400000 : headTimeoutSeconds * 1000;
+  NSUInteger bodyTimeoutSeconds = ALNConfigUInt(limits, @"requestBodyTimeoutSeconds", 300);
+  out.bodyTimeoutMilliseconds = (bodyTimeoutSeconds > 86400) ? 86400000 : bodyTimeoutSeconds * 1000;
+  out.bodyMinBytesPerSecond = ALNConfigUInt(limits, @"requestBodyMinBytesPerSecond", 1024);
+  NSUInteger graceSeconds = ALNConfigUInt(limits, @"requestBodyMinRateGraceSeconds", 10);
+  out.bodyMinRateGraceMilliseconds = (graceSeconds > 86400) ? 86400000 : graceSeconds * 1000;
   out.application = nil;
   return out;
 }
@@ -2083,6 +2093,58 @@ static BOOL ALNAwaitRequestHeadBytes(ALNSocketHandle clientFd,
   return NO;
 }
 
+typedef struct {
+  uint64_t start;
+  size_t startBytes;
+} ALNRequestBodyClock;
+
+// Waits for more of a request body. The clock starts at the first call, when
+// the head is complete; `receivedBytes` is any count that grows with the body.
+// Fails (408) once limits.bodyTimeout has passed, or once the average rate
+// since the start has fallen below limits.bodyMinBytesPerSecond after the
+// grace period. While the client is silent the rate is rechecked every second.
+static BOOL ALNAwaitRequestBodyBytes(ALNSocketHandle clientFd,
+                                     ALNRequestLimits limits,
+                                     ALNRequestBodyClock *clock,
+                                     size_t receivedBytes,
+                                     NSInteger *statusCode) {
+  if (clock == NULL || (limits.bodyTimeoutMilliseconds == 0 && limits.bodyMinBytesPerSecond == 0)) {
+    return YES;
+  }
+  uint64_t now = ALNMonotonicMilliseconds();
+  if (clock->start == 0) {
+    clock->start = now;
+    clock->startBytes = receivedBytes;
+  }
+  uint64_t received = (receivedBytes > clock->startBytes) ? (uint64_t)(receivedBytes - clock->startBytes) : 0;
+  while (1) {
+    uint64_t elapsed = now - clock->start;
+    if (limits.bodyTimeoutMilliseconds > 0 && elapsed >= limits.bodyTimeoutMilliseconds) {
+      break;
+    }
+    if (limits.bodyMinBytesPerSecond > 0 && elapsed > limits.bodyMinRateGraceMilliseconds &&
+        received * 1000u < (uint64_t)limits.bodyMinBytesPerSecond * elapsed) {
+      break;
+    }
+    uint64_t wait = 1000;
+    if (limits.bodyTimeoutMilliseconds > 0) {
+      wait = MIN(wait, limits.bodyTimeoutMilliseconds - elapsed);
+    }
+    if (limits.bodyMinBytesPerSecond == 0 && limits.bodyTimeoutMilliseconds > 0) {
+      wait = limits.bodyTimeoutMilliseconds - elapsed;
+    }
+    int ready = ALNWebSocketWaitReadable(clientFd, (NSUInteger)wait);
+    if (ready != 0) {
+      return YES;
+    }
+    now = ALNMonotonicMilliseconds();
+  }
+  if (statusCode != NULL) {
+    *statusCode = 408;
+  }
+  return NO;
+}
+
 // Reads one frame (GitHub issue 214). Rejects, with the RFC 6455 close code:
 // unmasked client frames, nonzero RSV bits (no extension is negotiated),
 // reserved opcodes and control frames that are fragmented or longer than 125
@@ -2231,7 +2293,14 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
     ALNConnectionReadStateConsumePrefix(readState, headerBytes + buffered);
     NSUInteger remaining = contentLength - buffered;
     char chunk[65536];
+    ALNRequestBodyClock bodyClock = {0, 0};
     while (failure == 0 && remaining > 0) {
+      NSInteger waitStatus = 0;
+      if (!ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, (size_t)(contentLength - remaining),
+                                    &waitStatus)) {
+        failure = waitStatus;
+        break;
+      }
       ssize_t readBytes = ALNRecvWithFaults(clientFd, chunk, MIN(sizeof(chunk), remaining), 0);
       if (readBytes < 0) {
         if (errno == EINTR) {
@@ -2372,6 +2441,7 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
 
   BOOL continueAnswered = NO;
   uint64_t headDeadline = 0;
+  ALNRequestBodyClock bodyClock = {0, 0};
   while (1) {
     if (!readState->metadataReady) {
       if (readState->length > limits.maxHeaderBytes) {
@@ -2457,6 +2527,10 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
         !ALNAwaitRequestHeadBytes(clientFd, limits, readState->length, &headDeadline, statusCode)) {
       return nil;
     }
+    if (readState->metadataReady &&
+        !ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, readState->length, statusCode)) {
+      return nil;
+    }
     char chunk[8192];
     ssize_t readBytes = ALNRecvWithFaults(clientFd, chunk, sizeof(chunk), 0);
     if (readBytes < 0) {
@@ -2510,6 +2584,7 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
 
   BOOL continueAnswered = NO;
   uint64_t headDeadline = 0;
+  ALNRequestBodyClock bodyClock = {0, 0};
   while (1) {
     NSUInteger consumedLength = 0;
     BOOL headersComplete = NO;
@@ -2647,6 +2722,10 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
 
     if (!headersComplete &&
         !ALNAwaitRequestHeadBytes(clientFd, limits, readState->length, &headDeadline, statusCode)) {
+      return nil;
+    }
+    if (headersComplete &&
+        !ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, readState->length, statusCode)) {
       return nil;
     }
     char chunk[8192];
