@@ -12,6 +12,8 @@
 #import "ALNRequest.h"
 #import "ALNSecurityPrimitives.h"
 
+#include <sys/stat.h>
+
 NSString *const ALNStorageModuleErrorDomain = @"Arlen.Modules.Storage.Error";
 
 static NSString *const ALNStorageVariantJobIdentifier = @"storage.generate_variant";
@@ -148,6 +150,63 @@ static BOOL SMEnvironmentAllowsEphemeralSigningKey(NSString *environment) {
 
 static NSData *SMEphemeralSigningKeyData(void) {
   return ALNSecureRandomData(32);
+}
+
+// Object and upload-session IDs, and per-object token nonces, are random so
+// that processes sharing one state file (propane workers, the jobs worker)
+// never hand out the same ID, and an ID never names a different object later.
+static NSString *SMRandomHexString(NSUInteger byteCount) {
+  NSData *bytes = ALNSecureRandomData(byteCount);
+  if ([bytes length] != byteCount) {
+    return nil;
+  }
+  const unsigned char *raw = [bytes bytes];
+  NSMutableString *hex = [NSMutableString stringWithCapacity:byteCount * 2];
+  for (NSUInteger idx = 0; idx < byteCount; idx++) {
+    [hex appendFormat:@"%02x", raw[idx]];
+  }
+  return hex;
+}
+
+static NSString *SMRandomIdentifier(NSString *prefix) {
+  NSString *hex = SMRandomHexString(16);
+  return ([hex length] > 0) ? [NSString stringWithFormat:@"%@-%@", prefix, hex] : nil;
+}
+
+// Changes whenever the state file is replaced (each write is an atomic
+// rename), so a process can tell another process wrote it.
+static NSString *SMStateFileStamp(NSString *path) {
+  if ([path length] == 0) {
+    return @"";
+  }
+#if defined(_WIN32)
+  unsigned long long fileIndex = 0;
+  unsigned long long writeTime = 0;
+  unsigned long long changeTime = 0;
+  if (!ALNPlatformFileVersion(path, &fileIndex, &writeTime, &changeTime)) {
+    return @"";
+  }
+  return [NSString stringWithFormat:@"%llu:%llu:%llu", fileIndex, writeTime, changeTime];
+#else
+  // Nanosecond times: an inode freed by one rename can be reused by the next
+  // write, so the inode alone does not tell versions apart.
+  struct stat info;
+  if (stat([path fileSystemRepresentation], &info) != 0) {
+    return @"";
+  }
+#if defined(__APPLE__)
+  long long mtimeNanos = (long long)info.st_mtimespec.tv_nsec;
+  long long ctimeNanos = (long long)info.st_ctimespec.tv_nsec;
+#else
+  long long mtimeNanos = (long long)info.st_mtim.tv_nsec;
+  long long ctimeNanos = (long long)info.st_ctim.tv_nsec;
+#endif
+  return [NSString stringWithFormat:@"%llu:%lld:%lld.%09lld:%lld.%09lld",
+                                    (unsigned long long)info.st_ino,
+                                    (long long)info.st_size,
+                                    (long long)info.st_mtime, mtimeNanos,
+                                    (long long)info.st_ctime, ctimeNanos];
+#endif
 }
 
 static NSString *SMPathJoin(NSString *prefix, NSString *suffix) {
@@ -507,6 +566,12 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *activityLog;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+// Serializes state transactions in this process; the lock file next to the
+// state file serializes them across processes.
+@property(nonatomic, strong) NSRecursiveLock *transactionLock;
+@property(nonatomic, assign) NSUInteger transactionDepth;
+@property(nonatomic, assign) int stateLockDescriptor;
+@property(nonatomic, copy) NSString *loadedStateStamp;
 
 - (nullable NSDictionary *)normalizedCollectionMetadataForDefinition:(id<ALNStorageCollectionDefinition>)definition
                                                                error:(NSError **)error;
@@ -523,6 +588,8 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                            error:(NSError **)error;
 - (BOOL)loadPersistedStateWithError:(NSError **)error;
 - (BOOL)persistStateWithError:(NSError **)error;
+- (BOOL)performStateTransaction:(BOOL (^)(NSError **blockError))block error:(NSError **)error;
+- (void)refreshStateIfChanged;
 - (void)recordActivityNamed:(NSString *)event details:(NSDictionary *)details;
 - (NSUInteger)pruneExpiredUploadSessionsAt:(NSDate *)timestamp
                             recordActivity:(BOOL)recordActivity;
@@ -568,6 +635,10 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     _activityLog = [NSMutableArray array];
     _persistenceEnabled = NO;
     _statePath = @"";
+    _transactionLock = [[NSRecursiveLock alloc] init];
+    _transactionDepth = 0;
+    _stateLockDescriptor = -1;
+    _loadedStateStamp = @"";
   }
   return self;
 }
@@ -674,6 +745,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   self.nextSequence = 0;
   self.statePath = SMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
+  self.loadedStateStamp = @"";
   [self.lock unlock];
 
   if (![self loadPersistedStateWithError:error]) {
@@ -728,6 +800,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       }
     }
   }
+  return [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self pruneUnknownCollectionState];
+    [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
+    return [self persistStateWithError:blockError];
+  }
+                                 error:error];
+}
+
+- (void)pruneUnknownCollectionState {
   [self.lock lock];
   NSSet *knownCollections = [NSSet setWithArray:[self.collectionMetadataByIdentifier allKeys]];
   NSArray *storedObjectIDs = [NSArray arrayWithArray:[self.objectsByIdentifier allKeys]];
@@ -754,11 +835,6 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
   }
   [self.lock unlock];
-  [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
-  if (![self persistStateWithError:error]) {
-    return NO;
-  }
-  return YES;
 }
 
 - (BOOL)loadPersistedStateWithError:(NSError **)error {
@@ -774,28 +850,140 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
     return YES;
   }
+  // The file is the shared truth: replace the in-memory copy rather than merge
+  // into it, so objects another process deleted stay deleted here.
   [self.lock lock];
   NSDictionary *objects = [state[@"objectsByIdentifier"] isKindOfClass:[NSDictionary class]] ? state[@"objectsByIdentifier"] : @{};
   NSDictionary *sessions = [state[@"uploadSessionsByIdentifier"] isKindOfClass:[NSDictionary class]] ? state[@"uploadSessionsByIdentifier"] : @{};
   NSDictionary *objectIDsByCollection = [state[@"objectIDsByCollection"] isKindOfClass:[NSDictionary class]] ? state[@"objectIDsByCollection"] : @{};
+  [self.objectIDsByCollection removeAllObjects];
+  for (NSString *collection in self.collectionMetadataByIdentifier) {
+    self.objectIDsByCollection[collection] = [NSMutableArray array];
+  }
   for (NSString *collection in objectIDsByCollection) {
     NSArray *objectIDs = [objectIDsByCollection[collection] isKindOfClass:[NSArray class]] ? objectIDsByCollection[collection] : @[];
     self.objectIDsByCollection[collection] = [NSMutableArray arrayWithArray:objectIDs];
   }
-  [self.objectsByIdentifier addEntriesFromDictionary:objects];
+  [self.objectsByIdentifier removeAllObjects];
+  for (NSString *objectID in objects) {
+    NSDictionary *record = [objects[objectID] isKindOfClass:[NSDictionary class]] ? objects[objectID] : nil;
+    if (record == nil) {
+      continue;
+    }
+    if ([SMTrimmedString(record[@"tokenNonce"]) length] == 0) {
+      // State written before tokens were bound to the object.
+      NSMutableDictionary *upgraded = [NSMutableDictionary dictionaryWithDictionary:record];
+      upgraded[@"tokenNonce"] = SMRandomHexString(16) ?: @"";
+      record = [NSDictionary dictionaryWithDictionary:upgraded];
+    }
+    self.objectsByIdentifier[objectID] = record;
+  }
+  [self.uploadSessionsByIdentifier removeAllObjects];
   [self.uploadSessionsByIdentifier addEntriesFromDictionary:sessions];
   NSArray *activity = [state[@"activityLog"] isKindOfClass:[NSArray class]] ? state[@"activityLog"] : @[];
+  [self.activityLog removeAllObjects];
   [self.activityLog addObjectsFromArray:activity];
-  self.nextSequence = [state[@"nextSequence"] respondsToSelector:@selector(unsignedIntegerValue)]
-                          ? [state[@"nextSequence"] unsignedIntegerValue]
-                          : self.nextSequence;
+  NSUInteger storedSequence = [state[@"nextSequence"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                  ? [state[@"nextSequence"] unsignedIntegerValue]
+                                  : 0;
+  self.nextSequence = MAX(self.nextSequence, storedSequence);
   [self.lock unlock];
+  self.loadedStateStamp = SMStateFileStamp(self.statePath);
   return YES;
+}
+
+- (NSString *)stateLockPath {
+  return [self.statePath stringByAppendingString:@".lock"];
+}
+
+// Runs block as one read-modify-write of the shared state. The outermost
+// transaction takes the cross-process lock, reloads the state file, and
+// releases the lock after block's writes; nested transactions (a method that
+// calls another) join it.
+- (BOOL)performStateTransaction:(BOOL (^)(NSError **blockError))block error:(NSError **)error {
+  [self.transactionLock lock];
+  BOOL outermost = (self.transactionDepth == 0);
+  BOOL sharedState = (self.persistenceEnabled && [self.statePath length] > 0);
+  if (outermost && sharedState) {
+    NSString *parent = [self.statePath stringByDeletingLastPathComponent];
+    if ([parent length] > 0) {
+      (void)[[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                      withIntermediateDirectories:YES
+                                                       attributes:nil
+                                                            error:NULL];
+    }
+    int descriptor = ALNPlatformOpenExclusiveLock([self stateLockPath]);
+    if (descriptor < 0) {
+      [self.transactionLock unlock];
+      if (error != NULL) {
+        *error = SMError(ALNStorageModuleErrorPersistenceFailed,
+                         @"storage state lock could not be acquired",
+                         @{ @"path" : [self stateLockPath] ?: @"" });
+      }
+      return NO;
+    }
+    self.stateLockDescriptor = descriptor;
+    NSError *loadError = nil;
+    // Holding the lock, nobody can replace the file between this check and
+    // the block's write, so an unchanged stamp means memory is current.
+    BOOL current = [SMStateFileStamp(self.statePath) isEqualToString:self.loadedStateStamp ?: @""];
+    if (!current && ![self loadPersistedStateWithError:&loadError]) {
+      ALNPlatformReleaseExclusiveLock(descriptor);
+      self.stateLockDescriptor = -1;
+      [self.transactionLock unlock];
+      if (error != NULL) {
+        *error = loadError;
+      }
+      return NO;
+    }
+  }
+  self.transactionDepth += 1;
+  NSError *blockError = nil;
+  BOOL ok = block(&blockError);
+  self.transactionDepth -= 1;
+  if (outermost && self.stateLockDescriptor >= 0) {
+    ALNPlatformReleaseExclusiveLock(self.stateLockDescriptor);
+    self.stateLockDescriptor = -1;
+  }
+  [self.transactionLock unlock];
+  if (!ok && error != NULL) {
+    *error = blockError;
+  }
+  return ok;
+}
+
+// Picks up writes from other processes before a read. Cheap when nothing
+// changed: one stat of the state file.
+- (void)refreshStateIfChanged {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return;
+  }
+  [self.transactionLock lock];
+  BOOL inTransaction = (self.transactionDepth > 0);
+  NSString *stamp = SMStateFileStamp(self.statePath);
+  BOOL changed = ![stamp isEqualToString:self.loadedStateStamp ?: @""];
+  [self.transactionLock unlock];
+  if (inTransaction || !changed) {
+    return;
+  }
+  (void)[self performStateTransaction:^BOOL(NSError **blockError) {
+    (void)blockError;
+    return YES;
+  }
+                                error:NULL];
 }
 
 - (BOOL)persistStateWithError:(NSError **)error {
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return YES;
+  }
+  // Changes are made inside performStateTransaction:, which already holds the
+  // cross-process lock. A write from outside one still takes the lock, so two
+  // processes never interleave their writes.
+  [self.transactionLock lock];
+  int bareDescriptor = -1;
+  if (self.transactionDepth == 0) {
+    bareDescriptor = ALNPlatformOpenExclusiveLock([self stateLockPath]);
   }
   NSDictionary *payload = nil;
   [self.lock lock];
@@ -812,7 +1000,13 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"activityLog" : [[NSArray alloc] initWithArray:self.activityLog copyItems:YES] ?: @[],
   };
   [self.lock unlock];
-  return SMWritePropertyListAtPath(self.statePath, payload, error);
+  BOOL written = SMWritePropertyListAtPath(self.statePath, payload, error);
+  if (written) {
+    self.loadedStateStamp = SMStateFileStamp(self.statePath);
+  }
+  ALNPlatformReleaseExclusiveLock(bareDescriptor);
+  [self.transactionLock unlock];
+  return written;
 }
 
 - (void)recordActivityNamed:(NSString *)event details:(NSDictionary *)details {
@@ -830,6 +1024,18 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (NSUInteger)pruneExpiredUploadSessionsAt:(NSDate *)timestamp
                             recordActivity:(BOOL)recordActivity {
+  __block NSUInteger count = 0;
+  (void)[self performStateTransaction:^BOOL(NSError **blockError) {
+    (void)blockError;
+    count = [self pruneExpiredUploadSessionsInTransactionAt:timestamp recordActivity:recordActivity];
+    return YES;
+  }
+                                error:NULL];
+  return count;
+}
+
+- (NSUInteger)pruneExpiredUploadSessionsInTransactionAt:(NSDate *)timestamp
+                                         recordActivity:(BOOL)recordActivity {
   NSDate *now = timestamp ?: [NSDate date];
   NSMutableArray<NSString *> *expired = [NSMutableArray array];
   [self.lock lock];
@@ -988,6 +1194,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSString *collection = SMLowerTrimmedString(record[@"collection"]);
   NSString *objectID = SMTrimmedString(record[@"objectID"]);
   NSMutableDictionary *publicRecord = [NSMutableDictionary dictionaryWithDictionary:record ?: @{}];
+  [publicRecord removeObjectForKey:@"tokenNonce"];
   publicRecord[@"paths"] = @{
     @"html" : SMPathJoin(self.prefix, [NSString stringWithFormat:@"collections/%@/objects/%@", collection, objectID]),
     @"api" : SMPathJoin(self.apiPrefix, [NSString stringWithFormat:@"collections/%@/objects/%@", collection, objectID]),
@@ -1016,6 +1223,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                                 query:(NSString *)query {
   NSString *collectionID = SMLowerTrimmedString(collection);
   NSString *search = SMLowerTrimmedString(query);
+  [self refreshStateIfChanged];
   [self.lock lock];
   NSArray<NSString *> *objectIDs = nil;
   if ([collectionID length] > 0) {
@@ -1043,6 +1251,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 - (NSDictionary *)objectRecordForIdentifier:(NSString *)objectID
                                       error:(NSError **)error {
   NSString *normalizedObjectID = SMTrimmedString(objectID);
+  [self refreshStateIfChanged];
   [self.lock lock];
   NSDictionary *record = self.objectsByIdentifier[normalizedObjectID];
   [self.lock unlock];
@@ -1137,9 +1346,13 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return nil;
   }
   NSTimeInterval ttl = (expiresIn > 0.0) ? expiresIn : self.defaultUploadSessionTTLSeconds;
-  [self.lock lock];
-  self.nextSequence += 1;
-  NSString *sessionID = [NSString stringWithFormat:@"upload-%lu", (unsigned long)self.nextSequence];
+  NSString *sessionID = SMRandomIdentifier(@"upload");
+  if ([sessionID length] == 0) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorPersistenceFailed, @"upload session identifier could not be generated", nil);
+    }
+    return nil;
+  }
   NSDictionary *session = @{
     @"sessionID" : sessionID,
     @"collection" : SMLowerTrimmedString(collection),
@@ -1151,15 +1364,20 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"expiresAt" : @([[NSDate dateWithTimeIntervalSinceNow:ttl] timeIntervalSince1970]),
     @"status" : @"pending",
   };
-  self.uploadSessionsByIdentifier[sessionID] = session;
-  [self.lock unlock];
-  [self recordActivityNamed:@"upload_session_created"
-                    details:@{
-                      @"sessionID" : sessionID ?: @"",
-                      @"collection" : SMLowerTrimmedString(collection),
-                      @"name" : SMTrimmedString(name),
-                    }];
-  if (![self persistStateWithError:error]) {
+  BOOL saved = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self.lock lock];
+    self.uploadSessionsByIdentifier[sessionID] = session;
+    [self.lock unlock];
+    [self recordActivityNamed:@"upload_session_created"
+                      details:@{
+                        @"sessionID" : sessionID ?: @"",
+                        @"collection" : SMLowerTrimmedString(collection),
+                        @"name" : SMTrimmedString(name),
+                      }];
+    return [self persistStateWithError:blockError];
+  }
+                                       error:error];
+  if (!saved) {
     return nil;
   }
   NSString *token = SMCreateSignedToken(@{
@@ -1223,40 +1441,55 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   }
   NSDictionary *analysis = SMAnalyzeObjectData(name, contentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
 
-  NSDictionary *record = nil;
-  [self.lock lock];
-  self.nextSequence += 1;
-  NSString *objectID = [NSString stringWithFormat:@"obj-%lu", (unsigned long)self.nextSequence];
-  record = @{
-    @"objectID" : objectID,
-    @"sequence" : @(self.nextSequence),
-    @"collection" : SMLowerTrimmedString(collection),
-    @"name" : SMTrimmedString(name),
-    @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
-    @"sizeBytes" : @(sizeBytes),
-    @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
-    @"attachmentID" : attachmentID ?: @"",
-    @"metadata" : SMNormalizeDictionary(metadata),
-    @"analysis" : analysis ?: @{},
-    @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
-    @"variantState" : ([variants count] > 0) ? @"pending" : @"none",
-    @"variants" : [NSArray arrayWithArray:variants],
-  };
-  self.objectsByIdentifier[objectID] = record;
-  NSMutableArray *collectionIDs = self.objectIDsByCollection[SMLowerTrimmedString(collection)];
-  if (![collectionIDs isKindOfClass:[NSMutableArray class]]) {
-    collectionIDs = [NSMutableArray array];
-    self.objectIDsByCollection[SMLowerTrimmedString(collection)] = collectionIDs;
+  NSString *objectID = SMRandomIdentifier(@"obj");
+  NSString *tokenNonce = SMRandomHexString(16);
+  if ([objectID length] == 0 || [tokenNonce length] == 0) {
+    (void)[self.attachmentAdapter deleteAttachmentID:attachmentID error:NULL];
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorPersistenceFailed, @"storage object identifier could not be generated", nil);
+    }
+    return nil;
   }
-  [collectionIDs addObject:objectID];
-  [self.lock unlock];
-  [self recordActivityNamed:@"object_stored"
-                    details:@{
-                      @"objectID" : record[@"objectID"] ?: @"",
-                      @"collection" : record[@"collection"] ?: @"",
-                      @"name" : record[@"name"] ?: @"",
-                    }];
-  if (![self persistStateWithError:error]) {
+  __block NSDictionary *record = nil;
+  BOOL saved = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self.lock lock];
+    // The sequence only orders listings; under the transaction it is unique
+    // across processes too.
+    self.nextSequence += 1;
+    record = @{
+      @"objectID" : objectID,
+      @"tokenNonce" : tokenNonce,
+      @"sequence" : @(self.nextSequence),
+      @"collection" : SMLowerTrimmedString(collection),
+      @"name" : SMTrimmedString(name),
+      @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
+      @"sizeBytes" : @(sizeBytes),
+      @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
+      @"attachmentID" : attachmentID ?: @"",
+      @"metadata" : SMNormalizeDictionary(metadata),
+      @"analysis" : analysis ?: @{},
+      @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
+      @"variantState" : ([variants count] > 0) ? @"pending" : @"none",
+      @"variants" : [NSArray arrayWithArray:variants],
+    };
+    self.objectsByIdentifier[objectID] = record;
+    NSMutableArray *collectionIDs = self.objectIDsByCollection[SMLowerTrimmedString(collection)];
+    if (![collectionIDs isKindOfClass:[NSMutableArray class]]) {
+      collectionIDs = [NSMutableArray array];
+      self.objectIDsByCollection[SMLowerTrimmedString(collection)] = collectionIDs;
+    }
+    [collectionIDs addObject:objectID];
+    [self.lock unlock];
+    [self recordActivityNamed:@"object_stored"
+                      details:@{
+                        @"objectID" : record[@"objectID"] ?: @"",
+                        @"collection" : record[@"collection"] ?: @"",
+                        @"name" : record[@"name"] ?: @"",
+                      }];
+    return [self persistStateWithError:blockError];
+  }
+                                       error:error];
+  if (!saved) {
     return nil;
   }
 
@@ -1312,6 +1545,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (tokenPayload == nil) {
     return nil;
   }
+  [self refreshStateIfChanged];
   [self.lock lock];
   NSDictionary *session = self.uploadSessionsByIdentifier[normalizedSessionID];
   [self.lock unlock];
@@ -1349,18 +1583,37 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (object == nil) {
     return nil;
   }
-  [self.lock lock];
-  NSMutableDictionary *updatedSession = [NSMutableDictionary dictionaryWithDictionary:session];
-  updatedSession[@"status"] = @"complete";
-  updatedSession[@"objectID"] = object[@"objectID"] ?: @"";
-  self.uploadSessionsByIdentifier[normalizedSessionID] = [NSDictionary dictionaryWithDictionary:updatedSession];
-  [self.lock unlock];
-  [self recordActivityNamed:@"upload_session_completed"
-                    details:@{
-                      @"sessionID" : normalizedSessionID ?: @"",
-                      @"objectID" : object[@"objectID"] ?: @"",
-                    }];
-  if (![self persistStateWithError:error]) {
+  __block BOOL alreadyCompleted = NO;
+  BOOL saved = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self.lock lock];
+    // Another process may have completed (or expired) the session while this
+    // one stored the data.
+    NSDictionary *currentSession = self.uploadSessionsByIdentifier[normalizedSessionID];
+    if (currentSession == nil || [[currentSession[@"status"] description] isEqualToString:@"complete"]) {
+      [self.lock unlock];
+      alreadyCompleted = YES;
+      if (blockError != NULL) {
+        *blockError = SMError(ALNStorageModuleErrorValidationFailed, @"upload session has already been completed", nil);
+      }
+      return NO;
+    }
+    NSMutableDictionary *updatedSession = [NSMutableDictionary dictionaryWithDictionary:currentSession];
+    updatedSession[@"status"] = @"complete";
+    updatedSession[@"objectID"] = object[@"objectID"] ?: @"";
+    self.uploadSessionsByIdentifier[normalizedSessionID] = [NSDictionary dictionaryWithDictionary:updatedSession];
+    [self.lock unlock];
+    [self recordActivityNamed:@"upload_session_completed"
+                      details:@{
+                        @"sessionID" : normalizedSessionID ?: @"",
+                        @"objectID" : object[@"objectID"] ?: @"",
+                      }];
+    return [self persistStateWithError:blockError];
+  }
+                                       error:error];
+  if (!saved) {
+    if (alreadyCompleted) {
+      (void)[self deleteObjectIdentifier:object[@"objectID"] reason:@"upload_session_race" error:NULL];
+    }
     return nil;
   }
   NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:object];
@@ -1375,10 +1628,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (record == nil) {
     return nil;
   }
+  [self.lock lock];
+  NSString *tokenNonce = SMTrimmedString(self.objectsByIdentifier[record[@"objectID"] ?: @""][@"tokenNonce"]);
+  [self.lock unlock];
   NSTimeInterval ttl = (expiresIn > 0.0) ? expiresIn : self.defaultDownloadTokenTTLSeconds;
+  // objectNonce ties the token to this object, not just to its ID.
   return SMCreateSignedToken(@{
     @"purpose" : @"download",
     @"objectID" : record[@"objectID"] ?: @"",
+    @"objectNonce" : tokenNonce ?: @"",
     @"exp" : @([[NSDate dateWithTimeIntervalSinceNow:ttl] timeIntervalSince1970]),
   }, self.signingKeyData);
 }
@@ -1403,6 +1661,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (record == nil) {
     return nil;
   }
+  [self.lock lock];
+  NSString *tokenNonce = SMTrimmedString(self.objectsByIdentifier[record[@"objectID"] ?: @""][@"tokenNonce"]);
+  [self.lock unlock];
+  if ([tokenNonce length] == 0 || ![SMTrimmedString(payload[@"objectNonce"]) isEqualToString:tokenNonce]) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorTokenRejected, @"token does not match the stored object", nil);
+    }
+    return nil;
+  }
   NSDictionary *adapterMetadata = nil;
   NSData *data = [self.attachmentAdapter attachmentDataForID:record[@"attachmentID"] metadata:&adapterMetadata error:error];
   if (data == nil) {
@@ -1425,6 +1692,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                         reason:(NSString *)reason
                          error:(NSError **)error {
   NSString *normalizedObjectID = SMTrimmedString(objectID);
+  return [self performStateTransaction:^BOOL(NSError **blockError) {
+    return [self deleteObjectIdentifierInTransaction:normalizedObjectID reason:reason error:blockError];
+  }
+                                 error:error];
+}
+
+- (BOOL)deleteObjectIdentifierInTransaction:(NSString *)normalizedObjectID
+                                     reason:(NSString *)reason
+                                      error:(NSError **)error {
   [self.lock lock];
   NSDictionary *record = self.objectsByIdentifier[normalizedObjectID];
   [self.lock unlock];
@@ -1500,8 +1776,12 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"deletedObjects" : @(deletedObjects),
     @"timestamp" : @([now timeIntervalSince1970]),
   };
-  [self recordActivityNamed:@"maintenance_completed" details:summary];
-  if (![self persistStateWithError:error]) {
+  BOOL saved = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self recordActivityNamed:@"maintenance_completed" details:summary];
+    return [self persistStateWithError:blockError];
+  }
+                                       error:error];
+  if (!saved) {
     return nil;
   }
   return summary;
@@ -1517,19 +1797,36 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if ([variants count] == 0) {
     return @{ @"objectID" : record[@"objectID"] ?: @"", @"queuedCount" : @0, @"status" : @"no_variants" };
   }
-  NSMutableArray *resetVariants = [NSMutableArray array];
-  for (NSDictionary *variant in variants) {
-    NSMutableDictionary *mutableVariant = [NSMutableDictionary dictionaryWithDictionary:variant];
-    mutableVariant[@"status"] = @"pending";
-    mutableVariant[@"error"] = @"";
-    [resetVariants addObject:mutableVariant];
+  BOOL reset = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self.lock lock];
+    // Update the stored record, which carries fields the public copy omits.
+    NSDictionary *stored = self.objectsByIdentifier[record[@"objectID"] ?: @""];
+    if (stored == nil) {
+      [self.lock unlock];
+      if (blockError != NULL) {
+        *blockError = SMError(ALNStorageModuleErrorNotFound, @"storage object was not found",
+                              @{ @"objectID" : record[@"objectID"] ?: @"" });
+      }
+      return NO;
+    }
+    NSMutableArray *resetVariants = [NSMutableArray array];
+    for (NSDictionary *variant in ([stored[@"variants"] isKindOfClass:[NSArray class]] ? stored[@"variants"] : @[])) {
+      NSMutableDictionary *mutableVariant = [NSMutableDictionary dictionaryWithDictionary:variant];
+      mutableVariant[@"status"] = @"pending";
+      mutableVariant[@"error"] = @"";
+      [resetVariants addObject:mutableVariant];
+    }
+    NSMutableDictionary *mutableRecord = [NSMutableDictionary dictionaryWithDictionary:stored];
+    mutableRecord[@"variants"] = [NSArray arrayWithArray:resetVariants];
+    mutableRecord[@"variantState"] = @"pending";
+    self.objectsByIdentifier[record[@"objectID"]] = [NSDictionary dictionaryWithDictionary:mutableRecord];
+    [self.lock unlock];
+    return [self persistStateWithError:blockError];
   }
-  NSMutableDictionary *mutableRecord = [NSMutableDictionary dictionaryWithDictionary:record];
-  mutableRecord[@"variants"] = [NSArray arrayWithArray:resetVariants];
-  mutableRecord[@"variantState"] = @"pending";
-  [self.lock lock];
-  self.objectsByIdentifier[record[@"objectID"]] = [NSDictionary dictionaryWithDictionary:mutableRecord];
-  [self.lock unlock];
+                                       error:error];
+  if (!reset) {
+    return nil;
+  }
   NSUInteger queuedCount = 0;
   for (NSDictionary *variant in variants) {
     NSString *variantID = SMTrimmedString(variant[@"identifier"]);
@@ -1548,12 +1845,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
   }
   NSDictionary *summary = @{ @"objectID" : record[@"objectID"] ?: @"", @"queuedCount" : @(queuedCount), @"status" : @"queued" };
-  [self recordActivityNamed:@"variant_generation_queued"
-                    details:@{
-                      @"objectID" : record[@"objectID"] ?: @"",
-                      @"queuedCount" : @(queuedCount),
-                    }];
-  (void)[self persistStateWithError:NULL];
+  (void)[self performStateTransaction:^BOOL(NSError **blockError) {
+    [self recordActivityNamed:@"variant_generation_queued"
+                      details:@{
+                        @"objectID" : record[@"objectID"] ?: @"",
+                        @"queuedCount" : @(queuedCount),
+                      }];
+    return [self persistStateWithError:blockError];
+  }
+                                error:NULL];
   return summary;
 }
 
@@ -1567,6 +1867,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                       error:(NSError **)error {
   NSString *objectID = SMTrimmedString(payload[@"objectID"]);
   NSString *variantID = SMLowerTrimmedString(payload[@"variant"]);
+  [self refreshStateIfChanged];
   [self.lock lock];
   NSDictionary *record = self.objectsByIdentifier[objectID];
   [self.lock unlock];
@@ -1669,17 +1970,47 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       anyFailed = YES;
     }
   }
-  NSMutableDictionary *updatedRecord = [NSMutableDictionary dictionaryWithDictionary:record];
-  updatedRecord[@"variants"] = [NSArray arrayWithArray:updatedVariants];
-  updatedRecord[@"variantState"] = allReady ? @"ready" : (anyFailed ? @"failed" : @"pending");
-  updatedRecord[@"analysis"] = SMAnalyzeObjectData(updatedRecord[@"name"],
-                                                   updatedRecord[@"contentType"],
-                                                   data ?: [NSData data],
-                                                   updatedRecord[@"metadata"] ?: @{},
-                                                   updatedVariants);
-  [self.lock lock];
-  self.objectsByIdentifier[objectID] = [NSDictionary dictionaryWithDictionary:updatedRecord];
-  [self.lock unlock];
+  NSString *variantState = allReady ? @"ready" : (anyFailed ? @"failed" : @"pending");
+  NSDictionary *analysis = SMAnalyzeObjectData(record[@"name"],
+                                               record[@"contentType"],
+                                               data ?: [NSData data],
+                                               record[@"metadata"] ?: @{},
+                                               updatedVariants);
+  NSString *sourceAttachmentID = SMTrimmedString(record[@"attachmentID"]);
+  __block BOOL objectGone = NO;
+  NSError *saveError = nil;
+  BOOL saved = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self.lock lock];
+    // The object may have been deleted (or replaced) while the variant was
+    // generated; only update the record this job started from.
+    NSDictionary *current = self.objectsByIdentifier[objectID];
+    if (current == nil || ![SMTrimmedString(current[@"attachmentID"]) isEqualToString:sourceAttachmentID]) {
+      [self.lock unlock];
+      objectGone = YES;
+      if (blockError != NULL) {
+        *blockError = SMError(ALNStorageModuleErrorNotFound, @"storage object was not found",
+                              @{ @"objectID" : objectID ?: @"" });
+      }
+      return NO;
+    }
+    NSMutableDictionary *updatedRecord = [NSMutableDictionary dictionaryWithDictionary:current];
+    updatedRecord[@"variants"] = [NSArray arrayWithArray:updatedVariants];
+    updatedRecord[@"variantState"] = variantState;
+    updatedRecord[@"analysis"] = analysis ?: @{};
+    self.objectsByIdentifier[objectID] = [NSDictionary dictionaryWithDictionary:updatedRecord];
+    [self.lock unlock];
+    return [self persistStateWithError:blockError];
+  }
+                                       error:&saveError];
+  if (!saved) {
+    if (objectGone && [generatedAttachmentID length] > 0) {
+      (void)[self.attachmentAdapter deleteAttachmentID:generatedAttachmentID error:NULL];
+    }
+    if (error != NULL) {
+      *error = saveError;
+    }
+    return nil;
+  }
   NSUInteger attempt = [jobContext[@"attempt"] respondsToSelector:@selector(unsignedIntegerValue)]
                            ? [jobContext[@"attempt"] unsignedIntegerValue]
                            : 1;
@@ -1687,15 +2018,18 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                ? [jobContext[@"maxAttempts"] unsignedIntegerValue]
                                : 1;
   if (processingError != nil) {
-    [self recordActivityNamed:@"variant_failed"
-                      details:@{
-                        @"objectID" : objectID ?: @"",
-                        @"variant" : variantID ?: @"",
-                        @"attempt" : @(attempt),
-                        @"maxAttempts" : @(maxAttempts),
-                        @"error" : processingError.localizedDescription ?: @"variant generation failed",
-                      }];
-    (void)[self persistStateWithError:NULL];
+    (void)[self performStateTransaction:^BOOL(NSError **blockError) {
+      [self recordActivityNamed:@"variant_failed"
+                        details:@{
+                          @"objectID" : objectID ?: @"",
+                          @"variant" : variantID ?: @"",
+                          @"attempt" : @(attempt),
+                          @"maxAttempts" : @(maxAttempts),
+                          @"error" : processingError.localizedDescription ?: @"variant generation failed",
+                        }];
+      return [self persistStateWithError:blockError];
+    }
+                                  error:NULL];
     if (error != NULL) {
       *error = processingError;
     }
@@ -1707,12 +2041,16 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"status" : @"ready",
     @"attachmentID" : generatedAttachmentID ?: @"",
   };
-  [self recordActivityNamed:@"variant_ready"
-                    details:@{
-                      @"objectID" : objectID ?: @"",
-                      @"variant" : variantID ?: @"",
-                    }];
-  if (![self persistStateWithError:error]) {
+  BOOL recorded = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self recordActivityNamed:@"variant_ready"
+                      details:@{
+                        @"objectID" : objectID ?: @"",
+                        @"variant" : variantID ?: @"",
+                      }];
+    return [self persistStateWithError:blockError];
+  }
+                                          error:error];
+  if (!recorded) {
     return nil;
   }
   return summary;

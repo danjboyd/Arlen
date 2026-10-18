@@ -302,4 +302,184 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertEqualObjects(@YES, summary[@"attachmentAdapter"][@"capabilities"][@"scoped"]);
 }
 
+// Two runtimes on one state file stand in for two propane workers (or a
+// worker and the jobs worker): separate memory, one shared catalog.
+- (ALNStorageModuleRuntime *)workerRuntimeWithStatePath:(NSString *)statePath
+                                         attachmentRoot:(NSString *)attachmentRoot
+                                                 shared:(BOOL)shared {
+  ALNApplication *app = [self applicationWithStatePath:statePath attachmentRoot:attachmentRoot];
+  NSMutableDictionary *config = [app.config mutableCopy];
+  NSMutableDictionary *storage = [config[@"storageModule"] mutableCopy];
+  storage[@"signingSecret"] = @"phase16c-shared-worker-signing-secret-0123456789";
+  config[@"storageModule"] = storage;
+  ALNApplication *configured = [[ALNApplication alloc] initWithConfig:config];
+  [configured setAttachmentAdapter:app.attachmentAdapter];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:configured error:&error]);
+  XCTAssertNil(error);
+  if (shared) {
+    XCTAssertTrue([[[ALNStorageModule alloc] init] registerWithApplication:configured error:&error]);
+    XCTAssertNil(error);
+    return [ALNStorageModuleRuntime sharedRuntime];
+  }
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertTrue([runtime configureWithApplication:configured error:&error]);
+  XCTAssertNil(error);
+  return runtime;
+}
+
+- (NSDictionary *)storeObjectNamed:(NSString *)name
+                              body:(NSString *)body
+                         inRuntime:(ALNStorageModuleRuntime *)runtime {
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"gallery"
+                                                     name:name
+                                              contentType:@"image/png"
+                                                     data:[body dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:nil
+                                                    error:&error];
+  XCTAssertNotNil(object);
+  XCTAssertNil(error);
+  return object;
+}
+
+- (NSString *)downloadedBodyForToken:(NSString *)token inRuntime:(ALNStorageModuleRuntime *)runtime {
+  NSError *error = nil;
+  NSData *data = [runtime downloadDataForToken:token metadata:NULL error:&error];
+  return (data != nil) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+}
+
+- (NSMutableDictionary *)stateAtPath:(NSString *)statePath {
+  NSData *data = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil(data);
+  id state = [NSPropertyListSerialization propertyListWithData:data
+                                                       options:NSPropertyListMutableContainersAndLeaves
+                                                        format:NULL
+                                                         error:NULL];
+  XCTAssertTrue([state isKindOfClass:[NSMutableDictionary class]]);
+  return state;
+}
+
+- (void)writeState:(NSDictionary *)state toPath:(NSString *)statePath {
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:state
+                                                            format:NSPropertyListBinaryFormat_v1_0
+                                                           options:0
+                                                             error:NULL];
+  XCTAssertNotNil(data);
+  XCTAssertTrue([data writeToFile:statePath atomically:YES]);
+}
+
+- (void)testRuntimesSharingOneStateFileKeepDistinctObjectsTokensAndCatalog {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *workerA = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:YES];
+  ALNStorageModuleRuntime *workerB = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:NO];
+  XCTAssertTrue(workerA != workerB);
+
+  NSDictionary *alice = [self storeObjectNamed:@"alice-private.png" body:@"alice data" inRuntime:workerA];
+  NSError *error = nil;
+  NSString *aliceToken = [workerA issueDownloadTokenForObjectID:alice[@"objectID"] expiresIn:60 error:&error];
+  XCTAssertNotNil(aliceToken);
+  NSDictionary *bob = [self storeObjectNamed:@"bob.png" body:@"bob data" inRuntime:workerB];
+
+  // IDs are random, not per-process counters, so the two workers never collide.
+  XCTAssertNotEqualObjects(alice[@"objectID"], bob[@"objectID"]);
+  XCTAssertTrue([alice[@"objectID"] hasPrefix:@"obj-"]);
+  XCTAssertEqual((NSUInteger)36, [alice[@"objectID"] length]);
+  XCTAssertNil(alice[@"tokenNonce"]);
+
+  // Alice's token resolves to Alice's object on either worker.
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerA]);
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerB]);
+
+  // Neither worker's write dropped the other's object.
+  for (ALNStorageModuleRuntime *worker in @[ workerA, workerB ]) {
+    NSArray *names = [[worker listObjectsForCollection:@"gallery" query:nil] valueForKey:@"name"];
+    XCTAssertEqualObjects((@[ @"alice-private.png", @"bob.png" ]),
+                          [names sortedArrayUsingSelector:@selector(compare:)]);
+    XCTAssertNotNil([worker objectRecordForIdentifier:bob[@"objectID"] error:NULL]);
+  }
+  NSDictionary *state = [self stateAtPath:statePath];
+  XCTAssertNotNil(state[@"objectsByIdentifier"][alice[@"objectID"]]);
+  XCTAssertNotNil(state[@"objectsByIdentifier"][bob[@"objectID"]]);
+
+  // An upload session opened on one worker completes on the other.
+  NSDictionary *session = [workerA createUploadSessionForCollection:@"gallery"
+                                                               name:@"carol.png"
+                                                        contentType:@"image/png"
+                                                          sizeBytes:5
+                                                           metadata:nil
+                                                          expiresIn:60
+                                                              error:&error];
+  XCTAssertNotNil(session);
+  XCTAssertTrue([session[@"sessionID"] hasPrefix:@"upload-"]);
+  NSDictionary *carol = [workerB storeUploadData:[@"carol" dataUsingEncoding:NSUTF8StringEncoding]
+                              forUploadSessionID:session[@"sessionID"]
+                                           token:session[@"token"]
+                                           error:&error];
+  XCTAssertNotNil(carol);
+  XCTAssertNil(error);
+  XCTAssertNotNil([workerA objectRecordForIdentifier:carol[@"objectID"] error:NULL]);
+
+  // A delete on one worker is seen by the other, and the token stops working.
+  XCTAssertTrue([workerB deleteObjectIdentifier:alice[@"objectID"] error:&error]);
+  XCTAssertNil([workerA objectRecordForIdentifier:alice[@"objectID"] error:NULL]);
+  XCTAssertNil([self downloadedBodyForToken:aliceToken inRuntime:workerA]);
+  XCTAssertNotNil([workerA objectRecordForIdentifier:bob[@"objectID"] error:NULL]);
+}
+
+- (void)testDownloadTokenIsBoundToTheObjectNotJustItsIdentifier {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *worker = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:YES];
+  NSDictionary *alice = [self storeObjectNamed:@"alice.png" body:@"alice data" inRuntime:worker];
+  NSDictionary *bob = [self storeObjectNamed:@"bob.png" body:@"bob data" inRuntime:worker];
+  NSString *aliceToken = [worker issueDownloadTokenForObjectID:alice[@"objectID"] expiresIn:60 error:NULL];
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:worker]);
+
+  // Another process puts a different object under Alice's ID (what a reused
+  // ID would do). Her token must not hand it out.
+  NSMutableDictionary *state = [self stateAtPath:statePath];
+  NSMutableDictionary *objects = state[@"objectsByIdentifier"];
+  NSMutableDictionary *replacement = [objects[bob[@"objectID"]] mutableCopy];
+  replacement[@"objectID"] = alice[@"objectID"];
+  objects[alice[@"objectID"]] = replacement;
+  [self writeState:state toPath:statePath];
+
+  NSError *error = nil;
+  XCTAssertNil([worker downloadDataForToken:aliceToken metadata:NULL error:&error]);
+  XCTAssertNotNil(error);
+}
+
+- (void)testStateWrittenWithCounterIdentifiersStillLoadsAndIssuesTokens {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *seed = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:YES];
+  NSDictionary *stored = [self storeObjectNamed:@"legacy.png" body:@"legacy" inRuntime:seed];
+
+  // Rewrite the record the way the previous release stored it: a counter ID
+  // and no token nonce.
+  NSMutableDictionary *state = [self stateAtPath:statePath];
+  NSMutableDictionary *record = [state[@"objectsByIdentifier"][stored[@"objectID"]] mutableCopy];
+  [record removeObjectForKey:@"tokenNonce"];
+  record[@"objectID"] = @"obj-1";
+  state[@"objectsByIdentifier"] = [@{ @"obj-1" : record } mutableCopy];
+  state[@"objectIDsByCollection"] = [@{ @"gallery" : [@[ @"obj-1" ] mutableCopy] } mutableCopy];
+  state[@"nextSequence"] = @1;
+  [self writeState:state toPath:statePath];
+
+  ALNStorageModuleRuntime *upgraded = [self workerRuntimeWithStatePath:statePath attachmentRoot:attachmentRoot shared:YES];
+  NSError *error = nil;
+  XCTAssertNotNil([upgraded objectRecordForIdentifier:@"obj-1" error:&error]);
+  NSString *token = [upgraded issueDownloadTokenForObjectID:@"obj-1" expiresIn:60 error:&error];
+  XCTAssertNotNil(token);
+  XCTAssertEqualObjects(@"legacy", [self downloadedBodyForToken:token inRuntime:upgraded]);
+  NSDictionary *next = [self storeObjectNamed:@"next.png" body:@"next" inRuntime:upgraded];
+  XCTAssertNotEqualObjects(@"obj-2", next[@"objectID"]);
+  XCTAssertNotNil([upgraded objectRecordForIdentifier:@"obj-1" error:NULL]);
+}
+
 @end

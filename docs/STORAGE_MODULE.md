@@ -45,6 +45,22 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
 
+Processes that share the state file (propane workers, the jobs worker, CLI
+delegates on one host) stay consistent:
+
+- Each change is a read-modify-write under an exclusive lock on
+  `<state file>.lock` (`flock` on POSIX, `LockFileEx` on Windows). It reloads
+  whatever another process wrote first, so no process drops another's objects
+  or upload sessions.
+- Reads reload the file when another process has replaced it.
+- Object and upload-session IDs are random (`obj-<32 hex>`,
+  `upload-<32 hex>`), not per-process counters. Download tokens are bound to
+  the object they were issued for, not just to its ID.
+
+The state file must be on a local filesystem that honours those locks, and
+every process must see the same file: this is single-host shared state, not
+multi-host storage.
+
 Runtime access is available through `ALNStorageModuleRuntime`.
 
 ## Collection Metadata

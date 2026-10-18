@@ -53,6 +53,16 @@
     so clients can't mass-assign foreign keys or role fields;
     `docs/ARLEN_ORM.md` now shows it.
   - `persistedPrimaryKeyValues` is now a reserved generated-property name.
+- The `storage` module (now `1.2.0`) keeps one consistent catalog across
+  processes that share its state file, such as propane workers and the jobs
+  worker:
+  - Each change reloads and rewrites the state file under an exclusive file
+    lock (`<state file>.lock`), and reads pick up other processes' writes.
+  - Object and upload-session IDs are random (`obj-<32 hex>`,
+    `upload-<32 hex>`) instead of per-process counters.
+  - Download tokens are bound to the object they were issued for.
+  - Download tokens issued before the upgrade are rejected; they expire within
+    `downloadTokenTTLSeconds` anyway. Existing objects keep their IDs.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
