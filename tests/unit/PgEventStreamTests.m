@@ -3,6 +3,7 @@
 
 #import "ALNEventStream.h"
 #import "ALNPgEventStream.h"
+#import "../shared/ALNTestSupport.h"
 
 // GitHub issue 48, part 2: PostgreSQL event stream store and broker.
 @interface PgEventStreamRecorder : NSObject <ALNEventStreamLiveSubscriber>
@@ -53,7 +54,7 @@
   [super setUp];
   const char *dsn = getenv("ARLEN_PG_TEST_DSN");
   self.dsn = (dsn != NULL && dsn[0] != '\0') ? [NSString stringWithUTF8String:dsn] : nil;
-  self.table = [NSString stringWithFormat:@"arlen_evs_test_%u", arc4random_uniform(1000000000)];
+  self.table = [NSString stringWithFormat:@"arlen_evs_test_%u", ALNTestRandomUniform(1000000000)];
 }
 
 - (ALNPgEventStreamStore *)store {
@@ -157,7 +158,7 @@
   if (self.dsn == nil) {
     return;
   }
-  NSString *channel = [NSString stringWithFormat:@"arlen_evs_chan_%u", arc4random_uniform(1000000000)];
+  NSString *channel = [NSString stringWithFormat:@"arlen_evs_chan_%u", ALNTestRandomUniform(1000000000)];
   NSError *error = nil;
   ALNPgEventStreamBroker *brokerA = [[ALNPgEventStreamBroker alloc] initWithConnectionString:self.dsn notifyChannel:channel error:&error];
   ALNPgEventStreamBroker *brokerB = [[ALNPgEventStreamBroker alloc] initWithConnectionString:self.dsn notifyChannel:channel error:&error];

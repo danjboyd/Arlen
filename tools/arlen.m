@@ -22,6 +22,10 @@
 #import "ALNSchemaCodegen.h"
 #import "ALNWebPush.h"
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 static void PrintUsage(void) {
   fprintf(stderr,
           "Usage: arlen <command> [options]\n"
@@ -493,7 +497,138 @@ static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   return [stdoutText stringByAppendingString:stderrText];
 }
 
+#if defined(_WIN32)
+// Set by the console handler on Ctrl-C/Ctrl-Break while a shell command runs.
+static HANDLE gShellCommandInterrupted = NULL;
+
+// MSYS bash started by a native process does not turn a console Ctrl-C into
+// SIGINT, so arlen stops the command itself: the handler only signals the
+// waiting thread. A handler, unlike SetConsoleCtrlHandler(NULL, TRUE), is not
+// inherited by the child. Other events (window close, logoff) end arlen, and
+// closing its job ends the command too.
+static WINBOOL WINAPI StopShellCommandOnConsoleInterrupt(DWORD type) {
+  if ((type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) && gShellCommandInterrupted != NULL) {
+    SetEvent(gShellCommandInterrupted);
+    return TRUE;
+  }
+  return FALSE;
+}
+
+// A job that ends its processes when its last handle closes, so the command's
+// whole tree (bash, make, boomhauer, the app) stops with arlen. NULL if
+// Windows refuses one; the command then runs without it.
+static HANDLE CreateKillOnCloseJob(void) {
+  HANDLE job = CreateJobObjectW(NULL, NULL);
+  if (job == NULL) {
+    return NULL;
+  }
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
+  ZeroMemory(&limits, sizeof(limits));
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+    CloseHandle(job);
+    return NULL;
+  }
+  return job;
+}
+
+static wchar_t *CopyWideString(NSString *string) {
+  NSUInteger length = [string length];
+  wchar_t *buffer = calloc(length + 1, sizeof(wchar_t));
+  if (buffer != NULL) {
+    [string getCharacters:(unichar *)buffer range:NSMakeRange(0, length)];
+  }
+  return buffer;
+}
+
+// Runs `bash -lc command` on this console with this process's standard
+// handles. GNUstep's NSTask starts the child without a console, so when arlen
+// runs in a console window the console handles it passes are invalid there
+// and bash fails its first write ("Bad file descriptor"); pipes and files
+// worked. The command travels in ARLEN_SHELL_COMMAND, so the command line is a
+// constant that MSYS's argument parsing (quotes, backslashes, globbing)
+// cannot alter.
+static int RunShellCommandOnConsole(NSString *command) {
+  NSString *bashPath = ALNPlatformBashPath();
+  NSString *commandLine =
+      [NSString stringWithFormat:@"\"%@\" -lc \"c=$ARLEN_SHELL_COMMAND; unset ARLEN_SHELL_COMMAND; eval \\\"$c\\\"\"",
+                                 bashPath];
+  wchar_t *wideCommand = CopyWideString(command ?: @"");
+  wchar_t *wideCommandLine = CopyWideString(commandLine);
+  if (wideCommand == NULL || wideCommandLine == NULL ||
+      !SetEnvironmentVariableW(L"ARLEN_SHELL_COMMAND", wideCommand)) {
+    free(wideCommand);
+    free(wideCommandLine);
+    fprintf(stderr, "arlen: could not prepare the shell command\n");
+    return 127;
+  }
+
+  STARTUPINFOW startup;
+  ZeroMemory(&startup, sizeof(startup));
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+  startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  PROCESS_INFORMATION process;
+  ZeroMemory(&process, sizeof(process));
+
+  HANDLE job = CreateKillOnCloseJob();
+  gShellCommandInterrupted = CreateEventW(NULL, TRUE, FALSE, NULL);
+  fflush(NULL);
+  SetConsoleCtrlHandler(StopShellCommandOnConsoleInterrupt, TRUE);
+  // Suspended until it is in the job, so nothing it starts escapes the job.
+  BOOL started = CreateProcessW(NULL, wideCommandLine, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &startup,
+                                &process);
+  DWORD launchError = started ? 0 : GetLastError();
+  SetEnvironmentVariableW(L"ARLEN_SHELL_COMMAND", NULL);
+  free(wideCommand);
+  free(wideCommandLine);
+  int result = 127;
+  if (!started) {
+    fprintf(stderr, "arlen: failed to run %s (Windows error %lu)\n", [bashPath UTF8String],
+            (unsigned long)launchError);
+  } else {
+    if (job != NULL && !AssignProcessToJobObject(job, process.hProcess)) {
+      CloseHandle(job);
+      job = NULL;
+    }
+    ResumeThread(process.hThread);
+    CloseHandle(process.hThread);
+    HANDLE waits[2] = {process.hProcess, gShellCommandInterrupted};
+    DWORD nwaits = (gShellCommandInterrupted != NULL) ? 2 : 1;
+    if (WaitForMultipleObjects(nwaits, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1 &&
+        WaitForSingleObject(process.hProcess, 2000) == WAIT_TIMEOUT) {
+      // Ctrl-C: the command did not stop on its own within 2 s, so stop its
+      // tree with the shell's usual status for SIGINT.
+      if (job != NULL) {
+        TerminateJobObject(job, 130);
+      } else {
+        TerminateProcess(process.hProcess, 130);
+      }
+      WaitForSingleObject(process.hProcess, 5000);
+    }
+    DWORD exitCode = 1;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hProcess);
+    result = (int)exitCode;
+  }
+  SetConsoleCtrlHandler(StopShellCommandOnConsoleInterrupt, FALSE);
+  if (gShellCommandInterrupted != NULL) {
+    CloseHandle(gShellCommandInterrupted);
+    gShellCommandInterrupted = NULL;
+  }
+  if (job != NULL) {
+    CloseHandle(job);  // ends anything the command left running
+  }
+  return result;
+}
+#endif
+
 static int RunShellCommand(NSString *command) {
+#if defined(_WIN32)
+  return RunShellCommandOnConsole(command);
+#else
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ];
@@ -503,6 +638,7 @@ static int RunShellCommand(NSString *command) {
   [task launch];
   [task waitUntilExit];
   return task.terminationStatus;
+#endif
 }
 
 // Replaces arlen with `bash -lc command`. Used for the long-running servers

@@ -4,6 +4,7 @@
 #import "ALNPg.h"
 #import "ALNPgRealtimeFanout.h"
 #import "ALNRealtime.h"
+#import "../shared/ALNTestSupport.h"
 
 // GitHub issue 48: cross-process fanout for ALNRealtimeHub.
 @interface RealtimeFanoutRecorder : NSObject <ALNRealtimeSubscriber>
@@ -114,7 +115,7 @@
     return;  // Needs PostgreSQL; CI sets ARLEN_PG_TEST_DSN.
   }
   NSString *dsn = [NSString stringWithUTF8String:dsnValue];
-  NSString *notifyChannel = [NSString stringWithFormat:@"arlen_rt_test_%u", arc4random_uniform(1000000000)];
+  NSString *notifyChannel = [NSString stringWithFormat:@"arlen_rt_test_%u", ALNTestRandomUniform(1000000000)];
   // Two hubs with their own fanouts stand in for two propane workers.
   ALNRealtimeHub *workerA = [[ALNRealtimeHub alloc] init];
   ALNRealtimeHub *workerB = [[ALNRealtimeHub alloc] init];

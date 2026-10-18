@@ -4,6 +4,7 @@
 #import <stdlib.h>
 
 #import "ALNRequest.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface RequestTests : XCTestCase
 @end
@@ -578,6 +579,33 @@
   XCTAssertTrue(secondHeadersComplete);
   XCTAssertEqual((NSInteger)0, secondContentLength);
   XCTAssertEqual([remainder length], secondConsumedLength);
+}
+
+
+// A handler exception leaks the request (ARC frames unwind without releasing
+// them), so the server's explicit removeTemporaryFiles must not depend on the
+// request being freed: it releases the request's own mapping of a spooled
+// body, and on Windows the spool file can then be deleted.
+- (void)testRemovingTemporaryFilesReleasesASpooledBodyWhileTheRequestLives {
+  NSString *directory = ALNTestTemporaryDirectory(@"request-spooled-body");
+  XCTAssertNotNil(directory);
+  NSString *path = [directory stringByAppendingPathComponent:@"arlen-body-test"];
+  NSData *payload = [@"a=1&b=2" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([payload writeToFile:path atomically:NO]);
+  NSData *head = [@"POST /explode HTTP/1.1\r\nHost: localhost\r\nContent-Length: 7\r\n\r\n"
+      dataUsingEncoding:NSUTF8StringEncoding];
+  ALNRequest *request = [ALNRequest requestFromHeadData:head backend:ALNHTTPParserBackendLegacy error:NULL];
+  XCTAssertNotNil(request);
+  NSError *error = nil;
+  XCTAssertTrue([request adoptSpooledBodyAtPath:path error:&error], @"%@", error);
+  XCTAssertEqualObjects(payload, request.body);
+
+  [request removeTemporaryFiles];
+  XCTAssertEqual((NSUInteger)0, request.body.length);
+  XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:path],
+                 @"the spool file must go while the request is still alive");
+  [request removeTemporaryFiles];
+  [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
 }
 
 @end

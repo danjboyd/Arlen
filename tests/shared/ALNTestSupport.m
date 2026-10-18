@@ -266,6 +266,13 @@ static BOOL ALNTestShellHasGNUTimeout(void) {
   static BOOL available = NO;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
+#if defined(_WIN32)
+    // Commands run in MSYS2 bash, which resolves its own coreutils timeout.exe
+    // (not System32's). This process's PATH is ';'-separated Windows paths.
+    NSString *bin = [ALNTestBashPath() stringByDeletingLastPathComponent];
+    available = [[NSFileManager defaultManager]
+        isExecutableFileAtPath:[bin stringByAppendingPathComponent:@"timeout.exe"]];
+#else
     NSString *path = [[[NSProcessInfo processInfo] environment] objectForKey:@"PATH"] ?: @"/usr/bin:/bin";
     for (NSString *directory in [path componentsSeparatedByString:@":"]) {
       if ([directory length] > 0 &&
@@ -275,6 +282,7 @@ static BOOL ALNTestShellHasGNUTimeout(void) {
         break;
       }
     }
+#endif
   });
   return available;
 }
@@ -571,7 +579,14 @@ NSString *ALNTestToolPath(NSString *tool) {
 
 NSString *ALNTestPlatformObjCFlags(void) {
 #if defined(_WIN32)
+#if defined(ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS) && ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS
+  // The GNUmakefile's shim for gnustep-base 1.31.1, which does not declare
+  // NSJSONWritingSortedKeys; direct clang compiles of Arlen sources need it too.
+  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 "
+         "-DNSJSONWritingSortedKeys=2UL -DARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS=1";
+#else
   return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
+#endif
 #else
   return @"";
 #endif

@@ -109,6 +109,13 @@ class Peer(socketserver.BaseRequestHandler):
                 wire = headers + b"Content-Length: 32\r\n\r\n" + b"x" * 32
             else:
                 wire = headers + b"Content-Length: 2\r\n\r\n{}"
+            # The server closes after every response, so say so on redirects:
+            # without it libcurl reuses the closed connection for the next
+            # hop, and on Windows that send meets a reset ("connection lost")
+            # instead of a reconnect.
+            if wire.startswith(b"HTTP/1.1 3") and b"\r\nConnection:" not in wire.split(b"\r\n\r\n", 1)[0]:
+                status_line, rest = wire.split(b"\r\n", 1)
+                wire = status_line + b"\r\nConnection: close\r\n" + rest
             self.request.sendall(wire)
         except (OSError, IndexError):
             pass

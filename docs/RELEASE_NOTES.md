@@ -2,6 +2,63 @@
 
 ## Unreleased
 
+- `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
+  stop with "--build-tests currently supports GNUstep on Linux only"; the app
+  test bundle is now `AppTests.dll`, built against the framework's vendored
+  tools-xctest.
+- A spooled request body (`request.body` above `requestLimits.spoolThresholdBytes`)
+  reads as empty once the handler returns. On Windows its spool file used to
+  stay on disk after a handler exception, because the leaked request kept the
+  file mapped. Also on Windows, static and `renderFileAtPath:` ETags now use
+  the NTFS file index and 100 ns write/change times: a same-size rewrite within
+  a second used to keep its ETag, so a changed file could answer 304.
+- On Windows, `arlen boomhauer`, `arlen propane`, `arlen jobs worker` and the
+  other commands that run a shell step (`arlen build`, `check`, `test`,
+  `perf`) work from a console window. They used to exit 1 at once with
+  "echo: write error: Bad file descriptor": `arlen` started `bash` through
+  `NSTask`, which gives the child no console, while passing it the console's
+  handles. They worked only when output went to a pipe or file (CI, `| tee`).
+  `arlen` now starts `bash` on its own console and returns its exit code.
+  Ctrl-C stops the whole command (`bash`, the server and the app) and `arlen`
+  exits 130; closing the window or ending `arlen` stops it too, so nothing is
+  left holding the port.
+- Windows (MSYS2 `CLANG64`) builds again, on the public gnustep-cli `v0.1.0`
+  managed toolchain. `scripts/run_clang64.ps1` and the runtime now find that
+  toolchain (or `ARLEN_MSYS_ROOT`, or `C:\msys64`) instead of assuming
+  `C:\msys64`. Code added since the Windows lane last ran was made portable
+  again (UTF-16 file paths, Winsock timeouts, no `getrlimit`/`pthread`/`execl`
+  on Windows), apps built by `boomhauer` get the framework's Windows flags,
+  and a pointer stored in an `unsigned long` (32 bits on 64-bit Windows) no
+  longer truncates. Windows test lanes now run through the vendored
+  tools-xctest runner (#116), and make no longer relinks every tool and
+  rebuilds the framework on each run on Windows.
+- On Windows, `boomhauer` started from a native process (the test runner, an
+  app) no longer rebuilds the whole framework, header edits now rebuild the
+  objects that include them, and `propane` no longer rejects its own config
+  ("cluster enabled must be a boolean"). The repository now checks out LF
+  line endings on every platform (`.gitattributes`). `phase24-windows-runtime-tests`
+  passes, and the `windows-preview` workflow has a self-hosted runner (fork
+  pull requests are not run on it).
+- An OIDC authorization callback validated in the same clock tick its state
+  was issued in could be rejected as "exceeded the configured age window":
+  rebuilding `issuedAt` from seconds since 1970 left it ~1e-7 s in the future.
+  Callbacks now allow 1 s of future skew. The same rounding made a job
+  enqueued "now" in the file job adapter not due for an immediate dequeue.
+  Both were common on Windows (GNUstep's clock there ticks in ~1 ms steps)
+  and possible anywhere.
+- On Windows, `ALNLogger` wrote to stderr even when `outputFileDescriptor`
+  named another descriptor; boomhauer relinked the app on every build (the
+  make target lacked `.exe`); and the notifications module's Web Push store
+  did not compile (it now locks with `LockFileEx`). The unit test suite builds
+  and runs on Windows.
+- Release archives built without `build/obj` (the planned Windows zip) carry
+  `build/.release-prebuilt`. While it matches the tree and toolchain,
+  `bin/arlen` and `boomhauer` use the prebuilt framework instead of running
+  `make` (`tools/release_prebuilt.sh`).
+- `arlen new /absolute/path` creates the app at that path. It used to be
+  nested under the current directory on every platform.
+- `make` parses faster: module template paths no longer spawn a shell per
+  template (about 0.3 s per invocation on Linux, about 15 s on Windows).
 - JSON log lines are written from the serializer's UTF-8 bytes with the
   newline appended once. Before, each line was decoded to an `NSString`,
   appended to, and encoded again (two encodes and three copies). An access-log
@@ -18,7 +75,6 @@
   workers take turns. A new request behind 16 busy keep-alive clients went
   from no response (10 s timeout) to about 1 ms. Single-client throughput is
   unchanged.
-
 - Response headers are serialized into a byte buffer instead of an
   `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
   check on each of about 80 appends per response. Serializing a typical
@@ -279,9 +335,23 @@
   minutes before propane started and never checked the second probe port, so
   CI occasionally failed with `bind: Address already in use` (#170).
 
+
+- Releases now include `arlen-X.Y.Z-windows-x64.zip`, a prebuilt Windows
+  archive for the gnustep-cli managed MSYS2 `CLANG64` toolchain. It bundles
+  `libpq.dll`, which the toolchain does not ship, and records the toolchain
+  version it was built against. `SHA256SUMS` covers it and `install.ps1`. A
+  new `release-certification / windows` job installs the zip with
+  `install.ps1` and checks `arlen new`, the app build and `boomhauer` through
+  the installed launcher (#200).
+
 - `ALNPg` now decodes `json`/`jsonb` values that hold a scalar document (a
   string, number, boolean or `null`) instead of failing the whole query
   (#182).
+- `tools/install.ps1`: a PowerShell installer for Windows that mirrors
+  `install.sh`. It downloads `arlen-X.Y.Z-windows-x64.zip`, checks it against
+  `SHA256SUMS`, and refuses a gnustep-cli managed CLANG64 toolchain whose
+  version differs from the one the zip was built against. It installs to
+  `%LOCALAPPDATA%\Arlen` and adds an `arlen.cmd` launcher (#200).
 
 - `tools/deploy/build_release.sh` now works from a shell that hasn't sourced
   GNUstep.sh. On Linux it and `smoke_release.sh` source
@@ -309,7 +379,9 @@
   `runtimeLimits.keepAliveParkAfterMilliseconds` (default 5), and picks it up
   again when the next request arrives. `docs/CONFIGURATION_REFERENCE.md` now
   documents `runtimeLimits` and notes that server-sent event and WebSocket
-  sessions still hold a worker while open (#187).
+  sessions still hold a worker while open (#187). Windows parks idle
+  connections too: its watcher polls with `WSAPoll` and wakes on a loopback
+  socket instead of a pipe (#200).
 
 - `arlen typescript-codegen` output compiles in two more cases (#184):
   - Inferred ORM relations no longer reuse a column name on the same model. A

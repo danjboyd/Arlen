@@ -258,6 +258,14 @@ FEATURE_FLAGS += -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1
 # Foundation.h includes <dispatch/dispatch.h>, whose os/generic_win_base.h
 # typedefs mode_t as int unless HAVE_MODE_T is set; MinGW already defines it.
 FEATURE_FLAGS += -DHAVE_MODE_T=1
+# The gnustep-cli toolchain's gnustep-base (1.31.1) neither declares nor
+# implements NSJSONWritingSortedKeys. Give it Apple's value (1 << 1) so
+# sorted-keys requests compile, and have ALNJSONSerialization write them with
+# its yyjson writer, which sorts.
+GNUSTEP_SYSTEM_HEADERS_DIR := $(strip $(shell gnustep-config --variable=GNUSTEP_SYSTEM_HEADERS 2>/dev/null))
+ifeq ($(shell grep -qs NSJSONWritingSortedKeys "$(GNUSTEP_SYSTEM_HEADERS_DIR)/Foundation/NSJSONSerialization.h" && echo yes),)
+FEATURE_FLAGS += -DNSJSONWritingSortedKeys=2UL -DARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS=1
+endif
 endif
 THIRD_PARTY_FEATURE_FLAGS := -DARGON2_NO_THREADS=1
 COMMON_COMPILE_FLAGS := $(FEATURE_FLAGS) $(THIRD_PARTY_FEATURE_FLAGS) $(PIC_FLAG) $(EXTRA_OBJC_FLAGS)

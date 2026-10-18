@@ -6,6 +6,7 @@
 
 #import "ALNApplication.h"
 #import "ALNModuleSystem.h"
+#import "../shared/ALNTestSupport.h"
 
 @interface Phase13AAlphaModule : NSObject <ALNModule>
 @end
@@ -70,15 +71,7 @@
 @implementation Phase13ATests
 
 - (NSString *)createTempDirectoryWithPrefix:(NSString *)prefix {
-  NSString *templatePath =
-      [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-XXXXXX", prefix]];
-  char *buffer = strdup([templatePath fileSystemRepresentation]);
-  char *created = mkdtemp(buffer);
-  NSString *result = created ? [[NSFileManager defaultManager] stringWithFileSystemRepresentation:created
-                                                                                             length:strlen(created)]
-                             : nil;
-  free(buffer);
-  return result;
+  return ALNTestTemporaryDirectory(prefix);
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
