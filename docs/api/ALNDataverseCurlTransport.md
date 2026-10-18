@@ -10,6 +10,7 @@ Data-layer APIs for SQL composition, adapters, and migration/runtime operations.
 | Property | Type | Attributes | Purpose |
 | --- | --- | --- | --- |
 | `timeoutInterval` | `NSTimeInterval` | `nonatomic, assign, readonly` | Public `timeoutInterval` property available on `ALNDataverseCurlTransport`. |
+| `curlExecutablePath` | `NSString *` | `nonatomic, copy, nullable` | Public `curlExecutablePath` property available on `ALNDataverseCurlTransport`. |
 
 ## Methods
 

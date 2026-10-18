@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Dataverse: `ALNDataverseCurlTransport` passes request headers, including the
+  bearer token, to curl as a config file on stdin (`--config -`). They are no
+  longer on curl's command line, which any local user can read through `ps` or
+  `/proc/<pid>/cmdline`. The request-body file, which holds the client secret
+  for token requests, is created owner-only (0600). The new
+  `curlExecutablePath` property picks the curl to run (default: `curl` from
+  PATH).
 - Dataverse: the request method must be an HTTP token. A method with
   whitespace or control characters fails with
   `ALNDataverseErrorInvalidArgument` in `performRequestWithMethod:` before a

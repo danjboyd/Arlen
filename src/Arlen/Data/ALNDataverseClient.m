@@ -149,6 +149,13 @@ static NSString *ALNDataverseCorrelationIDFromHeaders(NSDictionary<NSString *, N
   return nil;
 }
 
+// Quotes a value for a curl config file `name = "value"` line. Header values
+// are already free of control characters, so only `\` and `"` need escaping.
+static NSString *ALNDataverseCurlConfigQuoted(NSString *value) {
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  return [escaped stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+}
+
 static NSString *ALNDataverseTemporaryPath(NSString *prefix) {
   NSString *directory = NSTemporaryDirectory();
   NSString *name = [NSString stringWithFormat:@"%@-%@",
@@ -1226,7 +1233,10 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   NSString *requestBodyPath = nil;
   if ([request.bodyData length] > 0) {
     requestBodyPath = ALNDataverseTemporaryPath(@"dataverse-request");
-    BOOL wrote = [request.bodyData writeToFile:requestBodyPath atomically:YES];
+    // The token request's body carries the client secret: owner-only.
+    BOOL wrote = [[NSFileManager defaultManager] createFileAtPath:requestBodyPath
+                                                         contents:request.bodyData
+                                                       attributes:@{ NSFilePosixPermissions : @(0600) }];
     if (!wrote) {
       if (error != NULL) {
         *error = ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
@@ -1259,15 +1269,19 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     @"--connect-timeout",
     [NSString stringWithFormat:@"%.0f", MIN(self.timeoutInterval, 30.0)],
   ]];
+  // Headers carry the bearer token, so they go to curl as a config file on
+  // stdin; argv is readable by every local user (/proc/<pid>/cmdline, ps).
+  NSMutableString *config = [NSMutableString string];
   NSArray<NSString *> *headerKeys = [[request.headers allKeys] sortedArrayUsingSelector:@selector(compare:)];
   for (NSString *key in headerKeys) {
     NSString *value = request.headers[key];
     if ([ALNDataverseTrimmedString(key) length] == 0 || [ALNDataverseTrimmedString(value) length] == 0) {
       continue;
     }
-    [arguments addObject:@"--header"];
-    [arguments addObject:[NSString stringWithFormat:@"%@: %@", key, value]];
+    NSString *line = [NSString stringWithFormat:@"%@: %@", key, value];
+    [config appendFormat:@"header = \"%@\"\n", ALNDataverseCurlConfigQuoted(line)];
   }
+  [arguments addObjectsFromArray:@[ @"--config", @"-" ]];
   if ([request.bodyData length] > 0 && [requestBodyPath length] > 0) {
     [arguments addObject:@"--data-binary"];
     [arguments addObject:[NSString stringWithFormat:@"@%@", requestBodyPath]];
@@ -1275,15 +1289,25 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   [arguments addObject:request.URLString ?: @""];
 
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/usr/bin/env";
-  task.arguments = arguments;
+  if ([self.curlExecutablePath length] > 0) {
+    task.launchPath = self.curlExecutablePath;
+    task.arguments = [arguments subarrayWithRange:NSMakeRange(1, [arguments count] - 1)];
+  } else {
+    task.launchPath = @"/usr/bin/env";
+    task.arguments = arguments;
+  }
+  NSPipe *stdinPipe = [NSPipe pipe];
   NSPipe *stdoutPipe = [NSPipe pipe];
   NSPipe *stderrPipe = [NSPipe pipe];
+  task.standardInput = stdinPipe;
   task.standardOutput = stdoutPipe;
   task.standardError = stderrPipe;
 
   @try {
     [task launch];
+    NSFileHandle *configHandle = [stdinPipe fileHandleForWriting];
+    [configHandle writeData:[config dataUsingEncoding:NSUTF8StringEncoding]];
+    [configHandle closeFile];
     [task waitUntilExit];
   } @catch (NSException *exception) {
     if (error != NULL) {

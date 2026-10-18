@@ -462,4 +462,54 @@
   XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
 }
 
+- (void)testCurlTransportKeepsCredentialsOutOfArgv {
+#if defined(_WIN32)
+  XCTSkip(@"uses a POSIX shell script as a stand-in curl");
+#else
+  NSString *directory = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"dataverse-argv-%@", [[NSUUID UUID] UUIDString]]];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  NSString *argvPath = [directory stringByAppendingPathComponent:@"argv"];
+  NSString *stdinPath = [directory stringByAppendingPathComponent:@"stdin"];
+  NSString *curlPath = [directory stringByAppendingPathComponent:@"curl"];
+  NSString *script = [NSString stringWithFormat:@"#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%@'\ncat > '%@'\n"
+                                                 @"for arg in \"$@\"; do case \"$arg\" in @*) cat \"${arg#@}\" >> '%@';; esac; done\n"
+                                                 @"exit 7\n",
+                                                 argvPath, stdinPath, stdinPath];
+  XCTAssertTrue([script writeToFile:curlPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @(0700) }
+                                                 ofItemAtPath:curlPath
+                                                        error:NULL]);
+
+  ALNDataverseCurlTransport *transport = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:5];
+  transport.curlExecutablePath = curlPath;
+  ALNDataverseRequest *request =
+      [[ALNDataverseRequest alloc] initWithMethod:@"POST"
+                                        URLString:@"https://login.example/tenant/oauth2/v2.0/token"
+                                          headers:@{
+                                            @"Authorization" : @"Bearer SECRET-BEARER-TOKEN-abc123",
+                                            @"X-Quoted" : @"a \"b\" \\c",
+                                          }
+                                         bodyData:[@"grant_type=client_credentials&client_secret=SECRET-CLIENT-xyz"
+                                                      dataUsingEncoding:NSUTF8StringEncoding]];
+  NSError *error = nil;
+  XCTAssertNil([transport executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorTransportFailed, error.code);
+
+  NSString *argv = [NSString stringWithContentsOfFile:argvPath encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+  NSString *input = [NSString stringWithContentsOfFile:stdinPath encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+  XCTAssertTrue([argv containsString:@"--config\n-\n"], @"%@", argv);
+  XCTAssertFalse([argv containsString:@"SECRET"], @"%@", argv);
+  XCTAssertFalse([argv containsString:@"Authorization"], @"%@", argv);
+  XCTAssertTrue([input containsString:@"header = \"Authorization: Bearer SECRET-BEARER-TOKEN-abc123\"\n"], @"%@", input);
+  XCTAssertTrue([input containsString:@"header = \"X-Quoted: a \\\"b\\\" \\\\c\"\n"], @"%@", input);
+  // The request body (and its client secret) went through an owner-only file.
+  XCTAssertTrue([input containsString:@"client_secret=SECRET-CLIENT-xyz"], @"%@", input);
+  [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+#endif
+}
+
 @end

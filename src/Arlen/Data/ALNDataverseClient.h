@@ -148,6 +148,8 @@ FOUNDATION_EXPORT NSDictionary<NSString *, NSString *> *ALNDataverseParseHeaders
 @interface ALNDataverseCurlTransport : NSObject <ALNDataverseTransport>
 
 @property(nonatomic, assign, readonly) NSTimeInterval timeoutInterval;
+/// The curl to run. Nil (the default) runs `curl` from PATH.
+@property(nonatomic, copy, nullable) NSString *curlExecutablePath;
 
 - (instancetype)init;
 - (instancetype)initWithTimeoutInterval:(NSTimeInterval)timeoutInterval NS_DESIGNATED_INITIALIZER;
