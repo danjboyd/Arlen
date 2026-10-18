@@ -547,12 +547,19 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
 - warns (without failing) about vendored module content:
+ - `module_outdated`: the framework checkout's copy of the module has a newer
+   `version` than the app's vendored copy; the hint is
+   `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild.
+   `./build/arlen doctor` runs the same version check, and apps log it at
+   startup (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as it is under
+   `boomhauer`, `propane` and `jobs-worker`
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
  - `module_framework_copy_differs`: the vendored copy differs from
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
-   framework checkout, or the running `arlen` binary's checkout), typically
-   after moving the framework pin without re-running `module upgrade`
+   framework checkout, or the running `arlen` binary's checkout) at the same or
+   an older framework version, typically after moving the framework pin
+   without re-running `module upgrade`
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 

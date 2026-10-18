@@ -1080,6 +1080,79 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
   return diagnostics;
 }
 
++ (NSArray<NSDictionary *> *)frameworkCopyDiagnosticsAtAppRoot:(NSString *)appRoot
+                                                 frameworkRoot:(NSString *)frameworkRoot
+                                                compareContent:(BOOL)compareContent {
+  NSString *root = ALNModuleTrim(frameworkRoot);
+  if ([root length] == 0 || [ALNModuleTrim(appRoot) length] == 0) {
+    return @[];
+  }
+  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
+  NSArray<NSDictionary *> *records = [self installedModuleRecordsAtAppRoot:appRoot error:NULL] ?: @[];
+  for (NSDictionary *record in records) {
+    NSString *identifier = record[@"identifier"];
+    NSString *frameworkCopy =
+        [[[root stringByAppendingPathComponent:@"modules"] stringByAppendingPathComponent:identifier ?: @""]
+            stringByStandardizingPath];
+    NSString *installPath = [[appRoot stringByAppendingPathComponent:record[@"path"] ?: @""] stringByStandardizingPath];
+    if ([frameworkCopy isEqualToString:installPath]) {
+      continue;
+    }
+    ALNModuleDefinition *frameworkDefinition = [self moduleDefinitionAtPath:frameworkCopy error:NULL];
+    if (frameworkDefinition == nil) {
+      continue;
+    }
+    ALNModuleDefinition *installedDefinition = [self moduleDefinitionAtPath:installPath error:NULL];
+    NSString *installedVersion = installedDefinition.version ?: (record[@"version"] ?: @"");
+    NSString *availableVersion = frameworkDefinition.version ?: @"";
+    if (ALNModuleCompareVersions(installedVersion, availableVersion) == NSOrderedAscending) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"module_outdated",
+          identifier,
+          [NSString stringWithFormat:@"module %@ is %@ in this app; the framework has %@",
+                                     identifier,
+                                     installedVersion,
+                                     availableVersion],
+          [NSString stringWithFormat:@"run `arlen module upgrade %@`, then `arlen module migrate`, then rebuild "
+                                     @"(framework copy: %@)",
+                                     identifier,
+                                     frameworkCopy],
+          @"");
+      continue;
+    }
+    if (!compareContent) {
+      continue;
+    }
+    NSString *frameworkDigest = [self contentDigestForModuleAtPath:frameworkCopy error:NULL];
+    NSString *installedDigest = [self contentDigestForModuleAtPath:installPath error:NULL];
+    if (frameworkDigest == nil || installedDigest == nil || [frameworkDigest isEqualToString:installedDigest]) {
+      continue;
+    }
+    NSString *message =
+        [installedVersion isEqualToString:availableVersion]
+            ? [NSString stringWithFormat:@"module %@ differs from the framework copy at the same version %@",
+                                         identifier,
+                                         installedVersion]
+            : [NSString stringWithFormat:@"module %@ %@ differs from the framework copy (%@)",
+                                         identifier,
+                                         installedVersion,
+                                         availableVersion];
+    ALNModuleAppendDiagnostic(diagnostics,
+                              @"warning",
+                              @"module_framework_copy_differs",
+                              identifier,
+                              message,
+                              [NSString stringWithFormat:@"framework copy: %@; run `arlen module upgrade %@ --source %@`",
+                                                         frameworkCopy,
+                                                         identifier,
+                                                         frameworkCopy],
+                              @"");
+  }
+  return diagnostics;
+}
+
 + (NSArray<id<ALNModule>> *)loadModulesForApplication:(ALNApplication *)application
                                                 error:(NSError **)error {
   NSString *appRoot = ALNModuleTrim(application.config[@"appRoot"]);
