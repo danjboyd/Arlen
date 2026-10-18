@@ -3,12 +3,13 @@
 ## Unreleased
 
 - Vendored modules that are older than the framework's copy are now reported.
-  `arlen module doctor` and `./build/arlen doctor` warn with
-  `module_outdated` (vendored → available version, and the fix:
-  `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild), and
-  apps log `vendored module is older than the framework copy` at startup
-  outside `test` when `ARLEN_FRAMEWORK_ROOT` is set (as it is under
-  `boomhauer`, `propane` and `jobs-worker`). Upgrading Arlen alone does not
+  `arlen doctor` and `arlen module doctor` warn with `module_outdated`
+  (vendored → available version, and the fix: `arlen module upgrade <id>`,
+  then `arlen module migrate`, then rebuild), and apps log
+  `vendored module is older than the framework copy` at startup outside
+  `test` when `ARLEN_FRAMEWORK_ROOT` is set. `boomhauer` now exports
+  `ARLEN_FRAMEWORK_ROOT` to the app process, as `propane` and `jobs-worker`
+  already did, so the warning also appears in development. Upgrading Arlen alone does not
   update modules an app has vendored with `arlen module add`; see
   [Modules](MODULES.md#6-upgrade-a-module).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to

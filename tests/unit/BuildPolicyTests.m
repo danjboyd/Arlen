@@ -522,6 +522,16 @@
   XCTAssertTrue([doctor containsString:@"toolchain_state=\"/state/cli-state.json\""]);
 }
 
+// Apps compare vendored modules with the framework's copy at startup, which
+// needs ARLEN_FRAMEWORK_ROOT in the app process under every launcher.
+- (void)testLaunchersExportTheFrameworkRootToTheApp {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  for (NSString *launcher in @[ @"bin/boomhauer", @"bin/propane", @"bin/jobs-worker" ]) {
+    NSString *script = [self readFile:[repoRoot stringByAppendingPathComponent:launcher]];
+    XCTAssertTrue([script containsString:@"export ARLEN_FRAMEWORK_ROOT=\"$framework_root\""], @"%@", launcher);
+  }
+}
+
 - (void)testDoctorAndCLIUseResolvedGNUstepContract {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *doctorScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
