@@ -3435,9 +3435,14 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
                                           withIntermediateDirectories:YES
                                                            attributes:nil
                                                                 error:NULL]);
+  // Migration versions are file names, so include the per-run table name to
+  // keep them unique across runs against the same database.
+  NSString *(^fileName)(NSString *) = ^NSString *(NSString *prefix) {
+    return [NSString stringWithFormat:@"%@_%@.sql", prefix, table];
+  };
   NSDictionary<NSString *, NSString *> *initial = @{
-    @"001_create.sql" : [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY)", table],
-    @"004_add_d.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN d TEXT", table],
+    fileName(@"001_create") : [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY)", table],
+    fileName(@"004_add_d") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN d TEXT", table],
   };
   for (NSString *name in initial) {
     XCTAssertTrue([initial[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
@@ -3456,8 +3461,8 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   // A release can add migrations numbered below one a database already has;
   // the runner tracks applied versions as a set, so they still run, in order.
   NSDictionary<NSString *, NSString *> *later = @{
-    @"002_add_b.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN b TEXT", table],
-    @"003_add_c.sql" : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN c TEXT", table],
+    fileName(@"002_add_b") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN b TEXT", table],
+    fileName(@"003_add_c") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN c TEXT", table],
   };
   for (NSString *name in later) {
     XCTAssertTrue([later[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
@@ -3475,7 +3480,7 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   for (NSString *file in gapFiles) {
     [gapNames addObject:[file lastPathComponent]];
   }
-  XCTAssertEqualObjects((@[ @"002_add_b.sql", @"003_add_c.sql" ]), gapNames);
+  XCTAssertEqualObjects((@[ fileName(@"002_add_b"), fileName(@"003_add_c") ]), gapNames);
 
   NSArray *columns = [database executeQuery:@"SELECT column_name FROM information_schema.columns "
                                              "WHERE table_name = $1 ORDER BY column_name"
@@ -3490,6 +3495,12 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
                            error:nil];
+  for (NSString *prefix in @[ @"001_create", @"002_add_b", @"003_add_c", @"004_add_d" ]) {
+    NSString *file = [migrationsDir stringByAppendingPathComponent:fileName(prefix)];
+    (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                        parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                             error:nil];
+  }
 }
 
 - (void)testMigrationRunnerAppliesMultiStatementFile {
