@@ -613,6 +613,26 @@
     XCTAssertNotEqual(0, code, @"%@", workerOutput);
     XCTAssertTrue([workerOutput containsString:@"jobs worker: startup failed: module broken failed to load"],
                   @"%@", workerOutput);
+
+    // propane prints the startup error once, backs off, and gives up with
+    // status 3 after startupFailureLimit identical failures.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  propaneAccessories = {\n    respawnDelayMs = 50;\n"
+                                  "    startupFailureLimit = 3;\n    respawnBackoffMaxMs = 200;\n  };\n}\n"]);
+    NSString *pidFile = [appRoot stringByAppendingPathComponent:@"tmp/propane.pid"];
+    NSString *propaneOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/propane --env production --workers 1 "
+         "--pid-file %@ 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix,
+        ALNTestShellQuote(repoRoot), ALNTestShellQuote(pidFile)]
+                                           exitCode:&code];
+    XCTAssertEqual(3, code, @"%@", propaneOutput);
+    NSString *firstLine = @"propane: worker startup failed: boomhauer: startup failed: module broken failed to load";
+    XCTAssertEqual((NSUInteger)2, [[propaneOutput componentsSeparatedByString:firstLine] count], @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"worker startup failed (same error) x3"], @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"giving up after 3 consecutive identical worker startup failures"],
+                  @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"next_respawn_delay_ms=200"], @"%@", propaneOutput);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:modulesRoot error:nil];

@@ -42,8 +42,7 @@ static int ALNRunJobsWorker(ALNApplication *application,
                             NSTimeInterval pollIntervalSeconds,
                             NSTimeInterval schedulerIntervalSeconds) {
   if ([application moduleLoadErrorPreventsStartup]) {
-    fprintf(stderr, "jobs worker: startup failed: %s\n",
-            [[application.moduleLoadError localizedDescription] UTF8String]);
+    ALNReportStartupFailure(@"jobs worker", [application.moduleLoadError localizedDescription]);
     return 1;
   }
   Class runtimeClass = NSClassFromString(@"ALNJobsModuleRuntime");

@@ -13,6 +13,21 @@
   `arlen module doctor` adds a `module_sessions_disabled` warning for a module
   that needs sessions while `config/app.plist` sets `session.enabled = NO`
   (#294).
+- `propane` no longer respawns a worker that fails at startup in a tight loop.
+  It prints each distinct startup error once (`worker startup failed (same
+  error) xN` for repeats), backs off exponentially from `respawnDelayMs` up to
+  the new `respawnBackoffMaxMs` propane accessory (default 30 s), and after
+  `startupFailureLimit` consecutive identical failures (propane accessory,
+  default 5) exits with status `3` so the service manager reports a failed
+  unit. Workers report startup errors through `ARLEN_STARTUP_FAILURE_FILE`,
+  which propane sets (#294).
+- A module load error names the config key whether the module reports it as
+  `key_path`, `config_key` or `keyPath`, including on an underlying error.
+- Environment names are classified once, ignoring case and surrounding
+  whitespace: `ALNEnvironmentKindForName()` and
+  `ALNEnvironmentIsDevelopmentLike()` in `ALNConfig.h`. Core uses them for the
+  module-load startup check and the detailed error page, so `--env
+  Development` behaves like `development` there.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

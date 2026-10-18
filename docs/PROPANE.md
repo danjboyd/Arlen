@@ -78,8 +78,30 @@ propaneAccessories = {
   jobWorkerCount = 0;
   jobWorkerCommand = "";
   jobWorkerRespawnDelayMs = 250;
+  startupFailureLimit = 5;
+  respawnBackoffMaxMs = 30000;
 };
 ```
+
+Worker startup failures. A worker that cannot start (for example a module
+that fails to load, or invalid security configuration) exits before serving.
+propane tells each worker where to report that error
+(`ARLEN_STARTUP_FAILURE_FILE`), so it can tell a startup failure from a crash:
+
+- It prints each distinct startup error once, then
+  `worker startup failed (same error) xN` for repeats, and emits a
+  `http_worker_startup_failed` (or `async_worker_startup_failed`) lifecycle
+  event with the consecutive count and the next delay.
+- It backs off exponentially: the respawn delay (`respawnDelayMs`, or
+  `jobWorkerRespawnDelayMs` for async workers, at least 100 ms) doubles per
+  consecutive startup failure, up to `respawnBackoffMaxMs`. This gives a
+  transient startup error (a lock held by another process, a database that is
+  still starting) room to clear.
+- After `startupFailureLimit` consecutive startup failures with the same error,
+  propane stops its workers and exits with status `3`, so systemd or launchd
+  reports a failed unit. `0` disables the limit.
+- A worker exit that is not a startup failure (a worker that started and later
+  crashed) resets the count and respawns after the plain respawn delay.
 
 Runtime socket controls:
 

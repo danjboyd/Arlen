@@ -1279,6 +1279,12 @@ Behavior:
 
 - in app-root mode, runs `bin/boomhauer --no-watch --prepare-only` before launching workers
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
+- worker startup failures (a worker that exits before serving, e.g. a module
+  that fails to load) are printed once per distinct error, respawned with
+  exponential backoff up to the `respawnBackoffMaxMs` propane accessory, and
+  after `startupFailureLimit` consecutive identical failures (propane
+  accessory, default `5`) propane exits with status `3`; see
+  [Propane](PROPANE.md#propane-accessories)
 
 Core options:
 
