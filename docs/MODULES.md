@@ -247,6 +247,10 @@ too (GitHub issue 264).
   `authModule.publicBaseURL`; and session roles are resolved from the current
   user record on every request (new migration `002_auth_session_stamp.sql`,
   recommended for ending sessions by stamp; roles are read live without it).
+  Signing out ends the session server-side (new migration
+  `003_auth_revoked_sessions.sql`, recommended), password changes and resets
+  end other sessions, `POST /auth/logout/all` signs out everywhere, and
+  `authModule.session.absoluteLifetimeSeconds` limits a sign-in's lifetime.
 - `search`: an unscoped query from a caller who may query no registered
   resource returns no results, and auto-indexed `admin-ui` resources are
   searchable only by callers the `admin-ui` policy admits (new

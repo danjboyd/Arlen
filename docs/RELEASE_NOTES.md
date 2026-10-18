@@ -45,6 +45,19 @@
   `refreshSessionDescriptorForSubject:provider:error:` to keep provider
   sessions' roles current the same way. See
   [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- Auth module (`1.6.0`): signing out now ends the session on the server. The
+  session is recorded in a new `auth_revoked_sessions` table (migration
+  `003_auth_revoked_sessions.sql`; running `arlen module migrate` is
+  recommended), so another copy of the signed-out cookie no longer works, while
+  the user's other devices stay signed in. Changing the password ends the
+  user's other sessions and keeps the current one; a password reset by link
+  and removing the SMS factor end other sessions too. New sign out everywhere
+  routes (`POST /auth/logout/all`, `POST /auth/api/logout/all`) end every
+  session of the user. New `authModule.session.absoluteLifetimeSeconds`
+  (default 14 days) signs a session out that long after sign-in even when it
+  is renewed by use. Without migration 003, signing out still clears the
+  cookie and one warning names the migration. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
 - admin-ui (`1.1.0`, requires auth `1.6.0`): revoking the admin role through
   the users resource also ends that user's existing sessions (once the auth
   stamp migration is applied).
