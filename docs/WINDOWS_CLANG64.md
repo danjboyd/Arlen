@@ -28,6 +28,11 @@ until 0.4.0; see the support statement below.
 
 ## 1. Host Entry Path
 
+Private file-backed service storage uses a protected current-user NTFS DACL;
+POSIX permission bits do not secure Windows files. Static mounts resolve native
+final handle paths before containment/extension checks, and listen sockets use
+exclusive binding. The Windows preview job exercises these transport rules.
+
 Use PowerShell as the outer launcher and MSYS2 `CLANG64` as the inner GNUstep
 shell:
 

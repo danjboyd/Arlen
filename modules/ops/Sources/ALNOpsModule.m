@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNOpsModule.h"
 
 #import "ALNApplication.h"
@@ -72,7 +73,7 @@ static NSDictionary *OTJSONObjectFromData(NSData *data) {
   if ([data length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 

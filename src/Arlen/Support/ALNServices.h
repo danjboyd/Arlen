@@ -132,6 +132,8 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// File-backed queue with a sibling .lock file coordinating independent processes.
+/// Does not recover leases abandoned by crashed consumers; use PostgreSQL for recovery.
 @interface ALNFileJobAdapter : NSObject <ALNJobAdapter>
 
 - (nullable instancetype)initWithStoragePath:(NSString *)storagePath
@@ -156,6 +158,8 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// Process-local cache capped at 1024 entries, evicting least recently used keys.
+/// Writes sweep expired entries; values themselves have no byte-size limit.
 @interface ALNInMemoryCacheAdapter : NSObject <ALNCacheAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
@@ -227,6 +231,7 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// Diagnostic mail adapter retaining only the last 100 deliveries; does not send mail.
 @interface ALNInMemoryMailAdapter : NSObject <ALNMailAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;

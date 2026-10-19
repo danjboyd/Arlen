@@ -16,6 +16,28 @@
 
 @implementation HTTPIntegrationTests
 
+- (void)testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths {
+  int port = [self randomPort];
+  NSTask *server = [NSTask new];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[@"--port", [NSString stringWithFormat:@"%d", port]];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:@"PORT=%d\nexec(open('tests/fixtures/http/windows_security.py').read())\n", port];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"security-wire-passed"], @"%@", output);
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
 - (int)randomPort {
   int port = ALNTestFreeLoopbackPort();
   return port > 0 ? port : 32000 + (int)ALNTestRandomUniform(20000);
@@ -1634,19 +1656,19 @@
                                          @"    publisher = ws_connect('/ws/channel/mixed-lifecycle')\n"
                                          @"    subscriber = ws_connect('/ws/channel/mixed-lifecycle')\n"
                                          @"    ws_send_text(publisher, 'fanout-check')\n"
-                                         @"    fanout_a = ws_recv_text(publisher)\n"
-                                         @"    fanout_b = ws_recv_text(subscriber)\n"
+                                         @"    for peer in (publisher, subscriber):\n"
+                                         @"        peer.settimeout(0.3)\n"
+                                         @"        try: peer.recv(1); raise RuntimeError('client frame rebroadcast')\n"
+                                         @"        except socket.timeout: pass\n"
                                          @"    publisher.close()\n"
                                          @"    subscriber.close()\n"
-                                         @"    if fanout_a != 'fanout-check' or fanout_b != 'fanout-check':\n"
-                                         @"        raise RuntimeError('websocket fanout mismatch')\n"
                                          @"else:\n"
                                          @"    channel_client = ws_connect('/ws/channel/mixed-lifecycle')\n"
                                          @"    ws_send_text(channel_client, 'fanout-check')\n"
-                                         @"    fanout_single = ws_recv_text(channel_client)\n"
+                                         @"    channel_client.settimeout(0.3)\n"
+                                         @"    try: channel_client.recv(1); raise RuntimeError('client frame rebroadcast')\n"
+                                         @"    except socket.timeout: pass\n"
                                          @"    channel_client.close()\n"
-                                         @"    if fanout_single != 'fanout-check':\n"
-                                         @"        raise RuntimeError('websocket channel self-echo mismatch')\n"
                                          @"with urllib.request.urlopen(f'http://127.0.0.1:{PORT}/sse/ticker?count=3', timeout=5) as sse_res:\n"
                                          @"    sse_body = sse_res.read().decode('utf-8')\n"
                                          @"    sse_type = sse_res.headers.get('Content-Type', '')\n"
@@ -2723,10 +2745,10 @@
                                          @"ws1 = ws_connect('/ws/channel/alpha')\n"
                                          @"ws2 = ws_connect('/ws/channel/alpha')\n"
                                          @"send_text(ws1, 'fanout-message')\n"
-                                         @"m1 = recv_text(ws1)\n"
-                                         @"m2 = recv_text(ws2)\n"
-                                         @"print(m1)\n"
-                                         @"print(m2)\n"
+                                         @"for peer in (ws1, ws2):\n"
+                                         @"    peer.settimeout(0.3)\n"
+                                         @"    try: peer.recv(1); raise RuntimeError('client frame rebroadcast')\n"
+                                         @"    except socket.timeout: print('receive-only')\n"
                                          @"ws1.close(); ws2.close()\n",
                                          port];
     int pyCode = 0;
@@ -2736,8 +2758,8 @@
         [[output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
             componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
     XCTAssertGreaterThanOrEqual([lines count], 2u);
-    XCTAssertEqualObjects(@"fanout-message", lines[0]);
-    XCTAssertEqualObjects(@"fanout-message", lines[1]);
+    XCTAssertEqualObjects(@"receive-only", lines[0]);
+    XCTAssertEqualObjects(@"receive-only", lines[1]);
   } @finally {
     if ([server isRunning]) {
       (void)ALNTestKill(server.processIdentifier, SIGTERM);

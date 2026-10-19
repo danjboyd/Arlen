@@ -210,6 +210,18 @@
 
 @implementation Phase33EHTests
 
+- (void)testEventTypesCannotInjectSSEFields {
+  ALNInMemoryEventStreamStore *store = [[ALNInMemoryEventStreamStore alloc] initWithAdapterName:nil];
+  for (NSString *type in @[@"chat\ndata: forged", @"chat\rforged", @"a b"]) {
+    NSError *error = nil;
+    NSDictionary *event = @{@"event_type": type, @"payload": @{}};
+    XCTAssertNil([store appendEvent:event toStream:@"s" error:&error]);
+    XCTAssertNotNil(error);
+  }
+  NSDictionary *valid = @{@"event_type": @"order.updated:v1", @"payload": @{}};
+  XCTAssertNotNil([store appendEvent:valid toStream:@"s" error:NULL]);
+}
+
 - (NSArray<NSNumber *> *)sequencesInStore:(ALNInMemoryEventStreamStore *)store
                                    stream:(NSString *)stream
                             afterSequence:(NSNumber *)after

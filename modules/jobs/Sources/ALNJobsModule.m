@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNJobsModule.h"
 #import "ALNPostgresJobAdapter.h"
 
@@ -76,7 +77,7 @@ static NSDictionary *JMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -1839,7 +1840,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   NSDictionary *payload = JMNormalizeDictionary(parameters[@"payload"]);
   if ([payload count] == 0 && [parameters[@"payload_json"] isKindOfClass:[NSString class]]) {
     NSData *jsonData = [parameters[@"payload_json"] dataUsingEncoding:NSUTF8StringEncoding];
-    id object = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
+    id object = [ALNJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
     payload = [object isKindOfClass:[NSDictionary class]] ? object : @{};
   }
   NSError *error = nil;

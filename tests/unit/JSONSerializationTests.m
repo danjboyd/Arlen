@@ -11,6 +11,54 @@
 
 @implementation JSONSerializationTests
 
+- (void)testDeepInputIsRejectedBeforeEitherParserRuns {
+  NSMutableString *deep = [NSMutableString string];
+  for (NSUInteger i = 0; i < 2000; i++) [deep appendString:@"["];
+  [deep appendString:@"0"];
+  for (NSUInteger i = 0; i < 2000; i++) [deep appendString:@"]"];
+  [self forEachBackend:^(ALNJSONBackend backend) {
+    (void)backend;
+    NSError *error = nil;
+    XCTAssertNil([ALNJSONSerialization JSONObjectWithData:[deep dataUsingEncoding:NSUTF8StringEncoding]
+                                                options:0 error:&error]);
+    XCTAssertEqual((NSInteger)6, error.code);
+  }];
+  [ALNJSONSerialization setBackendForTesting:ALNJSONBackendFoundation];
+  for (NSNumber *encoding in @[@(NSUTF16LittleEndianStringEncoding), @(NSUTF16BigEndianStringEncoding),
+                                @(NSUTF32LittleEndianStringEncoding), @(NSUTF32BigEndianStringEncoding)]) {
+    NSError *error = nil;
+    XCTAssertNil([ALNJSONSerialization JSONObjectWithData:[deep dataUsingEncoding:encoding.unsignedIntegerValue]
+                                                options:0 error:&error]);
+    XCTAssertEqual((NSInteger)6, error.code);
+  }
+  XCTAssertNotNil([ALNJSONSerialization JSONObjectWithData:[@"[\"[{\\\"}]\"]" dataUsingEncoding:NSUTF8StringEncoding]
+                                                  options:0 error:NULL]);
+}
+
+- (void)testDepthBoundaryAndQuotedBracketsHaveBackendParity {
+  for (NSUInteger count = 512; count <= 513; count++) {
+    NSMutableString *text = [NSMutableString string];
+    for (NSUInteger i = 0; i < count; i++) [text appendString:@"["];
+    [text appendString:@"0"];
+    for (NSUInteger i = 0; i < count; i++) [text appendString:@"]"];
+    [self forEachBackend:^(ALNJSONBackend backend) {
+      (void)backend;
+      NSError *error = nil;
+      id value = [ALNJSONSerialization JSONObjectWithData:[text dataUsingEncoding:NSUTF8StringEncoding] options:0 error:&error];
+      if (count == 512) { XCTAssertNotNil(value); XCTAssertNil(error); }
+      else { XCTAssertNil(value); XCTAssertEqual((NSInteger)6, error.code); }
+    }];
+  }
+  NSMutableString *string = [NSMutableString stringWithString:@"[\""];
+  for (NSUInteger i = 0; i < 2000; i++) [string appendString:@"[\\\"}"];
+  [string appendString:@"\"]"];
+  [self forEachBackend:^(ALNJSONBackend backend) {
+    (void)backend;
+    XCTAssertNotNil([ALNJSONSerialization JSONObjectWithData:[string dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL]);
+    XCTAssertNotNil([ALNJSONSerialization JSONObjectWithData:[@"42" dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingAllowFragments error:NULL]);
+  }];
+}
+
 - (void)setUp {
   [super setUp];
   [ALNJSONSerialization resetBackendForTesting];

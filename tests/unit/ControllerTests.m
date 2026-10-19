@@ -44,6 +44,19 @@ static NSString *RenderControllerAlternateLayout(id ctx, NSError **error) {
 
 @implementation ControllerTests
 
+- (void)testSSERejectsInjectedEventFields {
+  ControllerTestHarness *controller = [self freshController];
+  [controller renderSSEEvents:@[
+    @{@"id": @"1\ndata: forged", @"data": @"bad"},
+    @{@"event": @"chat\r\ndata: forged", @"data": @"bad"},
+    @{@"event": @"chat", @"id": @"2", @"data": @"good"}
+  ]];
+  NSString *body = [[NSString alloc] initWithData:controller.context.response.bodyData encoding:NSUTF8StringEncoding];
+  XCTAssertFalse([body containsString:@"forged"]);
+  XCTAssertTrue([body containsString:@"event: chat\n"]);
+  XCTAssertTrue([body containsString:@"id: 2\n"]);
+}
+
 - (void)setUp {
   [super setUp];
   ALNEOCClearTemplateRegistry();

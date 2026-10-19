@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNAuthModuleOIDC.h"
 #import "ALNPlatform.h"
 #import "ALNOIDCClient.h"
@@ -309,7 +310,7 @@ static BOOL OStrings(id values) {
 - (NSDictionary *)documentForRequest:(NSURLRequest *)request error:(NSError **)error {
   NSData *data = self.transport ? [self.transport performOIDCRequest:request error:NULL] :
                                  ALNBoundedJSONRequest(request, 262144, NULL);
-  id json = data && data.length <= 262144 ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+  id json = data && data.length <= 262144 ? [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
   if (![json isKindOfClass:[NSDictionary class]]) {
     OFail(error, @"OIDC provider response unavailable or invalid"); return nil;
   }
@@ -397,7 +398,7 @@ static BOOL OStrings(id values) {
   if (!token) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   NSArray *parts = [OS(token[@"id_token"]) componentsSeparatedByString:@"."];
   NSData *headerData = parts.count == 3 ? ALNDataFromBase64URLString(parts[0]) : nil;
-  id header = headerData ? [NSJSONSerialization JSONObjectWithData:headerData options:0 error:NULL] : nil;
+  id header = headerData ? [ALNJSONSerialization JSONObjectWithData:headerData options:0 error:NULL] : nil;
   if (token[@"error"] || ![header isKindOfClass:[NSDictionary class]] || ![header[@"alg"] isEqual:@"RS256"]) {
     return OFailWithCode(error, nil, @"OIDC requires a successful token response with an RS256 ID token",
                          @"verification_failed");

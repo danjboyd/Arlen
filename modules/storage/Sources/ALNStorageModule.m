@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNStorageModule.h"
 
 #import "../..//admin-ui/Sources/ALNAdminUIModule.h"
@@ -198,7 +199,7 @@ static NSDictionary *SMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -466,7 +467,7 @@ static NSDictionary *SMTokenPayloadDecode(NSString *token, NSData *keyData, NSEr
     }
     return nil;
   }
-  id object = [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:payloadData options:0 error:NULL];
   if (![object isKindOfClass:[NSDictionary class]]) {
     if (error != NULL) {
       *error = SMError(ALNStorageModuleErrorTokenRejected, @"token payload is invalid", nil);

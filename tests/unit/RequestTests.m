@@ -11,6 +11,19 @@
 
 @implementation RequestTests
 
+- (void)testEmptyTransferEncodingCannotFallBackToContentLength {
+  for (NSNumber *backend in @[@(ALNHTTPParserBackendLegacy), @(ALNHTTPParserBackendLLHTTP)]) {
+    if (backend.integerValue == ALNHTTPParserBackendLLHTTP && ![ALNRequest isLLHTTPAvailable]) continue;
+    for (NSString *value in @[@"", @" ", @"\t"]) {
+      NSString *raw = [NSString stringWithFormat:@"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding:%@\r\nContent-Length: 1\r\n\r\nxGET / HTTP/1.1\r\nHost: localhost\r\n\r\n", value];
+      NSError *error = nil;
+      XCTAssertNil([ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                       backend:backend.integerValue error:&error]);
+      XCTAssertNotNil(error);
+    }
+  }
+}
+
 - (NSArray<NSNumber *> *)allBackends {
   NSMutableArray<NSNumber *> *backends = [NSMutableArray array];
   if ([ALNRequest isLLHTTPAvailable]) {

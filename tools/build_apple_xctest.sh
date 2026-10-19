@@ -298,6 +298,11 @@ fi
 
 # Binaries the suites launch, matching the GNUstep build's build/ outputs.
 case "$suite" in
+  unit)
+    compile_sources "$repo_root/tests/durable_jobs/file_job_probe.m"
+    link_tool_if_stale "$build_root/file-job-probe" "${compiled_objects[@]}" "$framework_lib"
+    ensure_wrapper "$build_root/file-job-probe" "$repo_root/build/file-job-probe"
+    ;;
   integration)
     compile_sources ${module_generated_sources[@]+"${module_generated_sources[@]}"}
     module_generated_objects=(${compiled_objects[@]+"${compiled_objects[@]}"})

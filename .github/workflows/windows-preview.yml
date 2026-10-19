@@ -47,6 +47,11 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
 
+      - name: Run Windows static and realtime transport regressions
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths"
+
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
