@@ -367,6 +367,8 @@ The built-in admin users search treats `%` and `_` as literal characters in
 Production apps keep `/openapi.json` and its docs routes closed unless they set
 `openapi.publicInProduction = YES`; route metadata includes privileged API
 paths. Local development keeps the OpenAPI routes enabled.
+The ops module coordinates persisted dashboard history across processes when
+they share its configured persistence path; see [Ops Module](OPS_MODULE.md).
 
 When automating `arlen module migrate --json`, capture stdout and stderr
 separately. PostgreSQL notices may appear on stderr during repeated migrations;

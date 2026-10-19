@@ -115,6 +115,11 @@ opsModule = {
 };
 ```
 
+When a persistence path is set, dashboard history writes reload the shared
+state under a sibling `.lock` file before atomic replacement. Separate ops
+processes can append snapshots to the same history without overwriting each
+other, and each dashboard read includes the latest persisted history.
+
 ## Current Limits
 
 - the dashboard is additive; it does not replace the raw lower-level health,
