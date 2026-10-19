@@ -405,6 +405,8 @@ processes. A process that only reads may show cached inbox state until it
 writes or restarts.
 Jobs workers sharing a persistence path also coordinate operator-state writes;
 job claim durability still depends on the configured jobs adapter.
+Search workers sharing a persistence path preserve writes to different
+resources; schedule one reindex worker per resource at a time.
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)

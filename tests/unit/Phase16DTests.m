@@ -43,6 +43,9 @@ static void Phase16DResetOrderStore(void) {
 @implementation Phase16DSearchResource
 
 - (NSString *)searchModuleResourceIdentifier {
+  if ([[[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_SEARCH_SHARED_STATE_PATH"] length] > 0) {
+    return [NSString stringWithFormat:@"worker-%d", getpid()];
+  }
   return @"orders";
 }
 
@@ -336,6 +339,57 @@ static void Phase16DResetOrderStore(void) {
   NSArray *history = [drilldown[@"history"] isKindOfClass:[NSArray class]] ? drilldown[@"history"] : @[];
   NSPredicate *predicate = [NSPredicate predicateWithFormat:@"status == %@", @"failed"];
   XCTAssertEqual((NSUInteger)1, [[history filteredArrayUsingPredicate:predicate] count]);
+}
+
+- (void)testSearchStateTransactionsAcrossProcesses {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *sharedPath = environment[@"ARLEN_SEARCH_SHARED_STATE_PATH"];
+  if ([sharedPath length] > 0) {
+    [self registerModulesForApplication:[self applicationWithStatePath:sharedPath]];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSUInteger readyCount = 0;
+    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
+      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
+                                                                           error:NULL];
+      readyCount = 0;
+      for (NSString *name in names) {
+        if ([name hasPrefix:[[sharedPath lastPathComponent] stringByAppendingString:@".ready."]]) readyCount++;
+      }
+      if (readyCount >= 2U) break;
+      usleep(50000);
+    }
+    XCTAssertEqual((NSUInteger)2, readyCount);
+    NSString *resource = [NSString stringWithFormat:@"worker-%d", getpid()];
+    NSDictionary *payload = @{ @"resource" : resource, @"mode" : @"full" };
+    NSError *error = nil;
+    XCTAssertNotNil([[ALNSearchModuleRuntime sharedRuntime] processReindexJobPayload:payload error:&error]);
+    XCTAssertNil(error);
+    return;
+  }
+
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"search-process-state.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 2U; index++) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+    child.arguments = @[ @"-XCTest", @"Phase16DTests/testSearchStateTransactionsAcrossProcesses", bundlePath ];
+    NSMutableDictionary *childEnvironment = [environment mutableCopy];
+    childEnvironment[@"ARLEN_SEARCH_SHARED_STATE_PATH"] = statePath;
+    child.environment = childEnvironment;
+    [child launch];
+    [children addObject:child];
+  }
+  for (NSTask *child in children) {
+    [child waitUntilExit];
+    XCTAssertEqual(0, child.terminationStatus);
+  }
+  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  XCTAssertEqual((NSUInteger)2, [(NSDictionary *)state[@"indexedDocumentsByResource"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSDictionary *)state[@"generationHistoryByResource"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"reindexHistory"] count]);
 }
 
 @end
