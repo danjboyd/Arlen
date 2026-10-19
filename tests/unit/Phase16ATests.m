@@ -226,4 +226,56 @@
   XCTAssertEqual((NSUInteger)1, [[runtime pendingJobs] count]);
 }
 
+- (void)testJobsOperatorStateTransactionsAcrossProcesses {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *sharedPath = environment[@"ARLEN_JOBS_SHARED_STATE_PATH"];
+  if ([sharedPath length] > 0) {
+    [self registerJobsForApplication:[self applicationWithStatePath:sharedPath]];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSUInteger readyCount = 0;
+    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
+      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
+                                                                           error:NULL];
+      readyCount = 0;
+      for (NSString *name in names) {
+        if ([name hasPrefix:[[sharedPath lastPathComponent] stringByAppendingString:@".ready."]]) readyCount++;
+      }
+      if (readyCount >= 2U) break;
+      usleep(50000);
+    }
+    XCTAssertEqual((NSUInteger)2, readyCount);
+    ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+    NSError *error = nil;
+    NSString *queue = [NSString stringWithFormat:@"queue-%d", getpid()];
+    XCTAssertTrue([runtime pauseQueueNamed:queue error:&error]);
+    XCTAssertNil(error);
+    XCTAssertNotNil([runtime runWorkerAt:[NSDate date] limit:1 error:&error]);
+    XCTAssertNil(error);
+    return;
+  }
+
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"jobs-process-state.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 2U; index++) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+    child.arguments = @[ @"-XCTest", @"Phase16ATests/testJobsOperatorStateTransactionsAcrossProcesses", bundlePath ];
+    NSMutableDictionary *childEnvironment = [environment mutableCopy];
+    childEnvironment[@"ARLEN_JOBS_SHARED_STATE_PATH"] = statePath;
+    child.environment = childEnvironment;
+    [child launch];
+    [children addObject:child];
+  }
+  for (NSTask *child in children) {
+    [child waitUntilExit];
+    XCTAssertEqual(0, child.terminationStatus);
+  }
+  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"pausedQueues"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"runHistory"] count]);
+}
+
 @end

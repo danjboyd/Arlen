@@ -643,6 +643,8 @@ First-party module surfaces after install:
 - Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
 - `POST /auth/api/register` defaults to a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in and duplicate-email response, with an enumeration tradeoff.
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+  Shared operator-state writes coordinate across processes; this is separate
+  from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
   Persisted notification writes coordinate across processes sharing one state path;
   read-only processes refresh their cached view after a write or restart.
