@@ -4592,6 +4592,33 @@ static void ALNFinalizeResponse(ALNApplication *application,
                  @"module" : identifier ?: @"",
                }];
   }
+  [self warnAboutOutdatedVendoredModules];
+}
+
+// boomhauer, propane and jobs-worker export ARLEN_FRAMEWORK_ROOT. Vendored
+// modules compile from the app's copy, so name any that are older than the
+// framework's (a version check only; `arlen module doctor` also compares files).
+- (void)warnAboutOutdatedVendoredModules {
+  if ([[self.environment lowercaseString] isEqualToString:@"test"]) {
+    return;
+  }
+  const char *rawRoot = getenv("ARLEN_FRAMEWORK_ROOT");
+  NSString *appRoot = [self.config[@"appRoot"] isKindOfClass:[NSString class]] ? self.config[@"appRoot"] : @"";
+  if (rawRoot == NULL || rawRoot[0] == '\0' || [appRoot length] == 0) {
+    return;
+  }
+  NSArray<NSDictionary *> *outdated =
+      [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                           frameworkRoot:[NSString stringWithUTF8String:rawRoot]
+                                          compareContent:NO];
+  for (NSDictionary *entry in outdated) {
+    [self.logger warn:@"vendored module is older than the framework copy"
+               fields:@{
+                 @"module" : entry[@"module"] ?: @"",
+                 @"detail" : entry[@"message"] ?: @"",
+                 @"fix" : entry[@"detail"] ?: @"",
+               }];
+  }
 }
 
 - (void)loadConfiguredSPAFallback {

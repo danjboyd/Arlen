@@ -133,6 +133,13 @@ Run bootstrap environment diagnostics without requiring a framework build.
  set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
  requests when `observability.operabilityAnonymous` /
  `ARLEN_OPERABILITY_ANONYMOUS` is set
+- in an app root, warns (`module_outdated`) for each vendored
+ `modules/<id>` whose `version` is lower than the framework checkout's
+ `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
+ `arlen module migrate`, then rebuild (a numeric `MAJOR.MINOR[.PATCH]`
+ comparison only; a copy whose version has a suffix such as `-rc1`, which
+ module manifests don't allow, is skipped; `arlen module doctor` also compares
+ file contents)
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -557,11 +564,18 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
   `authModule.allowWithoutCSRF = YES`) when a module that expects CSRF, such as
   `auth`, is installed while `session.enabled = YES` and `csrf.enabled = NO`
 - warns (without failing) about vendored module content:
+ - `module_outdated`: the framework checkout's copy of the module has a newer
+   `version` than the app's vendored copy; the hint is
+   `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild.
+   `arlen doctor` runs the same version check, and apps log it at startup
+   (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as `boomhauer`,
+   `propane` and `jobs-worker` do for the app process
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
  - `module_framework_copy_differs`: the vendored copy differs from
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
-   framework checkout, or the running `arlen` binary's checkout), typically
+   framework checkout, or the running `arlen` binary's checkout) at the same or
+   an older framework version, typically
    after moving the framework pin without re-running `module upgrade`
  - `module_sessions_disabled`: an installed module's defaults enable sessions,
    but `config/app.plist` sets `session.enabled = NO` (the `arlen new`

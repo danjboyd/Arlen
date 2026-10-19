@@ -530,4 +530,124 @@ static NSError *Phase13ADefaultFailingModuleError(void) {
   }
 }
 
+- (void)testFrameworkCopyDiagnosticsReportOutdatedAndChangedVendoredModules {
+  NSString *root = [self createTempDirectoryWithPrefix:@"phase13a-outdated"];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+
+  @try {
+    NSString *appRoot = [root stringByAppendingPathComponent:@"app"];
+    NSString *frameworkRoot = [root stringByAppendingPathComponent:@"framework"];
+    NSString *vendored = [appRoot stringByAppendingPathComponent:@"modules/alpha"];
+    NSString *upstream = [frameworkRoot stringByAppendingPathComponent:@"modules/alpha"];
+    NSString *manifest = @"{ identifier = \"alpha\"; version = \"%@\"; principalClass = \"Phase13AAlphaModule\"; }\n";
+    NSString *manifest100 = [NSString stringWithFormat:manifest, @"1.0.0"];
+    NSString *manifest120 = [NSString stringWithFormat:manifest, @"1.2.0"];
+    NSString *manifest130 = [NSString stringWithFormat:manifest, @"1.3.0"];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{ modules = ( { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; } ); }\n"]);
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"module.plist"]
+                          content:manifest100]);
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"Sources/Alpha.m"] content:@"// v1\n"]);
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"]
+                          content:manifest100]);
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"Sources/Alpha.m"] content:@"// v1\n"]);
+
+    // Same version, same files: nothing to report.
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:frameworkRoot
+                                                                   compareContent:YES]);
+    // No framework root known: nothing to compare against.
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:@""
+                                                                   compareContent:YES]);
+
+    // Same version, different files: only the content comparison reports it.
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"Sources/Alpha.m"] content:@"// v1 fix\n"]);
+    NSArray<NSDictionary *> *diagnostics = [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                                frameworkRoot:frameworkRoot
+                                                                               compareContent:YES];
+    XCTAssertEqual((NSUInteger)1, [diagnostics count]);
+    XCTAssertEqualObjects(@"module_framework_copy_differs", [diagnostics firstObject][@"code"]);
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:frameworkRoot
+                                                                   compareContent:NO]);
+
+    // A newer framework version is outdated, with or without the file comparison.
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"]
+                          content:manifest120]);
+    for (NSNumber *compareContent in @[ @YES, @NO ]) {
+      diagnostics = [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                         frameworkRoot:frameworkRoot
+                                                        compareContent:[compareContent boolValue]];
+      XCTAssertEqual((NSUInteger)1, [diagnostics count]);
+      NSDictionary *entry = [diagnostics firstObject];
+      XCTAssertEqualObjects(@"module_outdated", entry[@"code"]);
+      XCTAssertEqualObjects(@"warning", entry[@"status"]);
+      XCTAssertEqualObjects(@"alpha", entry[@"module"]);
+      XCTAssertTrue([entry[@"message"] containsString:@"1.0.0"], @"%@", entry);
+      XCTAssertTrue([entry[@"message"] containsString:@"1.2.0"], @"%@", entry);
+      XCTAssertTrue([entry[@"detail"] containsString:@"arlen module upgrade alpha"], @"%@", entry);
+      XCTAssertTrue([entry[@"detail"] containsString:@"arlen module migrate"], @"%@", entry);
+    }
+
+    // A framework copy with a pre-release suffix is not a valid manifest, so it is skipped, not compared.
+    NSString *manifestPrerelease = [NSString stringWithFormat:manifest, @"9.0.0-rc1"];
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"] content:manifestPrerelease]);
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:frameworkRoot
+                                                                   compareContent:YES]);
+    XCTAssertTrue([self writeFile:[upstream stringByAppendingPathComponent:@"module.plist"] content:manifest120]);
+
+    // A vendored copy newer than the framework's is not outdated.
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"module.plist"]
+                          content:manifest130]);
+    XCTAssertEqualObjects(@[], [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                    frameworkRoot:frameworkRoot
+                                                                   compareContent:NO]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:nil];
+  }
+}
+
+
+- (void)testDoctorReportsLocallyModifiedVendoredModule {
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13a-local-edit"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *vendored = [appRoot stringByAppendingPathComponent:@"modules/alpha"];
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{ identifier = \"alpha\"; version = \"1.0.0\"; principalClass = \"Phase13AAlphaModule\"; }\n"]);
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"Sources/Alpha.m"] content:@"// v1\n"]);
+    NSString *digest = [ALNModuleSystem contentDigestForModuleAtPath:vendored error:NULL];
+    XCTAssertTrue([digest hasPrefix:@"sha256:"]);
+    NSError *error = nil;
+    NSDictionary *lock = @{
+      @"modules" : @[ @{ @"identifier" : @"alpha", @"path" : @"modules/alpha", @"enabled" : @YES, @"contentDigest" : digest } ]
+    };
+    XCTAssertTrue([ALNModuleSystem writeModulesLockDocument:lock appRoot:appRoot error:&error], @"%@", error);
+
+    NSArray<NSString *> * (^codes)(void) = ^NSArray<NSString *> * {
+      NSMutableArray<NSString *> *found = [NSMutableArray array];
+      for (NSDictionary *entry in [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:@{} error:NULL] ?: @[]) {
+        if ([entry[@"module"] isEqualToString:@"alpha"]) {
+          [found addObject:entry[@"code"] ?: @""];
+        }
+      }
+      return found;
+    };
+    XCTAssertFalse([codes() containsObject:@"module_locally_modified"]);
+    XCTAssertTrue([self writeFile:[vendored stringByAppendingPathComponent:@"Sources/Alpha.m"] content:@"// local patch\n"]);
+    XCTAssertTrue([codes() containsObject:@"module_locally_modified"], @"%@", codes());
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 @end

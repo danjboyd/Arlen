@@ -8412,6 +8412,29 @@ static int CommandDoctor(NSArray *args) {
     warnCount += 1;
   }
 
+  // Vendored modules are compiled from the app's copy, so a framework upgrade
+  // alone leaves them at their old version until `arlen module upgrade`.
+  NSUInteger vendoredModuleCount =
+      [[ALNModuleSystem installedModuleRecordsAtAppRoot:appRoot error:NULL] count];
+  if (!overrideInvalid && [frameworkRoot length] > 0 && vendoredModuleCount > 0) {
+    NSArray<NSDictionary *> *outdated = [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                                                              frameworkRoot:frameworkRoot
+                                                                             compareContent:NO];
+    for (NSDictionary *entry in outdated) {
+      AddDoctorCheck(checks, @"module_outdated", @"warn", entry[@"message"], entry[@"detail"]);
+      warnCount += 1;
+    }
+    if ([outdated count] == 0) {
+      AddDoctorCheck(checks,
+                     @"module_outdated",
+                     @"pass",
+                     [NSString stringWithFormat:@"%lu vendored module(s) are at the framework's versions",
+                                                (unsigned long)vendoredModuleCount],
+                     @"");
+      passCount += 1;
+    }
+  }
+
   NSString *gnustepScript = ResolveGNUstepScriptPath();
   if (PathExists(gnustepScript, NULL)) {
     AddDoctorCheck(checks, @"gnustep_script", @"pass",
@@ -11065,9 +11088,7 @@ static int CommandModuleList(NSArray *args) {
   return 0;
 }
 
-// Warns when a vendored module no longer matches the framework checkout's copy,
-// e.g. after the framework pin moved but `module upgrade` was not re-run.
-static NSArray<NSDictionary *> *FrameworkModuleCopyDiagnostics(NSString *appRoot) {
+static NSString *ModuleDoctorFrameworkRoot(NSString *appRoot) {
   NSString *frameworkRoot = EnvValue("ARLEN_FRAMEWORK_ROOT");
   if ([frameworkRoot length] == 0) {
     frameworkRoot = FindFrameworkRoot(appRoot);
@@ -11075,51 +11096,16 @@ static NSArray<NSDictionary *> *FrameworkModuleCopyDiagnostics(NSString *appRoot
   if ([frameworkRoot length] == 0) {
     frameworkRoot = FrameworkRootFromExecutablePath();
   }
-  if ([frameworkRoot length] == 0) {
-    return @[];
-  }
+  return frameworkRoot ?: @"";
+}
 
-  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
-  NSArray<NSDictionary *> *records = [ALNModuleSystem installedModuleRecordsAtAppRoot:appRoot error:NULL] ?: @[];
-  for (NSDictionary *record in records) {
-    NSString *identifier = record[@"identifier"];
-    NSString *frameworkCopy =
-        [[frameworkRoot stringByAppendingPathComponent:@"modules"] stringByAppendingPathComponent:identifier];
-    NSString *installPath = [appRoot stringByAppendingPathComponent:record[@"path"]];
-    if ([[frameworkCopy stringByStandardizingPath] isEqualToString:[installPath stringByStandardizingPath]]) {
-      continue;
-    }
-    ALNModuleDefinition *frameworkDefinition = [ALNModuleSystem moduleDefinitionAtPath:frameworkCopy error:NULL];
-    if (frameworkDefinition == nil) {
-      continue;
-    }
-    NSString *frameworkDigest = [ALNModuleSystem contentDigestForModuleAtPath:frameworkCopy error:NULL];
-    NSString *installedDigest = [ALNModuleSystem contentDigestForModuleAtPath:installPath error:NULL];
-    if (frameworkDigest == nil || installedDigest == nil || [frameworkDigest isEqualToString:installedDigest]) {
-      continue;
-    }
-    NSString *installedVersion = record[@"version"] ?: @"";
-    NSString *message =
-        [installedVersion isEqualToString:frameworkDefinition.version]
-            ? [NSString stringWithFormat:@"module %@ differs from the framework copy at the same version %@",
-                                         identifier,
-                                         installedVersion]
-            : [NSString stringWithFormat:@"module %@ %@ differs from the framework copy (%@)",
-                                         identifier,
-                                         installedVersion,
-                                         frameworkDefinition.version ?: @""];
-    [diagnostics addObject:@{
-      @"status" : @"warning",
-      @"code" : @"module_framework_copy_differs",
-      @"module" : identifier ?: @"",
-      @"message" : message,
-      @"detail" : [NSString stringWithFormat:@"framework copy: %@; run `arlen module upgrade %@ --source %@`",
-                                             frameworkCopy,
-                                             identifier,
-                                             frameworkCopy],
-    }];
-  }
-  return diagnostics;
+// Warns when a vendored module is older than, or no longer matches, the
+// framework checkout's copy, e.g. after the framework pin moved but
+// `module upgrade` was not re-run.
+static NSArray<NSDictionary *> *FrameworkModuleCopyDiagnostics(NSString *appRoot) {
+  return [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                              frameworkRoot:ModuleDoctorFrameworkRoot(appRoot)
+                                             compareContent:YES];
 }
 
 static int CommandModuleDoctor(NSArray *args) {

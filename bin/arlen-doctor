@@ -136,6 +136,54 @@ else
     "Run 'arlen new <AppName>' if you are bootstrapping a new app."
 fi
 
+# The top-level `version = "1.2.3";` of a module.plist (dependency constraints
+# such as ">= 1.0.0" don't start with a digit, so they never match).
+module_manifest_version() {
+  sed -n -E 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([0-9][0-9.]*)"[[:space:]]*;.*/\1/p' "$1" | head -n 1
+}
+
+# Succeeds when dotted numeric version $1 is lower than $2.
+module_version_lt() {
+  local IFS=.
+  local -a left=($1) right=($2)
+  local idx count=${#left[@]}
+  (( ${#right[@]} > count )) && count=${#right[@]}
+  for (( idx = 0; idx < count; idx++ )); do
+    local l=$((10#${left[idx]:-0})) r=$((10#${right[idx]:-0}))
+    (( l < r )) && return 0
+    (( l > r )) && return 1
+  done
+  return 1
+}
+
+# Vendored modules compile from the app's copy, so a framework upgrade alone
+# leaves them at their old version until `arlen module upgrade`.
+if [[ -f "$app_config_path" && -n "$framework_root" && -d "$app_root/modules" ]]; then
+  vendored_module_count=0
+  outdated_module_count=0
+  for vendored_manifest in "$app_root"/modules/*/module.plist; do
+    [[ -f "$vendored_manifest" ]] || continue
+    module_dir="$(dirname "$vendored_manifest")"
+    module_id="$(basename "$module_dir")"
+    framework_manifest="$framework_root/modules/$module_id/module.plist"
+    [[ -f "$framework_manifest" ]] || continue
+    [[ "$(cd "$module_dir" && pwd -P)" == "$(cd "$(dirname "$framework_manifest")" && pwd -P)" ]] && continue
+    vendored_module_count=$((vendored_module_count + 1))
+    installed_version="$(module_manifest_version "$vendored_manifest")"
+    available_version="$(module_manifest_version "$framework_manifest")"
+    [[ -n "$installed_version" && -n "$available_version" ]] || continue
+    if module_version_lt "$installed_version" "$available_version"; then
+      outdated_module_count=$((outdated_module_count + 1))
+      add_check "module_outdated" "warn" \
+        "module $module_id is $installed_version in this app; the framework has $available_version" \
+        "run \`arlen module upgrade $module_id\`, then \`arlen module migrate\`, then rebuild (framework copy: $(dirname "$framework_manifest"))"
+    fi
+  done
+  if (( vendored_module_count > 0 && outdated_module_count == 0 )); then
+    add_check "module_outdated" "pass" "$vendored_module_count vendored module(s) are at the framework's versions"
+  fi
+fi
+
 phase39_config_blob() {
   if [[ -f "$app_config_path" ]]; then
     sed 's,//.*,,' "$app_config_path"

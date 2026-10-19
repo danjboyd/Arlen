@@ -124,6 +124,27 @@ Override rule:
 Use `module upgrade` when you want to replace the vendored files with a newer
 source tree and update the lock metadata in `config/modules.plist`.
 
+**Upgrading Arlen does not upgrade your modules.** `module add` copies a
+module's sources into your app (`modules/<id>`), and `boomhauer`, `propane`
+and `jobs-worker` compile that copy. After you move to a newer framework, the
+app keeps running the old module code until you re-vendor each module:
+
+```bash
+./build/arlen module upgrade <id>    # for each installed module
+./build/arlen module migrate         # apply any new module migrations
+# then rebuild and restart (boomhauer rebuilds on its next start)
+```
+
+`arlen doctor` and `arlen module doctor` report `module_outdated` for every
+vendored module whose framework copy has a newer version, and the app logs
+`vendored module is older than the framework copy` at startup (outside the
+`test` environment) when it runs under `boomhauer`, `propane` or
+`jobs-worker`, which export `ARLEN_FRAMEWORK_ROOT` to it. The check compares
+numeric versions component by component (`1.10.0` is newer than `1.9.0`).
+Module versions must be plain `MAJOR.MINOR[.PATCH]` numbers: the module system
+refuses a `module.plist` with a pre-release suffix such as `1.2.0-rc1`, and the
+doctors skip a copy whose version they can't read rather than guess.
+
 Re-run it for every installed module whenever you move your framework pin.
 First-party module sources can change without a `version` bump, so `upgrade`
 compares file contents:

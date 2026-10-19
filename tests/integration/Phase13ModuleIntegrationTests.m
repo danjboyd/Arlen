@@ -836,4 +836,85 @@
   }
 }
 
+- (void)testDoctorsReportVendoredModulesOlderThanTheFrameworkCopy {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-outdated-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"phase13-module-outdated-fw"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    // A minimal framework checkout as bin/arlen-doctor recognises one, with a newer alpha.
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"framework"];
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"GNUmakefile"] content:@"\n"]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"src/Arlen/.keep"] content:@""]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.2.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"2.0.0\";\n  principalClass = \"BetaModule\";\n}\n"]);
+    // A pre-release suffix isn't a valid module version; the doctor skips it rather than guess.
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.1.0-rc1\";\n  principalClass = \"GammaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.0.0\";\n  principalClass = \"GammaModule\";\n}\n"]);
+
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{ modules = (\n"
+                                  "  { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; },\n"
+                                  "  { identifier = \"beta\"; path = \"modules/beta\"; enabled = YES; }\n"
+                                  "); }\n"]);
+    // alpha is behind the framework; beta matches it (its dependency constraint must not be read as its version).
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"2.0.0\";\n  principalClass = \"BetaModule\";\n"
+                                  "  dependencies = ( { identifier = \"alpha\"; version = \">= 1.0.0\"; } );\n}\n"]);
+
+    int code = 0;
+    NSString *doctorCommand =
+        [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ bash %@ --json",
+                                   ALNTestShellQuote(appRoot),
+                                   ALNTestShellQuote(frameworkRoot),
+                                   ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"])];
+    NSString *output = [self runJSONCommand:doctorCommand exitCode:&code];
+    NSDictionary *payload = [self parseJSONDictionary:output];
+    NSMutableArray<NSDictionary *> *outdated = [NSMutableArray array];
+    for (NSDictionary *check in [payload[@"checks"] isKindOfClass:[NSArray class]] ? payload[@"checks"] : @[]) {
+      if ([check[@"id"] isEqualToString:@"module_outdated"]) {
+        [outdated addObject:check];
+      }
+    }
+    XCTAssertEqual((NSUInteger)1, [outdated count], @"%@", output);
+    NSDictionary *check = [outdated firstObject];
+    XCTAssertEqualObjects(@"warn", check[@"status"], @"%@", output);
+    XCTAssertEqualObjects(@"module alpha is 1.0.0 in this app; the framework has 1.2.0", check[@"message"], @"%@", output);
+    XCTAssertTrue([check[@"hint"] containsString:@"arlen module upgrade alpha"], @"%@", output);
+    XCTAssertTrue([check[@"hint"] containsString:@"arlen module migrate"], @"%@", output);
+
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json"
+                                                   appRoot:appRoot
+                                                  repoRoot:repoRoot
+                                             frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertTrue([[self diagnosticCodesInDoctorPayload:payload module:@"alpha"] containsObject:@"module_outdated"],
+                  @"%@", output);
+    XCTAssertFalse([[self diagnosticCodesInDoctorPayload:payload module:@"beta"] containsObject:@"module_outdated"],
+                   @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
 @end
