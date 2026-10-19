@@ -891,9 +891,22 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
                          format:(NSPropertyListFormat)format {
   NSMutableDictionary *objects = [NSMutableDictionary dictionary];
   NSMutableArray *ids = [NSMutableArray array];
+  // Each record needs its own nested containers. Apple's XML serializer
+  // rejects an XML tree that reuses the same nested NSDictionary/NSArray
+  // instances thousands of times, even though the values are valid.
+  NSError *templateError = nil;
+  NSData *templateData = [NSPropertyListSerialization dataWithPropertyList:template
+                                                                   format:NSPropertyListBinaryFormat_v1_0
+                                                                  options:0
+                                                                    error:&templateError];
+  XCTAssertNotNil(templateData, @"%@", templateError);
+  if (templateData == nil) return;
   for (NSUInteger idx = 0; idx < count; idx++) {
     NSString *objectID = [NSString stringWithFormat:@"obj-%032lx", (unsigned long)(idx + 1)];
-    NSMutableDictionary *record = [template mutableCopy];
+    NSMutableDictionary *record = [NSPropertyListSerialization propertyListWithData:templateData
+                                                                            options:NSPropertyListMutableContainersAndLeaves
+                                                                             format:NULL
+                                                                              error:NULL];
     record[@"objectID"] = objectID;
     record[@"sequence"] = @(idx + 1);
     record[@"name"] = [NSString stringWithFormat:@"bulk-%lu.txt", (unsigned long)idx];
@@ -908,8 +921,13 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
     @"uploadSessionsByIdentifier" : @{},
     @"activityLog" : @[],
   };
-  NSData *data = [NSPropertyListSerialization dataWithPropertyList:state format:format options:0 error:NULL];
-  XCTAssertNotNil(data);
+  NSError *serializeError = nil;
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:state
+                                                            format:format
+                                                           options:0
+                                                             error:&serializeError];
+  XCTAssertNotNil(data, @"%@", serializeError);
+  if (data == nil) return;
   XCTAssertTrue([data writeToFile:statePath atomically:YES]);
 }
 
@@ -938,14 +956,18 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertNil([self configureRuntime:runtime withApplication:app]);
   XCTAssertEqual((NSUInteger)5000, [[runtime listObjectsForCollection:@"plain" query:nil] count]);
 
-  // One store rewrites the whole 5,000-object catalog under the lock.
+  // The plist backend rewrites the whole 5,000-object catalog under the lock.
   NSDate *started = [NSDate date];
   XCTAssertNotNil([self storeObjectInRuntime:runtime named:@"one-more.txt" body:@"one more"]);
   NSTimeInterval elapsed = -[started timeIntervalSinceNow];
   XCTAssertLessThan(elapsed, 3.0);
   NSData *written = [NSData dataWithContentsOfFile:statePath];
-  XCTAssertTrue([[[NSString alloc] initWithData:[written subdataWithRange:NSMakeRange(0, 5)]
-                                       encoding:NSUTF8StringEncoding] isEqualToString:@"<?xml"]);
+  NSPropertyListFormat writtenFormat = NSPropertyListOpenStepFormat;
+  XCTAssertNotNil([NSPropertyListSerialization propertyListWithData:written
+                                                             options:NSPropertyListImmutable
+                                                              format:&writtenFormat
+                                                               error:NULL]);
+  XCTAssertEqual(NSPropertyListXMLFormat_v1_0, writtenFormat);
   XCTAssertEqual((NSUInteger)5001, [[[self stateAtPath:statePath][@"objectsByIdentifier"] allKeys] count]);
 }
 
@@ -972,6 +994,25 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
   XCTAssertNil([self configureRuntime:runtime withApplication:app]);
   XCTAssertEqual((NSUInteger)20, [[runtime listObjectsForCollection:@"plain" query:nil] count]);
+
+  // Small legacy XML catalogs remain readable and continue to be written as XML.
+  [self writeStateForObjects:20
+                  likeRecord:storedTemplate
+                  collection:@"plain"
+                      toPath:statePath
+                      format:NSPropertyListXMLFormat_v1_0];
+  ALNStorageModuleRuntime *xmlRuntime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:xmlRuntime withApplication:app]);
+  XCTAssertEqual((NSUInteger)20, [[xmlRuntime listObjectsForCollection:@"plain" query:nil] count]);
+  XCTAssertNotNil([self storeObjectInRuntime:xmlRuntime named:@"after-xml.txt" body:@"xml"]);
+  NSPropertyListFormat writtenFormat = NSPropertyListOpenStepFormat;
+  NSData *written = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil([NSPropertyListSerialization propertyListWithData:written
+                                                             options:NSPropertyListImmutable
+                                                              format:&writtenFormat
+                                                               error:NULL]);
+  XCTAssertEqual(NSPropertyListXMLFormat_v1_0, writtenFormat);
+  XCTAssertEqual((NSUInteger)21, [[[self stateAtPath:statePath][@"objectsByIdentifier"] allKeys] count]);
 }
 
 - (NSDictionary *)storeObjectInRuntime:(ALNStorageModuleRuntime *)runtime named:(NSString *)name body:(NSString *)body {
