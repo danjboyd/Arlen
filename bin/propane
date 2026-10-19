@@ -6,6 +6,7 @@ print_usage() {
 Usage: propane [options] [-- worker-args]
 
 Runs Arlen in production manager mode with prefork workers.
+Windows production hosting is unsupported; use boomhauer for Windows development.
 All production manager settings are called "propane accessories".
 
 Options:
@@ -309,6 +310,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$(uname -s)" in
+  MSYS*|MINGW*|CYGWIN*)
+    echo "propane: Windows production hosting is not supported; use boomhauer for development" >&2
+    exit 2
+    ;;
+esac
 
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"

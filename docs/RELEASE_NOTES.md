@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Windows: `propane` now fails immediately with an unsupported-production
+  diagnostic and status 2; `--help` still works. Windows remains a development
+  platform. Previous multiworker preview behavior depended on unsafe port sharing;
+  exclusive socket binding is now enforced. Use `boomhauer` for development.
+
 - **Breaking (production):** `/metrics` and `/clusterz` answer `404` in the
   `production` environment until access is configured with
   `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` or

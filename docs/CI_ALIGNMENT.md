@@ -20,6 +20,12 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+The runtime parity suite tests watch recovery, jobs CLI smoke, and explicit
+rejection of unsupported Windows `propane` startup. It no longer attempts
+multiworker reloads on independently bound Windows sockets; that depended on
+unsafe port sharing. The supported-development scope and existing required
+check names remain unchanged. Native exclusive-binding coverage stays enabled.
+
 The ordinary unit suite builds `build/file-job-probe` and runs a four-process
 file-queue regression without PostgreSQL. This is part of existing unit lanes,
 including `windows-preview`; required check names and branch protection stay

@@ -46,13 +46,26 @@ make docs-api docs-html ci-docs
 
 Unit tests use the pinned vendored tools-xctest runner. Native Windows defaults
 to the legacy HTTP parser; the independent C regression always exercises the
-vendored llhttp code. The unit inventory contains 1113 methods and the integration
+vendored llhttp code. The unit inventory contains 1114 methods and the integration
 inventory 223 at this checkpoint. Platform/optional-service skips remain explicit.
 
 Local logs are in the worktree root (`tests-unit-final.log`, `tests-wire-final.log`,
 `tests-channel.log`, `tests-llhttp.log`, `tests-buildpolicy2.log`, and documentation
 logs). CI records JUnit under `test-results/`. Earlier failed iterations remain
 in logs; use the final logs for current results.
+
+The follow-up adds native DACL evidence in
+`Phase7DTests/testWindowsPrivateStorageDACLRejectsBroadInheritedAccess`: fresh
+directories/files and existing paths deliberately made insecure are both
+reduced to one explicit current-user allow entry with inheritance disabled.
+`tests-adapters-acl-final.log` records all twelve adapter tests passing.
+The static wire regression also covers hidden files accessed through 8.3 aliases.
+
+An expanded runtime check exposed that the old Windows propane test depended on
+two independent workers binding one port. Exclusive binding correctly prevents
+that unsafe setup. Windows production remains unsupported; propane now rejects
+startup with status 2, and the parity suite verifies rejection plus working help.
+Watch recovery and jobs CLI smoke remain in the development parity suite.
 
 Full combined-candidate validation on GNUstep Linux and Apple, plus exact SHA
 certification, belongs to the release coordinator after integration. Existing

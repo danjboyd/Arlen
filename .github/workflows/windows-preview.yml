@@ -34,6 +34,8 @@ jobs:
             throw "missing vendored gnustep-cli-new Windows integration docs"
           }
 
+      # Covers development/watch/jobs smoke and rejection of unsupported propane
+      # startup; independent Windows workers must never share a listen port.
       - name: Run Windows preview runtime parity lane
         shell: powershell
         run: |

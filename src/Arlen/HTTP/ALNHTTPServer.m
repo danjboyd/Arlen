@@ -3129,6 +3129,12 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   if (!ALNResolveStaticCandidateWithinRoot(candidatePath, canonicalRoot, &standardCandidate)) {
     return ALNStaticNotFoundResponse();
   }
+  // Apply hidden-file policy to the resolved long name as well as the URL:
+  // an NTFS 8.3 alias need not preserve the leading dot of its target.
+  if (standardCandidate.length > canonicalRoot.length &&
+      ALNStaticRelativePathIsHidden([standardCandidate substringFromIndex:canonicalRoot.length + 1])) {
+    return ALNStaticNotFoundResponse();
+  }
 
   BOOL isDirectory = NO;
   BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:standardCandidate
