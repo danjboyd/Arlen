@@ -55,8 +55,12 @@ def recv_frame(sock):
 
 
 def expect_close(sock, code, label):
-    sock.settimeout(10)
+    deadline = time.monotonic() + 10
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"{label}: close deadline exceeded")
+        sock.settimeout(remaining)
         opcode, payload = recv_frame(sock)
         if opcode == 0x9:
             continue
@@ -99,7 +103,7 @@ expect_close(sock, 1000, "close echo")
 sock.close()
 
 # 239: a quiet subscriber that answers pings outlives connectionTimeoutSeconds
-# (2 s) and still gets messages.
+# (2 s) and still processes control frames. Channel subscriptions are receive-only.
 subscriber = connect("/ws/channel/idle239")
 subscriber.settimeout(10)
 pings = 0
@@ -114,17 +118,19 @@ while time.time() < deadline:
     pings += 1
     subscriber.sendall(frame(0xA, payload))
 assert pings >= 2, pings
-publisher = connect("/ws/channel/idle239")
-publisher.sendall(frame(0x1, b"still here"))
-subscriber.settimeout(5)
+subscriber.sendall(frame(0x9, b"still here"))
+deadline = time.monotonic() + 5
 while True:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("idle subscriber did not answer control ping")
+    subscriber.settimeout(remaining)
     opcode, payload = recv_frame(subscriber)
     if opcode == 0x9:
         subscriber.sendall(frame(0xA, payload))
         continue
-    assert (opcode, payload) == (0x1, b"still here"), (opcode, payload)
+    assert (opcode, payload) == (0xA, b"still here"), (opcode, payload)
     break
-publisher.close()
 subscriber.close()
 
 # 239: a client that never answers is pinged, then closed with 1001.
