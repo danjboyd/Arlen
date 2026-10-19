@@ -33,6 +33,23 @@
 
 @end
 
+@interface AppThrowingMiddleware : NSObject <ALNMiddleware>
+@end
+
+@implementation AppThrowingMiddleware
+
+// Raises like an ordinary middleware bug: a substring on a short header value.
+- (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
+  (void)error;
+  NSString *tenant = [context.request headerValueForName:@"x-tenant"] ?: @"";
+  if ([tenant length] > 0) {
+    context.stash[@"tenant"] = [tenant substringToIndex:4];
+  }
+  return YES;
+}
+
+@end
+
 @interface AppHaltingMiddleware : NSObject <ALNMiddleware>
 @end
 
@@ -1565,6 +1582,33 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqualObjects(@"bob", json[@"name"]);
   XCTAssertEqual((NSUInteger)2, [AppFastPathController initCount]);
   XCTAssertEqual((NSUInteger)1, [AppFastPathController slowInvocationCount]);
+}
+
+- (void)testMiddlewareExceptionAnswers500AndLaterRequestsStillWork {
+  for (NSString *environment in @[ @"production", @"development" ]) {
+    ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                           performanceLogging:NO
+                                                  environment:environment
+                                                  extraConfig:nil];
+    [app addMiddleware:[[AppThrowingMiddleware alloc] init]];
+
+    ALNResponse *thrown = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{ @"x-tenant" : @"ab" }]];
+    XCTAssertEqual((NSInteger)500, thrown.statusCode, @"%@", environment);
+    NSString *body = [[NSString alloc] initWithData:thrown.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+    if ([environment isEqualToString:@"production"]) {
+      XCTAssertFalse([body containsString:@"substringToIndex"], @"production 500 must not include the exception");
+      XCTAssertTrue([body containsString:@"middleware_exception"], @"%@", body);
+    }
+
+    ALNResponse *after = [app dispatchRequest:[self requestForPath:@"/dict"]];
+    XCTAssertEqual((NSInteger)200, after.statusCode, @"%@", environment);
+    ALNResponse *tenant = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{ @"x-tenant" : @"acme" }]];
+    XCTAssertEqual((NSInteger)200, tenant.statusCode, @"%@", environment);
+  }
 }
 
 - (void)testHealthzJSONPayloadIncludesDeterministicSignalChecks {

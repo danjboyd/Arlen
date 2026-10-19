@@ -4016,6 +4016,36 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   response.committed = YES;
 }
 
+// An exception before the controller runs (middleware, request/auth
+// contracts) answers this request with a 500, like a controller exception,
+// instead of leaving the worker thread and ending the process.
+static void ALNApplyPreControllerException(ALNApplication *application,
+                                           ALNRequest *request,
+                                           ALNResponse *response,
+                                           NSString *requestID,
+                                           ALNContext *context,
+                                           NSString *stage,
+                                           NSException *exception) {
+  if (!response.committed) {
+    ALNApplyInternalErrorResponse(application,
+                                  request,
+                                  response,
+                                  requestID,
+                                  500,
+                                  [stage stringByAppendingString:@"_exception"],
+                                  @"Internal Server Error",
+                                  exception.reason ?: [stage stringByAppendingString:@" exception"],
+                                  ALNErrorDetailsFromException(exception));
+  }
+  [application.logger error:[stage stringByAppendingString:@" exception"]
+                     fields:@{
+                       @"request_id" : requestID ?: @"",
+                       @"controller" : context.controllerName ?: @"",
+                       @"action" : context.actionName ?: @"",
+                       @"exception" : exception.description ?: @""
+                     }];
+}
+
 static BOOL ALNApplyRequestContractIfNeeded(ALNApplication *application,
                                             ALNRequest *request,
                                             ALNResponse *response,
@@ -6147,20 +6177,36 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                                   routeName:resolvedRouteName
                                              controllerName:resolvedControllerName
                                                  actionName:resolvedActionName];
-  BOOL shouldDispatchController =
-      routeReady && ALNApplyRequestContractIfNeeded(self,
-                                                    request,
-                                                    response,
-                                                    context,
-                                                    matchedRoute,
-                                                    ALNResolvedRequestID(requestIdentity));
+  BOOL shouldDispatchController = NO;
+  @try {
+    shouldDispatchController =
+        routeReady && ALNApplyRequestContractIfNeeded(self,
+                                                      request,
+                                                      response,
+                                                      context,
+                                                      matchedRoute,
+                                                      ALNResolvedRequestID(requestIdentity));
+  } @catch (NSException *exception) {
+    shouldDispatchController = NO;
+    ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                   @"request_contract", exception);
+  }
   NSMutableArray *executedMiddlewares = nil;
   if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
     executedMiddlewares = [NSMutableArray arrayWithCapacity:[self.mutableMiddlewares count]];
     [trace startStage:@"middleware"];
     for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
       NSError *middlewareError = nil;
-      BOOL shouldContinue = [middleware processContext:context error:&middlewareError];
+      BOOL shouldContinue = NO;
+      @try {
+        shouldContinue = [middleware processContext:context error:&middlewareError];
+      } @catch (NSException *exception) {
+        [executedMiddlewares addObject:middleware];
+        shouldDispatchController = NO;
+        ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                       @"middleware", exception);
+        break;
+      }
       [executedMiddlewares addObject:middleware];
       if (!shouldContinue) {
         shouldDispatchController = NO;
@@ -6199,13 +6245,19 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   if (shouldDispatchController && !response.committed) {
-    shouldDispatchController =
-        ALNApplyAuthContractIfNeeded(self,
-                                     request,
-                                     response,
-                                     context,
-                                     matchedRoute,
-                                     ALNResolvedRequestID(requestIdentity));
+    @try {
+      shouldDispatchController =
+          ALNApplyAuthContractIfNeeded(self,
+                                       request,
+                                       response,
+                                       context,
+                                       matchedRoute,
+                                       ALNResolvedRequestID(requestIdentity));
+    } @catch (NSException *exception) {
+      shouldDispatchController = NO;
+      ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                     @"auth_contract", exception);
+    }
   }
 
   if (shouldDispatchController) {

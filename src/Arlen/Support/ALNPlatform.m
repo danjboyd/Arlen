@@ -696,8 +696,26 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
 #endif
 }
 
+BOOL ALNPlatformPathHasNoControlCharacters(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  NSUInteger length = [path length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar ch = [path characterAtIndex:idx];
+    if (ch < 0x20 || ch == 0x7f) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
   if ([path length] == 0 || mode == NULL) {
+    return NULL;
+  }
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
+    errno = EINVAL;
     return NULL;
   }
 #if defined(_WIN32)
@@ -810,7 +828,7 @@ static void ALNPlatformCloseLockDescriptor(int descriptor) {
 @end
 
 int ALNPlatformOpenExclusiveLockWithTimeout(NSString *path, NSTimeInterval timeoutSeconds) {
-  if ([path length] == 0) {
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
     errno = EINVAL;
     return -1;
   }

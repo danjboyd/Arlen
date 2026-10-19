@@ -243,6 +243,47 @@
   already did, so the warning also appears in development. Upgrading Arlen alone does not
   update modules an app has vendored with `arlen module add`; see
   [Modules](MODULES.md#6-upgrade-a-module).
+- Request bodies now have bounds too, on both parsers and on the spool path
+  for large bodies. `requestLimits.requestBodyTimeoutSeconds` (default `300`,
+  env `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`) caps the total time to send a body
+  after its head, and after `requestBodyMinRateGraceSeconds` (default `10`)
+  the body must average at least `requestBodyMinBytesPerSecond` (default
+  `1024`). A body that misses either gets `408`, and its spool file is removed.
+  Before, a client trickling a body could hold an HTTP worker indefinitely.
+  **Behavior change:** uploads slower than 1 KiB/s on average, or taking more
+  than 5 minutes, now fail with `408`; raise or set `0` for the limits if your
+  clients need that.
+- New `requestLimits.requestHeadTimeoutSeconds` (default `15`, env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`) bounds the total time to receive a
+  request head; a slower head gets `408`. For a connection's first request it
+  counts from accept, so connections that send nothing, or that waited for a
+  worker, are covered and can't stack; later keep-alive requests count from
+  their first byte. Before, only each read was bounded by
+  `connectionTimeoutSeconds`, so a few clients trickling one byte at a time
+  (or sending nothing) could hold every HTTP worker. Both parsers apply it.
+- File responses (`renderFileAtPath:`, `ALNFileResponse`) and static mounts
+  answer 404 for a path that contains a control character (U+0000-U+001F or
+  DEL) instead of passing it to the filesystem. A C path ends at U+0000, which
+  JSON and multipart strings can carry, so a name checked as
+  `report\u0000.pdf` reached `report`. Format characters such as U+200D,
+  which emoji file names use, are still allowed. The same check now covers
+  writes: `-[ALNUpload writeToFile:error:]` fails with an error, and
+  `ALNPlatformOpenFile` / `ALNPlatformOpenExclusiveLock` fail with `EINVAL`,
+  for such a path (new `ALNPlatformPathHasNoControlCharacters()`).
+- An exception raised in middleware, or in the request or auth contract
+  stages before the controller, now answers that request with a 500 (the
+  normal error page or JSON; no exception details outside development and
+  test) and is logged as `middleware exception`, `request_contract exception`
+  or `auth_contract exception`. Before, only controller exceptions were
+  caught, and one raised earlier ended the server process. As a last resort,
+  an exception that escapes request handling now closes only that connection.
+- Pipelined HTTP/1.1 requests on one connection each keep their own headers.
+  On the llhttp parser, headers outside the small set copied at parse time
+  (Host, Authorization, Origin, Content-Type, User-Agent and others) were read
+  lazily from the connection buffer, which by then held the next pipelined
+  request, so they came back truncated, empty or from that next request. A
+  request now keeps its own copy of the header bytes, which also ends its
+  dependence on the connection buffer's lifetime.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

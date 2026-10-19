@@ -840,6 +840,29 @@ static id ALNLLHTTPDeferredHeaderStorageFromBytes(const unsigned char *bytes,
   return [NSData dataWithBytes:bytes length:length];
 }
 
+// Deferred headers are ranges into the parse buffer. The server parses from
+// its connection buffer without copying, then shifts the next pipelined
+// request to the front of it (and frees it when the connection closes), so
+// the request keeps its own copy of the bytes those ranges cover.
+static NSData *ALNLLHTTPOwnedDeferredHeaderSource(NSData *sourceData,
+                                                  NSArray *nameStorage,
+                                                  NSArray *valueStorage) {
+  NSUInteger end = 0;
+  for (NSArray *storage in @[ nameStorage ?: @[], valueStorage ?: @[] ]) {
+    for (id stored in storage) {
+      if ([stored isKindOfClass:[NSValue class]]) {
+        NSRange range = [(NSValue *)stored rangeValue];
+        end = MAX(end, NSMaxRange(range));
+      }
+    }
+  }
+  if (end == 0 || sourceData == nil) {
+    return nil;
+  }
+  end = MIN(end, [sourceData length]);
+  return [NSData dataWithBytes:[sourceData bytes] length:end];
+}
+
 static int ALNLLHTTPSetError(llhttp_t *parser, NSString *message) {
   ALNLLHTTPParseState *state = ALNLLHTTPState(parser);
   if (state != nil) {
@@ -1441,7 +1464,9 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
       [state->_deferredHeaderNames count] == [state->_deferredHeaderValues count]) {
     [request aln_setDeferredHeaderStorage:state->_deferredHeaderNames
                            deferredValues:state->_deferredHeaderValues
-                                sourceData:sourceData];
+                                sourceData:ALNLLHTTPOwnedDeferredHeaderSource(sourceData,
+                                                                              state->_deferredHeaderNames,
+                                                                              state->_deferredHeaderValues)];
   }
   return request;
 }

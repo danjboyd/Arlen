@@ -105,6 +105,31 @@ Generated apps start with:
 - `maxRequestLineBytes`
 - `maxHeaderBytes`
 - `maxBodyBytes`
+- `requestHeadTimeoutSeconds` (default `15`; env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`): the total time a client has to finish
+  sending a request head (request line and headers). For a connection's first
+  request it is counted from when the connection was accepted, so it also
+  covers a client that never sends a byte and the time a connection waited for
+  a free HTTP worker. For later requests on a keep-alive connection it is
+  counted from the head's first byte; idle time between requests stays bounded
+  by `connectionTimeoutSeconds`. A head that takes longer gets `408` and the
+  connection closes. `connectionTimeoutSeconds` only bounds each individual
+  read, so without this a client sending one byte every few seconds could hold
+  an HTTP worker indefinitely. `0` turns the limit off.
+- `requestBodyTimeoutSeconds` (default `300`; env
+  `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`): the total time a client has to send
+  the request body, counted from the end of the head. It covers `Content-Length`
+  and chunked bodies, and bodies that stream to the spool file. A slower body
+  gets `408`, the connection closes and any spool file is removed. `0` turns it
+  off. Raise it with `maxBodyBytes` for very large uploads over slow links.
+- `requestBodyMinBytesPerSecond` (default `1024`; env
+  `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND`) and
+  `requestBodyMinRateGraceSeconds` (default `10`; env
+  `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS`): after the grace period, the
+  body's average rate since the head must stay at or above this many bytes per
+  second, or the request gets `408`. A client trickling a body is closed long
+  before the total deadline; slow but real uploads (1 KiB/s is far below any
+  mobile link) are not. `0` turns the rate check off.
 
 Raise these only for real application needs. The defaults are intentionally
 bounded.
