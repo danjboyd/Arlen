@@ -156,7 +156,10 @@
   XCTAssertTrue(exited);
   if (!exited) [child terminate];
   else XCTAssertEqual(7, child.terminationStatus);
+  NSString *marker = [path stringByAppendingString:@".initialized"];
+  XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:marker]);
   XCTAssertEqualObjects(original, [[self catalogAt:legacy] readStateWithError:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:marker]);
 }
 
 - (void)testCorruptPeerRecordFailsClosedWithoutStaleCacheOrLegacyReimport {
@@ -226,6 +229,71 @@
     }
   });
   XCTAssertEqual((NSUInteger)0, failures.count, @"%@", failures);
+}
+
+- (void)testRemovedOrTruncatedCatalogCannotReimportStaleLegacyAfterRestart {
+  for (NSNumber *truncate in @[@NO, @YES]) {
+    NSString *legacy = [self legacyPath];
+    NSString *path = [legacy stringByAppendingString:@".sqlite3"];
+    NSMutableDictionary *state = [[self stateWithEntries:@[@{@"entryID":@"original"}]] mutableCopy];
+    state[@"preferencesByRecipient"] = @{@"alice":@{@"digest":@{@"email":@YES}}};
+    XCTAssertTrue([state writeToFile:legacy atomically:YES]);
+    @autoreleasepool {
+      ALNNotificationsCatalog *catalog = [self catalogAt:legacy];
+      state[@"preferencesByRecipient"] = @{@"alice":@{@"digest":@{@"email":@NO}}};
+      XCTAssertTrue([catalog writeState:state error:NULL]);
+    }
+    if (truncate.boolValue) XCTAssertTrue([[NSData data] writeToFile:path atomically:NO]);
+    else XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:path error:NULL]);
+    NSError *error = nil;
+    XCTAssertNil([[ALNNotificationsCatalog alloc] initWithPath:path legacyPath:legacy error:&error]);
+    XCTAssertNotNil(error.localizedDescription);
+    // Repeated starts must not turn a failed recovery into a successful import.
+    XCTAssertNil([[ALNNotificationsCatalog alloc] initWithPath:path legacyPath:legacy error:NULL]);
+  }
+}
+
+- (void)testEmbeddedNulPathsAreRejectedBeforeFilesystemAccess {
+  for (NSNumber *nulInLegacy in @[@NO, @YES]) {
+    NSString *legacy = [self legacyPath];
+    NSString *path = [legacy stringByAppendingString:@".sqlite3"];
+    NSString *suffix = [NSString stringWithFormat:@"%Cignored", (unichar)0];
+    NSError *error = nil;
+    XCTAssertNil([[ALNNotificationsCatalog alloc]
+        initWithPath:nulInLegacy.boolValue ? path : [path stringByAppendingString:suffix]
+        legacyPath:nulInLegacy.boolValue ? [legacy stringByAppendingString:suffix] : legacy error:&error]);
+    XCTAssertNotNil(error.localizedDescription);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:path]);
+  }
+}
+
+- (void)testCommittedInitialCatalogCompletesMissingMarkerWithoutReimport {
+  NSString *legacy = [self legacyPath];
+  NSString *path = [legacy stringByAppendingString:@".sqlite3"];
+  NSString *marker = [path stringByAppendingString:@".initialized"];
+  NSDictionary *original = [self stateWithEntries:@[@{@"entryID":@"committed"}]];
+  XCTAssertTrue([original writeToFile:legacy atomically:YES]);
+  @autoreleasepool { XCTAssertNotNil([self catalogAt:legacy]); }
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:marker]);
+  // Model a crash after SQLite's initial commit but before marker installation.
+  XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:marker error:NULL]);
+  XCTAssertTrue([@"damaged backup" writeToFile:legacy atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  XCTAssertEqualObjects(original, [[self catalogAt:legacy] readStateWithError:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:marker]);
+}
+
+- (void)testMarkerFailureDoesNotExposeCatalogAndCanBeRetried {
+  NSString *legacy = [self legacyPath];
+  NSString *path = [legacy stringByAppendingString:@".sqlite3"];
+  NSString *marker = [path stringByAppendingString:@".initialized"];
+  @autoreleasepool { XCTAssertNotNil([self catalogAt:legacy]); }
+  XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:marker error:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:marker withIntermediateDirectories:NO attributes:nil error:NULL]);
+  NSError *error = nil;
+  XCTAssertNil([[ALNNotificationsCatalog alloc] initWithPath:path legacyPath:legacy error:&error]);
+  XCTAssertNotNil(error.localizedDescription);
+  XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:marker error:NULL]);
+  XCTAssertNotNil([self catalogAt:legacy]);
 }
 
 @end

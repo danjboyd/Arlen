@@ -37,7 +37,9 @@ including unresolved, non-blocking ThreadSanitizer findings.
   mutations refresh authoritative shared state; corrupt or unreadable persistence
   fails closed. Stop all older workers and back up before upgrading. Linux needs
   `libsqlite3-0`; see [Notifications Module](NOTIFICATIONS_MODULE.md) for migration,
-  backup, retention and remaining in-memory merge costs.
+  backup, retention and remaining in-memory merge costs. Preserve the catalog
+  initialization marker with backups; it prevents stale plist reimport after
+  catalog loss.
 
 
 - Windows file responses accept valid Unicode filenames using wide-character

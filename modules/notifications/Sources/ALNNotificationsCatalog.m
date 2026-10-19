@@ -2,6 +2,7 @@
 #import "ALNNotificationsModule.h"
 #import "ALNPlatform.h"
 #include <fcntl.h>
+#include <errno.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -78,6 +79,55 @@ static NSError *CatalogError(NSString *message) {
   return [NSError errorWithDomain:ALNNotificationsModuleErrorDomain
                             code:ALNNotificationsModuleErrorDeliveryFailed
                         userInfo:@{NSLocalizedDescriptionKey : message ?: @"notification catalog failed"}];
+}
+
+// A zero-byte marker records that this path has been initialized. It is never
+// removed during normal operation. Creation follows the initial SQLite commit
+// and must be durable before a constructor exposes the catalog to any writer.
+static BOOL CatalogMarkerExists(NSString *path) {
+#if defined(_WIN32)
+  NSMutableData *wide = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  DWORD attributes = GetFileAttributesW((const wchar_t *)wide.bytes);
+  return attributes != INVALID_FILE_ATTRIBUTES ||
+         (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND);
+#else
+  struct stat info;
+  return lstat(path.fileSystemRepresentation, &info) == 0 || errno != ENOENT;
+#endif
+}
+
+static BOOL EnsureCatalogMarker(NSString *path, NSError **error) {
+  BOOL success = NO;
+#if defined(_WIN32)
+  NSMutableData *wide = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE file = CreateFileW((const wchar_t *)wide.bytes, GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
+      FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH, NULL);
+  if (file != INVALID_HANDLE_VALUE) {
+    BY_HANDLE_FILE_INFORMATION info;
+    success = GetFileInformationByHandle(file, &info) &&
+        !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+        ALNWindowsSecurePrivatePath(path, NO, error) && FlushFileBuffers(file);
+    CloseHandle(file);
+  }
+#else
+  int fd = open(path.fileSystemRepresentation, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0600);
+  struct stat info;
+  if (fd >= 0) {
+    success = fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && fchmod(fd, 0600) == 0 && fsync(fd) == 0;
+    close(fd);
+  }
+  if (success) {
+    // Also persist the directory entry, not just the empty marker's inode.
+    int directory = open(path.stringByDeletingLastPathComponent.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    success = directory >= 0 && fsync(directory) == 0;
+    if (directory >= 0) close(directory);
+  }
+#endif
+  if (!success && error != NULL && *error == nil) *error = CatalogError(@"could not durably create notification catalog initialization marker");
+  return success;
 }
 
 static BOOL CatalogValueIsPropertyList(id value, NSUInteger depth) {
@@ -239,10 +289,9 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 
 - (BOOL)fail:(NSError **)error {
   if (error != NULL) {
-    int code = self.database != NULL ? SQL.errcode(self.database) : 0;
     NSString *message = self.database != NULL ? [NSString stringWithUTF8String:SQL.errmsg(self.database)] : @"SQLite could not open the notification catalog";
     *error = [NSError errorWithDomain:ALNNotificationsModuleErrorDomain
-                                code:(code == 5 || code == 6) ? ALNNotificationsModuleErrorDeliveryFailed : ALNNotificationsModuleErrorDeliveryFailed
+                                code:ALNNotificationsModuleErrorDeliveryFailed
                             userInfo:@{NSLocalizedDescriptionKey:message}];
   }
   return NO;
@@ -259,6 +308,15 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 - (instancetype)initWithPath:(NSString *)path legacyPath:(NSString *)legacyPath error:(NSError **)error {
   self = [super init];
   if (self == nil) return nil;
+  if (!ALNPlatformPathHasNoControlCharacters(path) || !ALNPlatformPathHasNoControlCharacters(legacyPath)) {
+    if (error != NULL) *error = CatalogError(@"notification persistence paths must be nonempty and contain no control characters");
+    return nil;
+  }
+  NSString *markerPath = [path stringByAppendingString:@".initialized"];
+  if (CatalogMarkerExists(markerPath) && ![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    if (error != NULL) *error = CatalogError(@"initialized notification catalog is missing; refusing stale legacy import");
+    return nil;
+  }
   _lock = [[NSLock alloc] init];
   _cachedDataVersion = -1;
   if (!LoadSQLite()) {
@@ -313,7 +371,7 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
     if (state == nil) return nil;
     self.snapshot = state;
     if (state[@"meta"][@"root"] == nil) {
-      if (existed) {
+      if (existed || CatalogMarkerExists(markerPath)) {
         if (error != NULL) *error = CatalogError(@"notification catalog is missing its committed metadata; refusing stale legacy import");
         return nil;
       }
@@ -334,6 +392,10 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
   } @finally {
     if (!committed) (void)[self execute:"ROLLBACK" error:NULL];
   }
+  // A crash before this point leaves either an uncommitted import (safe to
+  // retry) or a complete SQLite catalog (install its marker on the next open).
+  // No runtime can acknowledge mutations until this durable marker exists.
+  if (!EnsureCatalogMarker(markerPath, error)) return nil;
   SQL.busy_timeout(db, 100);
   if ([self readStateWithError:error] == nil) return nil;
   return self;

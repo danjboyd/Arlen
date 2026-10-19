@@ -148,7 +148,10 @@ Values must be positive integers; anything else uses the default.
 Notifications 1.3 stores each outbox, inbox and fanout entry, and each recipient's
 preferences, in a separate SQLite row. `persistence.path` remains the legacy
 plist path; the live catalog is `<persistence.path>.sqlite3`. The summary reports
-`persistenceBackend` (`sqlite` or `memory`) and `catalogPath`. There is no silent
+`persistenceBackend` (`sqlite` or `memory`) and `catalogPath`. A permanent
+`<catalogPath>.initialized` marker prevents stale legacy reimport after catalog
+loss; keep it with the database. Persistence paths reject control characters,
+including embedded NUL. There is no silent
 plist fallback. Disabling persistence retains the in-memory behavior.
 
 Linux requires `libsqlite3.so.0` (Debian/Ubuntu package `libsqlite3-0`); macOS and
@@ -170,12 +173,20 @@ To upgrade an existing deployment:
    an obsolete plist. Once a committed catalog exists, it is authoritative; the
    old plist is never automatically reimported to recover missing/corrupt data.
 
-For backups, stop all writers before copying the SQLite database and any journal
-sidecars, or use SQLite's online backup API. Restoring the old plist alone does
+Before any runtime can write, initialization flushes the marker to durable
+storage. A crash before the initial commit permits import retry; a committed
+catalog missing its marker completes marker installation on restart without
+reimport. A marker with a missing or truncated catalog fails startup and requires
+operator restoration of a valid backup. Do not delete the marker to bypass this
+check.
+
+For backups, stop all writers before copying the SQLite database, its
+initialization marker and any journal sidecars, or use SQLite's online backup API
+and retain the marker alongside the backup. Restoring the old plist alone does
 not restore the catalog. Rollback to an older module requires restoring the
-pre-upgrade backup with all writers stopped and removing the newer catalog;
-post-upgrade changes will be lost. Web Push subscriptions keep their separate
-existing persistence path and format.
+pre-upgrade backup with all writers stopped and removing the newer catalog and
+its initialization marker; post-upgrade changes will be lost. Web Push
+subscriptions keep their separate existing persistence path and format.
 
 A cross-process lock protects reload/merge/commit transactions; SQLite commits
 are atomic with full synchronous durability. UUID entries preserve independent
@@ -184,6 +195,9 @@ state. Transport and realtime network calls run outside those locks. Corrupt,
 removed, replaced or unwritable catalogs fail closed rather than returning stale
 notification state. Use a local filesystem with working SQLite and process locks;
 this is not a distributed persistence protocol for shared network filesystems.
+Durability requires the filesystem and device to honor synchronization barriers
+(POSIX file/directory `fsync`, or Windows write-through handles and
+`FlushFileBuffers`).
 
 Only changed rows are serialized and written. Trimming old entries deletes their
 rows without renumbering retained entries; SQLite reuses freed pages rather than
