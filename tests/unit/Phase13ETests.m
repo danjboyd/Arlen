@@ -1097,7 +1097,7 @@ static ALNContext *ALNTestStandInContext(void) {
   NSString *token = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
   XCTAssertTrue([token length] > 0);
 
-  const size_t attempts = 4;
+  const size_t attempts = 6;
   __block NSInteger successes = 0;
   NSMutableArray *winners = [NSMutableArray array];
   NSLock *lock = [[NSLock alloc] init];
