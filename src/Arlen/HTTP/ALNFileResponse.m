@@ -551,4 +551,20 @@ const char *ALNFileResponseFilesystemPathCString(NSString *path) {
   return YES;
 }
 
++ (BOOL)prepareResponse:(ALNResponse *)response
+             forRequest:(ALNRequest *)request
+             fileHandle:(NSFileHandle *)fileHandle
+            contentType:(NSString *)contentType
+                options:(NSDictionary *)options {
+  struct stat fileStat;
+  if (response == nil || fileHandle == nil || fstat(fileHandle.fileDescriptor, &fileStat) != 0 ||
+      !S_ISREG(fileStat.st_mode)) {
+    if (response != nil) ALNFileResponseCommitNotFound(response);
+    return NO;
+  }
+  ALNFileResponseApplyStat(response, request, @"<open-file>", &fileStat, contentType, options);
+  if (response.statusCode == 200 || response.statusCode == 206) response.fileBodyHandle = fileHandle;
+  return YES;
+}
+
 @end

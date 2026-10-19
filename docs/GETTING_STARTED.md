@@ -428,3 +428,8 @@ and box their numeric values only when taking a snapshot. The metrics names
 and snapshot/Prometheus formats remain compatible. PostgreSQL ORM reads without
 raw expressions avoid a session-reset round trip; raw expressions and
 transactions retain conservative cleanup.
+
+Filesystem-backed storage downloads stream the verified open file, support HEAD
+and byte ranges, and use checksum ETags. Variant source data defaults to a 16 MiB
+limit (`storageModule.maxVariantInputBytes`). See [Storage Module](STORAGE_MODULE.md)
+for custom-adapter behavior and file immutability requirements.

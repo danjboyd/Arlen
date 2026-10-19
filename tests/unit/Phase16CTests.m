@@ -633,6 +633,9 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
     NSError *error = nil;
     XCTAssertNil([worker downloadDataForToken:aliceToken metadata:NULL error:&error]);
     XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
+    error = nil;
+    XCTAssertNil([worker openDownloadFileForToken:aliceToken metadata:NULL error:&error]);
+    XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
   }
   NSError *error = nil;
   NSDictionary *payload = @{ @"objectID" : alice[@"objectID"], @"variant" : @"thumb" };
@@ -1126,6 +1129,45 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertEqual(0L, dispatch_group_wait(readers, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60 * NSEC_PER_SEC))));
   XCTAssertEqual((NSUInteger)0, mismatches);
   XCTAssertGreaterThan(served, (NSUInteger)0);
+}
+
+- (void)testStreamingDownloadPinsVerifiedBytesAcrossPathReplacement {
+  NSString *directory = [self temporaryDirectory];
+  NSString *root = [directory stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *runtime = [self workerRuntimeWithStatePath:[directory stringByAppendingPathComponent:@"state.plist"] attachmentRoot:root shared:NO];
+  NSDictionary *object = [self storeObjectNamed:@"alice.png" body:@"alice data" inRuntime:runtime];
+  NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:NULL];
+  NSError *error = nil;
+  NSDictionary *metadata = nil;
+  NSFileHandle *handle = [runtime openDownloadFileForToken:token metadata:&metadata error:&error];
+  XCTAssertNotNil(handle, @"%@", error);
+  XCTAssertEqualObjects(object[@"objectID"], metadata[@"object"][@"objectID"]);
+  NSString *path = [root stringByAppendingPathComponent:[object[@"attachmentID"] stringByAppendingString:@".bin"]];
+  XCTAssertTrue([[@"bobby data" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:path atomically:YES]);
+  XCTAssertEqualObjects(@"alice data", [[NSString alloc] initWithData:[handle readDataToEndOfFile] encoding:NSUTF8StringEncoding]);
+  [handle closeFile];
+  XCTAssertNil([runtime openDownloadFileForToken:token metadata:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
+}
+
+- (void)testVariantSourceLimitRejectsBeforeMaterializingBytes {
+  NSString *directory = [self temporaryDirectory];
+  ALNApplication *base = [self applicationWithStatePath:[directory stringByAppendingPathComponent:@"state.plist"] attachmentRoot:[directory stringByAppendingPathComponent:@"attachments"]];
+  NSMutableDictionary *config = [base.config mutableCopy];
+  NSMutableDictionary *storage = [config[@"storageModule"] mutableCopy];
+  storage[@"maxVariantInputBytes"] = @4;
+  config[@"storageModule"] = storage;
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
+  [app setAttachmentAdapter:base.attachmentAdapter];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertTrue([runtime configureWithApplication:app error:&error], @"%@", error);
+  NSDictionary *object = [self storeObjectNamed:@"large.png" body:@"12345" inRuntime:runtime];
+  error = nil;
+  NSDictionary *payload = @{ @"objectID" : object[@"objectID"], @"variant" : @"thumb" };
+  XCTAssertNil([runtime processVariantJobPayload:payload error:&error]);
+  XCTAssertEqual((NSInteger)ALNStorageModuleErrorValidationFailed, error.code);
 }
 
 @end

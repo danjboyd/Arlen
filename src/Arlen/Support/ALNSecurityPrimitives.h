@@ -12,6 +12,8 @@ BOOL ALNConstantTimeDataEquals(NSData *lhs, NSData *rhs);
 NSData *_Nullable ALNHMACSHA1(NSData *input, NSData *key);
 NSData *_Nullable ALNHMACSHA256(NSData *input, NSData *key);
 NSData *_Nullable ALNSHA256(NSData *input);
+/// Hashes an open file in bounded chunks and restores its original offset.
+NSData *_Nullable ALNSHA256FileHandle(NSFileHandle *handle);
 NSString *_Nullable ALNLowercaseHexStringFromData(NSData *data);
 
 // Signing secrets committed in the Arlen tree (example apps, env examples,

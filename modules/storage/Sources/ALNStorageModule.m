@@ -12,6 +12,7 @@
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNFileResponse.h"
 #import "ALNSecurityPrimitives.h"
 
 #include <errno.h>
@@ -2183,6 +2184,59 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   return [self validatedTokenPayload:token purpose:@"download" expectedField:nil expectedValue:nil error:error];
 }
 
+- (NSFileHandle *)openDownloadFileForToken:(NSString *)token
+                        metadata:(NSDictionary **)metadata
+                           error:(NSError **)error {
+  if (![self.attachmentAdapter respondsToSelector:@selector(openAttachmentFileForID:metadata:error:)]) return nil;
+  NSDictionary *payload = [self validatedTokenPayload:token
+                                              purpose:@"download"
+                                        expectedField:nil
+                                        expectedValue:nil
+                                                error:error];
+  if (payload == nil) {
+    return nil;
+  }
+  [self refreshStateIfChanged];
+  NSString *objectID = SMTrimmedString(payload[@"objectID"]);
+  NSDictionary *stored = [self internalObjectRecordForIdentifier:objectID];
+  if (stored == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorNotFound,
+                       [NSString stringWithFormat:@"storage object %@ was not found", objectID ?: @""],
+                       @{ @"objectID" : objectID ?: @"" });
+    }
+    return nil;
+  }
+  NSDictionary *record = [self publicObjectRecordFromInternalRecord:stored];
+  NSString *tokenNonce = SMTrimmedString(stored[@"tokenNonce"]);
+  if ([tokenNonce length] == 0 || ![SMTrimmedString(payload[@"objectNonce"]) isEqualToString:tokenNonce]) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorTokenRejected, @"token does not match the stored object", nil);
+    }
+    return nil;
+  }
+  NSDictionary *adapterMetadata = nil;
+  NSFileHandle *handle = [self.attachmentAdapter openAttachmentFileForID:stored[@"attachmentID"] metadata:&adapterMetadata error:error];
+  if (handle == nil) return nil;
+  struct stat fileStat;
+  NSString *expected = SMTrimmedString(stored[@"checksumSHA256"]);
+  BOOL valid = fstat(handle.fileDescriptor, &fileStat) == 0 && S_ISREG(fileStat.st_mode) &&
+               (unsigned long long)fileStat.st_size == [stored[@"sizeBytes"] unsignedLongLongValue] &&
+               expected.length > 0 &&
+               [expected isEqualToString:ALNLowercaseHexStringFromData(ALNSHA256FileHandle(handle))];
+  if (!valid) {
+    [handle closeFile];
+    if (error != NULL) *error = SMError(ALNStorageModuleErrorNotFound, @"stored object data does not match its record", nil);
+    return nil;
+  }
+  if (metadata != NULL) {
+    NSMutableDictionary *combined = [NSMutableDictionary dictionaryWithDictionary:adapterMetadata ?: @{}];
+    combined[@"object"] = record;
+    *metadata = [NSDictionary dictionaryWithDictionary:combined];
+  }
+  return handle;
+}
+
 - (NSData *)downloadDataForToken:(NSString *)token
                         metadata:(NSDictionary **)metadata
                            error:(NSError **)error {
@@ -2459,8 +2513,34 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
     return nil;
   }
+  // Variant hooks accept NSData, so bound their source before materialization.
+  NSUInteger inputLimit = [self.moduleConfig[@"maxVariantInputBytes"] respondsToSelector:@selector(unsignedIntegerValue)]
+      ? [self.moduleConfig[@"maxVariantInputBytes"] unsignedIntegerValue] : 16 * 1024 * 1024;
+  if (inputLimit == 0) inputLimit = 16 * 1024 * 1024;
+  inputLimit = MIN(inputLimit, NSUIntegerMax - 1);
+  if ([record[@"sizeBytes"] unsignedLongLongValue] > inputLimit) {
+    if (error != NULL) *error = SMError(ALNStorageModuleErrorValidationFailed, @"variant source exceeds maxVariantInputBytes", nil);
+    return nil;
+  }
   NSDictionary *originalMetadata = nil;
-  NSData *data = [self.attachmentAdapter attachmentDataForID:record[@"attachmentID"] metadata:&originalMetadata error:error];
+  NSData *data = nil;
+  NSFileHandle *source = nil;
+  if ([self.attachmentAdapter respondsToSelector:@selector(openAttachmentFileForID:metadata:error:)]) {
+    source = [self.attachmentAdapter openAttachmentFileForID:record[@"attachmentID"] metadata:&originalMetadata error:error];
+    if (source == nil && error != NULL && *error != nil) return nil;
+  }
+  if (source != nil) {
+    @try { data = [source readDataOfLength:inputLimit + 1]; }
+    @catch (NSException *exception) {
+      if (error != NULL) *error = SMError(ALNStorageModuleErrorNotFound, @"variant source could not be read", nil);
+    } @finally { [source closeFile]; }
+  } else {
+    data = [self.attachmentAdapter attachmentDataForID:record[@"attachmentID"] metadata:&originalMetadata error:error];
+  }
+  if (data.length > inputLimit) {
+    if (error != NULL) *error = SMError(ALNStorageModuleErrorValidationFailed, @"variant source exceeds maxVariantInputBytes", nil);
+    return nil;
+  }
   if (data == nil) {
     return nil;
   }
@@ -2990,8 +3070,10 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   (void)ctx;
   NSError *error = nil;
   NSDictionary *metadata = nil;
-  NSData *data = [self.runtime downloadDataForToken:[self stringParamForName:@"token"] ?: @"" metadata:&metadata error:&error];
-  if (data == nil) {
+  NSString *token = [self stringParamForName:@"token"] ?: @"";
+  NSFileHandle *handle = [self.runtime openDownloadFileForToken:token metadata:&metadata error:&error];
+  NSData *data = (handle == nil && error == nil) ? [self.runtime downloadDataForToken:token metadata:&metadata error:&error] : nil;
+  if (data == nil && handle == nil) {
     [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorTokenRejected || error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Download failed" } error:NULL];
     return nil;
@@ -3013,7 +3095,13 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (!(inlineDisposition && [SMBaseContentType(contentType) isEqualToString:@"application/pdf"])) {
     [response setHeader:@"Content-Security-Policy" value:@"sandbox"];
   }
-  [self renderData:data contentType:contentType];
+  if (handle != nil) {
+    NSString *checksum = metadata[@"object"][@"checksumSHA256"];
+    NSDictionary *options = checksum.length > 0 ? @{ ALNFileResponseETagOption : [NSString stringWithFormat:@"\"%@\"", checksum] } : @{};
+    [ALNFileResponse prepareResponse:response forRequest:self.context.request fileHandle:handle contentType:contentType options:options];
+  } else {
+    [self renderData:data contentType:contentType];
+  }
   return nil;
 }
 

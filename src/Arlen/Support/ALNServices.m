@@ -11,6 +11,8 @@
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
 #else
 #include <netdb.h>
 #include <poll.h>
@@ -3854,6 +3856,15 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
   return nil;
 }
 
+- (NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                  metadata:(NSDictionary **)metadata
+                                     error:(NSError **)error {
+  if ([self.baseAdapter respondsToSelector:_cmd]) {
+    return [self.baseAdapter openAttachmentFileForID:attachmentID metadata:metadata error:error];
+  }
+  return nil;
+}
+
 - (NSData *)attachmentDataForID:(NSString *)attachmentID
                        metadata:(NSDictionary **)metadata
                           error:(NSError **)error {
@@ -4153,6 +4164,48 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
   }
   [self.lock unlock];
   return attachmentID;
+}
+
+- (NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                  metadata:(NSDictionary **)metadata
+                                     error:(NSError **)error {
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:568 error:error];
+  if (normalizedID.length == 0) return nil;
+  [self.lock lock];
+  @try {
+    NSDictionary *entry = [self metadataEntryForAttachmentID:normalizedID error:error];
+    if (entry == nil) return nil;
+    NSString *path = [self validatedExistingAttachmentPathForID:normalizedID extension:@"bin" errorCode:568 error:error];
+    if (path.length == 0) return nil;
+    int fd = -1;
+#if defined(_WIN32)
+    NSMutableData *widePath = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+    const unichar terminator = 0;
+    [widePath appendBytes:&terminator length:sizeof(terminator)];
+    HANDLE handle = CreateFileW((const wchar_t *)widePath.bytes, GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                               FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (handle != INVALID_HANDLE_VALUE) {
+      BY_HANDLE_FILE_INFORMATION info;
+      if (GetFileInformationByHandle(handle, &info) &&
+          !(info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
+        fd = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+      }
+      if (fd < 0) CloseHandle(handle);
+    }
+#else
+    do { fd = open([path fileSystemRepresentation], O_RDONLY | O_CLOEXEC | O_NOFOLLOW); }
+    while (fd < 0 && errno == EINTR);
+#endif
+    struct stat info;
+    if (fd < 0 || fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+      if (fd >= 0) close(fd);
+      if (error != NULL) *error = ALNServiceError(560, @"attachment is not a readable regular file", nil);
+      return nil;
+    }
+    if (metadata != NULL) *metadata = [self normalizedMetadataEntry:entry];
+    return [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
+  } @finally { [self.lock unlock]; }
 }
 
 - (NSData *)attachmentDataForID:(NSString *)attachmentID

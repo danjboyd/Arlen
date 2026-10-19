@@ -3284,7 +3284,8 @@ static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
   long fileBodyMTimeNanoseconds = response.fileBodyMTimeNanoseconds;
   int fileBodyFd = -1;
   if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
-    fileBodyFd = ALNStaticFileFDForPath(fileBodyPath,
+    fileBodyFd = response.fileBodyHandle != nil ? dup(response.fileBodyHandle.fileDescriptor) :
+        ALNStaticFileFDForPath(fileBodyPath,
                                         fileBodyDevice,
                                         fileBodyInode,
                                         response.fileBodyFullLength ?: fileBodyLength,
