@@ -847,7 +847,13 @@ def scenario_alloc_response_serialize_once(binary: str, mode: str, rng: random.R
     _ = rng
 
     def runner(port: int) -> Dict[str, Any]:
-        first = _single_roundtrip(port, "/healthz")
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.settimeout(2)
+            sock.sendall(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n")
+            status, headers, body = read_http_response(sock)
+            if headers.get("connection", "").lower() != "close" or sock.recv(1) != b"":
+                raise RuntimeError("allocation fallback must close a keepalive connection")
+            first = {"path": "/healthz", "status": status, "body": body.decode("utf-8", "replace")}
         if "500" not in first["status"]:
             raise RuntimeError(f"allocation response-serialize scenario expected 500, got {first}")
         second = _single_roundtrip(port, "/healthz")

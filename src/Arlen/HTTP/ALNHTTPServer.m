@@ -3330,7 +3330,7 @@ static void ALNEnsurePerformanceHeaders(ALNResponse *response,
   }
 }
 
-static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
+static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd, ALNResponseSendBudget *budget) {
   static const char *response =
       "HTTP/1.1 500 Internal Server Error\r\n"
       "Content-Type: text/plain; charset=utf-8\r\n"
@@ -3338,7 +3338,7 @@ static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
       "Connection: close\r\n"
       "\r\n"
       "internal server error\n";
-  (void)ALNSendAll(clientFd, response, strlen(response));
+  (void)ALNSendAllWithBudget(clientFd, response, strlen(response), budget);
 }
 
 static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
@@ -3363,7 +3363,8 @@ static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
                                         fileBodyMTimeNanoseconds);
     if (fileBodyFd < 0) {
       double writeStart = ALNNowMilliseconds();
-      ALNSendFallbackInternalServerError(clientFd);
+      *sentOK = NO;
+      ALNSendFallbackInternalServerError(clientFd, budget);
       return ALNNowMilliseconds() - writeStart;
     }
     if (!sendBody) {
@@ -3380,7 +3381,8 @@ static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
     if (fileBodyFd >= 0) {
       close(fileBodyFd);
     }
-    ALNSendFallbackInternalServerError(clientFd);
+    *sentOK = NO;
+    ALNSendFallbackInternalServerError(clientFd, budget);
     return (ALNNowMilliseconds() - writeStart) + serializeMs;
   }
 

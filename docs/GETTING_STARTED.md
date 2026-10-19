@@ -445,3 +445,6 @@ Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
 need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
 CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup rules.
+
+Normal-response allocation-error fallbacks use the configured response send
+budget and close the connection after the fallback 500 response.
