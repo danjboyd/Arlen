@@ -678,6 +678,8 @@ First-party module surfaces after install:
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
+  Shared state writes merge changes by resource across processes. Schedule one
+  reindex worker per resource to avoid concurrent rebuilds of that resource.
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
