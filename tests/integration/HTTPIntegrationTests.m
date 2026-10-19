@@ -313,7 +313,12 @@
 - (NSArray *)childPIDsForParent:(pid_t)parentPID {
   NSMutableArray *pids = [NSMutableArray array];
   for (NSDictionary *entry in [self childProcessInfoForParent:parentPID]) {
-    [pids addObject:entry[@"pid"]];
+    // The shell manager also has transient `sleep` children. Only the app
+    // binaries are HTTP workers; killing `sleep` does not exercise respawn.
+    NSString *args = [entry[@"args"] isKindOfClass:[NSString class]] ? entry[@"args"] : @"";
+    if ([args containsString:@"boomhauer-app"]) {
+      [pids addObject:entry[@"pid"]];
+    }
   }
   return pids;
 }
