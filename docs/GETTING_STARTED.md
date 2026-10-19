@@ -388,8 +388,9 @@ Web Push channel: `arlen webpush generate-keys` prints a VAPID key pair for the
 server environment. See [Notifications Module: Web Push](NOTIFICATIONS_MODULE.md#web-push).
 Jobs workers sharing a persistence path also refresh reads and transact operator-state changes;
 job claim durability still depends on the configured jobs adapter.
-Search workers sharing a persistence path preserve writes to different
-resources; schedule one reindex worker per resource at a time.
+Search workers refresh shared state and reject conflicting rebuild/update results
+instead of overwriting newer state. External engines still require one reindex
+worker per resource unless the backend fences publication; see [Search Module](SEARCH_MODULE.md).
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)

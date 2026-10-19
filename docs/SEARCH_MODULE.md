@@ -52,11 +52,29 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
-State writes lock the file and merge changes by resource, preserving concurrent
-updates to different resources and recent history. A process that only reads
-may show cached state until it writes or restarts. Concurrent rebuilds of the
-same resource still need scheduler coordination; run one reindex worker per
-resource at a time.
+State changes reload the authoritative file and atomically replace it under a
+sibling `.lock` file. Queries and operator reads refresh shared state without a
+restart. Lock acquisition waits at most ten seconds; unreadable or malformed
+state returns an error instead of authorizing an overwrite. Stop all older
+workers before upgrading a shared state path so every writer follows this
+transaction protocol.
+
+Generation reservations are unique within the shared state file. Rebuilds and
+incremental updates run provider/engine work outside state locks, then compare
+the resource revision and build generation before committing. A concurrent
+change returns `reason = state_conflict`; retry the operation against fresh
+state. The older result cannot replace newer module state, and a failed older
+build cannot clear another build's status. This fences the module's persisted
+snapshot, not remote backend side effects: remote engine writes cannot be
+rolled back by the state-file transaction. Run one reindex worker per resource
+for external engines unless the backend supplies its own publication fencing.
+
+Replay entries remain durable while in flight. Workers claim the queue head
+with a random ownership token; commit and removal require that token. Claims
+expire after five minutes so another worker can recover after a crash. Replay
+is at least once, so engine upsert/delete operations must be idempotent. A stale
+claimant cannot commit module state or remove its successor's queue entry.
+Concurrent enqueues are preserved when a claimed entry completes.
 
 Optional first-party PostgreSQL search uses the same resource/provider
 contracts:
