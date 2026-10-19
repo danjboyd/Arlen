@@ -893,7 +893,15 @@ worker_fd_count() {
       fi
       ;;
     lsof)
-      lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null | awk '/^f/ {n++} END {print n + 0}'
+      # A worker can exit after kill -0 and before lsof runs. Treat that as
+      # unavailable so pipefail/errexit cannot abort the manager before it
+      # reaps the worker and applies startup-failure backoff.
+      local listing
+      if ! listing="$(lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null)"; then
+        echo "-1"
+        return
+      fi
+      printf '%s\n' "$listing" | awk '/^f/ {n++} END {print n + 0}'
       ;;
     *)
       echo "-1"

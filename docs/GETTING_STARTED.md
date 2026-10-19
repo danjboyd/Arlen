@@ -277,7 +277,8 @@ If you are working on Arlen itself rather than just building an app with it:
   is the preferred operator-facing wrapper, including
   `config/deploy.plist.example`, checked-in `config/deploy.plist` targets, and
   SSH-backed target deploy flows. `--json` output remains parseable when a
-  successful app build emits compiler warnings on stderr
+  successful app build emits compiler warnings on stderr. On macOS, `propane`
+  continues startup-failure handling when a worker exits during an FD check
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes

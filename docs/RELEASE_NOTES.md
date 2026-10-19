@@ -306,6 +306,9 @@ including unresolved, non-blocking ThreadSanitizer findings.
   default 5) exits with status `3` so the service manager reports a failed
   unit. Workers report startup errors through `ARLEN_STARTUP_FAILURE_FILE`,
   which propane sets (#294).
+- On macOS, `propane` no longer exits early if a worker disappears while `lsof`
+  samples its file descriptors. It continues reaping the worker and applies the
+  configured startup-failure limit and backoff.
 - A module load error names the config key whether the module reports it as
   `key_path`, `config_key` or `keyPath`, including on an underlying error.
 - Environment names are classified once, ignoring case and surrounding

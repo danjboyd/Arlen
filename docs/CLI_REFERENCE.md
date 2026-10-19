@@ -1361,6 +1361,9 @@ Behavior:
   after `startupFailureLimit` consecutive startup failures (propane
   accessory, default `5`) propane exits with status `3`; see
   [Propane](PROPANE.md#propane-accessories)
+- on macOS, a worker exiting during an `lsof` FD-pressure sample is reaped
+  normally; the failed sample does not end the manager before startup-failure
+  backoff and the configured limit are applied
 
 Core options:
 

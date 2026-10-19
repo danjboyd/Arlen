@@ -258,7 +258,9 @@ Stable FD-pressure fields include:
 before descriptor exhaustion breaks request handling. On Linux it reads
 `/proc/$pid/fd` and `/proc/$pid/limits`. On macOS it lists the worker's numeric
 descriptors with `lsof` and uses propane's own `ulimit -n` as the soft limit,
-which workers inherit.
+which workers inherit. If a worker exits between the manager's process check
+and `lsof`, the sample is skipped so worker reaping and startup-failure backoff
+can continue.
 The checks are disabled only by setting thresholds to `0`; warning diagnostics
 default on.
 
