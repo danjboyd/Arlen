@@ -1,3 +1,4 @@
+#import "ALNPrivateStorage.h"
 #import "ALNServices.h"
 #import "ALNDataCompat.h"
 #import "ALNJSONSerialization.h"
@@ -12,7 +13,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <aclapi.h>
 #include <io.h>
 #else
 #include <netdb.h>
@@ -50,52 +50,7 @@ static NSDictionary *ALNPermissionsAttributes(NSUInteger mode) {
   return @{ NSFilePosixPermissions : @(mode) };
 }
 
-#if defined(_WIN32)
-// NTFS access control is a DACL, not POSIX permission bits. Restrict private
-// service storage to the current user and protect it from inherited broad ACLs.
-static BOOL ALNWindowsSecurePrivatePath(NSString *path, BOOL directory, NSError **error) {
-  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
-      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
-  [wide appendBytes:"\0\0" length:2];
-  HANDLE file = CreateFileW((const wchar_t *)wide.bytes, READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
-      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
-      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-  DWORD failure = ERROR_SUCCESS;
-  HANDLE token = NULL;
-  PACL acl = NULL;
-  NSMutableData *tokenData = nil;
-  if (file == INVALID_HANDLE_VALUE) { failure = GetLastError(); goto done; }
-  BY_HANDLE_FILE_INFORMATION info;
-  if (!GetFileInformationByHandle(file, &info)) { failure = GetLastError(); goto done; }
-  if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
-      !!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != !!directory) {
-    failure = ERROR_ACCESS_DENIED; goto done;
-  }
-  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) { failure = GetLastError(); goto done; }
-  DWORD size = 0;
-  GetTokenInformation(token, TokenUser, NULL, 0, &size);
-  tokenData = [NSMutableData dataWithLength:size];
-  if (!GetTokenInformation(token, TokenUser, tokenData.mutableBytes, size, &size)) {
-    failure = GetLastError(); goto done;
-  }
-  EXPLICIT_ACCESSW entry;
-  memset(&entry, 0, sizeof(entry));
-  entry.grfAccessPermissions = FILE_ALL_ACCESS;
-  entry.grfAccessMode = SET_ACCESS;
-  entry.grfInheritance = directory ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
-  BuildTrusteeWithSidW(&entry.Trustee, ((TOKEN_USER *)tokenData.mutableBytes)->User.Sid);
-  failure = SetEntriesInAclW(1, &entry, NULL, &acl);
-  if (failure == ERROR_SUCCESS) failure = SetSecurityInfo(file, SE_FILE_OBJECT,
-      DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, acl, NULL);
-done:
-  if (acl) LocalFree(acl);
-  if (token) CloseHandle(token);
-  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
-  if (failure != ERROR_SUCCESS && error) *error = [NSError errorWithDomain:NSOSStatusErrorDomain
-      code:failure userInfo:@{NSLocalizedDescriptionKey: @"private storage ACL could not be enforced"}];
-  return failure == ERROR_SUCCESS;
-}
-#endif
+
 
 static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
   int errorCode = errno;
