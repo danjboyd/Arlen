@@ -1506,17 +1506,43 @@ static int ALNStatWithRetry(const char *path, struct stat *statBuffer) {
   return -1;
 }
 
-static BOOL ALNSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
+static uint64_t ALNMonotonicMilliseconds(void);
+
+// One budget covers the header and body, including sendfile and fallback writes.
+typedef struct {
+  uint64_t started;
+  uint64_t sent;
+  NSUInteger timeoutMilliseconds;
+  NSUInteger minBytesPerSecond;
+  NSUInteger graceMilliseconds;
+  BOOL expired;
+} ALNResponseSendBudget;
+
+static BOOL ALNResponseSendAllowed(ALNResponseSendBudget *budget) {
+  if (budget == NULL) return YES;
+  uint64_t elapsed = ALNMonotonicMilliseconds() - budget->started;
+  if ((budget->timeoutMilliseconds > 0 && elapsed >= budget->timeoutMilliseconds) ||
+      (budget->minBytesPerSecond > 0 && elapsed > budget->graceMilliseconds &&
+       (double)budget->sent * 1000.0 < (double)budget->minBytesPerSecond * elapsed)) {
+    budget->expired = YES;
+    errno = ETIMEDOUT;
+    return NO;
+  }
+  return YES;
+}
+
+static BOOL ALNSendAllWithBudget(ALNSocketHandle fd, const void *bytes, size_t length, ALNResponseSendBudget *budget) {
   const unsigned char *cursor = (const unsigned char *)bytes;
   size_t remaining = length;
   int transientRetries = 0;
   while (remaining > 0) {
+    if (!ALNResponseSendAllowed(budget)) return NO;
     ssize_t written = ALNSendWithFaults(fd, cursor, remaining, 0);
     if (written < 0) {
       if (errno == EINTR) {
         continue;
       }
-      if ((errno == EAGAIN || errno == EWOULDBLOCK) && transientRetries < 32) {
+      if ((errno == EAGAIN || errno == EWOULDBLOCK) && (budget != NULL || transientRetries < 32)) {
         transientRetries += 1;
         ALNTransientWriteBackoff();
         continue;
@@ -1526,6 +1552,7 @@ static BOOL ALNSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
     if (written == 0) {
       return NO;
     }
+    if (budget != NULL) budget->sent += (uint64_t)written;
     transientRetries = 0;
     cursor += (size_t)written;
     remaining -= (size_t)written;
@@ -1533,7 +1560,7 @@ static BOOL ALNSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
   return YES;
 }
 
-static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt) {
+static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt, ALNResponseSendBudget *budget) {
   if (iov == NULL || iovcnt <= 0) {
     return YES;
   }
@@ -1549,12 +1576,13 @@ static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt
   int current = 0;
   int transientRetries = 0;
   while (current < iovcnt) {
+    if (!ALNResponseSendAllowed(budget)) return NO;
     ssize_t written = ALNWritevWithFaults(fd, &localIOV[current], iovcnt - current);
     if (written < 0) {
       if (errno == EINTR) {
         continue;
       }
-      if ((errno == EAGAIN || errno == EWOULDBLOCK) && transientRetries < 32) {
+      if ((errno == EAGAIN || errno == EWOULDBLOCK) && (budget != NULL || transientRetries < 32)) {
         transientRetries += 1;
         ALNTransientWriteBackoff();
         continue;
@@ -1564,6 +1592,7 @@ static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt
     if (written == 0) {
       return NO;
     }
+    if (budget != NULL) budget->sent += (uint64_t)written;
     transientRetries = 0;
 
     ssize_t remainingWrite = written;
@@ -1581,6 +1610,10 @@ static BOOL ALNWritevAll(ALNSocketHandle fd, const struct iovec *iov, int iovcnt
     }
   }
   return YES;
+}
+
+static BOOL ALNSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
+  return ALNSendAllWithBudget(fd, bytes, length, NULL);
 }
 
 static NSLock *gALNStaticFileFDCacheLock = nil;
@@ -1810,13 +1843,14 @@ static void ALNStaticFileFDCacheClear(void) {
 static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
                                     int fileFd,
                                     unsigned long long remaining,
-                                    off_t offset) {
+                                    off_t offset, ALNResponseSendBudget *budget) {
   if (remaining == 0) {
     return YES;
   }
 
   unsigned char buffer[16384];
   while (remaining > 0) {
+    if (!ALNResponseSendAllowed(budget)) return NO;
     size_t chunk = (remaining > (unsigned long long)sizeof(buffer))
                        ? sizeof(buffer)
                        : (size_t)remaining;
@@ -1835,7 +1869,7 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
     if (readBytes == 0) {
       return NO;
     }
-    if (!ALNSendAll(clientFd, buffer, (size_t)readBytes)) {
+    if (!ALNSendAllWithBudget(clientFd, buffer, (size_t)readBytes, budget)) {
       return NO;
     }
     remaining -= (unsigned long long)readBytes;
@@ -1847,7 +1881,7 @@ static BOOL ALNSendFileReadFallback(ALNSocketHandle clientFd,
 static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
                                   int fileFd,
                                   unsigned long long byteLength,
-                                  unsigned long long byteOffset) {
+                                  unsigned long long byteOffset, ALNResponseSendBudget *budget) {
   if (fileFd < 0) {
     return NO;
   }
@@ -1857,6 +1891,7 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
   off_t offset = (off_t)byteOffset;
   int transientRetries = 0;
   while (remaining > 0) {
+    if (!ALNResponseSendAllowed(budget)) return NO;
     size_t chunk = (remaining > (unsigned long long)SSIZE_MAX)
                        ? (size_t)SSIZE_MAX
                        : (size_t)remaining;
@@ -1865,14 +1900,14 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
       if (errno == EINTR) {
         continue;
       }
-      if ((errno == EAGAIN || errno == EWOULDBLOCK) && transientRetries < 32) {
+      if ((errno == EAGAIN || errno == EWOULDBLOCK) && (budget != NULL || transientRetries < 32)) {
         transientRetries += 1;
         ALNTransientWriteBackoff();
         continue;
       }
       transientRetries = 0;
       if (errno == EINVAL || errno == ENOSYS) {
-        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
+        ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset, budget);
         goto cleanup;
       }
       ok = NO;
@@ -1882,14 +1917,15 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
       break;
     }
     transientRetries = 0;
+    if (budget != NULL) budget->sent += (uint64_t)sent;
     remaining -= (unsigned long long)sent;
   }
   ok = (remaining == 0);
   if (!ok) {
-    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset);
+    ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset, budget);
   }
 #else
-  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, (off_t)byteOffset);
+  ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, (off_t)byteOffset, budget);
 #endif
 
 #ifdef __linux__
@@ -3235,10 +3271,10 @@ static void ALNSendFallbackInternalServerError(ALNSocketHandle clientFd) {
   (void)ALNSendAll(clientFd, response, strlen(response));
 }
 
-static double ALNSendResponse(ALNSocketHandle clientFd,
+static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
                               ALNResponse *response,
                               BOOL performanceHeaders,
-                              BOOL sendBody) {
+                              BOOL sendBody, ALNResponseSendBudget *budget, BOOL *sentOK) {
   double serializeStart = ALNNowMilliseconds();
   NSString *fileBodyPath = response.fileBodyPath;
   unsigned long long fileBodyLength = response.fileBodyLength;
@@ -3293,14 +3329,14 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
   NSUInteger bodyLength = [response bodyLength];
   if (!sendBody) {
     if (headerLength > 0) {
-      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+      *sentOK = *sentOK && ALNSendAllWithBudget(clientFd, [headerData bytes], headerLength, budget);
     }
   } else if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
     if (headerLength > 0) {
-      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+      *sentOK = *sentOK && ALNSendAllWithBudget(clientFd, [headerData bytes], headerLength, budget);
     }
     if (fileBodyFd >= 0) {
-      (void)ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength, response.fileBodyOffset);
+      *sentOK = *sentOK && ALNSendFileDescriptor(clientFd, fileBodyFd, fileBodyLength, response.fileBodyOffset, budget);
       close(fileBodyFd);
       fileBodyFd = -1;
     }
@@ -3310,22 +3346,64 @@ static double ALNSendResponse(ALNSocketHandle clientFd,
     iov[0].iov_len = headerLength;
     iov[1].iov_base = (void *)[bodyData bytes];
     iov[1].iov_len = bodyLength;
-    if (!ALNWritevAll(clientFd, iov, 2)) {
-      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
-      (void)ALNSendAll(clientFd, [bodyData bytes], bodyLength);
-    }
+#if defined(_WIN32)
+    *sentOK = ALNSendAllWithBudget(clientFd, [headerData bytes], headerLength, budget) &&
+              ALNSendAllWithBudget(clientFd, [bodyData bytes], bodyLength, budget);
+#else
+    // A failed writev may already have sent bytes. Never replay its prefix.
+    *sentOK = ALNWritevAll(clientFd, iov, 2, budget);
+#endif
   } else {
     if (headerLength > 0) {
-      (void)ALNSendAll(clientFd, [headerData bytes], headerLength);
+      *sentOK = *sentOK && ALNSendAllWithBudget(clientFd, [headerData bytes], headerLength, budget);
     }
     if (bodyLength > 0) {
-      (void)ALNSendAll(clientFd, [bodyData bytes], bodyLength);
+      *sentOK = *sentOK && ALNSendAllWithBudget(clientFd, [bodyData bytes], bodyLength, budget);
     }
   }
   if (fileBodyFd >= 0) {
     close(fileBodyFd);
   }
   return (ALNNowMilliseconds() - writeStart) + serializeMs;
+}
+
+static double ALNSendResponse(ALNSocketHandle clientFd, ALNApplication *application,
+                              ALNResponse *response, BOOL performanceHeaders, BOOL sendBody) {
+  NSDictionary *limits = application.config[@"requestLimits"] ?: @{};
+  ALNResponseSendBudget budget = {0};
+  budget.started = ALNMonotonicMilliseconds();
+  budget.timeoutMilliseconds = ALNConfigUInt(limits, @"responseSendTimeoutSeconds", 300) * 1000;
+  budget.minBytesPerSecond = ALNConfigUInt(limits, @"responseMinBytesPerSecond", 1024);
+  budget.graceMilliseconds = ALNConfigUInt(limits, @"responseMinRateGraceSeconds", 10) * 1000;
+  BOOL bounded = budget.timeoutMilliseconds > 0 || budget.minBytesPerSecond > 0;
+  // Bound individual blocking calls too, so a silent reader cannot postpone
+  // the total/rate check until connectionTimeoutSeconds elapses.
+#if defined(_WIN32)
+  DWORD previous = 0, interval = 100;
+  int timeoutLength = sizeof(previous);
+  getsockopt(ALNNativeSocketHandle(clientFd), SOL_SOCKET, SO_SNDTIMEO, (char *)&previous, &timeoutLength);
+  if (bounded) setsockopt(ALNNativeSocketHandle(clientFd), SOL_SOCKET, SO_SNDTIMEO, (char *)&interval, sizeof(interval));
+#else
+  struct timeval previous = {0}, interval = {0, 100000};
+  socklen_t timeoutLength = sizeof(previous);
+  getsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &previous, &timeoutLength);
+  if (bounded) setsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &interval, sizeof(interval));
+#endif
+  BOOL sentOK = YES;
+  double elapsed = ALNSendResponseWithBudget(clientFd, response, performanceHeaders, sendBody,
+                                             bounded ? &budget : NULL, &sentOK);
+#if defined(_WIN32)
+  if (bounded) setsockopt(ALNNativeSocketHandle(clientFd), SOL_SOCKET, SO_SNDTIMEO, (char *)&previous, sizeof(previous));
+#else
+  if (bounded) setsockopt((int)clientFd, SOL_SOCKET, SO_SNDTIMEO, &previous, sizeof(previous));
+#endif
+  if (!sentOK) {
+    if (budget.expired) {
+      [application.logger warn:@"response send limit exceeded" fields:@{ @"bytes_sent" : @(budget.sent) }];
+    }
+    ALNSocketShutdown(clientFd);
+  }
+  return elapsed;
 }
 
 static ALNResponse *ALNErrorResponse(NSInteger statusCode, NSString *body) {
@@ -4690,7 +4768,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                       performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, errorResponse, performanceHeaders, YES);
+          (void)ALNSendResponse(clientFd, self.application, errorResponse, performanceHeaders, YES);
           return NO;
         }
         request.parseDurationMilliseconds = parseMs;
@@ -4728,7 +4806,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
             request.responseWriteDurationMilliseconds =
-                ALNSendResponse(clientFd,
+                ALNSendResponse(clientFd, self.application,
                                 staticResponse,
                                 performanceHeaders,
                                 ![request.method isEqualToString:@"HEAD"]);
@@ -4777,7 +4855,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                       performanceHeaders,
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
-          (void)ALNSendResponse(clientFd, invalidUpgrade, performanceHeaders, YES);
+          (void)ALNSendResponse(clientFd, self.application, invalidUpgrade, performanceHeaders, YES);
           return NO;
         }
         BOOL webSocketUpgrade = webSocketRequestValid && responseWantsWebSocket;
@@ -4789,7 +4867,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                         performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, originDenied, performanceHeaders, YES);
+            (void)ALNSendResponse(clientFd, self.application, originDenied, performanceHeaders, YES);
             return NO;
           }
           ALNWebSocketClientSession *webSocketSession = nil;
@@ -4810,7 +4888,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                         performanceHeaders,
                                         parseMs,
                                         ALNNowMilliseconds() - requestStartMs);
-            (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
+            (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
             return NO;
           }
 
@@ -4834,7 +4912,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                           performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
+              (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
@@ -4860,7 +4938,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                             performanceHeaders,
                                             parseMs,
                                             ALNNowMilliseconds() - requestStartMs);
-                (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
+                (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
                 [self releaseWebSocketSessionReservation];
                 return NO;
               }
@@ -4880,7 +4958,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                           performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
+              (void)ALNSendResponse(clientFd, self.application, failure, performanceHeaders, YES);
               [self releaseWebSocketSessionReservation];
               return NO;
             }
@@ -4956,7 +5034,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                           performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, failure, performanceHeaders, YES);
+              (void)ALNSendResponse(clientFd, self.application, failure, performanceHeaders, YES);
               return NO;
             }
             if (streamReplayResult.resyncRequired) {
@@ -4967,7 +5045,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                           performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, resyncResponse, performanceHeaders, YES);
+              (void)ALNSendResponse(clientFd, self.application, resyncResponse, performanceHeaders, YES);
               return NO;
             }
 
@@ -4981,7 +5059,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                           performanceHeaders,
                                           parseMs,
                                           ALNNowMilliseconds() - requestStartMs);
-              (void)ALNSendResponse(clientFd, busyResponse, performanceHeaders, YES);
+              (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
               return NO;
             }
             @try {
@@ -5017,7 +5095,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                     parseMs,
                                     ALNNowMilliseconds() - requestStartMs);
         request.responseWriteDurationMilliseconds =
-            ALNSendResponse(clientFd,
+            ALNSendResponse(clientFd, self.application,
                             response,
                             performanceHeaders,
                             ![request.method isEqualToString:@"HEAD"]);
@@ -5211,7 +5289,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
         [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
                           value:@"http_session_limit"];
         [busyResponse setHeader:@"Connection" value:@"close"];
-        (void)ALNSendResponse(clientFd, busyResponse, NO, YES);
+        (void)ALNSendResponse(clientFd, self.application, busyResponse, NO, YES);
         ALNSocketClose(clientFd);
         continue;
       }
@@ -5227,7 +5305,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
           [busyResponse setHeader:@"X-Arlen-Backpressure-Reason"
                             value:@"http_worker_queue_full"];
           [busyResponse setHeader:@"Connection" value:@"close"];
-          (void)ALNSendResponse(clientFd, busyResponse, NO, YES);
+          (void)ALNSendResponse(clientFd, self.application, busyResponse, NO, YES);
           [self releaseHTTPSessionReservation];
           ALNSocketClose(clientFd);
         }

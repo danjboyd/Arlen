@@ -400,3 +400,10 @@ Create process-wide lazy objects, such as a shared `NSRegularExpression`, with
 `dispatch_once` rather than `if (x == nil) { x = ...; }`. Concurrent first
 requests can otherwise race, and one thread can free the object another is
 using.
+
+Normal HTTP responses have a five-minute total send deadline and require an
+average of 1 KiB/s after a ten-second grace period. This prevents slow readers
+from occupying every HTTP worker. For unusually slow bulk downloads, adjust
+`requestLimits.responseSendTimeoutSeconds`, `responseMinBytesPerSecond`, and
+`responseMinRateGraceSeconds` in your app configuration. SSE and WebSocket
+sessions use separate policies. See [Configuration reference](CONFIGURATION_REFERENCE.md).

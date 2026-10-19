@@ -1355,6 +1355,85 @@
   }
 }
 
+
+- (void)assertSlowResponseReadersWithLimits:(NSDictionary *)limits {
+  int port = [self randomPort];
+  NSString *name = [NSString stringWithFormat:@"send-limit-%@.txt", [[NSUUID UUID] UUIDString]];
+  NSString *path = [@"public" stringByAppendingPathComponent:name];
+  XCTAssertTrue([[NSMutableData dataWithLength:32 * 1024 * 1024] writeToFile:path atomically:YES]);
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  [environment addEntriesFromDictionary:limits];
+  environment[@"ARLEN_MAX_HTTP_WORKERS"] = @"2";
+  environment[@"ARLEN_CONNECTION_TIMEOUT_SECONDS"] = @"30";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+      @"import socket,time,urllib.request\n"
+       "port=%d\n"
+       "clients=[]\n"
+       "try:\n"
+       "    for _ in range(2):\n"
+       "        s=socket.socket()\n"
+       "        s.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,1024)\n"
+       "        s.settimeout(5)\n"
+       "        s.connect(('127.0.0.1',port))\n"
+       "        s.sendall(b'GET /static/%@ HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n')\n"
+       "        head=b''\n"
+       "        while b'\\r\\n\\r\\n' not in head: head+=s.recv(1)\n"
+       "        assert b'200 OK' in head, head\n"
+       "        assert b'33554432' in head, head\n"
+       "        clients.append(s)\n"
+       "    time.sleep(2.5)\n"
+       "    start=time.monotonic()\n"
+       "    assert urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz',timeout=6).read().strip()==b'ok'\n"
+       "    assert time.monotonic()-start < 5\n"
+       "    for s in clients:\n"
+       "        received=0\n"
+       "        while True:\n"
+       "            chunk=s.recv(65536)\n"
+       "            if not chunk: break\n"
+       "            received+=len(chunk)\n"
+       "        assert received < 33554432, received\n"
+       "    print('ok')\n"
+       "finally:\n"
+       "    for s in clients: s.close()\n",port,name];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+  }
+}
+
+- (void)testSlowResponseReadersHitTotalDeadline {
+  [self assertSlowResponseReadersWithLimits:@{
+    @"ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS" : @"2",
+    @"ARLEN_RESPONSE_MIN_BYTES_PER_SECOND" : @"0",
+  }];
+}
+
+- (void)testSlowResponseReadersHitMinimumRate {
+  [self assertSlowResponseReadersWithLimits:@{
+    @"ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS" : @"0",
+    @"ARLEN_RESPONSE_MIN_BYTES_PER_SECOND" : @"10485760",
+    @"ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS" : @"2",
+  }];
+}
+
 - (void)testSlowRequestBodiesHitTheBodyDeadline {
   [self assertSlowRequestBodiesDoNotStarveWorkersWithLimits:@{
     @"ARLEN_REQUEST_BODY_TIMEOUT_SECONDS" : @"3",

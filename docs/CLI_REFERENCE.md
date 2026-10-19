@@ -1693,3 +1693,18 @@ defaults. No new CLI option or propane accessory is required; see
 `boomhauer` and `propane` need no new option or propane accessory for the
 libobjc2 first-use lock workaround; see
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+
+### Response transfer limits
+
+`requestLimits.responseSendTimeoutSeconds` (default `300`) bounds the total
+header and body send time for a normal HTTP response.
+`requestLimits.responseMinBytesPerSecond` (default `1024`) requires that average
+send rate after `responseMinRateGraceSeconds` (default `10`). Set a limit to
+`0` to disable it. The deadline covers file transfers and their read/write
+fallback as well as in-memory bodies. A missed limit closes the connection,
+releases the response file, and logs `response send limit exceeded`.
+
+Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
+`ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
+`ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
+separate streaming lifecycle and are exempt from these bulk-transfer limits.

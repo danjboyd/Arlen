@@ -509,6 +509,9 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
   NSString *requestHeadTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS");
+  NSString *responseSendTimeoutSeconds = ALNEnvValue("ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS");
+  NSString *responseMinBytesPerSecond = ALNEnvValue("ARLEN_RESPONSE_MIN_BYTES_PER_SECOND");
+  NSString *responseMinRateGraceSeconds = ALNEnvValue("ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS");
   NSString *requestBodyTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_TIMEOUT_SECONDS");
   NSString *requestBodyMinBytesPerSecond = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND");
   NSString *requestBodyMinRateGraceSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS");
@@ -711,6 +714,9 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
   ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
   ALNApplyIntegerOverride(limits, requestHeadTimeoutSeconds, @"requestHeadTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, responseSendTimeoutSeconds, @"responseSendTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, responseMinBytesPerSecond, @"responseMinBytesPerSecond", 0);
+  ALNApplyIntegerOverride(limits, responseMinRateGraceSeconds, @"responseMinRateGraceSeconds", 0);
   ALNApplyIntegerOverride(limits, requestBodyTimeoutSeconds, @"requestBodyTimeoutSeconds", 0);
   ALNApplyIntegerOverride(limits, requestBodyMinBytesPerSecond, @"requestBodyMinBytesPerSecond", 0);
   ALNApplyIntegerOverride(limits, requestBodyMinRateGraceSeconds, @"requestBodyMinRateGraceSeconds", 0);
@@ -1071,6 +1077,15 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   }
   if (finalLimits[@"requestHeadTimeoutSeconds"] == nil) {
     finalLimits[@"requestHeadTimeoutSeconds"] = @(15);
+  }
+  if (finalLimits[@"responseSendTimeoutSeconds"] == nil) {
+    finalLimits[@"responseSendTimeoutSeconds"] = @(300);
+  }
+  if (finalLimits[@"responseMinBytesPerSecond"] == nil) {
+    finalLimits[@"responseMinBytesPerSecond"] = @(1024);
+  }
+  if (finalLimits[@"responseMinRateGraceSeconds"] == nil) {
+    finalLimits[@"responseMinRateGraceSeconds"] = @(10);
   }
   if (finalLimits[@"requestBodyTimeoutSeconds"] == nil) {
     finalLimits[@"requestBodyTimeoutSeconds"] = @(300);

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Normal HTTP responses now have a total send deadline (300 seconds) and
+  minimum average rate (1024 bytes/second after 10 seconds). The limits cover
+  headers and file or in-memory bodies; a miss closes the connection and frees
+  its worker. Configure them under `requestLimits.responseSendTimeoutSeconds`,
+  `responseMinBytesPerSecond`, and `responseMinRateGraceSeconds`. SSE and
+  WebSocket sessions retain their separate policies. A failed partial `writev`
+  is no longer retried by replaying already-sent response bytes (#304).
+
 - Dataverse: `ALNDataverseCurlTransport` passes request headers, including the
   bearer token, to curl as a config file on stdin (`--config -`). They are no
   longer on curl's command line, which any local user can read through `ps` or
