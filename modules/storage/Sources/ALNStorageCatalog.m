@@ -98,6 +98,34 @@ static BOOL CatalogStateIsValid(NSDictionary *state) {
   return state[@"activityLog"] == nil || [state[@"activityLog"] isKindOfClass:[NSArray class]];
 }
 
+static id CatalogImmutableValue(id value) {
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *copy = [NSMutableDictionary dictionary];
+    for (NSString *key in value) copy[key] = CatalogImmutableValue(value[key]);
+    return [NSDictionary dictionaryWithDictionary:copy];
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *copy = [NSMutableArray array];
+    for (id entry in value) [copy addObject:CatalogImmutableValue(entry)];
+    return [NSArray arrayWithArray:copy];
+  }
+  return [value copy];
+}
+
+static NSDictionary *CatalogSnapshot(NSDictionary *rows, NSDictionary *previous) {
+  NSMutableDictionary *snapshot = [NSMutableDictionary dictionary];
+  for (NSString *kind in rows) {
+    NSMutableDictionary *section = [NSMutableDictionary dictionary];
+    for (NSString *key in rows[kind]) {
+      id value = rows[kind][key];
+      id old = previous[kind][key];
+      section[key] = [value isEqual:old] ? old : CatalogImmutableValue(value);
+    }
+    snapshot[kind] = [NSDictionary dictionaryWithDictionary:section];
+  }
+  return [NSDictionary dictionaryWithDictionary:snapshot];
+}
+
 static NSDictionary *RowsForState(NSDictionary *state, NSDictionary *previous) {
   NSMutableDictionary *membership = [NSMutableDictionary dictionary];
   NSDictionary *collections = state[@"objectIDsByCollection"] ?: @{};
@@ -146,6 +174,7 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 @property(nonatomic, copy, readwrite) NSString *path;
 @property(nonatomic, assign) sqlite3 *database;
 @property(nonatomic, copy) NSDictionary *snapshot;
+@property(nonatomic, strong) NSLock *lock;
 @property(nonatomic, assign, readwrite) NSUInteger lastWrittenRowCount;
 @end
 
@@ -173,6 +202,7 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 - (instancetype)initWithPath:(NSString *)path legacyPath:(NSString *)legacyPath error:(NSError **)error {
   self = [super init];
   if (self == nil) return nil;
+  _lock = [[NSLock alloc] init];
   if (!LoadSQLite()) {
     if (error != NULL) *error = CatalogError(@"SQLite runtime is required for storage persistence (libsqlite3.so.0, libsqlite3.dylib, or Windows winsqlite3.dll)");
     return nil;
@@ -286,12 +316,13 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 }
 
 - (NSDictionary *)readStateWithError:(NSError **)error {
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     NSDictionary *rows = [self readRowsWithError:error];
     if (rows == nil) return nil;
     self.snapshot = rows;
     return StateForRows(rows);
-  }
+  } @finally { [self.lock unlock]; }
 }
 
 - (BOOL)writeRows:(NSDictionary *)rows error:(NSError **)error {
@@ -337,7 +368,8 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
 }
 
 - (BOOL)writeState:(NSDictionary *)state error:(NSError **)error {
-  @synchronized(self) {
+  [self.lock lock];
+  @try {
     if (!CatalogStateIsValid(state)) {
       if (error != NULL) *error = CatalogError(@"storage catalog state has an invalid shape");
       return NO;
@@ -349,12 +381,12 @@ static NSDictionary *StateForRows(NSDictionary *rows) {
     @try {
       if (![self writeRows:rows error:error]) return NO;
       committed = [self execute:"COMMIT" error:error];
-      if (committed) self.snapshot = rows;
+      if (committed) self.snapshot = CatalogSnapshot(rows, self.snapshot);
       return committed;
     } @finally {
       if (!committed) (void)[self execute:"ROLLBACK" error:NULL];
       SQL.busy_timeout(self.database, 100);
     }
-  }
+  } @finally { [self.lock unlock]; }
 }
 @end

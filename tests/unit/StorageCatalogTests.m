@@ -132,4 +132,20 @@
   XCTAssertNotNil(error.localizedDescription);
 }
 
+- (void)testMutableNestedInputDoesNotAliasCommittedSnapshot {
+  NSString *directory = ALNTestTemporaryDirectory(@"storage-catalog");
+  NSString *legacy = [directory stringByAppendingPathComponent:@"state.plist"];
+  NSString *path = [legacy stringByAppendingString:@".sqlite3"];
+  ALNStorageCatalog *catalog = [[ALNStorageCatalog alloc] initWithPath:path legacyPath:legacy error:NULL];
+  NSMutableDictionary *metadata = [@{ @"label":@"before" } mutableCopy];
+  NSDictionary *state = [self stateWithObjects:@{ @"alice":@{ @"metadata":metadata } }];
+  XCTAssertTrue([catalog writeState:state error:NULL]);
+  metadata[@"label"] = @"after";
+  XCTAssertTrue([catalog writeState:state error:NULL]);
+  XCTAssertEqual((NSUInteger)1, catalog.lastWrittenRowCount);
+  catalog = nil;
+  catalog = [[ALNStorageCatalog alloc] initWithPath:path legacyPath:legacy error:NULL];
+  XCTAssertEqualObjects(state, [catalog readStateWithError:NULL]);
+}
+
 @end
