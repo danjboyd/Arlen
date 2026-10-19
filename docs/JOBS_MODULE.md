@@ -54,6 +54,10 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
+Operator-state writes (paused queues, schedule timestamps, replay markers, and
+run history) merge under a cross-process file lock. A process that only reads
+may show cached operator state until it writes or restarts. This state file is
+separate from the jobs adapter's pending and leased job records.
 
 Path overrides live under `jobsModule.paths.*`. Keep `apiPrefix` relative, such as
 `"api"`, when you want the module API under `/jobs/api`. Setting `apiPrefix` to an

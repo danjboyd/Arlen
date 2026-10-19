@@ -672,6 +672,8 @@ First-party module surfaces after install:
 - `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+  Shared operator-state writes coordinate across processes; this is separate
+  from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
