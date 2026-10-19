@@ -31,9 +31,11 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `performanceLogging` (default: on, off in `production`): record per-stage
+- `performanceLogging` (default: on in `development` and `test`, off in every
+  other environment): record per-stage
   request timing in the access log. `ARLEN_PERFORMANCE_LOGGING` overrides it.
-- `performanceHeaders` (default: on, off in `production`): while
+- `performanceHeaders` (default: on in `development` and `test`, off
+  elsewhere): while
   `performanceLogging` is on, also send the timing as `X-Arlen-Total-Ms`,
   `X-Arlen-Parse-Ms`, `X-Arlen-Response-Write-Ms` and `X-Mojo-Total-Ms`
   response headers. They let any client time requests, so keep them off on
@@ -103,6 +105,31 @@ Generated apps start with:
 - `maxRequestLineBytes`
 - `maxHeaderBytes`
 - `maxBodyBytes`
+- `requestHeadTimeoutSeconds` (default `15`; env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`): the total time a client has to finish
+  sending a request head (request line and headers). For a connection's first
+  request it is counted from when the connection was accepted, so it also
+  covers a client that never sends a byte and the time a connection waited for
+  a free HTTP worker. For later requests on a keep-alive connection it is
+  counted from the head's first byte; idle time between requests stays bounded
+  by `connectionTimeoutSeconds`. A head that takes longer gets `408` and the
+  connection closes. `connectionTimeoutSeconds` only bounds each individual
+  read, so without this a client sending one byte every few seconds could hold
+  an HTTP worker indefinitely. `0` turns the limit off.
+- `requestBodyTimeoutSeconds` (default `300`; env
+  `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`): the total time a client has to send
+  the request body, counted from the end of the head. It covers `Content-Length`
+  and chunked bodies, and bodies that stream to the spool file. A slower body
+  gets `408`, the connection closes and any spool file is removed. `0` turns it
+  off. Raise it with `maxBodyBytes` for very large uploads over slow links.
+- `requestBodyMinBytesPerSecond` (default `1024`; env
+  `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND`) and
+  `requestBodyMinRateGraceSeconds` (default `10`; env
+  `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS`): after the grace period, the
+  body's average rate since the head must stay at or above this many bytes per
+  second, or the request gets `408`. A client trickling a body is closed long
+  before the total deadline; slow but real uploads (1 KiB/s is far below any
+  mobile link) are not. `0` turns the rate check off.
 
 Raise these only for real application needs. The defaults are intentionally
 bounded.
@@ -270,13 +297,18 @@ Session config:
 - `session.secret`
 - `session.cookieName`
 - `session.maxAgeSeconds`
-- `session.secure` (default: on in `production`, off elsewhere; generated apps
-  leave it unset so this default applies)
+- `session.secure` (default: off in `development` and `test`, on in every other
+  environment, e.g. `production`, `staging`, `qa`; generated apps leave it unset
+  so this default applies. Set it to `NO` explicitly for a non-development
+  environment served over plain HTTP)
 - `session.sameSite`
 
 CSRF config:
 
-- `csrf.enabled`
+- `csrf.enabled` (default: follows `session.enabled`, so turning sessions on
+  turns CSRF protection on. Only the `strict` security profile pins it on
+  regardless. Generated apps leave it unset; set it to `NO` only for apps
+  that never accept browser form posts on a session cookie.)
 - `csrf.headerName`
 - `csrf.queryParamName`
 - `csrf.exemptPathPrefixes`: optional array of literal absolute paths (not `/`).
@@ -389,6 +421,16 @@ Rate limiting:
 - `rateLimit.enabled`
 - `rateLimit.requests`
 - `rateLimit.windowSeconds`
+- `rateLimit.ipv6PrefixLength` (default `64`, 1-128): IPv6 clients are counted
+  per network of this size, since one IPv6 client usually holds a whole `/64`
+  and could otherwise use a new address for every request. `128` counts each
+  address. IPv4 clients (including IPv4-mapped `::ffff:a.b.c.d`) are counted
+  per address.
+
+The limiter keys on the request's `effectiveRemoteAddress`: the direct peer,
+or behind a trusted proxy the forwarded client (see
+`security.forwardedClientIPHeader` below). It tracks at most 65,536 clients;
+past that, a new client evicts the oldest.
 
 Security headers:
 
@@ -468,10 +510,19 @@ Policy keys:
   headers, but only when the direct peer matches `security.trustedProxies`
 
 Proxy behavior is fail-closed for protected routes. Without trusted proxies,
-Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen only
-uses `Forwarded` or `X-Forwarded-For` when the immediate peer is trusted; public
-clients cannot opt into those headers themselves. If Arlen cannot resolve a
-client IP for a protected allowlist check, the request is denied.
+Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen
+reads the forwarded client only when the immediate peer is trusted, and then
+takes the right-most `X-Forwarded-For` hop that is not itself a trusted proxy.
+Hops to its left were sent by the client and are ignored. If Arlen cannot
+resolve a client IP for a protected allowlist check, the request is denied.
+
+- `security.forwardedClientIPHeader` (default `"X-Forwarded-For"`): the one
+  header the forwarded client is read from, by route policies and by the
+  server's `effectiveRemoteAddress` (which the rate limiter keys on) alike. Set
+  `"Forwarded"` only when your proxy writes RFC 7239 `Forwarded`. The header
+  that is not selected is ignored, since a proxy passes through whichever one it
+  does not set. Repeated lines of either header are combined in order, as RFC
+  9110 requires, so a client's own line can't hide the one the proxy appended.
 
 Denied route-policy requests return `403`, set
 `X-Arlen-Policy-Denial-Reason`, and log `route_policy.denied` with distinct
@@ -641,8 +692,9 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
-- `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
-  it unset so `/openapi` is not served in production)
+- `openapi.docsUIEnabled` (default: on in `development` and `test`, off in every
+  other environment; generated apps leave it unset so `/openapi` is not served
+  in production or staging)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`
@@ -664,6 +716,10 @@ Other scaffolded sections:
 - `propaneAccessories.workerCount`
 - `propaneAccessories.gracefulShutdownSeconds`
 - `propaneAccessories.respawnDelayMs`
+- `propaneAccessories.startupFailureLimit` (default `5`; propane exits after
+  this many consecutive worker startup failures, `0` disables)
+- `propaneAccessories.respawnBackoffMaxMs` (default `30000`; cap for the
+  exponential respawn backoff after worker startup failures)
 - `propaneAccessories.reloadOverlapSeconds`
 
 `plugins.classes` is where `arlen generate plugin` and plugin/manual wiring land.
@@ -795,3 +851,25 @@ injection, primarily for deterministic tests.
 See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)
 for the complete Entra example, callback/session semantics, transport limits,
 resolver implementation, and upgrade instructions.
+
+### Response transfer limits
+
+`requestLimits.responseSendTimeoutSeconds` (default `300`) bounds the total
+header and body send time for a normal HTTP response.
+`requestLimits.responseMinBytesPerSecond` (default `1024`) requires that average
+send rate after `responseMinRateGraceSeconds` (default `10`). Set a limit to
+`0` to disable it. The deadline covers file transfers and their read/write
+fallback as well as in-memory bodies. A missed limit closes the connection,
+releases the response file, and logs `response send limit exceeded`.
+
+Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
+`ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
+`ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
+separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.

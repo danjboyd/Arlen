@@ -80,6 +80,13 @@ FOUNDATION_EXPORT NSString *const ALNORMStrictLoadingException;
             accessStrategy:(ALNORMRelationLoadStrategy)accessStrategy;
 - (NSArray<NSDictionary<NSString *, id> *> *)pivotValueDictionariesForRelationName:(NSString *)relationName;
 - (NSDictionary<NSString *, id> *)primaryKeyValues;
+// Primary-key values as last loaded or saved (falling back to the current
+// values for a model that was never persisted). UPDATE and DELETE target
+// these, so the row a write hits is the row that was read. A persisted model
+// loaded without its key returns an incomplete dictionary, and writes refuse.
+- (NSDictionary<NSString *, id> *)persistedPrimaryKeyValues;
+// NO when `value` would change the primary key of a persisted model.
+- (BOOL)allowsPrimaryKeyValue:(nullable id)value forFieldName:(NSString *)fieldName;
 - (NSDictionary<NSString *, id> *)changedFieldValues;
 - (NSDictionary<NSString *, id> *)dictionaryRepresentation;
 

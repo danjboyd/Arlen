@@ -591,6 +591,132 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertEqual(ALNORMModelStateDetached, user.state);
 }
 
+// A request payload used to be able to rewrite the primary key through a
+// changeset, so saveModel:changeset: updated another user's row.
+- (ALNORMRuntimePublicUsersModel *)loadedUserFromAdapter:(ORMRuntimeFakeAdapter *)adapter
+                                              repository:(ALNORMRepository **)repositoryOut {
+  [adapter.queuedRowSets addObject:@[
+    @{ @"id" : @"user-1", @"email" : @"owner@example.com", @"display_name" : @"Owner" },
+  ]];
+  ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+  ALNORMRepository *repository = [context repositoryForModelClass:[ALNORMRuntimePublicUsersModel class]];
+  NSError *error = nil;
+  ALNORMRuntimePublicUsersModel *user = [[repository all:&error] firstObject];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"user-1", [user objectForFieldName:@"id"]);
+  if (repositoryOut != NULL) {
+    *repositoryOut = repository;
+  }
+  return user;
+}
+
+- (void)testChangesetCannotRetargetAPersistedModelsPrimaryKey {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  ALNORMRepository *repository = nil;
+  ALNORMRuntimePublicUsersModel *user = [self loadedUserFromAdapter:adapter repository:&repository];
+  NSUInteger statementsAfterLoad = [adapter.executedSQL count];
+
+  NSError *error = nil;
+  ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:user];
+  NSDictionary *retarget = @{ @"id" : @"user-2", @"displayName" : @"defaced" };
+  XCTAssertFalse([changeset applyInputValues:retarget error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+  XCTAssertTrue([changeset hasErrors]);
+  XCTAssertEqualObjects(@"user-1", [user objectForFieldName:@"id"]);
+  XCTAssertEqual(statementsAfterLoad, [adapter.executedSQL count]);
+
+  // The model setter refuses too, so nothing can swap the key before a save.
+  error = nil;
+  XCTAssertFalse([user setObject:@"user-2" forFieldName:@"id" error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  // Echoing the unchanged key is fine, and the UPDATE targets the loaded row.
+  error = nil;
+  ALNORMChangeset *echo = [ALNORMChangeset changesetWithModel:user];
+  NSDictionary *echoPayload = @{ @"id" : @"user-1", @"displayName" : @"Renamed" };
+  XCTAssertTrue([echo applyInputValues:echoPayload error:&error], @"%@", error);
+  [adapter.queuedCommandResults addObject:@1];
+  XCTAssertTrue([repository saveModel:user changeset:echo options:nil error:&error], @"%@", error);
+  NSString *updateSQL = [adapter.executedSQL lastObject];
+  XCTAssertTrue([updateSQL hasPrefix:@"UPDATE"], @"%@", updateSQL);
+  XCTAssertTrue([[adapter.executedParameters lastObject] containsObject:@"user-1"]);
+  XCTAssertFalse([[adapter.executedParameters lastObject] containsObject:@"user-2"]);
+
+  // A model that was never persisted may still take an explicit key.
+  ALNORMRuntimePublicUsersModel *fresh = [[ALNORMRuntimePublicUsersModel alloc] init];
+  XCTAssertTrue([fresh setObject:@"user-9" forFieldName:@"id" error:&error], @"%@", error);
+}
+
+// A narrow selectFields: can load a model without its primary key. Nothing
+// then says which row it is, so a payload must not supply the key and writes
+// must refuse rather than target whatever key the model holds.
+- (void)testModelLoadedWithoutItsPrimaryKeyRefusesWrites {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  [adapter.queuedRowSets addObject:@[
+    @{ @"email" : @"owner@example.com", @"display_name" : @"Owner" },
+  ]];
+  ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+  ALNORMRepository *repository = [context repositoryForModelClass:[ALNORMRuntimePublicUsersModel class]];
+  NSError *error = nil;
+  ALNORMRuntimePublicUsersModel *user = [[repository all:&error] firstObject];
+  XCTAssertNotNil(user, @"%@", error);
+  XCTAssertNil([user objectForFieldName:@"id"]);
+  XCTAssertEqual(ALNORMModelStateLoaded, user.state);
+  NSUInteger statementsAfterLoad = [adapter.executedSQL count];
+
+  error = nil;
+  XCTAssertFalse([user setObject:@"user-2" forFieldName:@"id" error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:user];
+  NSDictionary *payload = @{ @"id" : @"user-2", @"displayName" : @"defaced" };
+  XCTAssertFalse([changeset applyInputValues:payload error:&error]);
+  XCTAssertEqual(ALNORMErrorReadOnlyMutation, error.code);
+
+  error = nil;
+  XCTAssertTrue([user setObject:@"Renamed" forFieldName:@"displayName" error:&error], @"%@", error);
+  XCTAssertFalse([repository saveModel:user options:nil error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  error = nil;
+  XCTAssertFalse([repository deleteModel:user error:&error]);
+  XCTAssertEqual(ALNORMErrorMissingField, error.code);
+  for (NSUInteger index = statementsAfterLoad; index < [adapter.executedSQL count]; index++) {
+    NSString *sql = adapter.executedSQL[index];
+    XCTAssertFalse([sql hasPrefix:@"UPDATE"] || [sql hasPrefix:@"DELETE"], @"%@", sql);
+  }
+}
+
+- (void)testPermittedFieldsDropUnlistedInput {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  ALNORMRepository *repository = nil;
+  ALNORMRuntimePublicUsersModel *user = [self loadedUserFromAdapter:adapter repository:&repository];
+
+  NSError *error = nil;
+  ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:user];
+  NSDictionary *payload = @{ @"id" : @"user-2", @"email" : @"attacker@example.com", @"display_name" : @"Renamed" };
+  NSArray *permitted = @[ @"displayName" ];
+  XCTAssertTrue([changeset applyInputValues:payload permittedFields:permitted error:&error], @"%@", error);
+  XCTAssertEqualObjects((@[ @"displayName" ]), [changeset changedFieldNames]);
+
+  [adapter.queuedCommandResults addObject:@1];
+  XCTAssertTrue([repository saveModel:user changeset:changeset options:nil error:&error], @"%@", error);
+  NSArray *parameters = [adapter.executedParameters lastObject];
+  XCTAssertTrue([parameters containsObject:@"Renamed"]);
+  XCTAssertTrue([parameters containsObject:@"user-1"]);
+  XCTAssertFalse([parameters containsObject:@"attacker@example.com"]);
+  XCTAssertFalse([parameters containsObject:@"user-2"]);
+
+  // An unknown permitted field is a programming error, not silently ignored.
+  error = nil;
+  NSArray *unknown = @[ @"nope" ];
+  BOOL appliedUnknown = [[ALNORMChangeset changesetWithModel:user] applyInputValues:@{}
+                                                                     permittedFields:unknown
+                                                                               error:&error];
+  XCTAssertFalse(appliedUnknown);
+  XCTAssertEqual(ALNORMErrorInvalidArgument, error.code);
+}
+
 - (void)testRepositoryBuildsInspectableSQLAndMaterializesModels {
   ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
   [adapter.queuedRowSets addObject:@[

@@ -50,6 +50,7 @@ if (![app startWithError:&error]) {
 | `mailAdapter` | `id<ALNMailAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `webhookAdapter` | `id<ALNWebhookAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `attachmentAdapter` | `id<ALNAttachmentAdapter>` | `nonatomic, strong, readonly` | Adapter used by this runtime for the corresponding service concern. |
+| `usesDefaultAttachmentAdapter` | `BOOL` | `nonatomic, assign, readonly` | Adapter used by this runtime for the corresponding service concern. |
 | `eventStreamStore` | `id<ALNEventStreamStore>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamStore` property available on `ALNApplication`. |
 | `eventStreamBroker` | `id<ALNEventStreamBroker>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamBroker` property available on `ALNApplication`. |
 | `eventStreamAuthorizationHook` | `id<ALNEventStreamAuthorizationHook>` | `nonatomic, strong, readonly, nullable` | Public `eventStreamAuthorizationHook` property available on `ALNApplication`. |
@@ -60,6 +61,7 @@ if (![app startWithError:&error]) {
 | `clusterObservedNodes` | `NSUInteger` | `nonatomic, assign, readonly` | Cluster/runtime metadata exposed for diagnostics and routing behavior. |
 | `clusterEmitHeaders` | `BOOL` | `nonatomic, assign, readonly` | Cluster/runtime metadata exposed for diagnostics and routing behavior. |
 | `started` | `BOOL` | `nonatomic, assign, readonly, getter=isStarted` | Lifecycle flag that indicates whether startup has completed. |
+| `moduleLoadError` | `NSError *` | `nonatomic, strong, readonly, nullable` | Public `moduleLoadError` property available on `ALNApplication`. |
 | `runtimeInvocationMode` | `NSString *` | `nonatomic, copy, readonly` | Public `runtimeInvocationMode` property available on `ALNApplication`. |
 | `traceExporter` | `id<ALNTraceExporter>` | `nonatomic, strong, nullable` | Optional request-trace exporter invoked after route dispatch. |
 
@@ -111,6 +113,7 @@ if (![app startWithError:&error]) {
 | `routeTable` | `- (NSArray *)routeTable;` | Return route metadata table for diagnostics and route inspection. | Read this value when you need current runtime/request state. |
 | `openAPISpecification` | `- (NSDictionary *)openAPISpecification;` | Build OpenAPI document from registered routes and schema metadata. | Read this value when you need current runtime/request state. |
 | `writeOpenAPISpecToPath:pretty:error:` | `- (BOOL)writeOpenAPISpecToPath:(NSString *)path pretty:(BOOL)pretty error:(NSError *_Nullable *_Nullable)error;` | Write OpenAPI document to disk for tooling/publishing. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
+| `moduleLoadErrorPreventsStartup` | `- (BOOL)moduleLoadErrorPreventsStartup;` | Perform `module load error prevents startup` for `ALNApplication`. | Check the return value to confirm the operation succeeded. |
 | `startWithError:` | `- (BOOL)startWithError:(NSError *_Nullable *_Nullable)error;` | Start runtime lifecycle processing and readiness checks. | Call once before accepting traffic. On failure, inspect startup compile/security diagnostics in `error`. |
 | `maxBodyBytesForMethod:path:` | `- (NSUInteger)maxBodyBytesForMethod:(NSString *)method path:(NSString *)path;` | Perform `max body bytes for method` for `ALNApplication`. | Capture the returned value and propagate errors/validation as needed. |
 | `largestRouteMaxBodyBytes` | `- (NSUInteger)largestRouteMaxBodyBytes;` | Perform `largest route max body bytes` for `ALNApplication`. | Read this value when you need current runtime/request state. |

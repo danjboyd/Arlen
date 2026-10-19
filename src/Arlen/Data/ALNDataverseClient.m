@@ -80,6 +80,48 @@ static BOOL ALNDataverseLooksLikeGUID(NSString *value) {
   return YES;
 }
 
+// A record ID names one row by its primary key, so it must be a GUID (an
+// NSUUID or its canonical 36-character string). Anything else would be spliced
+// into the URL path, where `)`, `/`, `..`, `?` or `#` change what is requested.
+static NSString *ALNDataverseRecordIdentifierString(id recordID) {
+  if ([recordID isKindOfClass:[NSUUID class]]) {
+    return [(NSUUID *)recordID UUIDString];
+  }
+  if (![recordID isKindOfClass:[NSString class]]) {
+    return nil;
+  }
+  NSString *identifier = ALNDataverseTrimmedString(recordID);
+  return ALNDataverseLooksLikeGUID(identifier) ? identifier : nil;
+}
+
+// Percent-encodes a key-predicate literal for the URL path. OData quoting
+// (doubled `'`) keeps the value inside its literal; encoding keeps `/`, `?`,
+// `#`, `%` and the predicate's own `(`, `)`, `,` and `=` from being read as URL
+// or predicate structure.
+static NSString *ALNDataversePathEncodedLiteral(NSString *literal) {
+  static NSCharacterSet *allowed = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    allowed = [NSCharacterSet
+        characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~':@"];
+  });
+  return [literal stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+}
+
+// An operation name: a safe identifier, optionally namespace-qualified
+// (`Microsoft.Dynamics.CRM.WhoAmI`).
+static BOOL ALNDataverseOperationNameIsSafe(NSString *value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
+    return NO;
+  }
+  for (NSString *part in [value componentsSeparatedByString:@"."]) {
+    if (!ALNDataverseIdentifierIsSafe(part)) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 static NSString *ALNDataverseEscapeODataStringLiteral(NSString *value) {
   return [ALNDataverseTrimmedString(value) stringByReplacingOccurrencesOfString:@"'"
                                                                      withString:@"''"];
@@ -105,6 +147,13 @@ static NSString *ALNDataverseCorrelationIDFromHeaders(NSDictionary<NSString *, N
     }
   }
   return nil;
+}
+
+// Quotes a value for a curl config file `name = "value"` line. Header values
+// are already free of control characters, so only `\` and `"` need escaping.
+static NSString *ALNDataverseCurlConfigQuoted(NSString *value) {
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  return [escaped stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
 }
 
 static NSString *ALNDataverseTemporaryPath(NSString *prefix) {
@@ -496,6 +545,80 @@ static id ALNDataverseSerializedObject(id object, NSError **error) {
                                    @{ @"value" : [object description] ?: @"" });
   }
   return nil;
+}
+
+// A bound operation's path: `/`-separated segments, each an operation name or
+// `entitySet(<GUID>)`. Nil or empty means unbound and is returned as @"".
+static NSString *ALNDataverseValidatedBoundPath(NSString *boundPath, NSError **error) {
+  NSString *path = ALNDataverseTrimmedString(boundPath);
+  if ([path length] == 0) {
+    return @"";
+  }
+  for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
+    BOOL safe = ALNDataverseOperationNameIsSafe(segment);
+    NSRange open = [segment rangeOfString:@"("];
+    if (!safe && open.location != NSNotFound && [segment hasSuffix:@")"]) {
+      NSString *entitySet = [segment substringToIndex:open.location];
+      NSString *key = [segment substringWithRange:NSMakeRange(NSMaxRange(open),
+                                                              [segment length] - NSMaxRange(open) - 1)];
+      safe = ALNDataverseIdentifierIsSafe(entitySet) && ALNDataverseLooksLikeGUID(key) &&
+             [key isEqualToString:ALNDataverseTrimmedString(key)];
+    }
+    if (!safe) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse bound path segments must be identifiers or entitySet(<GUID>)",
+                                       @{ @"boundPath" : path });
+      }
+      return nil;
+    }
+  }
+  return path;
+}
+
+// Header names are RFC 9110 tokens.
+static BOOL ALNDataverseHeaderNameIsValid(NSString *name) {
+  if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
+    return NO;
+  }
+  static NSCharacterSet *tokenCharacters = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    tokenCharacters = [NSCharacterSet characterSetWithCharactersInString:
+                                          @"!#$%&'*+-.^_`|~0123456789"
+                                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+  });
+  return [[name stringByTrimmingCharactersInSet:tokenCharacters] length] == 0;
+}
+
+// Header values (and other text written into a request head) must not carry
+// control characters other than a tab: a CR or LF would end the line and let
+// the value add headers of its own.
+static BOOL ALNDataverseTextHasControlCharacters(NSString *value) {
+  NSUInteger length = [value length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar character = [value characterAtIndex:idx];
+    if ((character < 0x20 && character != '\t') || character == 0x7f) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
+static BOOL ALNDataverseValidateHeaders(NSDictionary *headers, NSError **error) {
+  for (id key in headers ?: @{}) {
+    id value = headers[key];
+    if (![key isKindOfClass:[NSString class]] || ![value isKindOfClass:[NSString class]] ||
+        !ALNDataverseHeaderNameIsValid(key) || ALNDataverseTextHasControlCharacters(value)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse header names must be tokens and values must not contain control characters",
+                                       @{ @"header" : [key description] ?: @"" });
+      }
+      return NO;
+    }
+  }
+  return YES;
 }
 
 static NSString *ALNDataverseODataLiteral(id value, NSError **error) {
@@ -1092,13 +1215,28 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
+  // curl writes an embedded CR/LF from --request or --header onto the wire.
+  if (!ALNDataverseHeaderNameIsValid(request.method)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
+                                     nil);
+    }
+    return nil;
+  }
+  if (!ALNDataverseValidateHeaders(request.headers, error)) {
+    return nil;
+  }
 
   NSString *headerPath = ALNDataverseTemporaryPath(@"dataverse-headers");
   NSString *bodyPath = ALNDataverseTemporaryPath(@"dataverse-body");
   NSString *requestBodyPath = nil;
   if ([request.bodyData length] > 0) {
     requestBodyPath = ALNDataverseTemporaryPath(@"dataverse-request");
-    BOOL wrote = [request.bodyData writeToFile:requestBodyPath atomically:YES];
+    // The token request's body carries the client secret: owner-only.
+    BOOL wrote = [[NSFileManager defaultManager] createFileAtPath:requestBodyPath
+                                                         contents:request.bodyData
+                                                       attributes:@{ NSFilePosixPermissions : @(0600) }];
     if (!wrote) {
       if (error != NULL) {
         *error = ALNDataverseMakeError(ALNDataverseErrorTransportFailed,
@@ -1116,6 +1254,8 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     @"--show-error",
     @"--no-progress-meter",
     @"--globoff",
+    // Record paths are built and encoded here; curl must not collapse `..`.
+    @"--path-as-is",
     @"--request",
     request.method ?: @"GET",
     @"--dump-header",
@@ -1129,15 +1269,19 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     @"--connect-timeout",
     [NSString stringWithFormat:@"%.0f", MIN(self.timeoutInterval, 30.0)],
   ]];
+  // Headers carry the bearer token, so they go to curl as a config file on
+  // stdin; argv is readable by every local user (/proc/<pid>/cmdline, ps).
+  NSMutableString *config = [NSMutableString string];
   NSArray<NSString *> *headerKeys = [[request.headers allKeys] sortedArrayUsingSelector:@selector(compare:)];
   for (NSString *key in headerKeys) {
     NSString *value = request.headers[key];
     if ([ALNDataverseTrimmedString(key) length] == 0 || [ALNDataverseTrimmedString(value) length] == 0) {
       continue;
     }
-    [arguments addObject:@"--header"];
-    [arguments addObject:[NSString stringWithFormat:@"%@: %@", key, value]];
+    NSString *line = [NSString stringWithFormat:@"%@: %@", key, value];
+    [config appendFormat:@"header = \"%@\"\n", ALNDataverseCurlConfigQuoted(line)];
   }
+  [arguments addObjectsFromArray:@[ @"--config", @"-" ]];
   if ([request.bodyData length] > 0 && [requestBodyPath length] > 0) {
     [arguments addObject:@"--data-binary"];
     [arguments addObject:[NSString stringWithFormat:@"@%@", requestBodyPath]];
@@ -1145,15 +1289,25 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   [arguments addObject:request.URLString ?: @""];
 
   NSTask *task = [[NSTask alloc] init];
-  task.launchPath = @"/usr/bin/env";
-  task.arguments = arguments;
+  if ([self.curlExecutablePath length] > 0) {
+    task.launchPath = self.curlExecutablePath;
+    task.arguments = [arguments subarrayWithRange:NSMakeRange(1, [arguments count] - 1)];
+  } else {
+    task.launchPath = @"/usr/bin/env";
+    task.arguments = arguments;
+  }
+  NSPipe *stdinPipe = [NSPipe pipe];
   NSPipe *stdoutPipe = [NSPipe pipe];
   NSPipe *stderrPipe = [NSPipe pipe];
+  task.standardInput = stdinPipe;
   task.standardOutput = stdoutPipe;
   task.standardError = stderrPipe;
 
   @try {
     [task launch];
+    NSFileHandle *configHandle = [stdinPipe fileHandleForWriting];
+    [configHandle writeData:[config dataUsingEncoding:NSUTF8StringEncoding]];
+    [configHandle closeFile];
     [task waitUntilExit];
   } @catch (NSException *exception) {
     if (error != NULL) {
@@ -1529,8 +1683,7 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     *error = nil;
   }
   NSString *entitySet = ALNDataverseTrimmedString(entitySetName);
-  NSString *identifier = ALNDataverseTrimmedString(recordID);
-  if (!ALNDataverseIdentifierIsSafe(entitySet) || [identifier length] == 0) {
+  if (!ALNDataverseIdentifierIsSafe(entitySet) || recordID == nil) {
     if (error != NULL) {
       *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
                                      @"Dataverse entity set and record identifier are required",
@@ -1538,11 +1691,15 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
-  if ([identifier hasPrefix:@"("] && [identifier hasSuffix:@")"]) {
-    return [NSString stringWithFormat:@"%@%@", entitySet, identifier];
-  }
-  if ([identifier containsString:@"="]) {
-    return [NSString stringWithFormat:@"%@(%@)", entitySet, identifier];
+  NSString *identifier = ALNDataverseRecordIdentifierString(recordID);
+  if (identifier == nil) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(
+          ALNDataverseErrorInvalidArgument,
+          @"Dataverse record identifier must be a GUID; use the alternateKeyValues: methods for alternate keys",
+          @{ @"recordID" : [recordID description] ?: @"" });
+    }
+    return nil;
   }
   return [NSString stringWithFormat:@"%@(%@)", entitySet, identifier];
 }
@@ -1583,7 +1740,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       }
       return nil;
     }
-    [parts addObject:[NSString stringWithFormat:@"%@=%@", key, literal]];
+    NSString *encoded = ALNDataversePathEncodedLiteral(literal);
+    if ([encoded length] == 0) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse alternate-key value could not be encoded",
+                                       @{ @"key" : key ?: @"" });
+      }
+      return nil;
+    }
+    [parts addObject:[NSString stringWithFormat:@"%@=%@", key, encoded]];
   }
   return [NSString stringWithFormat:@"%@(%@)", entitySet, [parts componentsJoinedByString:@","]];
 }
@@ -1657,6 +1823,16 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     }
     return nil;
   }
+  // The method becomes curl's --request and the request line; a CR/LF in it
+  // would end the request and start another one with the app's token.
+  if (!ALNDataverseHeaderNameIsValid(normalizedMethod)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
+                                     nil);
+    }
+    return nil;
+  }
 
   NSError *serializationError = nil;
   id serializedObject = ALNDataverseSerializedObject(bodyObject, &serializationError);
@@ -1683,6 +1859,9 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   }
   if (consistencyCount) {
     requestHeaders[@"ConsistencyLevel"] = @"eventual";
+  }
+  if (!ALNDataverseValidateHeaders(headers, error)) {
+    return nil;
   }
   for (NSString *key in headers ?: @{}) {
     NSString *value = headers[key];
@@ -1743,6 +1922,14 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
     if (error != NULL) {
       *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
                                      @"Dataverse authorized request requires a method and URL",
+                                     nil);
+    }
+    return nil;
+  }
+  if (!ALNDataverseHeaderNameIsValid(normalizedMethod)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse request method must be an HTTP token",
                                      nil);
     }
     return nil;
@@ -2187,10 +2374,23 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                boundPath:(NSString *)boundPath
               parameters:(NSDictionary<NSString *, id> *)parameters
                    error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
   NSString *name = ALNDataverseTrimmedString(actionName);
-  NSString *path = ([ALNDataverseTrimmedString(boundPath) length] > 0)
-                       ? [NSString stringWithFormat:@"%@/%@", ALNDataverseTrimmedString(boundPath), name]
-                       : name;
+  if (!ALNDataverseOperationNameIsSafe(name)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse action name must be a safe identifier",
+                                     @{ @"action" : name ?: @"" });
+    }
+    return nil;
+  }
+  NSString *bound = ALNDataverseValidatedBoundPath(boundPath, error);
+  if (bound == nil) {
+    return nil;
+  }
+  NSString *path = ([bound length] > 0) ? [NSString stringWithFormat:@"%@/%@", bound, name] : name;
   ALNDataverseResponse *response = [self performRequestWithMethod:@"POST"
                                                             path:path
                                                            query:nil
@@ -2223,10 +2423,33 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
                  boundPath:(NSString *)boundPath
                 parameters:(NSDictionary<NSString *, id> *)parameters
                      error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
   NSString *name = ALNDataverseTrimmedString(functionName);
+  if (!ALNDataverseOperationNameIsSafe(name)) {
+    if (error != NULL) {
+      *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                     @"Dataverse function name must be a safe identifier",
+                                     @{ @"function" : name ?: @"" });
+    }
+    return nil;
+  }
+  NSString *bound = ALNDataverseValidatedBoundPath(boundPath, error);
+  if (bound == nil) {
+    return nil;
+  }
   NSMutableArray<NSString *> *parameterParts = [NSMutableArray array];
   NSArray<NSString *> *keys = [[parameters allKeys] sortedArrayUsingSelector:@selector(compare:)];
   for (NSString *key in keys) {
+    if (!ALNDataverseIdentifierIsSafe(key)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse function parameter name must be a safe identifier",
+                                       @{ @"key" : [key description] ?: @"" });
+      }
+      return nil;
+    }
     NSError *literalError = nil;
     NSString *literal = ALNDataverseODataLiteral(parameters[key], &literalError);
     if ([literal length] == 0 || literalError != nil) {
@@ -2235,12 +2458,19 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
       }
       return nil;
     }
-    [parameterParts addObject:[NSString stringWithFormat:@"%@=%@", key, literal]];
+    NSString *encoded = ALNDataversePathEncodedLiteral(literal);
+    if ([encoded length] == 0) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse function parameter value could not be encoded",
+                                       @{ @"key" : key });
+      }
+      return nil;
+    }
+    [parameterParts addObject:[NSString stringWithFormat:@"%@=%@", key, encoded]];
   }
   NSString *suffix = [NSString stringWithFormat:@"%@(%@)", name, [parameterParts componentsJoinedByString:@","]];
-  NSString *path = ([ALNDataverseTrimmedString(boundPath) length] > 0)
-                       ? [NSString stringWithFormat:@"%@/%@", ALNDataverseTrimmedString(boundPath), suffix]
-                       : suffix;
+  NSString *path = ([bound length] > 0) ? [NSString stringWithFormat:@"%@/%@", bound, suffix] : suffix;
   ALNDataverseResponse *response = [self performRequestWithMethod:@"GET"
                                                             path:path
                                                            query:nil
@@ -2286,6 +2516,25 @@ NSError *ALNDataverseMakeError(ALNDataverseErrorCode code,
   NSString *boundary = [NSString stringWithFormat:@"batch_%@", [[[NSUUID UUID] UUIDString] lowercaseString]];
   NSMutableString *body = [NSMutableString string];
   for (ALNDataverseBatchRequest *request in requests) {
+    // Each part is a hand-written HTTP request, so everything placed in its
+    // head must stay on its own line.
+    NSString *method = request.method ?: @"GET";
+    NSString *relativePath = request.relativePath ?: @"";
+    NSString *contentID = request.contentID ?: @"";
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    if (!ALNDataverseHeaderNameIsValid(method) || ALNDataverseTextHasControlCharacters(relativePath) ||
+        [relativePath rangeOfCharacterFromSet:whitespace].location != NSNotFound ||
+        ALNDataverseTextHasControlCharacters(contentID)) {
+      if (error != NULL) {
+        *error = ALNDataverseMakeError(ALNDataverseErrorInvalidArgument,
+                                       @"Dataverse batch request method, path or Content-ID contains forbidden characters",
+                                       @{ @"contentID" : contentID });
+      }
+      return nil;
+    }
+    if (!ALNDataverseValidateHeaders(request.headers, error)) {
+      return nil;
+    }
     [body appendFormat:@"--%@\r\n", boundary];
     [body appendString:@"Content-Type: application/http\r\n"];
     [body appendString:@"Content-Transfer-Encoding: binary\r\n"];

@@ -32,6 +32,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |
 | `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNPg`. |
+| `sessionResetPolicy` | `ALNPgSessionResetPolicy` | `nonatomic, assign` | Public `sessionResetPolicy` property available on `ALNPg`. |
 
 ## Methods
 
@@ -46,6 +47,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `releaseAdapterConnection:` | `- (void)releaseAdapterConnection:(id<ALNDatabaseConnection>)connection;` | Release a protocol-typed adapter connection instance. | Call for side effects; this method does not return a value. |
 | `executeQuery:parameters:error:` | `- (nullable NSArray<NSDictionary *> *)executeQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError *_Nullable *_Nullable)error;` | Execute SQL query and return zero or more result rows. | Pass `NSError **` and treat a `nil` result as failure. |
 | `executeQueryResult:parameters:error:` | `- (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql parameters:(NSArray *)parameters error:(NSError *_Nullable *_Nullable)error;` | Execute a read/query operation and return row dictionaries. | Pass `NSError **` and treat a `nil` result as failure. |
+| `enumerateQuery:parameters:batchSize:usingBlock:error:` | `- (BOOL)enumerateQuery:(NSString *)sql parameters:(NSArray *)parameters batchSize:(NSUInteger)batchSize usingBlock:(void (^)(NSDictionary *row, BOOL *stop))block error:(NSError *_Nullable *_Nullable)error;` | Perform `enumerate query` for `ALNPg`. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
 | `executeBuilderQuery:error:` | `- (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder error:(NSError *_Nullable *_Nullable)error;` | Compile and execute an `ALNSQLBuilder` query. | Pass `NSError **` and treat a `nil` result as failure. |
 | `executeCommand:parameters:error:` | `- (NSInteger)executeCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError *_Nullable *_Nullable)error;` | Execute SQL command and return affected-row count. | Pass `NSError **` when you need detailed failure diagnostics. |
 | `executeCommandBatch:parameterSets:error:` | `- (NSInteger)executeCommandBatch:(NSString *)sql parameterSets:(NSArray<NSArray *> *)parameterSets error:(NSError *_Nullable *_Nullable)error;` | Execute a write/command operation and return affected row count. | Pass `NSError **` when you need detailed failure diagnostics. |

@@ -63,6 +63,26 @@ typedef NS_ENUM(NSInteger, ALNPgPreparedStatementReusePolicy) {
   ALNPgPreparedStatementReusePolicyAlways = 2,
 };
 
+/// What the pool resets when a connection is released, so one borrower's
+/// session state never reaches the next. A connection released inside a
+/// transaction is always closed, whatever the policy. A connection that only
+/// ran SQL the pool generated itself (builder statements without trusted
+/// expressions) is reused without a reset.
+typedef NS_ENUM(NSInteger, ALNPgSessionResetPolicy) {
+  /// Default. One round trip: `RESET ALL`, `SET SESSION AUTHORIZATION
+  /// DEFAULT`, `CLOSE ALL`, `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *`
+  /// and `pg_advisory_unlock_all()`, plus a check of the pool's cached
+  /// prepared statements against `pg_prepared_statements`; they are kept
+  /// unless one was replaced, in which case all are deallocated.
+  ALNPgSessionResetPolicySession = 0,
+  /// `DISCARD ALL`, which also drops every prepared statement (the pool's
+  /// statement cache is cleared to match).
+  ALNPgSessionResetPolicyDiscardAll = 1,
+  /// No reset (queued notifications are still dropped). Only for code that
+  /// manages session state itself.
+  ALNPgSessionResetPolicyNone = 2,
+};
+
 typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *event);
 
 @interface ALNPgConnection : NSObject <ALNDatabaseConnection>
@@ -158,6 +178,9 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 /// `ALNPgErrorPoolExhausted`; a positive value fails with the same error once
 /// the wait runs out.
 @property(nonatomic, assign) NSTimeInterval acquireTimeout;
+/// Session state reset applied when a connection goes back to the pool.
+/// Default `ALNPgSessionResetPolicySession`.
+@property(nonatomic, assign) ALNPgSessionResetPolicy sessionResetPolicy;
 
 + (NSDictionary<NSString *, id> *)capabilityMetadata;
 
@@ -166,12 +189,19 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
                                              error:(NSError *_Nullable *_Nullable)error;
 
 - (nullable ALNPgConnection *)acquireConnection:(NSError *_Nullable *_Nullable)error;
+/// Returns a connection to the pool. A connection still inside a transaction
+/// (begun with `-beginTransaction:` or by sending `BEGIN`) is closed rather
+/// than re-pooled; otherwise its session state is reset per
+/// `sessionResetPolicy`, and it is closed if the reset fails.
 - (void)releaseConnection:(ALNPgConnection *)connection;
 /// Pool occupancy and wait counters: `max_connections`, `in_use_connections`,
 /// `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-/// `acquire_wait_seconds_total`, `pool_exhausted_count`, and
+/// `acquire_wait_seconds_total`, `pool_exhausted_count`,
 /// `connection_retry_count` (statements retried after a pooled connection
-/// turned out to have been closed by the server).
+/// turned out to have been closed by the server),
+/// `released_in_transaction_count` (connections closed because they were
+/// released inside a transaction), `session_reset_count` (releases that ran
+/// the reset round trip), and `session_reset_failure_count`.
 - (NSDictionary<NSString *, id> *)poolDiagnostics;
 
 - (nullable id<ALNDatabaseConnection>)acquireAdapterConnection:(NSError *_Nullable *_Nullable)error;
@@ -183,6 +213,16 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                         parameters:(NSArray *)parameters
                                              error:(NSError *_Nullable *_Nullable)error;
+/// Enumerates a SELECT through a transaction-local cursor, retaining at most
+/// batchSize rows (1...10000) at once. The callback may set stop to YES for a
+/// successful early stop. Rows retained by the caller remain its responsibility.
+/// The connection is held until completion; callbacks are never replayed.
+- (BOOL)enumerateQuery:(NSString *)sql
+           parameters:(NSArray *)parameters
+            batchSize:(NSUInteger)batchSize
+           usingBlock:(void (^)(NSDictionary *row, BOOL *stop))block
+                error:(NSError *_Nullable *_Nullable)error;
+
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                      error:(NSError *_Nullable *_Nullable)error;
 

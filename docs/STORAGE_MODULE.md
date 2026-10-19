@@ -45,6 +45,59 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
 
+Processes that share the state file (propane workers, the jobs worker, CLI
+delegates on one host) stay consistent:
+
+- Each change is a read-modify-write under an exclusive lock on
+  `<state file>.lock` (`flock` on POSIX, `LockFileEx` on Windows). It reloads
+  whatever another process wrote first, so no process drops another's objects
+  or upload sessions.
+- Reads reload the file when another process has replaced it, without the
+  lock: writers replace the file with a rename, so a read sees one whole
+  version. A read never waits for a writer; while one is busy it serves the
+  catalog already in memory.
+- The state file is an XML property list. Older binary files still load and
+  are rewritten as XML on the next change.
+- Object and upload-session IDs are random (`obj-<32 hex>`,
+  `upload-<32 hex>`), not per-process counters. Download tokens are bound to
+  the object they were issued for, not just to its ID.
+- Only the catalog update runs under the lock. Attachment data is written and
+  hashed before it, and an attachment whose catalog update fails is deleted
+  again.
+- A change that can't get the lock within
+  `persistence.lockTimeoutSeconds` (default `10`) fails with
+  `ALNStorageModuleErrorStateBusy` (HTTP 503 with `Retry-After: 1`) instead of waiting forever
+  behind a hung process. Waiting blocks on the lock rather than polling it.
+- At startup the module waits up to `persistence.startupLockTimeoutSeconds`
+  (default `60`) for its cleanup pass. If the lock is still busy it logs a
+  warning and starts anyway; the catalog was already loaded.
+- The state file is written owner-only (`0600`), whatever the umask. Startup
+  removes `<state file>.<hex>.tmp` files left by a process killed mid-write.
+
+The state file must be on a local filesystem that honours those locks, and
+every process must see the same file: this is single-host shared state, not
+multi-host storage.
+
+Attachment data has to be shared the same way, because the catalog names
+attachments by ID:
+
+- With persistence on and no attachment adapter configured, the module
+  replaces the application's in-memory default with a filesystem adapter at
+  `<state file without extension>-attachments/` (or `storageModule.attachments.path`,
+  relative to the app root).
+- With persistence on, an attachment adapter that keeps data in process memory
+  (`ALNInMemoryAttachmentAdapter`, alone or wrapped) is refused at startup.
+  Configure a filesystem or object-store adapter, or turn persistence off.
+- Downloads and variant jobs check the attachment's size and SHA-256 against
+  the object record, and answer 404 rather than serve bytes that don't match.
+  A delete removes only attachments whose bytes match the record.
+
+With persistence off, each process keeps its own catalog. That suits one
+process, but with `propaneAccessories.workerCount > 1` most downloads and
+jobs-worker variants would miss their objects, so startup logs a
+`storage_unshared_state` warning outside `test` and `development`, `propane`
+prints a warning, and `arlen module doctor` reports it.
+
 Runtime access is available through `ALNStorageModuleRuntime`.
 
 ## Collection Metadata

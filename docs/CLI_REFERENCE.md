@@ -133,6 +133,13 @@ Run bootstrap environment diagnostics without requiring a framework build.
  set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
  requests when `observability.operabilityAnonymous` /
  `ARLEN_OPERABILITY_ANONYMOUS` is set
+- in an app root, warns (`module_outdated`) for each vendored
+ `modules/<id>` whose `version` is lower than the framework checkout's
+ `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
+ `arlen module migrate`, then rebuild (a numeric `MAJOR.MINOR[.PATCH]`
+ comparison only; a copy whose version has a suffix such as `-rc1`, which
+ module manifests don't allow, is skipped; `arlen module doctor` also compares
+ file contents)
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -553,13 +560,29 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- reports `module_csrf_disabled` (an error; a warning with
+  `authModule.allowWithoutCSRF = YES`) when a module that expects CSRF, such as
+  `auth`, is installed while `session.enabled = YES` and `csrf.enabled = NO`
 - warns (without failing) about vendored module content:
+ - `module_outdated`: the framework checkout's copy of the module has a newer
+   `version` than the app's vendored copy; the hint is
+   `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild.
+   `arlen doctor` runs the same version check, and apps log it at startup
+   (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as `boomhauer`,
+   `propane` and `jobs-worker` do for the app process
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
  - `module_framework_copy_differs`: the vendored copy differs from
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
-   framework checkout, or the running `arlen` binary's checkout), typically
+   framework checkout, or the running `arlen` binary's checkout) at the same or
+   an older framework version, typically
    after moving the framework pin without re-running `module upgrade`
+ - `module_sessions_disabled`: an installed module's defaults enable sessions,
+   but `config/app.plist` sets `session.enabled = NO` (the `arlen new`
+   app.plist does), so the module's sessions never turn on
+- does not run module code: a module that fails to configure when the app
+  starts stops startup outside `development` and `test` (see
+  [Modules](MODULES.md#3-list-and-validate))
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -1142,6 +1165,7 @@ Behavior:
  `change-me`, `changeme`, `change_me` or `0123456789ab`, or a secret committed
  in the Arlen repository); generate one with `openssl rand -hex 32`
  - `csrf.enabled=YES` without session middleware
+ - the `auth` module with `session.enabled=YES` and `csrf.enabled=NO` (unless `authModule.allowWithoutCSRF=YES`); an unset `csrf.enabled` follows `session.enabled`
  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
@@ -1161,6 +1185,7 @@ Behavior:
  - `ALNAuthProviderSessionBridge`
 - `make phase12-confidence` runs the auth confidence gate and writes artifacts under `build/release_confidence/phase12`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
+ - the effective client address (used by the rate limiter) is the right-most `X-Forwarded-For` hop that is not in `trustedProxyCIDRs`; hops to its left are client-supplied and ignored, and an unreadable chain leaves the proxy's own address
  - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
  - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
  - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
@@ -1218,8 +1243,12 @@ Environment:
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_TRUSTED_PROXY` (legacy compatibility toggle for forwarded-header handling; when set to `1` with no explicit CIDRs, Arlen falls back to `127.0.0.1/32`; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
-- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
+- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 or IPv6 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
+- `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS` (default `15`; total seconds to finish sending a request head, counted from accept for a connection's first request and from the first byte afterwards, else `408`; `0` disables; overrides `requestLimits.requestHeadTimeoutSeconds`)
+- `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS` (default `300`; total seconds to send a request body after its head, else `408`; `0` disables; overrides `requestLimits.requestBodyTimeoutSeconds`)
+- `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND` (default `1024`; minimum average body rate after the grace period, else `408`; `0` disables; overrides `requestLimits.requestBodyMinBytesPerSecond`)
+- `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS` (default `10`; seconds before the minimum body rate applies; overrides `requestLimits.requestBodyMinRateGraceSeconds`)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
@@ -1291,6 +1320,12 @@ Behavior:
 
 - in app-root mode, runs `bin/boomhauer --no-watch --prepare-only` before launching workers
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
+- worker startup failures (a worker that exits before serving, e.g. a module
+  that fails to load) are printed once per distinct error, respawned with
+  exponential backoff up to the `respawnBackoffMaxMs` propane accessory, and
+  after `startupFailureLimit` consecutive startup failures (propane
+  accessory, default `5`) propane exits with status `3`; see
+  [Propane](PROPANE.md#propane-accessories)
 
 Core options:
 
@@ -1664,3 +1699,41 @@ defaults. No new CLI option or propane accessory is required; see
 `boomhauer` and `propane` need no new option or propane accessory for the
 libobjc2 first-use lock workaround; see
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+
+### Response transfer limits
+
+`requestLimits.responseSendTimeoutSeconds` (default `300`) bounds the total
+header and body send time for a normal HTTP response.
+`requestLimits.responseMinBytesPerSecond` (default `1024`) requires that average
+send rate after `responseMinRateGraceSeconds` (default `10`). Set a limit to
+`0` to disable it. The deadline covers file transfers and their read/write
+fallback as well as in-memory bodies. A missed limit closes the connection,
+releases the response file, and logs `response send limit exceeded`.
+
+Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
+`ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
+`ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
+separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+For large PostgreSQL SELECT results, use
+`-[ALNPg enumerateQuery:parameters:batchSize:usingBlock:error:]`. It holds one
+pooled connection and a transaction-local cursor, fetches 1–10,000 rows per
+batch, and drains an autorelease pool between batches. Set `*stop = YES` in the
+callback for successful early termination. Errors roll back; callback
+exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
+in your callback increases memory use; `executeQuery:` still buffers its full
+result. The cursor API does not change the SQL or limit its server-side cost.

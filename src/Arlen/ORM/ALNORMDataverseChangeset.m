@@ -86,10 +86,71 @@ static id ALNORMDataverseChangesetStoredValue(id value) {
       return NO;
     }
   }
+  // Batch saves encode a changeset without applying it to the model, so the
+  // persisted-ID rule is enforced here as well as in the model setter.
+  if (self.model.isPersisted && [field.logicalName isEqualToString:self.descriptor.primaryIDAttribute ?: @""]) {
+    id persistedID = [self.model persistedPrimaryIDValue];
+    BOOL clearing = (castValue == nil || castValue == [NSNull null]);
+    if (persistedID == nil ? !clearing : ![persistedID isEqual:castValue]) {
+      [self addError:@"cannot change the primary ID of a persisted record" forFieldName:field.logicalName];
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorReadOnlyMutation,
+                                 @"Dataverse changeset cannot change the primary ID of a persisted record",
+                                 @{
+                                   @"field_name" : field.logicalName ?: @"",
+                                   @"entity_name" : self.descriptor.logicalName ?: @"",
+                                 });
+      }
+      return NO;
+    }
+  }
   NSMutableDictionary *updated = [NSMutableDictionary dictionaryWithDictionary:self.values ?: @{}];
   updated[field.logicalName] = ALNORMDataverseChangesetStoredValue(castValue);
   _values = [updated copy];
   return YES;
+}
+
+- (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
+         permittedFields:(NSArray<NSString *> *)permittedFields
+                   error:(NSError **)error {
+  if (error != NULL) {
+    *error = nil;
+  }
+  if (![values isKindOfClass:[NSDictionary class]] || ![permittedFields isKindOfClass:[NSArray class]]) {
+    if (error != NULL) {
+      *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
+                               @"Dataverse changeset input must be a dictionary and permitted fields an array",
+                               nil);
+    }
+    return NO;
+  }
+  NSMutableSet<NSString *> *permitted = [NSMutableSet set];
+  for (NSString *fieldName in permittedFields) {
+    ALNORMDataverseFieldDescriptor *field =
+        [fieldName isKindOfClass:[NSString class]] ? [self.descriptor fieldNamed:fieldName] : nil;
+    if (field == nil) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorInvalidArgument,
+                                 @"permitted fields name an unknown Dataverse field",
+                                 @{
+                                   @"field_name" : [fieldName isKindOfClass:[NSString class]] ? fieldName : @"",
+                                 });
+      }
+      return NO;
+    }
+    [permitted addObject:field.logicalName];
+  }
+  // Input keys outside the permit list are dropped, like unknown form fields.
+  for (NSString *inputName in values) {
+    ALNORMDataverseFieldDescriptor *field = [self.descriptor fieldNamed:inputName];
+    if (field == nil || ![permitted containsObject:field.logicalName]) {
+      continue;
+    }
+    if (![self castInputValue:values[inputName] forFieldName:field.logicalName error:error]) {
+      return NO;
+    }
+  }
+  return [self validateRequiredFields];
 }
 
 - (BOOL)applyInputValues:(NSDictionary<NSString *,id> *)values error:(NSError **)error {

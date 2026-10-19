@@ -406,3 +406,25 @@ Create process-wide lazy objects, such as a shared `NSRegularExpression`, with
 `dispatch_once` rather than `if (x == nil) { x = ...; }`. Concurrent first
 requests can otherwise race, and one thread can free the object another is
 using.
+
+Normal HTTP responses have a five-minute total send deadline and require an
+average of 1 KiB/s after a ten-second grace period. This prevents slow readers
+from occupying every HTTP worker. For unusually slow bulk downloads, adjust
+`requestLimits.responseSendTimeoutSeconds`, `responseMinBytesPerSecond`, and
+`responseMinRateGraceSeconds` in your app configuration. SSE and WebSocket
+sessions use separate policies. See [Configuration reference](CONFIGURATION_REFERENCE.md).
+
+For PostgreSQL queries whose values vary per request, use bound builder
+parameters. The connection cache reuses their SQL shape while keeping each
+call's parameter values separate. See [Arlen Data](ARLEN_DATA.md).
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+Use PostgreSQL's `enumerateQuery:parameters:batchSize:usingBlock:error:` for
+large exports instead of collecting all rows with `executeQuery:`. Process
+rows as they arrive and avoid retaining them to keep client memory bounded.

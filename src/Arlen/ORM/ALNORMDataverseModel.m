@@ -107,6 +107,25 @@ static id ALNORMDataversePublicValue(id value) {
     }
     return NO;
   }
+  // The primary ID of a persisted record names the record PATCH and DELETE
+  // target; changing it would retarget them at another record. A record
+  // loaded without its ID (a narrow $select) can't be given one either.
+  if (_persisted && [field.logicalName isEqualToString:self.descriptor.primaryIDAttribute ?: @""]) {
+    id persistedID = _cleanFieldValues[field.logicalName];
+    id candidate = ALNORMDataverseStoredValue(value);
+    BOOL missing = (persistedID == nil || persistedID == [NSNull null]);
+    if (missing ? (candidate != [NSNull null]) : ![persistedID isEqual:candidate]) {
+      if (error != NULL) {
+        *error = ALNORMMakeError(ALNORMErrorReadOnlyMutation,
+                                 @"the primary ID of a persisted Dataverse record cannot change",
+                                 @{
+                                   @"field_name" : field.logicalName ?: @"",
+                                   @"entity_name" : self.descriptor.logicalName ?: @"",
+                                 });
+      }
+      return NO;
+    }
+  }
   if ((value == nil || value == [NSNull null]) && !field.isNullable) {
     if (error != NULL) {
       *error = ALNORMMakeError(ALNORMErrorMissingField,
@@ -207,6 +226,14 @@ static id ALNORMDataversePublicValue(id value) {
 
 - (id)primaryIDValue {
   return [self objectForFieldName:self.descriptor.primaryIDAttribute];
+}
+
+- (id)persistedPrimaryIDValue {
+  if (!_persisted) {
+    return [self primaryIDValue];
+  }
+  id persistedID = ALNORMDataversePublicValue(_cleanFieldValues[self.descriptor.primaryIDAttribute ?: @""]);
+  return (persistedID == [NSNull null]) ? nil : persistedID;
 }
 
 - (NSDictionary<NSString *, id> *)dictionaryRepresentation {

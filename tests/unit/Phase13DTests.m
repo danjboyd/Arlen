@@ -246,6 +246,54 @@
   }
 }
 
+- (void)testDoctorFlagsAuthModuleWithSessionsOnAndCSRFOff {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-auth-csrf"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/auth/module.plist"]
+                          content:[self readFile:[repoRoot stringByAppendingPathComponent:@"modules/auth/module.plist"]]]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{\n"
+                                  "  modules = (\n"
+                                  "    { identifier = \"auth\"; path = \"modules/auth\"; enabled = YES; }\n"
+                                  "  );\n"
+                                  "}\n"]);
+    NSDictionary *session = @{ @"enabled" : @YES, @"secret" : @"phase13d-secret-0123456789abcdef0123" };
+    NSDictionary *(^diagnosticFor)(NSDictionary *) = ^NSDictionary *(NSDictionary *config) {
+      NSMutableDictionary *full = [NSMutableDictionary dictionaryWithDictionary:config];
+      full[@"appRoot"] = appRoot;
+      full[@"session"] = session;
+      for (NSDictionary *entry in [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot config:full error:NULL]) {
+        if ([entry[@"code"] isEqualToString:@"module_csrf_disabled"]) {
+          return entry;
+        }
+      }
+      return nil;
+    };
+
+    NSDictionary *pinnedOff = diagnosticFor(@{ @"csrf" : @{ @"enabled" : @NO } });
+    XCTAssertEqualObjects(@"error", pinnedOff[@"status"]);
+    XCTAssertEqualObjects(@"auth", pinnedOff[@"module"]);
+    XCTAssertEqualObjects(@"csrf.enabled", pinnedOff[@"key_path"]);
+
+    XCTAssertNil(diagnosticFor(@{ @"csrf" : @{ @"enabled" : @YES } }));
+    XCTAssertNil(diagnosticFor(@{}));
+
+    NSDictionary *optedOut = diagnosticFor(@{
+      @"csrf" : @{ @"enabled" : @NO },
+      @"authModule" : @{ @"allowWithoutCSRF" : @YES },
+    });
+    XCTAssertEqualObjects(@"warning", optedOut[@"status"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 - (void)testCompatibilityChecksFailClosed {
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-compat"];
   XCTAssertNotNil(appRoot);

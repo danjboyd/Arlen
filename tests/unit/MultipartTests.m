@@ -2,6 +2,7 @@
 #import "ALNRequest.h"
 #import "ALNApplication.h"
 #import "ALNResponse.h"
+#import "ALNPlatform.h"
 @interface MultipartTests : XCTestCase
 @end
 @implementation MultipartTests
@@ -96,6 +97,31 @@
     XCTAssertTrue([upload writeToFile:path error:&error]);
     XCTAssertEqualObjects([NSData dataWithContentsOfFile:path], self.binary);
   } @finally { [[NSFileManager defaultManager] removeItemAtPath:path error:NULL]; }
+}
+// A destination built from request data may hold U+0000, where a C path ends:
+// "report\0.pdf" must not write "report".
+- (void)testUploadWriteRefusesDestinationsWithControlCharacters {
+  ALNRequest *request = [self request:self.body];
+  ALNUpload *upload = [request uploadsForName:@"doc"][0];
+  NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:directory withIntermediateDirectories:YES
+                                                           attributes:nil error:NULL]);
+  @try {
+    NSString *prefix = [directory stringByAppendingPathComponent:@"report"];
+    for (NSString *path in @[ [NSString stringWithFormat:@"%@%C.pdf", prefix, (unichar)0],
+                              [NSString stringWithFormat:@"%@%C", prefix, (unichar)0x0a], @"" ]) {
+      NSError *error = nil;
+      XCTAssertFalse([upload writeToFile:path error:&error]);
+      XCTAssertNotNil(error);
+    }
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:prefix]);
+    XCTAssertEqual(NULL, ALNPlatformOpenFile([NSString stringWithFormat:@"%@%C.pdf", prefix, (unichar)0], "wb"));
+    XCTAssertEqual(-1, ALNPlatformOpenExclusiveLock([NSString stringWithFormat:@"%@%C.lock", prefix, (unichar)0]));
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:prefix]);
+    NSString *emoji = [directory stringByAppendingPathComponent:[NSString stringWithFormat:@"family%C.bin", (unichar)0x200d]];
+    NSError *error = nil;
+    XCTAssertTrue([upload writeToFile:emoji error:&error], @"%@", error);
+  } @finally { [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL]; }
 }
 - (void)testEachLimitAndAtomicFailure {
   for (NSString *key in [ALNMultipart defaultLimits]) {

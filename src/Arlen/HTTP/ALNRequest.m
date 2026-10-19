@@ -382,6 +382,22 @@ static NSString *ALNTakeAbsoluteFormAuthority(NSString **pathInOut) {
   return authority;
 }
 
+// The stored value after another `name: value` field line. Repeated lines of
+// the forwarding list fields are combined in order with ", " (RFC 9110
+// 5.3), so a proxy's appended line is not dropped or replaced by the
+// client's. For other fields the last line wins, as before.
+static NSString *ALNHeaderValueAddingFieldLine(NSString *name, NSString *existing, NSString *value) {
+  value = value ?: @"";
+  if ([existing length] == 0 ||
+      !([name isEqualToString:@"x-forwarded-for"] || [name isEqualToString:@"forwarded"])) {
+    return value;
+  }
+  if ([value length] == 0) {
+    return existing;
+  }
+  return [NSString stringWithFormat:@"%@, %@", existing, value];
+}
+
 // RFC 9112 §3.2: an HTTP/1.1 request must carry exactly one Host header
 // (an absolute-form target supplies the authority instead). Requests with
 // several, or HTTP/1.1 requests with none, get 400 (#213).
@@ -756,6 +772,9 @@ static NSString *ALNLLHTTPHotHeaderKey(const unsigned char *bytes, size_t length
   if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "x-forwarded-proto")) {
     return @"x-forwarded-proto";
   }
+  if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "forwarded")) {
+    return @"forwarded";
+  }
   if (ALNLLHTTPASCIIEqualsIgnoreCase(bytes, length, "accept")) {
     return @"accept";
   }
@@ -821,6 +840,29 @@ static id ALNLLHTTPDeferredHeaderStorageFromBytes(const unsigned char *bytes,
   return [NSData dataWithBytes:bytes length:length];
 }
 
+// Deferred headers are ranges into the parse buffer. The server parses from
+// its connection buffer without copying, then shifts the next pipelined
+// request to the front of it (and frees it when the connection closes), so
+// the request keeps its own copy of the bytes those ranges cover.
+static NSData *ALNLLHTTPOwnedDeferredHeaderSource(NSData *sourceData,
+                                                  NSArray *nameStorage,
+                                                  NSArray *valueStorage) {
+  NSUInteger end = 0;
+  for (NSArray *storage in @[ nameStorage ?: @[], valueStorage ?: @[] ]) {
+    for (id stored in storage) {
+      if ([stored isKindOfClass:[NSValue class]]) {
+        NSRange range = [(NSValue *)stored rangeValue];
+        end = MAX(end, NSMaxRange(range));
+      }
+    }
+  }
+  if (end == 0 || sourceData == nil) {
+    return nil;
+  }
+  end = MIN(end, [sourceData length]);
+  return [NSData dataWithBytes:[sourceData bytes] length:end];
+}
+
 static int ALNLLHTTPSetError(llhttp_t *parser, NSString *message) {
   ALNLLHTTPParseState *state = ALNLLHTTPState(parser);
   if (state != nil) {
@@ -882,7 +924,7 @@ static int ALNLLHTTPFinalizeHeader(llhttp_t *parser) {
     if (value == nil) {
       return ALNLLHTTPSetError(parser, @"Request header is not valid UTF-8");
     }
-    state->_headers[hotKey] = value ?: @"";
+    state->_headers[hotKey] = ALNHeaderValueAddingFieldLine(hotKey, state->_headers[hotKey], value);
   } else {
     id deferredName = ALNLLHTTPDeferredHeaderStorageFromBytes(fieldBytes,
                                                               fieldByteLength,
@@ -1277,7 +1319,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
     } else if ([name isEqualToString:@"host"]) {
       hostHeaderCount += 1;
     }
-    headers[name] = value;
+    headers[name] = ALNHeaderValueAddingFieldLine(name, headers[name], value);
   }
   if (!ALNHostHeaderCountIsValid(hostHeaderCount, httpVersion, authority)) {
     if (error != NULL) {
@@ -1422,7 +1464,9 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
       [state->_deferredHeaderNames count] == [state->_deferredHeaderValues count]) {
     [request aln_setDeferredHeaderStorage:state->_deferredHeaderNames
                            deferredValues:state->_deferredHeaderValues
-                                sourceData:sourceData];
+                                sourceData:ALNLLHTTPOwnedDeferredHeaderSource(sourceData,
+                                                                              state->_deferredHeaderNames,
+                                                                              state->_deferredHeaderValues)];
   }
   return request;
 }

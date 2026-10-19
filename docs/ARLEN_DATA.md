@@ -686,3 +686,92 @@ other idle connections are closed first):
 `executeCommandBatch` and statements on a connection you acquired yourself
 are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.
+
+## Connection pool session reset
+
+`ALNPg` resets a connection's session state when it goes back to the pool, so
+one request's settings never reach the next borrower. This matters most for
+row-level security or tenancy implemented with
+`set_config('app.tenant_id', ...)`: without a reset, a request that skips the
+`set_config` would run as the previous request's tenant.
+
+- A connection still inside a transaction when it is released, whether
+  started with `beginTransaction:` or by sending `BEGIN` by hand, is closed
+  rather than reused. Closing it rolls the transaction back on the server.
+  `released_in_transaction_count` in `poolDiagnostics` counts these.
+- A connection is reset only if the borrower could have changed its session.
+  It is marked when it runs SQL the pool did not generate itself: any
+  `executeQuery`, `executeQueryResult`, `executeCommand`, batch, script or
+  `prepareStatementNamed:` with caller SQL, a transaction, and also a builder
+  statement that contains a trusted expression (`selectExpression:`,
+  `whereExpression:`, `orderByExpression:`, join `onExpression:` and the
+  other expression APIs splice app SQL text, which can call `set_config`,
+  `pg_advisory_lock` or `nextval` inside a plain `SELECT`). A connection that
+  only ran generated builder statements is reused without a reset. ORM
+  repositories run their SQL through `executeQuery`/`executeCommand`, so they
+  mark the connection too.
+- For a marked connection, `sessionResetPolicy` decides what is reset:
+  - `ALNPgSessionResetPolicySession` (default): one round trip running
+    `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`, `CLOSE ALL`,
+    `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *` and
+    `pg_advisory_unlock_all()`, and reading `pg_prepared_statements`.
+    Settings (including `search_path` and `SET ROLE`), cursors, temporary
+    tables, `currval`/`lastval` state, `LISTEN`s and session advisory locks
+    are cleared. The pool's cached prepared statements are kept only if every
+    one is still the statement the pool prepared: a statement the cache does
+    not know, one made with SQL `PREPARE`, or one whose text differs (a
+    borrower can `DEALLOCATE` a cached name and `PREPARE` other SQL under it)
+    makes the pool run `DEALLOCATE ALL` and clear its cache.
+  - `ALNPgSessionResetPolicyDiscardAll`: `DISCARD ALL`, which also drops
+    every prepared statement; the pool's statement cache is cleared and
+    statements are prepared again on next use.
+  - `ALNPgSessionResetPolicyNone`: no reset, for code that manages session
+    state itself.
+- Under every policy, notifications still queued for the borrower's
+  `LISTEN`s are read and dropped, so the next borrower's
+  `waitForNotificationsWithTimeout:` cannot see them.
+- If the reset fails, the connection is closed instead of reused
+  (`session_reset_failure_count`). `session_reset_count` counts releases that
+  ran the reset.
+
+Cost, measured on a local socket over 2,000 pooled requests: a connection that
+ran only generated builder statements pays nothing extra. A marked connection
+pays one round trip, about 95 µs per request (49 µs → 142 µs for a pooled
+`executeQuery`), for the reset, the prepared-statement check and the
+notification drain.
+
+```objc
+database.sessionResetPolicy = ALNPgSessionResetPolicyDiscardAll;
+```
+
+## Text parameters and NUL
+
+PostgreSQL `text` cannot hold U+0000, and libpq reads text parameters as C
+strings. `ALNPg` therefore refuses a string parameter that contains U+0000
+with `ALNPgErrorInvalidArgument` instead of letting it be cut short at the NUL
+(which would make the database see a different value than the one the app
+validated). Send binary data as `NSData`; it is bound as `bytea`.
+
+`ALNMSSQL` binds text parameters with their full byte length, so a value with
+an embedded U+0000 reaches SQL Server unchanged (SQL Server stores NUL inside
+`(n)varchar`).
+
+Both adapters also refuse SQL text (and `ALNPg` statement names) that contain
+U+0000 with an invalid-argument error. The drivers take statement text as a C
+string, so the statement would otherwise end silently at the NUL.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.
+
+For large PostgreSQL SELECT results, use
+`-[ALNPg enumerateQuery:parameters:batchSize:usingBlock:error:]`. It holds one
+pooled connection and a transaction-local cursor, fetches 1–10,000 rows per
+batch, and drains an autorelease pool between batches. Set `*stop = YES` in the
+callback for successful early termination. Errors roll back; callback
+exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
+in your callback increases memory use; `executeQuery:` still buffers its full
+result. The cursor API does not change the SQL or limit its server-side cost.

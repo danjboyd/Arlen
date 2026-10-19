@@ -19,6 +19,18 @@ The module ships three explicit reuse paths:
 Optional SMS MFA through Twilio Verify is available as a disabled-by-default
 secondary factor without changing the core TOTP-first auth/session contract.
 
+## Sessions and CSRF
+
+The module runs on the session cookie, so it requires CSRF protection. With
+`session.enabled = YES`, leave `csrf.enabled` unset (it then follows
+`session.enabled`) or set it to `YES`. If `csrf.enabled = NO` is pinned while
+sessions are on, the module refuses to start with an error naming
+`csrf.enabled`, and `arlen module doctor` reports `module_csrf_disabled`.
+Older `arlen new` scaffolds wrote `csrf.enabled = NO` into
+`config/app.plist`; delete that line. An app that really must run without CSRF
+(for example, every unsafe request is bearer-authenticated) can opt out with
+`authModule.allowWithoutCSRF = YES`; doctor then reports a warning instead.
+
 ## Route Contract
 
 Interactive HTML routes:

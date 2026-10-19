@@ -401,4 +401,40 @@ static NSDictionary *gFileResponseTestOptions = nil;
   XCTAssertNil(response.fileBodyPath);
 }
 
+// A C path ends at U+0000, so "secrets.txt\0.pdf" would pass an NSString-level
+// hasSuffix:@".pdf" check and then serve secrets.txt.
+- (void)testPrepareResponseRefusesPathsWithControlCharacters {
+  NSString *secret = [self.directory stringByAppendingPathComponent:@"secrets.txt"];
+  XCTAssertTrue([@"top secret" writeToFile:secret atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  ALNRequest *request = ALNTestRequestWithMethod(@"GET", @"/x", @"", @{}, nil);
+
+  NSArray<NSString *> *paths = @[
+    [NSString stringWithFormat:@"%@%C.pdf", secret, (unichar)0],
+    [NSString stringWithFormat:@"%@%C", secret, (unichar)0x0a],
+    [NSString stringWithFormat:@"%@%C", secret, (unichar)0x7f],
+  ];
+  for (NSString *path in paths) {
+    ALNResponse *response = [[ALNResponse alloc] init];
+    XCTAssertFalse([ALNFileResponse prepareResponse:response
+                                         forRequest:request
+                                           filePath:path
+                                        contentType:@"application/pdf"
+                                            options:nil]);
+    XCTAssertEqual((NSInteger)404, response.statusCode);
+    XCTAssertNil(response.fileBodyPath);
+  }
+
+  // Format characters such as U+200D (used in emoji names) are not controls.
+  NSString *emoji = [self.directory stringByAppendingPathComponent:
+                                        [NSString stringWithFormat:@"family%C.txt", (unichar)0x200d]];
+  XCTAssertTrue([@"ok" writeToFile:emoji atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  ALNResponse *response = [[ALNResponse alloc] init];
+  XCTAssertTrue([ALNFileResponse prepareResponse:response
+                                      forRequest:request
+                                        filePath:emoji
+                                     contentType:@"text/plain"
+                                         options:nil]);
+  XCTAssertEqualObjects(emoji, response.fileBodyPath);
+}
+
 @end

@@ -1,6 +1,9 @@
 #import "ALNPostgresSQLBuilder.h"
 #import "ALNSQLLexical.h"
 
+// In ALNSQLBuilder.m (not public API): records that app SQL text was spliced.
+extern void ALNSQLBuilderNoteTrustedExpressionCompile(void);
+
 @interface ALNSQLBuilder (ALNPostgresBaseCompile)
 - (nullable NSDictionary *)aln_buildDefaultDialect:(NSError **)error;
 @end
@@ -157,6 +160,7 @@ typedef NS_ENUM(NSInteger, ALNPostgresSQLBuilderConflictMode) {
                                   intoParameters:(NSMutableArray *)parameters
                                          context:(NSString *)context
                                            error:(NSError **)error {
+  ALNSQLBuilderNoteTrustedExpressionCompile();
   NSString *expression = ALNPostgresSQLBuilderTrimmedString(expressionValue);
   if ([expression length] == 0) {
     if (error != NULL) {

@@ -103,10 +103,6 @@ static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer);
 static uint64_t ALNPgFNV1a64(NSString *value);
 static NSString *ALNPgSQLHash(NSString *sql);
 static NSString *ALNPgSQLToken(NSString *sql);
-static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
-                                          id value,
-                                          NSMutableSet *visited);
-static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
@@ -569,170 +565,6 @@ static NSDictionary *ALNPgDiagnosticsFromResult(PGresult *result) {
   return [NSDictionary dictionaryWithDictionary:diagnostics];
 }
 
-static NSArray<NSString *> *ALNPgBuilderSnapshotKeys(void) {
-  static NSArray<NSString *> *keys = nil;
-  if (keys == nil) {
-    keys = @[
-      @"kind",
-      @"tableName",
-      @"tableAlias",
-      @"selectColumns",
-      @"values",
-      @"whereClauses",
-      @"havingClauses",
-      @"orderByClauses",
-      @"joins",
-      @"groupByFields",
-      @"ctes",
-      @"windowClauses",
-      @"setOperations",
-      @"returningColumns",
-      @"limitValue",
-      @"offsetValue",
-      @"hasLimit",
-      @"hasOffset",
-      @"rowLockMode",
-      @"rowLockTables",
-      @"rowLockSkipLocked",
-      @"conflictMode",
-      @"conflictColumns",
-      @"conflictUpdateFields",
-      @"conflictUpdateAssignments",
-      @"conflictDoUpdateWhereExpression",
-      @"conflictDoUpdateWhereParameters",
-    ];
-  }
-  return keys;
-}
-
-static id ALNPgBuilderValueForKey(ALNSQLBuilder *builder, NSString *key) {
-  if (builder == nil || [key length] == 0) {
-    return [NSNull null];
-  }
-  // Only ALNPostgresSQLBuilder has the conflict* keys; asking a plain builder
-  // raised and caught NSUnknownKeyException six times per query (#232).
-  if (![builder respondsToSelector:NSSelectorFromString(key)]) {
-    return [NSNull null];
-  }
-  @try {
-    id value = [builder valueForKey:key];
-    return value ?: [NSNull null];
-  } @catch (NSException *exception) {
-    (void)exception;
-    return [NSNull null];
-  }
-}
-
-static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
-                                          id value,
-                                          NSMutableSet *visited) {
-  if (out == nil) {
-    return NO;
-  }
-
-  if (value == nil || value == [NSNull null]) {
-    [out appendString:@"n;"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSString class]]) {
-    NSString *text = (NSString *)value;
-    [out appendFormat:@"s:%lu:%@;", (unsigned long)[text length], text];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSNumber class]]) {
-    [out appendFormat:@"#:%@;", [(NSNumber *)value stringValue]];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSDate class]]) {
-    [out appendFormat:@"d:%.6f;", [(NSDate *)value timeIntervalSince1970]];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSData class]]) {
-    NSString *base64 = [(NSData *)value base64EncodedStringWithOptions:0];
-    [out appendFormat:@"b:%lu:%@;", (unsigned long)[base64 length], base64];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSArray class]]) {
-    NSArray *array = (NSArray *)value;
-    [out appendFormat:@"a:%lu:[", (unsigned long)[array count]];
-    for (id element in array) {
-      if (!ALNPgCanonicalizeBuilderValue(out, element, visited)) {
-        return NO;
-      }
-    }
-    [out appendString:@"];"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSDictionary class]]) {
-    NSDictionary *dictionary = (NSDictionary *)value;
-    NSArray *keys = [[dictionary allKeys] sortedArrayUsingComparator:^NSComparisonResult(id lhs, id rhs) {
-      NSString *left = [lhs isKindOfClass:[NSString class]] ? lhs : [lhs description];
-      NSString *right = [rhs isKindOfClass:[NSString class]] ? rhs : [rhs description];
-      return [left compare:right];
-    }];
-    [out appendFormat:@"m:%lu:{", (unsigned long)[keys count]];
-    for (id key in keys) {
-      NSString *keyText = [key isKindOfClass:[NSString class]] ? key : [key description];
-      [out appendFormat:@"k:%lu:%@=", (unsigned long)[keyText length], keyText];
-      if (!ALNPgCanonicalizeBuilderValue(out, dictionary[key], visited)) {
-        return NO;
-      }
-    }
-    [out appendString:@"};"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[ALNSQLBuilder class]]) {
-    NSString *identity = [NSString stringWithFormat:@"%p", value];
-    if ([visited containsObject:identity]) {
-      [out appendString:@"builder:<cycle>;"];
-      return YES;
-    }
-
-    [visited addObject:identity];
-    [out appendString:@"builder:{"];
-    for (NSString *key in ALNPgBuilderSnapshotKeys()) {
-      [out appendString:key];
-      [out appendString:@"="];
-      id nested = ALNPgBuilderValueForKey((ALNSQLBuilder *)value, key);
-      if (!ALNPgCanonicalizeBuilderValue(out, nested, visited)) {
-        [visited removeObject:identity];
-        return NO;
-      }
-      [out appendString:@"|"];
-    }
-    [out appendString:@"};"];
-    [visited removeObject:identity];
-    return YES;
-  }
-
-  NSString *text = [value description] ?: @"";
-  [out appendFormat:@"o:%@:%lu:%@;",
-                    NSStringFromClass([value class]) ?: @"NSObject",
-                    (unsigned long)[text length],
-                    text];
-  return YES;
-}
-
-static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder) {
-  if (builder == nil) {
-    return nil;
-  }
-
-  NSMutableString *encoded = [NSMutableString string];
-  NSMutableSet *visited = [NSMutableSet set];
-  if (!ALNPgCanonicalizeBuilderValue(encoded, builder, visited)) {
-    return nil;
-  }
-  return [NSString stringWithString:encoded];
-}
-
 static uint64_t ALNPgFNV1a64(NSString *value) {
   static const uint64_t offsetBasis = UINT64_C(14695981039346656037);
   static const uint64_t prime = UINT64_C(1099511628211);
@@ -852,6 +684,9 @@ enum {
 // Text codecs for timestamp/date and bytea values. Not static so unit tests
 // can call them without a live database; they are not public API.
 NSString *ALNPgHexStringFromData(NSData *data);
+// In ALNSQLBuilder.m (not public API): trusted expressions compiled so far on
+// this thread.
+extern NSUInteger ALNSQLBuilderTrustedExpressionCompileCount(void);
 NSData *ALNPgDataFromByteaBytes(const char *text, NSUInteger length);
 NSData *ALNPgDataFromByteaString(NSString *value);
 NSString *ALNPgTimestampStringFromDate(NSDate *value);
@@ -1804,6 +1639,27 @@ static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer) {
   buffer->count = 0;
 }
 
+// libpq takes SQL text and statement names as C strings, so a U+0000 inside
+// one would silently end it early. Callers refuse such text up front.
+static BOOL ALNPgTextContainsNUL(NSString *text) {
+  return [text isKindOfClass:[NSString class]] &&
+         [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
+             NSNotFound;
+}
+
+static BOOL ALNPgFailIfTextContainsNUL(NSString *text, NSString *what, NSError **error) {
+  if (!ALNPgTextContainsNUL(text)) {
+    return NO;
+  }
+  if (error != NULL) {
+    *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                            [NSString stringWithFormat:@"%@ contains a NUL character (U+0000)", what],
+                            nil,
+                            nil);
+  }
+  return YES;
+}
+
 static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
                                        NSString *sql,
                                        ALNPgExecParamsBuffer *buffer,
@@ -1880,6 +1736,22 @@ static BOOL ALNPgBuildExecParamsBuffer(NSArray *parameters,
     }
 
     NSUInteger utf8Length = [utf8 length];
+    // libpq reads text parameters as C strings, so an embedded U+0000 would
+    // silently cut the value short (PostgreSQL text cannot hold it anyway).
+    // Refuse it; binary values go through NSData, which is sent as bytea hex.
+    if (utf8Length > 0 && memchr([utf8 bytes], 0, utf8Length) != NULL) {
+      if (error != NULL) {
+        NSString *detail = [NSString stringWithFormat:@"parameter %lu contains a NUL character (U+0000); "
+                                                      @"pass binary data as NSData",
+                                                      (unsigned long)(idx + 1)];
+        *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                                @"failed to encode query parameter",
+                                detail,
+                                sql);
+      }
+      ALNPgFreeExecParamsBuffer(buffer);
+      return NO;
+    }
     char *bytes = calloc(utf8Length + 1, sizeof(char));
     if (bytes == NULL) {
       if (error != NULL) {
@@ -2002,6 +1874,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 // YES when the pool handed this connection out from its idle list (it may have
 // been closed by the server while idle); NO for a freshly opened connection.
 @property(nonatomic, assign) BOOL reusedFromPool;
+// YES once this borrower ran SQL the pool did not generate itself: any
+// executeQuery/executeCommand/script/prepare with caller SQL, a transaction,
+// or a builder statement that spliced trusted expression text. Only a dirty
+// connection needs the session reset on release. builderExecutionDepth is
+// non-zero while a purely generated builder statement runs through the
+// public entry points, so those do not mark the connection.
+@property(nonatomic, assign) BOOL sessionStateDirty;
+@property(nonatomic, assign) NSUInteger builderExecutionDepth;
 
 - (BOOL)hasActiveTransaction;
 - (void)reportConnectionLossForError:(NSError **)error;
@@ -2010,6 +1890,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)isConnectionUsable;
 - (BOOL)deallocatePreparedStatementNamed:(NSString *)name error:(NSError **)error;
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll;
+- (BOOL)discardQueuedNotifications;
+- (void)noteCallerStatement;
 
 @end
 
@@ -2330,6 +2213,117 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   self.preparedStatementSequence = 0;
 }
 
+- (void)noteCallerStatement {
+  if (self.builderExecutionDepth == 0) {
+    self.sessionStateDirty = YES;
+  }
+}
+
+// The SQL text the statement cache believes each of its names was prepared
+// with. Cache keys are "operation|parameterCount|sql".
+- (NSDictionary<NSString *, NSString *> *)cachedPreparedStatementSQLByName {
+  NSMutableDictionary<NSString *, NSString *> *byName = [NSMutableDictionary dictionary];
+  [self.preparedStatementNamesByKey enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *name, BOOL *stop) {
+    (void)stop;
+    NSRange first = [key rangeOfString:@"|"];
+    NSRange second = (first.location == NSNotFound)
+                         ? first
+                         : [key rangeOfString:@"|" options:0 range:NSMakeRange(NSMaxRange(first), [key length] - NSMaxRange(first))];
+    byName[name] = (second.location == NSNotFound) ? @"" : [key substringFromIndex:NSMaxRange(second)];
+  }];
+  return byName;
+}
+
+// Called by the pool before a released connection is reused, so settings,
+// role, temp tables, cursors, sequences, LISTENs, queued notifications and
+// advisory locks from one borrower do not reach the next. A connection that
+// only ran SQL the pool generated itself (sessionStateDirty == NO) cannot
+// have changed any of that and is reused as is.
+//
+// The session reset keeps the pool's cached prepared statements, but checks
+// them in the same round trip: a borrower who ran its own SQL could have
+// DEALLOCATEd a cached name and PREPAREd different SQL under it, so the next
+// borrower would run that instead. Any statement the cache does not know,
+// any statement created by SQL PREPARE, any text that differs from the
+// cached SQL, or a cached name that is gone, drops every prepared statement
+// and clears the cache. DISCARD ALL drops them unconditionally. NO means the
+// reset failed and the connection must not be reused.
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll {
+  if (_conn == NULL || !self.isOpen) {
+    return NO;
+  }
+  if (!self.sessionStateDirty) {
+    return YES;
+  }
+  const char *sql = discardAll ? "DISCARD ALL"
+                               : "RESET ALL; SET SESSION AUTHORIZATION DEFAULT; CLOSE ALL; DISCARD TEMP; "
+                                 "DISCARD SEQUENCES; UNLISTEN *; SELECT pg_advisory_unlock_all(); "
+                                 "SELECT name, statement, from_sql FROM pg_prepared_statements";
+  PGresult *result = ALNPQexec(_conn, sql);
+  int status = (result != NULL) ? ALNPQresultStatus(result) : -1;
+  BOOL ok = (status == ALNPGRES_COMMAND_OK || status == ALNPGRES_TUPLES_OK) &&
+            ALNPQstatus(_conn) == ALNConnectionOK;
+  BOOL cacheTrusted = !discardAll;
+  if (ok && !discardAll && status == ALNPGRES_TUPLES_OK) {
+    NSDictionary<NSString *, NSString *> *expected = [self cachedPreparedStatementSQLByName];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    int rows = ALNPQntuples(result);
+    for (int row = 0; row < rows && cacheTrusted; row++) {
+      NSString *name = [NSString stringWithUTF8String:ALNPQgetvalue(result, row, 0) ?: ""] ?: @"";
+      NSString *statement = [NSString stringWithUTF8String:ALNPQgetvalue(result, row, 1) ?: ""] ?: @"";
+      const char *fromSQL = ALNPQgetvalue(result, row, 2);
+      BOOL createdBySQL = (fromSQL != NULL && fromSQL[0] == 't');
+      NSString *cachedSQL = expected[name];
+      if (createdBySQL || cachedSQL == nil || ![cachedSQL isEqualToString:statement]) {
+        cacheTrusted = NO;
+      }
+      [seen addObject:name];
+    }
+    if ([seen count] != [expected count]) {
+      cacheTrusted = NO;
+    }
+  }
+  if (result != NULL) {
+    ALNPQclear(result);
+  }
+  if (ok && !cacheTrusted) {
+    if (!discardAll) {
+      PGresult *deallocate = ALNPQexec(_conn, "DEALLOCATE ALL");
+      int deallocateStatus = (deallocate != NULL) ? ALNPQresultStatus(deallocate) : -1;
+      if (deallocate != NULL) {
+        ALNPQclear(deallocate);
+      }
+      ok = (deallocateStatus == ALNPGRES_COMMAND_OK) && ALNPQstatus(_conn) == ALNConnectionOK;
+    }
+    [self.preparedStatementNamesByKey removeAllObjects];
+    [self.preparedStatementCacheOrder removeAllObjects];
+  }
+  if (ok) {
+    ok = [self discardQueuedNotifications];
+  }
+  if (ok) {
+    self.sessionStateDirty = NO;
+  }
+  return ok;
+}
+
+// Notifications for a borrower's LISTENs can still be queued in libpq or
+// unread on the socket after it releases the connection. Read and drop them
+// (no round trip) so the next borrower's waitForNotifications does not see
+// them. NO means the connection turned out to be unusable.
+- (BOOL)discardQueuedNotifications {
+  if (_conn == NULL) {
+    return NO;
+  }
+  if (ALNPQconsumeInput != NULL && ALNPQconsumeInput(_conn) == 0) {
+    return NO;
+  }
+  if (ALNPQnotifies != NULL && ALNPQfreemem != NULL) {
+    (void)[self drainNotifications];
+  }
+  return YES;
+}
+
 - (BOOL)shouldUsePreparedStatementForParameterCount:(NSUInteger)parameterCount {
   switch (self.preparedStatementReusePolicy) {
   case ALNPgPreparedStatementReusePolicyAlways:
@@ -2404,19 +2398,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     *cacheHit = NO;
   }
 
-  NSString *signature = ALNPgBuilderCompilationSignature(builder);
-  if ([signature length] > 0) {
-    NSDictionary *cached = self.builderCompilationCache[signature];
-    if ([cached isKindOfClass:[NSDictionary class]]) {
-      if (cacheHit != NULL) {
-        *cacheHit = YES;
-      }
-      return cached;
-    }
-  }
-
+  NSUInteger trustedBefore = ALNSQLBuilderTrustedExpressionCompileCount();
   NSError *buildError = nil;
   NSDictionary *built = [builder buildWithDialect:[ALNPostgresDialect sharedDialect] error:&buildError];
+  // Trusted expressions are app SQL text, which can change session state even
+  // inside a plain SELECT (set_config, advisory locks, nextval), so a
+  // statement that holds one marks the connection for a reset on release.
+  BOOL trustedSQL = ALNSQLBuilderTrustedExpressionCompileCount() != trustedBefore;
+  if (trustedSQL) {
+    self.sessionStateDirty = YES;
+  }
   if (built == nil) {
     if (error != NULL) {
       *error = buildError ?: ALNPgMakeError(ALNPgErrorQueryFailed,
@@ -2439,21 +2430,27 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return nil;
   }
 
+  // Compile current values on every invocation, but retain only the SQL shape.
+  // This avoids a second KVC traversal of the builder and never retains a
+  // borrower's parameter values in the connection cache.
+  NSString *signature = [NSString stringWithFormat:@"%lu:%@", (unsigned long)[parameters count], sql];
+  NSString *cachedSQL = self.builderCompilationCache[signature];
+  if (cacheHit != NULL) *cacheHit = cachedSQL != nil;
+  if (cachedSQL != nil) sql = cachedSQL;
   NSDictionary *normalized = @{
     @"sql" : sql,
     @"parameters" : [NSArray arrayWithArray:parameters],
+    @"trusted_sql" : @(trustedSQL),
   };
-
-  if ([signature length] > 0 && self.builderCompilationCacheLimit > 0) {
-    if (self.builderCompilationCache[signature] == nil &&
-        [self.builderCompilationCache count] >= self.builderCompilationCacheLimit) {
-      NSString *oldest = [self.builderCompilationCacheOrder firstObject];
-      if ([oldest length] > 0) {
+  if (self.builderCompilationCacheLimit > 0) {
+    if (cachedSQL == nil && [self.builderCompilationCache count] >= self.builderCompilationCacheLimit) {
+      NSString *oldest = self.builderCompilationCacheOrder.firstObject;
+      if (oldest != nil) {
         [self.builderCompilationCache removeObjectForKey:oldest];
         [self.builderCompilationCacheOrder removeObjectAtIndex:0];
       }
     }
-    self.builderCompilationCache[signature] = normalized;
+    self.builderCompilationCache[signature] = sql;
     [self.builderCompilationCacheOrder removeObject:signature];
     [self.builderCompilationCacheOrder addObject:signature];
   }
@@ -2600,10 +2597,15 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NO;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql", error) ||
+      ALNPgFailIfTextContainsNUL(name, @"statement name", error)) {
+    return NO;
+  }
 
   if ([self failIfConnectionClosedBeforeSend:error]) {
     return NO;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQprepare(_conn,
                                [name UTF8String],
                                [sql UTF8String],
@@ -2659,6 +2661,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql", error)) {
+    return NULL;
+  }
 
   NSUInteger count = [parameters count];
   ALNPgExecParamsBuffer paramBuffer;
@@ -2670,6 +2675,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     ALNPgFreeExecParamsBuffer(&paramBuffer);
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexecParams(_conn,
                                   [sql UTF8String],
                                   (int)count,
@@ -2713,10 +2719,14 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(sql, @"sql script", error)) {
+    return NULL;
+  }
 
   if ([self failIfConnectionClosedBeforeSend:error]) {
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexec(_conn, [sql UTF8String]);
   if (result == NULL) {
     if (error != NULL) {
@@ -2753,6 +2763,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     }
     return NULL;
   }
+  if (ALNPgFailIfTextContainsNUL(name, @"statement name", error)) {
+    return NULL;
+  }
 
   NSUInteger count = [parameters count];
   ALNPgExecParamsBuffer paramBuffer;
@@ -2764,6 +2777,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     ALNPgFreeExecParamsBuffer(&paramBuffer);
     return NULL;
   }
+  [self noteCallerStatement];
   PGresult *result = ALNPQexecPrepared(_conn,
                                     [name UTF8String],
                                     (int)count,
@@ -3050,8 +3064,31 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return NO;
 }
 
+// Generated builder SQL runs through the public statement methods without
+// marking the connection dirty; compiledBuilder: marks it when the statement
+// holds a trusted expression.
 - (NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                             error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try {
+    return [self aln_executeBuilderQuery:builder error:error];
+  } @finally {
+    self.builderExecutionDepth -= 1;
+  }
+}
+
+- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
+                             error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try {
+    return [self aln_executeBuilderCommand:builder error:error];
+  } @finally {
+    self.builderExecutionDepth -= 1;
+  }
+}
+
+- (NSArray<NSDictionary *> *)aln_executeBuilderQuery:(ALNSQLBuilder *)builder
+                                               error:(NSError **)error {
   ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
@@ -3218,8 +3255,8 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   return rows;
 }
 
-- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder
-                             error:(NSError **)error {
+- (NSInteger)aln_executeBuilderCommand:(ALNSQLBuilder *)builder
+                                 error:(NSError **)error {
   ALNPgClearError(error);
   NSArray *normalizedParameters = @[];
   NSString *sql = @"";
@@ -3573,6 +3610,9 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign) NSTimeInterval acquireWaitSecondsTotal;
 @property(nonatomic, assign) NSUInteger poolExhaustedCount;
 @property(nonatomic, assign) NSUInteger connectionRetryCount;
+@property(nonatomic, assign) NSUInteger releasedInTransactionCount;
+@property(nonatomic, assign) NSUInteger sessionResetFailureCount;
+@property(nonatomic, assign) NSUInteger sessionResetCount;
 
 @end
 
@@ -3847,12 +3887,17 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return;
   }
   BOOL reusable = NO;
+  BOOL closedInTransaction = NO;
+  BOOL resetFailed = NO;
+  BOOL dirty = NO;
   @try {
-    if (connection.isOpen && [connection hasActiveTransaction]) {
-      NSError *rollbackError = nil;
-      if (![connection rollbackTransaction:&rollbackError]) {
-        [connection close];
-      }
+    // A connection still inside a transaction (an unfinished -beginTransaction:
+    // or a BEGIN sent by hand) is closed, which rolls the transaction back
+    // server-side. Re-pooling it would put the next borrower's statements into
+    // this borrower's transaction.
+    if (connection.isOpen && ([connection hasActiveTransaction] || [connection isInsideTransaction])) {
+      [connection close];
+      closedInTransaction = YES;
     }
     // Gate re-pooling on the real libpq socket status, not the cached
     // `isOpen` flag. A connection whose socket died while checked out (server
@@ -3860,12 +3905,32 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     // here poisons the pool and every subsequent borrower fails the same way
     // until the worker is restarted. isConnectionUsable asks libpq directly,
     // so a dead connection is torn down instead of recirculated.
-    reusable = [connection isConnectionUsable];
-    if (!reusable) {
+    reusable = !closedInTransaction && [connection isConnectionUsable];
+    // A connection that only ran SQL the pool generated is reused without a
+    // reset; the connection skips the round trip itself when it is clean.
+    dirty = connection.sessionStateDirty;
+    if (reusable && self.sessionResetPolicy != ALNPgSessionResetPolicyNone) {
+      if (![connection resetSessionStateDiscardingAll:(self.sessionResetPolicy == ALNPgSessionResetPolicyDiscardAll)]) {
+        reusable = NO;
+        resetFailed = YES;
+      }
+    } else if (reusable && dirty && ![connection discardQueuedNotifications]) {
+      // ALNPgSessionResetPolicyNone still drops queued notifications.
+      reusable = NO;
+    }
+    if (!reusable && !closedInTransaction) {
       [connection close];
     }
   } @finally {
     [self.poolCondition lock];
+    if (closedInTransaction) {
+      self.releasedInTransactionCount += 1;
+    }
+    if (resetFailed) {
+      self.sessionResetFailureCount += 1;
+    } else if (reusable && dirty && self.sessionResetPolicy != ALNPgSessionResetPolicyNone) {
+      self.sessionResetCount += 1;
+    }
     if (self.inUseConnections > 0) {
       self.inUseConnections -= 1;
     }
@@ -4055,6 +4120,9 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
       @"acquire_wait_seconds_total" : @(self.acquireWaitSecondsTotal),
       @"pool_exhausted_count" : @(self.poolExhaustedCount),
       @"connection_retry_count" : @(self.connectionRetryCount),
+      @"released_in_transaction_count" : @(self.releasedInTransactionCount),
+      @"session_reset_failure_count" : @(self.sessionResetFailureCount),
+      @"session_reset_count" : @(self.sessionResetCount),
     };
   } @finally {
     [self.poolCondition unlock];
@@ -4241,6 +4309,61 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
     return NO;
   }
   return NO;
+}
+
+- (BOOL)enumerateQuery:(NSString *)sql
+           parameters:(NSArray *)parameters
+            batchSize:(NSUInteger)batchSize
+           usingBlock:(void (^)(NSDictionary *row, BOOL *stop))block
+                error:(NSError **)error {
+  ALNPgClearError(error);
+  if (block == nil || batchSize == 0 || batchSize > 10000 || [sql length] == 0 ||
+      ALNPgFailIfTextContainsNUL(sql, @"sql", error)) {
+    if (error != NULL && *error == nil) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"enumeration requires SQL, a callback and batchSize from 1 through 10000", nil, nil);
+    }
+    return NO;
+  }
+  ALNPgConnection *connection = [self acquireConnection:error];
+  if (connection == nil) return NO;
+  BOOL finished = NO;
+  @try {
+    if (![connection beginTransaction:error]) return NO;
+    NSString *name = [@"aln_cursor_" stringByAppendingString:
+                        [[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""]];
+    NSString *declare = [NSString stringWithFormat:@"DECLARE %@ NO SCROLL CURSOR FOR %@", name, sql];
+    if ([connection executeCommand:declare parameters:parameters error:error] < 0) return NO;
+    NSString *fetch = [NSString stringWithFormat:@"FETCH FORWARD %lu FROM %@", (unsigned long)batchSize, name];
+    BOOL stop = NO;
+    NSError *failure = nil;
+    while (!stop) {
+      @autoreleasepool {
+        // Keep failures strongly across the per-batch autorelease pool.
+        NSError *fetchError = nil;
+        NSArray *rows = [connection executeQuery:fetch parameters:@[] error:&fetchError];
+        if (rows == nil) {
+          failure = fetchError;
+          break;
+        }
+        if ([rows count] == 0) break;
+        for (NSDictionary *row in rows) {
+          @autoreleasepool { block(row, &stop); }
+          if (stop) break;
+        }
+      }
+    }
+    if (failure != nil) {
+      if (error != NULL) *error = failure;
+      return NO;
+    }
+    if ([connection executeCommand:[@"CLOSE " stringByAppendingString:name] parameters:@[] error:error] < 0) return NO;
+    finished = [connection commitTransaction:error];
+    return finished;
+  } @finally {
+    if (!finished) (void)[connection rollbackTransaction:NULL];
+    [self releaseConnection:connection];
+  }
 }
 
 - (BOOL)withTransactionUsingBlock:(BOOL (^)(id<ALNDatabaseConnection> connection,

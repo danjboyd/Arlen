@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNAuthModule.h"
 
 #import <dispatch/dispatch.h>
@@ -1603,7 +1604,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
                                                  @protocol(ALNAuthModuleOIDCTransport), error) : nil;
   if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
-  BOOL allowLoopbackHTTPRedirect = developmentOrTest;
+  BOOL allowLoopbackHTTPRedirect = ALNEnvironmentIsDevelopmentLike(self.environmentName);
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
   NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
@@ -1711,6 +1712,39 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                        ? application.config[@"session"]
                                        : @{};
   self.sessionCookieMaxAgeSeconds = AMConfigUnsignedInteger(appSessionConfig[@"maxAgeSeconds"], 1209600U);
+  // The module's forms and JSON endpoints rely on CSRF protection whenever
+  // they run on a session cookie. An explicit csrf.enabled = NO (older
+  // generated app.plist files wrote one) would leave them open to cross-site
+  // posts, so refuse it unless the app opts out deliberately.
+  NSDictionary *session = [application.config[@"session"] isKindOfClass:[NSDictionary class]]
+                              ? application.config[@"session"]
+                              : @{};
+  NSDictionary *csrf = [application.config[@"csrf"] isKindOfClass:[NSDictionary class]]
+                           ? application.config[@"csrf"]
+                           : @{};
+  BOOL sessionEnabled = [session[@"enabled"] respondsToSelector:@selector(boolValue)] &&
+                        [session[@"enabled"] boolValue];
+  BOOL csrfEnabled = [csrf[@"enabled"] respondsToSelector:@selector(boolValue)]
+                         ? [csrf[@"enabled"] boolValue]
+                         : sessionEnabled;
+  BOOL allowWithoutCSRF = [moduleConfig[@"allowWithoutCSRF"] respondsToSelector:@selector(boolValue)] &&
+                          [moduleConfig[@"allowWithoutCSRF"] boolValue];
+  if (sessionEnabled && !csrfEnabled && !allowWithoutCSRF) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"auth module requires csrf.enabled when session.enabled is YES; remove "
+                       @"csrf.enabled = NO from config/app.plist (CSRF then follows session.enabled), "
+                       @"or set authModule.allowWithoutCSRF = YES to opt out",
+                       @{ @"key_path" : @"csrf.enabled" });
+    }
+    return NO;
+  }
+  NSString *environment = [application.environment lowercaseString] ?: @"";
+  if (sessionEnabled && !csrfEnabled && allowWithoutCSRF &&
+      ![environment isEqualToString:@"development"] && ![environment isEqualToString:@"test"]) {
+    [application.logger warn:@"auth module is running with CSRF protection off (authModule.allowWithoutCSRF = YES)"
+                      fields:@{ @"environment" : environment, @"key_path" : @"csrf.enabled" }];
+  }
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};

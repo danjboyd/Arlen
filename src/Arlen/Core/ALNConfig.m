@@ -1,4 +1,5 @@
 #import "ALNConfig.h"
+#import "ALNClientAddressInternal.h"
 #import "ALNDataCompat.h"
 #import "ALNModuleSystem.h"
 #import "ALNPositiveInteger.h"
@@ -239,6 +240,20 @@ static NSString *ALNNormalizeTrustedProxyCIDREntry(id rawValue) {
   if ([trimmed length] == 0) {
     return nil;
   }
+  if ([trimmed rangeOfString:@":"].location != NSNotFound) {
+    // IPv6: "address" or "address/prefix", address in canonical form.
+    if (!ALNClientAddressCIDRIsValid(trimmed)) {
+      return nil;
+    }
+    NSArray *parts = [trimmed componentsSeparatedByString:@"/"];
+    NSString *address = ALNClientAddressCanonicalIP(parts[0]);
+    NSInteger prefix = ([parts count] == 2) ? [parts[1] integerValue] : 128;
+    if ([address rangeOfString:@":"].location == NSNotFound) {
+      // IPv4-mapped (::ffff:a.b.c.d/96..128): the IPv4 range it maps.
+      prefix -= 96;
+    }
+    return [NSString stringWithFormat:@"%@/%ld", address, (long)prefix];
+  }
 
   NSString *addressPart = trimmed;
   NSInteger prefixLength = 32;
@@ -360,17 +375,43 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       @"trustedProxy" : @(YES),
       @"trustedProxyCIDRs" : @[ @"127.0.0.1/32" ],
       @"sessionEnabled" : @(NO),
-      @"csrfEnabled" : @(NO),
       @"securityHeadersEnabled" : @(YES),
     };
   }
+  // Only strict pins csrf.enabled; elsewhere an unset csrf.enabled follows
+  // session.enabled, so turning sessions on turns CSRF protection on too.
   return @{
     @"trustedProxy" : @(NO),
     @"trustedProxyCIDRs" : @[],
     @"sessionEnabled" : @(NO),
-    @"csrfEnabled" : @(NO),
     @"securityHeadersEnabled" : @(YES),
   };
+}
+
+ALNEnvironmentKind ALNEnvironmentKindForName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  if ([trimmed isEqualToString:@"development"]) {
+    return ALNEnvironmentKindDevelopment;
+  }
+  if ([trimmed isEqualToString:@"test"]) {
+    return ALNEnvironmentKindTest;
+  }
+  return ALNEnvironmentKindProduction;
+}
+
+BOOL ALNEnvironmentIsDevelopmentLike(NSString *name) {
+  return ALNEnvironmentKindForName(name) != ALNEnvironmentKindProduction;
+}
+
+NSString *ALNNormalizedEnvironmentName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  return ([trimmed length] > 0) ? trimmed : @"development";
 }
 
 @implementation ALNConfig
@@ -385,7 +426,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
                        environment:(NSString *)environment
                     includeModules:(BOOL)includeModules
                              error:(NSError **)error {
-  NSString *env = ([environment length] > 0) ? environment : @"development";
+  // `--env PRODUCTION` must load environments/production.plist.
+  NSString *env = ALNNormalizedEnvironmentName(environment);
   NSString *configRoot = [rootPath stringByAppendingPathComponent:@"config"];
   NSString *basePath = [configRoot stringByAppendingPathComponent:@"app.plist"];
   NSString *envPath =
@@ -466,6 +508,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
       ALNEnvValueCompat("ARLEN_MAX_HEADER_BYTES", "MOJOOBJC_MAX_HEADER_BYTES");
   NSString *maxBodyBytes =
       ALNEnvValueCompat("ARLEN_MAX_BODY_BYTES", "MOJOOBJC_MAX_BODY_BYTES");
+  NSString *requestHeadTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS");
+  NSString *responseSendTimeoutSeconds = ALNEnvValue("ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS");
+  NSString *responseMinBytesPerSecond = ALNEnvValue("ARLEN_RESPONSE_MIN_BYTES_PER_SECOND");
+  NSString *responseMinRateGraceSeconds = ALNEnvValue("ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS");
+  NSString *requestBodyTimeoutSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_TIMEOUT_SECONDS");
+  NSString *requestBodyMinBytesPerSecond = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND");
+  NSString *requestBodyMinRateGraceSeconds = ALNEnvValue("ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS");
   NSString *maxHTTPSessions =
       ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
@@ -664,6 +713,13 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   ALNApplyLimitOverride(limits, maxRequestLineBytes, @"maxRequestLineBytes");
   ALNApplyLimitOverride(limits, maxHeaderBytes, @"maxHeaderBytes");
   ALNApplyLimitOverride(limits, maxBodyBytes, @"maxBodyBytes");
+  ALNApplyIntegerOverride(limits, requestHeadTimeoutSeconds, @"requestHeadTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, responseSendTimeoutSeconds, @"responseSendTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, responseMinBytesPerSecond, @"responseMinBytesPerSecond", 0);
+  ALNApplyIntegerOverride(limits, responseMinRateGraceSeconds, @"responseMinRateGraceSeconds", 0);
+  ALNApplyIntegerOverride(limits, requestBodyTimeoutSeconds, @"requestBodyTimeoutSeconds", 0);
+  ALNApplyIntegerOverride(limits, requestBodyMinBytesPerSecond, @"requestBodyMinBytesPerSecond", 0);
+  ALNApplyIntegerOverride(limits, requestBodyMinRateGraceSeconds, @"requestBodyMinRateGraceSeconds", 0);
   config[@"requestLimits"] = limits;
 
   NSMutableDictionary *runtimeLimits =
@@ -1019,6 +1075,27 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalLimits[@"maxBodyBytes"] == nil) {
     finalLimits[@"maxBodyBytes"] = @(1048576);
   }
+  if (finalLimits[@"requestHeadTimeoutSeconds"] == nil) {
+    finalLimits[@"requestHeadTimeoutSeconds"] = @(15);
+  }
+  if (finalLimits[@"responseSendTimeoutSeconds"] == nil) {
+    finalLimits[@"responseSendTimeoutSeconds"] = @(300);
+  }
+  if (finalLimits[@"responseMinBytesPerSecond"] == nil) {
+    finalLimits[@"responseMinBytesPerSecond"] = @(1024);
+  }
+  if (finalLimits[@"responseMinRateGraceSeconds"] == nil) {
+    finalLimits[@"responseMinRateGraceSeconds"] = @(10);
+  }
+  if (finalLimits[@"requestBodyTimeoutSeconds"] == nil) {
+    finalLimits[@"requestBodyTimeoutSeconds"] = @(300);
+  }
+  if (finalLimits[@"requestBodyMinBytesPerSecond"] == nil) {
+    finalLimits[@"requestBodyMinBytesPerSecond"] = @(1024);
+  }
+  if (finalLimits[@"requestBodyMinRateGraceSeconds"] == nil) {
+    finalLimits[@"requestBodyMinRateGraceSeconds"] = @(10);
+  }
   NSDictionary *multipartDefaults = @{ @"maxMultipartParts":@128,
       @"maxMultipartFieldBytes":@65536, @"maxMultipartFileBytes":@1048576,
       @"maxMultipartHeaderBytes":@16384 };
@@ -1073,13 +1150,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     config[@"trustedProxyCIDRs"] = configuredTrustedProxyCIDRs;
   }
   // Stage timing costs CPU on every request, and the X-Arlen-*-Ms response
-  // headers give clients a timing oracle, so production leaves both off
-  // (#215, #244). performanceHeaders only matters while performanceLogging is on.
+  // headers give clients a timing oracle, so production-like environments
+  // (every one but development and test) leave both off (#215, #244).
+  // performanceHeaders only matters while performanceLogging is on.
   if (config[@"performanceLogging"] == nil) {
-    config[@"performanceLogging"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceLogging"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"performanceHeaders"] == nil) {
-    config[@"performanceHeaders"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceHeaders"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"serveStatic"] == nil) {
     config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
@@ -1177,8 +1255,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalSession[@"maxAgeSeconds"] == nil) {
     finalSession[@"maxAgeSeconds"] = @(1209600);
   }
+  // Production-like environments (staging, qa, ...) get Secure cookies too.
   if (finalSession[@"secure"] == nil) {
-    finalSession[@"secure"] = @([env isEqualToString:@"production"]);
+    finalSession[@"secure"] = @(!ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalSession[@"sameSite"] == nil) {
     finalSession[@"sameSite"] = @"Lax";
@@ -1253,7 +1332,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     finalOpenAPI[@"enabled"] = @(YES);
   }
   if (finalOpenAPI[@"docsUIEnabled"] == nil) {
-    finalOpenAPI[@"docsUIEnabled"] = @(![env isEqualToString:@"production"]);
+    finalOpenAPI[@"docsUIEnabled"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalOpenAPI[@"title"] == nil) {
     finalOpenAPI[@"title"] = @"Arlen API";
@@ -1343,9 +1422,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
-  // Pending schema migrations fail /readyz by default in production (GitHub issue 90).
+  // Pending schema migrations fail /readyz by default outside development and
+  // test (GitHub issue 90).
   if (finalObservability[@"readinessRequiresMigrations"] == nil) {
-    finalObservability[@"readinessRequiresMigrations"] = @([config[@"environment"] isEqual:@"production"]);
+    finalObservability[@"readinessRequiresMigrations"] = @(!ALNEnvironmentIsDevelopmentLike(config[@"environment"]));
   }
   if (finalObservability[@"metricsEnabled"] == nil) {
     finalObservability[@"metricsEnabled"] = @(YES);

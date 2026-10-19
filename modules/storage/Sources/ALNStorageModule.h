@@ -20,6 +20,9 @@ typedef NS_ENUM(NSInteger, ALNStorageModuleErrorCode) {
   ALNStorageModuleErrorNotFound = 3,
   ALNStorageModuleErrorTokenRejected = 4,
   ALNStorageModuleErrorPersistenceFailed = 5,
+  // Another process held the state lock past persistence.lockTimeoutSeconds.
+  // The change was not made; retrying later can succeed (HTTP 503).
+  ALNStorageModuleErrorStateBusy = 6,
 };
 
 @protocol ALNStorageCollectionDefinition <NSObject>

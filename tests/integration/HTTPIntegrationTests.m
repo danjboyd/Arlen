@@ -1144,6 +1144,311 @@
   }
 }
 
+// Clients that trickle an incomplete request head (one byte at a time, each
+// well inside connectionTimeoutSeconds) must not hold every HTTP worker.
+- (void)testSlowIncompleteRequestHeadsTimeOutAndDoNotStarveWorkers {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  environment[@"ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS"] = @"2";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"results = []\n"
+                                         @"def slow():\n"
+                                         @"    s = socket.create_connection(('127.0.0.1', PORT), timeout=20)\n"
+                                         @"    s.sendall(b'GET /healthz HTTP/1.1\\r\\nHost: x\\r\\n')\n"
+                                         @"    end = time.time() + 12\n"
+                                         @"    try:\n"
+                                         @"        s.settimeout(0.5)\n"
+                                         @"        while time.time() < end:\n"
+                                         @"            try:\n"
+                                         @"                data = s.recv(4096)\n"
+                                         @"                results.append(data[:12])\n"
+                                         @"                return\n"
+                                         @"            except socket.timeout:\n"
+                                         @"                s.sendall(b'X')\n"
+                                         @"        results.append(b'still-open')\n"
+                                         @"    except OSError:\n"
+                                         @"        results.append(b'closed')\n"
+                                         @"    finally:\n"
+                                         @"        s.close()\n"
+                                         @"threads = [threading.Thread(target=slow) for _ in range(12)]\n"
+                                         @"for t in threads: t.start()\n"
+                                         @"time.sleep(3.5)\n"
+                                         @"start = time.time()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=5).read()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"for t in threads: t.join()\n"
+                                         @"if body.strip() != b'ok':\n"
+                                         @"    raise RuntimeError(f'unexpected body {body!r}')\n"
+                                         @"if elapsed > 3:\n"
+                                         @"    raise RuntimeError(f'normal request waited {elapsed:.1f}s')\n"
+                                         @"if any(r == b'still-open' for r in results):\n"
+                                         @"    raise RuntimeError(f'slow heads were not timed out: {results}')\n"
+                                         @"print('ok', len(results))\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+// Holds `holders` connections that send `prefix` (possibly nothing) and then
+// stay silent, and checks that a normal request made shortly after is served
+// within `maxSeconds`. The head deadline runs from accept, so these
+// connections can't hold workers past it or stack while queued.
+- (void)assertHeldConnections:(NSUInteger)holders
+                    sendingPrefix:(NSString *)prefix
+                 leaveNormalWithin:(double)maxSeconds {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  environment[@"ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS"] = @"2";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"HOLDERS=%lu\n"
+                                         @"PREFIX=%@\n"
+                                         @"held = []\n"
+                                         @"for _ in range(HOLDERS):\n"
+                                         @"    s = socket.create_connection(('127.0.0.1', PORT), timeout=20)\n"
+                                         @"    if PREFIX:\n"
+                                         @"        s.sendall(PREFIX)\n"
+                                         @"    held.append(s)\n"
+                                         @"time.sleep(0.5)\n"
+                                         @"start = time.time()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=30).read()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"for s in held: s.close()\n"
+                                         @"if body.strip() != b'ok':\n"
+                                         @"    raise RuntimeError(f'unexpected body {body!r}')\n"
+                                         @"if elapsed > %f:\n"
+                                         @"    raise RuntimeError(f'normal request waited {elapsed:.1f}s')\n"
+                                         @"print('ok %%.1f' %% elapsed)\n",
+                                         port, (unsigned long)holders,
+                                         [prefix length] > 0
+                                             ? [NSString stringWithFormat:@"b'%@'", prefix]
+                                             : @"b''",
+                                         maxSeconds];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+// Connections that never send a byte are bounded by the head deadline too.
+- (void)testSilentConnectionsDoNotStarveWorkers {
+  [self assertHeldConnections:10 sendingPrefix:@"" leaveNormalWithin:4.0];
+}
+
+// Held partial heads beyond the worker count don't stack: queued time counts.
+- (void)testQueuedPartialHeadsDoNotStackHeadDeadlines {
+  [self assertHeldConnections:16 sendingPrefix:@"GET /healthz HTTP/1.1\\r\\nHost: x\\r\\n" leaveNormalWithin:4.0];
+}
+
+// The same one step later: a complete head followed by a trickled body.
+// `bodyLimits` are environment overrides for the server.
+- (void)assertSlowRequestBodiesDoNotStarveWorkersWithLimits:(NSDictionary *)bodyLimits {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  [environment addEntriesFromDictionary:bodyLimits];
+  // Room for 5 MB bodies, which stream to the spool file (above 1 MiB).
+  environment[@"ARLEN_MAX_BODY_BYTES"] = @"8000000";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+
+    NSString *script = [NSString stringWithFormat:
+                                         @"import socket, threading, time, urllib.request\n"
+                                         @"PORT=%d\n"
+                                         @"results = []\n"
+                                         @"def slow(length):\n"
+                                         @"    s = socket.create_connection(('127.0.0.1', PORT), timeout=20)\n"
+                                         @"    s.sendall(b'POST /healthz HTTP/1.1\\r\\nHost: x\\r\\n'\n"
+                                         @"              b'Content-Type: application/octet-stream\\r\\n'\n"
+                                         @"              + f'Content-Length: {length}\\r\\n\\r\\n'.encode() + b'ab')\n"
+                                         @"    end = time.time() + 14\n"
+                                         @"    try:\n"
+                                         @"        s.settimeout(0.5)\n"
+                                         @"        while time.time() < end:\n"
+                                         @"            try:\n"
+                                         @"                data = s.recv(4096)\n"
+                                         @"                results.append(data[:12])\n"
+                                         @"                return\n"
+                                         @"            except socket.timeout:\n"
+                                         @"                s.sendall(b'X')\n"
+                                         @"        results.append(b'still-open')\n"
+                                         @"    except OSError:\n"
+                                         @"        results.append(b'closed')\n"
+                                         @"    finally:\n"
+                                         @"        s.close()\n"
+                                         @"threads = [threading.Thread(target=slow, args=(1000000 if i %% 2 else 5000000,)) for i in range(12)]\n"
+                                         @"for t in threads: t.start()\n"
+                                         @"time.sleep(4.5)\n"
+                                         @"start = time.time()\n"
+                                         @"body = urllib.request.urlopen(f'http://127.0.0.1:{PORT}/healthz', timeout=5).read()\n"
+                                         @"elapsed = time.time() - start\n"
+                                         @"for t in threads: t.join()\n"
+                                         @"if body.strip() != b'ok':\n"
+                                         @"    raise RuntimeError(f'unexpected body {body!r}')\n"
+                                         @"if elapsed > 3:\n"
+                                         @"    raise RuntimeError(f'normal request waited {elapsed:.1f}s')\n"
+                                         @"if any(r == b'still-open' for r in results):\n"
+                                         @"    raise RuntimeError(f'slow bodies were not timed out: {results}')\n"
+                                         @"print('ok', len(results))\n",
+                                         port];
+    int pyCode = 0;
+    NSString *output = [self runPythonScript:script exitCode:&pyCode];
+    XCTAssertEqual(0, pyCode, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+  }
+}
+
+
+- (void)assertSlowResponseReadersWithLimits:(NSDictionary *)limits {
+  int port = [self randomPort];
+  NSString *name = [NSString stringWithFormat:@"send-limit-%@.txt", [[NSUUID UUID] UUIDString]];
+  NSString *path = [@"public" stringByAppendingPathComponent:name];
+  XCTAssertTrue([[NSMutableData dataWithLength:32 * 1024 * 1024] writeToFile:path atomically:YES]);
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:[[NSProcessInfo processInfo] environment]];
+  [environment addEntriesFromDictionary:limits];
+  environment[@"ARLEN_MAX_HTTP_WORKERS"] = @"2";
+  environment[@"ARLEN_CONNECTION_TIMEOUT_SECONDS"] = @"30";
+  server.environment = environment;
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+      @"import socket,time,urllib.request\n"
+       "port=%d\n"
+       "clients=[]\n"
+       "try:\n"
+       "    for _ in range(2):\n"
+       "        s=socket.socket()\n"
+       "        s.setsockopt(socket.SOL_SOCKET,socket.SO_RCVBUF,1024)\n"
+       "        s.settimeout(5)\n"
+       "        s.connect(('127.0.0.1',port))\n"
+       "        s.sendall(b'GET /static/%@ HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n')\n"
+       "        head=b''\n"
+       "        while b'\\r\\n\\r\\n' not in head: head+=s.recv(1)\n"
+       "        assert b'200 OK' in head, head\n"
+       "        assert b'33554432' in head, head\n"
+       "        clients.append(s)\n"
+       "    time.sleep(2.5)\n"
+       "    start=time.monotonic()\n"
+       "    assert urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz',timeout=6).read().strip()==b'ok'\n"
+       "    assert time.monotonic()-start < 5\n"
+       "    for s in clients:\n"
+       "        received=0\n"
+       "        while True:\n"
+       "            chunk=s.recv(65536)\n"
+       "            if not chunk: break\n"
+       "            received+=len(chunk)\n"
+       "        assert received < 33554432, received\n"
+       "    print('ok')\n"
+       "finally:\n"
+       "    for s in clients: s.close()\n",port,name];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"ok"], @"%@", output);
+  } @finally {
+    if ([server isRunning]) {
+      (void)ALNTestKill(server.processIdentifier, SIGTERM);
+      [server waitUntilExit];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+  }
+}
+
+- (void)testSlowResponseReadersHitTotalDeadline {
+  [self assertSlowResponseReadersWithLimits:@{
+    @"ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS" : @"2",
+    @"ARLEN_RESPONSE_MIN_BYTES_PER_SECOND" : @"0",
+  }];
+}
+
+- (void)testSlowResponseReadersHitMinimumRate {
+  [self assertSlowResponseReadersWithLimits:@{
+    @"ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS" : @"0",
+    @"ARLEN_RESPONSE_MIN_BYTES_PER_SECOND" : @"10485760",
+    @"ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS" : @"2",
+  }];
+}
+
+- (void)testSlowRequestBodiesHitTheBodyDeadline {
+  [self assertSlowRequestBodiesDoNotStarveWorkersWithLimits:@{
+    @"ARLEN_REQUEST_BODY_TIMEOUT_SECONDS" : @"3",
+    @"ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND" : @"0",
+  }];
+}
+
+- (void)testSlowRequestBodiesHitTheMinimumRate {
+  [self assertSlowRequestBodiesDoNotStarveWorkersWithLimits:@{
+    @"ARLEN_REQUEST_BODY_TIMEOUT_SECONDS" : @"0",
+    @"ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND" : @"1024",
+    @"ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS" : @"2",
+  }];
+}
+
 - (void)testKeepAliveRequestChurnDoesNotShowUnboundedRSSGrowth {
   const char *enabled = getenv("ARLEN_ENABLE_PHASE10J_RSS_CHURN");
   if (!(enabled != NULL && strcmp(enabled, "1") == 0)) {
@@ -4401,6 +4706,41 @@
   XCTAssertTrue([body containsString:@"203.0.113.9"]);
   XCTAssertTrue([body containsString:@"\"scheme\""]);
   XCTAssertTrue([body containsString:@"https"]);
+}
+
+// nginx-style appending: the client's own X-Forwarded-For comes first and the
+// proxy adds the peer it saw. The server must take the right-most untrusted
+// hop, not the client-chosen left-most one.
+- (void)testTrustedProxyUsesRightMostUntrustedForwardedHop {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32,192.0.2.0/24"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 10.1.1.1, 203.0.113.9, 192.0.2.7' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"effectiveRemoteAddress\":\"203.0.113.9\""], @"%@", body);
+}
+
+// The client's own X-Forwarded-For line plus a second line the proxy added:
+// the lines combine in order (RFC 9110), so the proxy's hop is the client.
+- (void)testTrustedProxyCombinesRepeatedForwardedForLines {
+  int curlCode = 0;
+  int serverCode = 0;
+  NSString *body =
+      [self requestWithServerEnv:@"ARLEN_TRUSTED_PROXY_CIDRS=127.0.0.1/32"
+                     serverBinary:@"./build/boomhauer"
+                        curlBody:@"curl -fsS -H 'X-Forwarded-For: 203.0.113.9' -H 'X-Forwarded-For: 198.51.100.4' "
+                                 "http://127.0.0.1:%d/api/request-meta"
+                        curlCode:&curlCode
+                       serverCode:&serverCode];
+  XCTAssertEqual(0, curlCode);
+  XCTAssertEqual(0, serverCode);
+  XCTAssertTrue([body containsString:@"\"effectiveRemoteAddress\":\"198.51.100.4\""], @"%@", body);
 }
 
 - (void)testTrustedProxyCIDRListEnablesForwardedMetadataWithoutLegacyToggle {

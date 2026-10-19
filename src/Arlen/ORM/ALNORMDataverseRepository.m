@@ -296,6 +296,25 @@
   return [self saveModel:model changeset:nil error:error];
 }
 
+// A persisted record loaded without its primary ID (a narrow $select) can't
+// say which record it is, so writes refuse instead of creating a duplicate or
+// targeting an ID supplied later.
+- (BOOL)requirePersistedPrimaryID:(id)primaryID operation:(NSString *)operation error:(NSError **)error {
+  if (primaryID != nil && primaryID != [NSNull null]) {
+    return YES;
+  }
+  if (error != NULL) {
+    *error = ALNORMMakeError(ALNORMErrorMissingField,
+                             [NSString stringWithFormat:@"cannot %@ a Dataverse record whose primary ID was not loaded",
+                                                        operation ?: @"write"],
+                             @{
+                               @"field_name" : self.descriptor.primaryIDAttribute ?: @"",
+                               @"entity_name" : self.descriptor.logicalName ?: @"",
+                             });
+  }
+  return NO;
+}
+
 - (BOOL)saveModel:(ALNORMDataverseModel *)model changeset:(ALNORMDataverseChangeset *)changeset error:(NSError **)error {
   if (error != NULL) {
     *error = nil;
@@ -309,7 +328,12 @@
     return NO;
   }
 
-  id primaryID = [model primaryIDValue];
+  // A persisted record is PATCHed by the ID it was loaded with, never by
+  // whatever ID the model holds now.
+  id primaryID = [model persistedPrimaryIDValue];
+  if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"update" error:error]) {
+    return NO;
+  }
   if (primaryID == nil || primaryID == [NSNull null] || !model.isPersisted) {
     [self.context appendEvent:@{
       @"event_kind" : @"dataverse_create",
@@ -340,7 +364,7 @@
   }
                 countAsQuery:YES];
   NSDictionary *updated = [self.context.client updateRecordInEntitySet:self.descriptor.entitySetName
-                                                              recordID:[primaryID description]
+                                                              recordID:primaryID
                                                                 values:encodedValues
                                                                ifMatch:([model.etag length] > 0 ? model.etag : nil)
                                                    returnRepresentation:YES
@@ -348,14 +372,25 @@
   if (updated == nil) {
     return NO;
   }
-  ALNDataverseRecord *record = [ALNDataverseRecord recordWithDictionary:updated error:error];
-  if (record != nil) {
+  [self applyWriteResponse:updated toModel:model];
+  [self.context trackModel:model];
+  return YES;
+}
+
+// A write answered with the record (return=representation) refreshes the
+// model from it. A server may ignore that preference and answer 204, which
+// leaves only a response summary; applying it would erase the model's fields,
+// its persisted ID among them, so the model keeps what it sent instead.
+- (void)applyWriteResponse:(NSDictionary *)response toModel:(ALNORMDataverseModel *)model {
+  ALNDataverseRecord *record = [ALNDataverseRecord recordWithDictionary:response error:NULL];
+  ALNORMDataverseFieldDescriptor *primaryField = [self.descriptor fieldNamed:self.descriptor.primaryIDAttribute ?: @""];
+  NSDictionary<NSString *, id> *returned = record.values ?: @{};
+  id returnedID = returned[primaryField.readKey ?: @""] ?: returned[self.descriptor.primaryIDAttribute ?: @""];
+  if (record != nil && returnedID != nil && returnedID != [NSNull null]) {
     [model applyRecord:record error:nil];
   } else {
     [model markClean];
   }
-  [self.context trackModel:model];
-  return YES;
 }
 
 - (BOOL)upsertModel:(ALNORMDataverseModel *)model
@@ -415,7 +450,10 @@
   if (error != NULL) {
     *error = nil;
   }
-  id primaryID = [model primaryIDValue];
+  id primaryID = [model persistedPrimaryIDValue];
+  if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"delete" error:error]) {
+    return NO;
+  }
   if (primaryID == nil || primaryID == [NSNull null]) {
     if (error != NULL) {
       *error = ALNORMMakeError(ALNORMErrorDeleteFailed,
@@ -430,7 +468,7 @@
   }
                 countAsQuery:YES];
   return [self.context.client deleteRecordInEntitySet:self.descriptor.entitySetName
-                                             recordID:[primaryID description]
+                                             recordID:primaryID
                                               ifMatch:([model.etag length] > 0 ? model.etag : nil)
                                                 error:error];
 }
@@ -453,11 +491,14 @@
 
     NSString *method = @"POST";
     NSString *relativePath = self.descriptor.entitySetName ?: @"";
-    id primaryID = [model primaryIDValue];
+    id primaryID = [model persistedPrimaryIDValue];
+    if (model.isPersisted && ![self requirePersistedPrimaryID:primaryID operation:@"update" error:error]) {
+      return NO;
+    }
     if (primaryID != nil && primaryID != [NSNull null] && model.isPersisted) {
       method = @"PATCH";
       NSString *path = [ALNDataverseClient recordPathForEntitySet:self.descriptor.entitySetName
-                                                         recordID:[primaryID description]
+                                                         recordID:primaryID
                                                             error:error];
       if (path == nil) {
         return NO;

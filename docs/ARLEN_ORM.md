@@ -277,16 +277,36 @@ ALNORMQuery *query = [[[posts query] withSelectInRelationNamed:@"author"] strict
 NSArray *models = [posts allMatchingQuery:query error:&error];
 ```
 
-For mutation-heavy flows, prefer changesets and write options:
+For mutation-heavy flows, prefer changesets and write options. When the input
+comes from a request, name the fields the client may set:
 
 ```objc
 ALNORMChangeset *changeset = [ALNORMChangeset changesetWithModel:post];
-[changeset applyInputValues:payload error:&error];
+[changeset applyInputValues:payload
+            permittedFields:@[ @"title", @"body" ]
+                      error:&error];
 [repository saveModel:post
             changeset:changeset
               options:[ALNORMWriteOptions options]
                 error:&error];
 ```
+
+`applyInputValues:permittedFields:error:` drops every input key outside the
+list, so a client can't mass-assign keys such as `author_id`, `role`, or
+`is_admin`. `applyInputValues:error:` casts every known field and is only for
+trusted input.
+
+A persisted model's primary key can't change: a changeset or
+`setObject:forFieldName:error:` that writes a different value fails with
+`ALNORMErrorReadOnlyMutation`, and an unchanged value (a client echoing its
+`id`) is accepted. `UPDATE` and `DELETE` always target the primary key as it
+was loaded or last saved. A model loaded without its primary key (a
+`selectFields:` that leaves it out) can't be given one, and saving or deleting
+it fails with `ALNORMErrorMissingField`, so select the key for rows you will
+write back. The Dataverse ORM applies the same rules to a persisted record's
+primary ID (`persistedPrimaryIDValue`), and
+`-[ALNORMDataverseChangeset applyInputValues:permittedFields:error:]` is the
+permit-list form for Dataverse input.
 
 When a new SQL model relies on a database-generated primary key default, Arlen
 now requests the generated key back through the adapter's `returning_mode`

@@ -671,6 +671,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
 @property(nonatomic, strong) ALNRoute *spaFallbackRoute;
 @property(nonatomic, strong) NSError *spaFallbackConfigError;
+@property(nonatomic, strong, readwrite, nullable) NSError *moduleLoadError;
 @property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
@@ -678,6 +679,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong, readwrite) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readwrite) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readwrite) id<ALNAttachmentAdapter> attachmentAdapter;
+@property(nonatomic, assign, readwrite) BOOL usesDefaultAttachmentAdapter;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamStore> eventStreamStore;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamBroker> eventStreamBroker;
 @property(nonatomic, strong, readwrite, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;
@@ -724,6 +726,13 @@ static BOOL ALNInvokeRouteAction(id controller,
                                    rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
 @end
+
+// Development and test keep serving after a module fails to load, so the
+// error can be fixed with the app running; every other environment refuses to
+// start rather than serve without the module.
+static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
+  return ALNEnvironmentIsDevelopmentLike(environment);
+}
 
 @implementation ALNApplication
 
@@ -1077,8 +1086,13 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 - (instancetype)initWithConfig:(NSDictionary *)config {
   self = [super init];
   if (self) {
+    _environment = [ALNNormalizedEnvironmentName(config[@"environment"]) copy];
+    if (![config[@"environment"] isEqual:_environment]) {
+      NSMutableDictionary *normalized = [NSMutableDictionary dictionaryWithDictionary:config ?: @{}];
+      normalized[@"environment"] = _environment;
+      config = normalized;
+    }
     _config = [config copy] ?: @{};
-    _environment = [_config[@"environment"] copy] ?: @"development";
     _router = [[ALNRouter alloc] init];
     _logger = [[ALNLogger alloc] initWithFormat:_config[@"logFormat"] ?: @"text"];
     _metrics = [[ALNMetricsRegistry alloc] init];
@@ -1094,6 +1108,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _mailAdapter = [[ALNInMemoryMailAdapter alloc] init];
     _webhookAdapter = [[ALNInMemoryWebhookAdapter alloc] init];
     _attachmentAdapter = [[ALNInMemoryAttachmentAdapter alloc] init];
+    _usesDefaultAttachmentAdapter = YES;
     _eventStreamBroker = [[ALNInMemoryEventStreamBroker alloc] initWithAdapterName:nil];
     NSDictionary *services = [_config[@"services"] isKindOfClass:[NSDictionary class]] ? _config[@"services"] : @{};
     NSDictionary *i18nConfig =
@@ -1427,6 +1442,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     return;
   }
   _attachmentAdapter = adapter;
+  _usesDefaultAttachmentAdapter = NO;
 }
 
 - (void)setEventStreamStore:(id<ALNEventStreamStore>)adapter {
@@ -2512,7 +2528,7 @@ static BOOL ALNOpenAPIEnabled(ALNApplication *application) {
 
 static BOOL ALNOpenAPIDocsUIEnabled(ALNApplication *application) {
   NSDictionary *openapi = ALNOpenAPIConfig(application.config);
-  BOOL defaultEnabled = ![application.environment isEqualToString:@"production"];
+  BOOL defaultEnabled = ALNEnvironmentIsDevelopmentLike(application.environment);
   return ALNBoolConfigValue(openapi[@"docsUIEnabled"], defaultEnabled);
 }
 
@@ -3165,7 +3181,7 @@ static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
 static BOOL ALNReadinessRequiresMigrations(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"readinessRequiresMigrations"],
-                            [application.environment isEqualToString:@"production"]);
+                            !ALNEnvironmentIsDevelopmentLike(application.environment));
 }
 
 static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
@@ -3969,8 +3985,7 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   // Only development and test get the detailed page (reason, stack, paths);
   // staging, preview and other environments are treated like production (#215).
   NSString *environment = application.environment ?: @"";
-  BOOL production = !([environment isEqualToString:@"development"] ||
-                      [environment isEqualToString:@"test"]);
+  BOOL production = !ALNEnvironmentIsDevelopmentLike(environment);
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
@@ -3999,6 +4014,36 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   [response setHeader:@"Content-Type" value:@"text/html; charset=utf-8"];
   [response setTextBody:html ?: @"internal server error\n"];
   response.committed = YES;
+}
+
+// An exception before the controller runs (middleware, request/auth
+// contracts) answers this request with a 500, like a controller exception,
+// instead of leaving the worker thread and ending the process.
+static void ALNApplyPreControllerException(ALNApplication *application,
+                                           ALNRequest *request,
+                                           ALNResponse *response,
+                                           NSString *requestID,
+                                           ALNContext *context,
+                                           NSString *stage,
+                                           NSException *exception) {
+  if (!response.committed) {
+    ALNApplyInternalErrorResponse(application,
+                                  request,
+                                  response,
+                                  requestID,
+                                  500,
+                                  [stage stringByAppendingString:@"_exception"],
+                                  @"Internal Server Error",
+                                  exception.reason ?: [stage stringByAppendingString:@" exception"],
+                                  ALNErrorDetailsFromException(exception));
+  }
+  [application.logger error:[stage stringByAppendingString:@" exception"]
+                     fields:@{
+                       @"request_id" : requestID ?: @"",
+                       @"controller" : context.controllerName ?: @"",
+                       @"action" : context.actionName ?: @"",
+                       @"exception" : exception.description ?: @""
+                     }];
 }
 
 static BOOL ALNApplyRequestContractIfNeeded(ALNApplication *application,
@@ -4534,17 +4579,29 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+// A module that fails to load stops module loading. Outside development and
+// test, -startWithError: then refuses to start; in development and test the
+// app keeps serving and the failure is logged as an error.
 - (void)loadConfiguredModules {
   NSError *error = nil;
-  NSArray<id<ALNModule>> *modules = [ALNModuleSystem loadModulesForApplication:self error:&error];
-  if (modules == nil) {
-    if (error != nil) {
-      [self.logger warn:@"module load skipped"
-                 fields:@{
-                   @"error" : error.localizedDescription ?: @"unknown",
-                 }];
+  NSMutableArray<id<ALNModule>> *modules = [NSMutableArray array];
+  BOOL loaded = [ALNModuleSystem loadModulesForApplication:self loadedModules:modules error:&error];
+  if (!loaded) {
+    self.moduleLoadError = error ?: [NSError errorWithDomain:ALNModuleSystemErrorDomain
+                                                        code:24
+                                                    userInfo:@{
+                                                      NSLocalizedDescriptionKey : @"module load failed",
+                                                    }];
+    NSDictionary *info = self.moduleLoadError.userInfo ?: @{};
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    fields[@"error"] = self.moduleLoadError.localizedDescription ?: @"unknown";
+    for (NSString *key in @[ @"module", @"key_path", @"not_loaded" ]) {
+      if (info[key] != nil) {
+        fields[key] = info[key];
+      }
     }
-    return;
+    fields[@"environment"] = self.environment ?: @"";
+    [self.logger error:@"module load failed" fields:fields];
   }
 
   for (id<ALNModule> module in modules) {
@@ -4563,6 +4620,33 @@ static void ALNFinalizeResponse(ALNApplication *application,
     [self.logger info:@"module loaded"
                fields:@{
                  @"module" : identifier ?: @"",
+               }];
+  }
+  [self warnAboutOutdatedVendoredModules];
+}
+
+// boomhauer, propane and jobs-worker export ARLEN_FRAMEWORK_ROOT. Vendored
+// modules compile from the app's copy, so name any that are older than the
+// framework's (a version check only; `arlen module doctor` also compares files).
+- (void)warnAboutOutdatedVendoredModules {
+  if ([[self.environment lowercaseString] isEqualToString:@"test"]) {
+    return;
+  }
+  const char *rawRoot = getenv("ARLEN_FRAMEWORK_ROOT");
+  NSString *appRoot = [self.config[@"appRoot"] isKindOfClass:[NSString class]] ? self.config[@"appRoot"] : @"";
+  if (rawRoot == NULL || rawRoot[0] == '\0' || [appRoot length] == 0) {
+    return;
+  }
+  NSArray<NSDictionary *> *outdated =
+      [ALNModuleSystem frameworkCopyDiagnosticsAtAppRoot:appRoot
+                                           frameworkRoot:[NSString stringWithUTF8String:rawRoot]
+                                          compareContent:NO];
+  for (NSDictionary *entry in outdated) {
+    [self.logger warn:@"vendored module is older than the framework copy"
+               fields:@{
+                 @"module" : entry[@"module"] ?: @"",
+                 @"detail" : entry[@"message"] ?: @"",
+                 @"fix" : entry[@"detail"] ?: @"",
                }];
   }
 }
@@ -5254,6 +5338,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return [json writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
+- (BOOL)moduleLoadErrorPreventsStartup {
+  return self.moduleLoadError != nil && !ALNModuleLoadFailureIsTolerated(self.environment);
+}
+
 - (BOOL)startWithError:(NSError **)error {
   if (self.isStarted) {
     return YES;
@@ -5285,6 +5373,23 @@ static void ALNFinalizeResponse(ALNApplication *application,
       *error = self.spaFallbackConfigError;
     }
     return NO;
+  }
+  if ([self moduleLoadErrorPreventsStartup]) {
+    if (error != NULL) {
+      *error = self.moduleLoadError;
+    }
+    return NO;
+  }
+  NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
+  NSDictionary *accessories = ALNDictionaryConfigValue(self.config, @"propaneAccessories");
+  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
+  NSString *workerEnvironment = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_PROPANE_WORKERS"];
+  if ([workerEnvironment integerValue] > 0) workers = [workerEnvironment integerValue];
+  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
+    [self.logger warn:@"rate limit is per worker"
+               fields:@{ @"worker_count" : @(workers),
+                         @"requests_per_worker" : rateLimit[@"requests"] ?: @120,
+                         @"hint" : @"Use an ingress rate limiter for a deployment-wide request budget." }];
   }
   if (self.spaFallback != nil) {
     // A missing shell is expected while a frontend dev server serves the app.
@@ -5473,8 +5578,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (rateLimitEnabled) {
     NSUInteger requests = ALNUIntConfigValue(rateLimit[@"requests"], 120, 1);
     NSUInteger windowSeconds = ALNUIntConfigValue(rateLimit[@"windowSeconds"], 60, 1);
+    NSUInteger ipv6PrefixLength = ALNUIntConfigValue(rateLimit[@"ipv6PrefixLength"], 64, 1);
     [self addMiddleware:[[ALNRateLimitMiddleware alloc] initWithMaxRequests:requests
-                                                               windowSeconds:windowSeconds]];
+                                                               windowSeconds:windowSeconds
+                                                            ipv6PrefixLength:ipv6PrefixLength]];
   }
 
   NSDictionary *session = ALNDictionaryConfigValue(self.config, @"session");
@@ -5501,7 +5608,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     } else {
       NSString *cookieName = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
       NSUInteger maxAge = ALNUIntConfigValue(session[@"maxAgeSeconds"], 1209600, 1);
-      BOOL secureDefault = [self.environment isEqualToString:@"production"];
+      BOOL secureDefault = !ALNEnvironmentIsDevelopmentLike(self.environment);
       BOOL secure = ALNBoolConfigValue(session[@"secure"], secureDefault);
       NSString *sameSite = ALNStringConfigValue(session[@"sameSite"], @"Lax");
       [self addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:secret
@@ -6081,20 +6188,36 @@ static void ALNFinalizeResponse(ALNApplication *application,
                                                   routeName:resolvedRouteName
                                              controllerName:resolvedControllerName
                                                  actionName:resolvedActionName];
-  BOOL shouldDispatchController =
-      routeReady && ALNApplyRequestContractIfNeeded(self,
-                                                    request,
-                                                    response,
-                                                    context,
-                                                    matchedRoute,
-                                                    ALNResolvedRequestID(requestIdentity));
+  BOOL shouldDispatchController = NO;
+  @try {
+    shouldDispatchController =
+        routeReady && ALNApplyRequestContractIfNeeded(self,
+                                                      request,
+                                                      response,
+                                                      context,
+                                                      matchedRoute,
+                                                      ALNResolvedRequestID(requestIdentity));
+  } @catch (NSException *exception) {
+    shouldDispatchController = NO;
+    ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                   @"request_contract", exception);
+  }
   NSMutableArray *executedMiddlewares = nil;
   if (shouldDispatchController && [self.mutableMiddlewares count] > 0) {
     executedMiddlewares = [NSMutableArray arrayWithCapacity:[self.mutableMiddlewares count]];
     [trace startStage:@"middleware"];
     for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
       NSError *middlewareError = nil;
-      BOOL shouldContinue = [middleware processContext:context error:&middlewareError];
+      BOOL shouldContinue = NO;
+      @try {
+        shouldContinue = [middleware processContext:context error:&middlewareError];
+      } @catch (NSException *exception) {
+        [executedMiddlewares addObject:middleware];
+        shouldDispatchController = NO;
+        ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                       @"middleware", exception);
+        break;
+      }
       [executedMiddlewares addObject:middleware];
       if (!shouldContinue) {
         shouldDispatchController = NO;
@@ -6133,13 +6256,19 @@ static void ALNFinalizeResponse(ALNApplication *application,
   }
 
   if (shouldDispatchController && !response.committed) {
-    shouldDispatchController =
-        ALNApplyAuthContractIfNeeded(self,
-                                     request,
-                                     response,
-                                     context,
-                                     matchedRoute,
-                                     ALNResolvedRequestID(requestIdentity));
+    @try {
+      shouldDispatchController =
+          ALNApplyAuthContractIfNeeded(self,
+                                       request,
+                                       response,
+                                       context,
+                                       matchedRoute,
+                                       ALNResolvedRequestID(requestIdentity));
+    } @catch (NSException *exception) {
+      shouldDispatchController = NO;
+      ALNApplyPreControllerException(self, request, response, ALNResolvedRequestID(requestIdentity), context,
+                                     @"auth_contract", exception);
+    }
   }
 
   if (shouldDispatchController) {

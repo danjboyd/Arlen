@@ -82,6 +82,44 @@
   }
 }
 
+// The scaffold used to write `csrf.enabled = NO`, so an app that later turned
+// sessions on (as the auth module needs) ran without CSRF protection.
+- (void)testGeneratedAppsLeaveCSRFFollowingSessions {
+  for (NSString *mode in @[ @"--lite", @"--full" ]) {
+    NSString *root = ALNTestTemporaryDirectory(@"arlen-new-csrf");
+    XCTAssertNotNil(root);
+    if (root == nil) {
+      return;
+    }
+    int exitCode = -1;
+    NSString *command = [NSString stringWithFormat:@"cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' "
+                                                    "ARLEN_FRAMEWORK_ROOT=%@ %@ new CSRFApp %@ 2>&1",
+                                                   ALNTestShellQuote(root),
+                                                   ALNTestShellQuote(ALNTestRepoRoot()),
+                                                   ALNTestShellQuote([self arlenPath]), mode];
+    NSString *output = ALNTestRunShellCapture(command, &exitCode);
+    XCTAssertEqual(0, exitCode, @"%@: %@", mode, output);
+    NSString *appRoot = [root stringByAppendingPathComponent:@"CSRFApp"];
+
+    NSDictionary *appPlist =
+        [NSDictionary dictionaryWithContentsOfFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]];
+    XCTAssertNotNil(appPlist, @"%@", mode);
+    XCTAssertNil(appPlist[@"csrf"][@"enabled"], @"%@", mode);
+
+    NSString *development = [appRoot stringByAppendingPathComponent:@"config/environments/development.plist"];
+    XCTAssertTrue([@"{\n  session = { enabled = YES; secret = \"0123456789abcdef0123456789abcdef\"; };\n}\n"
+                      writeToFile:development
+                       atomically:YES
+                         encoding:NSUTF8StringEncoding
+                            error:NULL]);
+    NSError *error = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:appRoot environment:@"development" error:&error];
+    XCTAssertNil(error, @"%@", mode);
+    XCTAssertEqualObjects(@YES, config[@"csrf"][@"enabled"], @"%@", mode);
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
 - (void)testAbsoluteTargetIsNotNestedUnderTheCurrentDirectory {
   NSString *root = ALNTestTemporaryDirectory(@"arlen-new-absolute");
   XCTAssertNotNil(root);
