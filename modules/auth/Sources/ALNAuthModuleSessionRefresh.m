@@ -6,6 +6,7 @@
 #import "ALNContext.h"
 #import "ALNLogger.h"
 #import "ALNPg.h"
+#import "ALNResponse.h"
 #import "ALNSecurityPrimitives.h"
 
 #import <dispatch/dispatch.h>
@@ -211,7 +212,24 @@ static NSString *const ARRevokedSessionPredicate =
 @implementation ALNAuthModuleSessionMiddleware
 
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
-  return [[ALNAuthModuleRuntime sharedRuntime] refreshAuthenticatedSessionForContext:context error:error];
+  NSError *refreshError = nil;
+  if ([[ALNAuthModuleRuntime sharedRuntime] refreshAuthenticatedSessionForContext:context error:&refreshError]) {
+    return YES;
+  }
+  if ([refreshError.domain isEqualToString:ALNPgErrorDomain] ||
+      ([refreshError.domain isEqualToString:ALNAuthModuleErrorDomain] &&
+       refreshError.code == ALNAuthModuleErrorDatabaseUnavailable)) {
+    context.response.statusCode = 503;
+    [context.response setHeader:@"Retry-After" value:@"2"];
+    [context.response setHeader:@"Content-Type" value:@"text/plain; charset=utf-8"];
+    [context.response setTextBody:@"The sign-in service is temporarily unavailable. Try again shortly.\n"];
+    context.response.committed = YES;
+    return NO;
+  }
+  if (error != NULL) {
+    *error = refreshError;
+  }
+  return NO;
 }
 
 @end
