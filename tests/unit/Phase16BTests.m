@@ -146,6 +146,27 @@
 
 @implementation Phase16BTests
 
+- (NSArray<NSString *> *)childArgumentsForMethod:(NSString *)method bundlePath:(NSString *)bundlePath {
+#if defined(__APPLE__)
+  return @[ @"-XCTest", [@"Phase16BTests/" stringByAppendingString:method], bundlePath ];
+#else
+  return @[ [@"-only-testing:ArlenUnitTests/Phase16BTests/" stringByAppendingString:method], bundlePath ];
+#endif
+}
+
+- (void)assertSelectedChildFinished:(NSTask *)child outputPipe:(NSPipe *)pipe {
+  BOOL exited = ALNTestWaitForTaskExit(child, 30.0);
+  if (!exited) {
+    [child terminate];
+    [child waitUntilExit];
+  }
+  NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+  NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+  XCTAssertTrue(exited, @"child timed out: %@", output);
+  XCTAssertEqual(0, child.terminationStatus, @"%@", output);
+  XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
+}
+
 - (void)setUp {
   [super setUp];
   [[ALNRealtimeHub sharedHub] reset];
@@ -527,16 +548,18 @@
   for (NSUInteger index = 0; index < 2U; index++) {
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
-    child.arguments = @[ @"-XCTest", @"Phase16BTests/testNotificationStateTransactionsAcrossProcesses", bundlePath ];
+    child.arguments = [self childArgumentsForMethod:@"testNotificationStateTransactionsAcrossProcesses" bundlePath:bundlePath];
+    NSPipe *output = [NSPipe pipe];
+    child.standardOutput = output;
+    child.standardError = output;
     NSMutableDictionary *childEnvironment = [environment mutableCopy];
     childEnvironment[@"ARLEN_NOTIFICATIONS_SHARED_STATE_PATH"] = statePath;
     child.environment = childEnvironment;
     [child launch];
-    [children addObject:child];
+    [children addObject:@{ @"task" : child, @"output" : output }];
   }
-  for (NSTask *child in children) {
-    [child waitUntilExit];
-    XCTAssertEqual(0, child.terminationStatus);
+  for (NSDictionary *entry in children) {
+    [self assertSelectedChildFinished:entry[@"task"] outputPipe:entry[@"output"]];
   }
   NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"outboxEntries"] count]);
@@ -613,17 +636,19 @@
   for (NSString *childRole in @[ @"first", @"second" ]) {
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
-    child.arguments = @[ @"-XCTest", @"Phase16BTests/testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses", bundlePath ];
+    child.arguments = [self childArgumentsForMethod:@"testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses" bundlePath:bundlePath];
+    NSPipe *output = [NSPipe pipe];
+    child.standardOutput = output;
+    child.standardError = output;
     NSMutableDictionary *childEnvironment = [environment mutableCopy];
     childEnvironment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_PATH"] = statePath;
     childEnvironment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_ROLE"] = childRole;
     child.environment = childEnvironment;
     [child launch];
-    [children addObject:child];
+    [children addObject:@{ @"task" : child, @"output" : output }];
   }
-  for (NSTask *child in children) {
-    [child waitUntilExit];
-    XCTAssertEqual(0, child.terminationStatus);
+  for (NSDictionary *entry in children) {
+    [self assertSelectedChildFinished:entry[@"task"] outputPipe:entry[@"output"]];
   }
   NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
   NSArray *inbox = state[@"inboxByRecipient"][@"shared-recipient"];
