@@ -41,6 +41,7 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      # The gate checks clang shared-runtime parent/child instrumentation first.
       - name: Run linux sanitizer matrix gate
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep

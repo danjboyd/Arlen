@@ -13,21 +13,8 @@ set +u
 source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
-asan_so="$(clang -print-file-name=libasan.so)"
-ubsan_so="$(clang -print-file-name=libubsan.so)"
-if [[ -z "$asan_so" || ! -f "$asan_so" ]]; then
-  echo "phase11 sanitizer matrix: unable to locate libasan.so"
-  exit 1
-fi
-if [[ -z "$ubsan_so" || ! -f "$ubsan_so" ]]; then
-  echo "phase11 sanitizer matrix: unable to locate libubsan.so"
-  exit 1
-fi
-
-export EXTRA_OBJC_FLAGS="${EXTRA_OBJC_FLAGS:--fsanitize=address,undefined -fno-omit-frame-pointer}"
-export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:halt_on_error=1:strict_string_checks=1}"
-export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
-export XCTEST_LD_PRELOAD="$asan_so:$ubsan_so"
+source "$repo_root/tools/ci/source_clang_sanitizers.sh"
+python3 ./tools/ci/test_clang_sanitizer_runtime.py
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT

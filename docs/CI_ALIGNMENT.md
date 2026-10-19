@@ -735,3 +735,20 @@ The same probe also verifies server-originated delivery to both subscribers
 `runtime-concurrency-fixture` executable accepts a command only through a pipe
 inherited from the test runner; ordinary `boomhauer` has no publishing hook or
 new network route. Failed probe runs retain their server log for diagnosis.
+
+### Linux sanitizer runtime consistency
+
+The blocking sanitizer gates source `tools/ci/source_clang_sanitizers.sh` after
+GNUstep initialization. Framework code, XCTest bundles and child executables use
+clang's shared ASan/UBSan runtime (`-shared-libsan`), with a runtime search path
+embedded in executables. The uninstrumented vendored XCTest launcher preloads
+that same runtime before loading instrumented bundles. Caller `LD_PRELOAD` and
+`XCTEST_LD_PRELOAD` entries are retained after the sanitizer runtime; do not add
+GCC sanitizer libraries to a clang-instrumented run.
+
+Each gate first runs `test_clang_sanitizer_runtime.py`: an uninstrumented parent
+loads an instrumented bundle and executes an instrumented child. A clean run
+must succeed, while ASan memory errors and UBSan overflow errors in either
+process must fail with the expected diagnostic. The check also verifies that an
+unrelated preload is retained. This corrects runtime selection without changing
+lane names, required checks, or branch-protection requirements.

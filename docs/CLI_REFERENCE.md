@@ -1485,6 +1485,7 @@ Lifecycle diagnostics:
 - `make ci-perf-smoke`: run the lighter standalone macro perf smoke lane for the checked-in `default` and `template_heavy` profiles and archive artifacts under `build/perf/ci_smoke`
  - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and fault-injection checks
+- Linux sanitizer gates require clang’s shared sanitizer runtime for both XCTest bundles and child executables; they preserve unrelated caller preloads and verify parent/child ASan and UBSan detection before running suites.
 - `make ci-sanitizers`: run the ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
 - `make ci-soak`: run the long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
 - `make ci-fd-regression`: run the opt-in FD regression evidence lane, preserving soak artifacts plus an FD summary under `build/release_confidence/phase38/fd_regression`

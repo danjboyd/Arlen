@@ -498,3 +498,7 @@ benchmark; see [Performance Profiles](internal/PERFORMANCE_PROFILES.md).
 
 Auth-only apps can build without the optional jobs module. Durable auth mail
 still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).
+
+For Linux contributor sanitizer checks, run `make ci-sanitizers` after sourcing
+`tools/source_gnustep_env.sh`. The gate requires clang's shared sanitizer runtime
+and uses it consistently for XCTest bundles and instrumented child processes.
