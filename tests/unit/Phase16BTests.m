@@ -11,6 +11,7 @@
 #import "ALNRealtime.h"
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
+#import "../shared/ALNTestProcessCheckpoint.h"
 
 @interface Phase16BNotification : NSObject <ALNNotificationDefinition>
 @end
@@ -712,11 +713,15 @@
       path, [payload base64EncodedStringWithOptions:0]];
   child.standardOutput = [NSFileHandle fileHandleWithNullDevice];
   child.standardError = [NSFileHandle fileHandleWithNullDevice];
-  [child launch];
-  BOOL exited = ALNTestWaitForTaskExit(child, 15.0);
-  if (!exited) [child terminate];
-  [child waitUntilExit];
-  return exited && child.terminationStatus == 0;
+  BOOL exited = NO;
+  BOOL reaped = NO;
+  @try {
+    [child launch];
+    exited = ALNTestWaitForTaskExit(child, 15.0);
+  } @finally {
+    reaped = ALNTestReapChild(child);
+  }
+  return exited && reaped && child.terminationStatus == 0;
 }
 #endif
 
