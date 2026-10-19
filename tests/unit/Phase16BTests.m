@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import <unistd.h>
+#import <sys/stat.h>
 
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
@@ -507,7 +508,7 @@
     NSString *recipient = [NSString stringWithFormat:@"worker-%d", getpid()];
     ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
     NSError *error = nil;
-    NSDictionary *payload = @{ @"recipient" : recipient, @"email" : @"reader@example.test", @"name" : @"Reader" };
+    NSDictionary *payload = @{ @"recipient" : @"shared-recipient", @"email" : @"reader@example.test", @"name" : @"Reader" };
     NSDictionary *sent = [runtime testSendNotificationIdentifier:@"phase16b.digest"
                                                          payload:payload channels:@[ @"in_app" ] error:&error];
     XCTAssertNotNil(sent);
@@ -539,9 +540,13 @@
   }
   NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"outboxEntries"] count]);
-  XCTAssertEqual((NSUInteger)2, [(NSDictionary *)state[@"inboxByRecipient"] count]);
+  XCTAssertEqual((NSUInteger)1, [(NSDictionary *)state[@"inboxByRecipient"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"inboxByRecipient"][@"shared-recipient"] count]);
   XCTAssertEqual((NSUInteger)2, [(NSDictionary *)state[@"preferencesByRecipient"] count]);
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"recentFanoutEvents"] count]);
+  for (NSDictionary *entry in state[@"outboxEntries"]) {
+    XCTAssertEqualObjects(@"delivered", entry[@"status"]);
+  }
 }
 
 - (void)testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses {
@@ -625,6 +630,58 @@
   XCTAssertEqual((NSUInteger)1, [inbox count]);
   XCTAssertEqualObjects(@YES, inbox[0][@"read"]);
   XCTAssertEqual((NSUInteger)0, [(NSDictionary *)state[@"preferencesByRecipient"][@"shared-recipient"] count]);
+}
+
+- (void)testCorruptNotificationStateDoesNotGetOverwrittenByMutation {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-corrupt-state.plist"];
+  [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSDictionary *initial = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+  NSError *error = nil;
+  XCTAssertNotNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNil(error);
+  NSData *corrupt = [@"not a property list" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([corrupt writeToFile:statePath atomically:YES]);
+  error = nil;
+  XCTAssertNil([runtime updateNotificationPreferences:@{} forRecipient:@"reader" error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(corrupt, [NSData dataWithContentsOfFile:statePath]);
+  XCTAssertEqual((NSUInteger)0, [[runtime notificationPreferencesForRecipient:@"reader"] count]);
+  XCTAssertEqual((NSUInteger)0, [[runtime outboxSnapshot] count]);
+  NSData *wrongRoot = [NSPropertyListSerialization dataWithPropertyList:@[ @"not-a-dictionary" ]
+                                                                  format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+  XCTAssertTrue([wrongRoot writeToFile:statePath atomically:YES]);
+  error = nil;
+  XCTAssertNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(wrongRoot, [NSData dataWithContentsOfFile:statePath]);
+}
+
+- (void)testFailedNotificationStateWriteRetainsLastDurablePreferences {
+#if defined(_WIN32)
+  XCTSkip(@"POSIX directory permissions are unavailable on Windows");
+#else
+  NSString *directory = [self temporaryDirectory];
+  NSString *statePath = [directory stringByAppendingPathComponent:@"notifications-write-failure.plist"];
+  [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *initial = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+  XCTAssertNotNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual(0, chmod([directory fileSystemRepresentation], 0500));
+  @try {
+    NSDictionary *changed = @{ @"phase16b.digest" : @{ @"email" : @YES } };
+    error = nil;
+    XCTAssertNil([runtime updateNotificationPreferences:changed forRecipient:@"reader" error:&error]);
+    XCTAssertNotNil(error);
+  } @finally {
+    XCTAssertEqual(0, chmod([directory fileSystemRepresentation], 0700));
+  }
+  NSDictionary *durable = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  XCTAssertEqualObjects(@NO, durable[@"preferencesByRecipient"][@"reader"][@"phase16b.digest"][@"email"]);
+  XCTAssertEqualObjects(@NO, [runtime notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+#endif
 }
 
 @end

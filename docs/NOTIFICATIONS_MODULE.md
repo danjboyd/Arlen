@@ -58,6 +58,9 @@ unique across workers. Inbox, outbox, and preference reads refresh from the
 shared file. Inbox read-state and preference changes reload the authoritative
 state while holding the file lock, so a worker that started earlier can update
 entries written by another worker.
+Malformed or unreadable state files stop inbox/preference mutations and suppress
+channel delivery until the file is repaired; a failed write restores the last
+durable state in memory.
 
 Runtime access is available through `ALNNotificationsModuleRuntime`.
 
