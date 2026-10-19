@@ -28,6 +28,8 @@ sharing; they retain the old-byte and checksum-mismatch assertions.
 The build-flags sentinel invalidates the vendored runner as well as framework,
 generated-source and test objects; changing the Windows offset ABI cannot reuse
 an older runner build.
+The existing Windows transport step also runs the static HTTP probe against a
+sparse file above 2 GiB, checking actual tail bytes and HEAD length over HTTP.
 
 The runtime parity suite tests watch recovery, jobs CLI smoke, and explicit
 rejection of unsupported Windows `propane` startup. It no longer attempts
