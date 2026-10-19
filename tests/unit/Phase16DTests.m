@@ -7,6 +7,7 @@
 #import "ALNJobsModule.h"
 #import "ALNSearchModule.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestProcessCheckpoint.h"
 
 // Private test seams: inject a second runtime while an engine call is in flight.
 @interface ALNDefaultSearchEngine : NSObject <ALNSearchEngine>
@@ -97,8 +98,11 @@ static void Phase16DResetOrderStore(void) {
   (void)runtime;
   if ([[[NSProcessInfo processInfo] environment][@"ARLEN_SEARCH_PROCESS_INDEX"] isEqual:@"0"]) {
     // Pause external/provider work while another process rebuilds the resource.
-    [[NSFileHandle fileHandleWithStandardOutput] writeData:[@"!" dataUsingEncoding:NSUTF8StringEncoding]];
-    (void)[[NSFileHandle fileHandleWithStandardInput] readDataOfLength:1];
+    NSString *path = [[NSProcessInfo processInfo] environment][@"ARLEN_SEARCH_SHARED_STATE_PATH"];
+    if (!ALNTestSignalCheckpoint(path, @"building-0") || !ALNTestWaitCheckpoint(path, @"resume-0")) {
+      if (error) *error = [NSError errorWithDomain:@"Phase16D" code:12 userInfo:@{NSLocalizedDescriptionKey:@"build checkpoint timed out"}];
+      return nil;
+    }
   }
   if (gPhase16DSearchBuildShouldFail) {
     if (error != NULL) {
@@ -383,14 +387,15 @@ static void Phase16DResetOrderStore(void) {
 - (void)testSearchStateTransactionsAcrossProcesses {
   NSDictionary *environment = [[NSProcessInfo processInfo] environment];
   NSString *sharedPath = environment[@"ARLEN_SEARCH_SHARED_STATE_PATH"];
-  NSData *signal = [@"!" dataUsingEncoding:NSUTF8StringEncoding];
   if (sharedPath.length > 0) {
     [self registerModulesForApplication:[self applicationWithStatePath:sharedPath]];
     ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
-    NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
-    NSFileHandle *output = [NSFileHandle fileHandleWithStandardOutput];
-    [output writeData:signal];
-    XCTAssertEqualObjects(signal, [input readDataOfLength:1]);
+    NSString *index = environment[@"ARLEN_SEARCH_PROCESS_INDEX"];
+    if ([environment[@"ARLEN_MODULE_PROCESS_PROBE_ABORT"] boolValue]) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, [@"ready-" stringByAppendingString:index]));
+    BOOL started = ALNTestWaitCheckpoint(sharedPath, [@"start-" stringByAppendingString:index]);
+    XCTAssertTrue(started);
+    if (!started) return;
     BOOL first = [environment[@"ARLEN_SEARCH_PROCESS_INDEX"] isEqual:@"0"];
     NSError *error = nil;
     NSDictionary *result = [runtime processReindexJobPayload:@{@"resource":@"orders", @"mode":@"full"} error:&error];
@@ -414,35 +419,66 @@ static void Phase16DResetOrderStore(void) {
       XCTAssertNotNil(([runtime processReindexJobPayload:@{@"resource":@"orders", @"mode":@"incremental",
           @"operation":@"upsert", @"record":replacement} error:&error]));
       XCTAssertNil(error);
-      [output writeData:signal];
+      XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, @"changed-1"));
     }
+    XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, [@"complete-" stringByAppendingString:index]));
     return;
   }
   NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"search-process-state.plist"];
   NSMutableArray<NSTask *> *children = [NSMutableArray array];
-  NSMutableArray<NSFileHandle *> *inputs = [NSMutableArray array];
-  NSMutableArray<NSFileHandle *> *outputs = [NSMutableArray array];
-  for (NSUInteger index = 0; index < 2; index++) {
-    NSTask *child = [[NSTask alloc] init];
-    child.launchPath = [[[NSProcessInfo processInfo] arguments] firstObject];
-    child.arguments = @[@"-XCTest", @"Phase16DTests/testSearchStateTransactionsAcrossProcesses", [[NSBundle bundleForClass:[self class]] bundlePath]];
-    NSMutableDictionary *childEnvironment = [environment mutableCopy];
-    childEnvironment[@"ARLEN_SEARCH_SHARED_STATE_PATH"] = path;
-    childEnvironment[@"ARLEN_SEARCH_PROCESS_INDEX"] = [@(index) stringValue];
-    child.environment = childEnvironment;
-    NSPipe *input = [NSPipe pipe], *output = [NSPipe pipe];
-    child.standardInput = input; child.standardOutput = output;
-    [child launch];
-    [children addObject:child];
-    [inputs addObject:input.fileHandleForWriting]; [outputs addObject:output.fileHandleForReading];
+  NSMutableArray<NSFileHandle *> *logs = [NSMutableArray array];
+  @try {
+    for (NSUInteger index = 0; index < 2; index++) {
+      NSTask *child = [[NSTask alloc] init];
+      child.launchPath = [[[NSProcessInfo processInfo] arguments] firstObject];
+      NSString *bundle = [[NSBundle bundleForClass:[self class]] bundlePath];
+#if defined(__APPLE__)
+      child.arguments = @[@"-XCTest", @"Phase16DTests/testSearchStateTransactionsAcrossProcesses", bundle];
+#else
+      child.arguments = @[@"-only-testing:ArlenUnitTests/Phase16DTests/testSearchStateTransactionsAcrossProcesses", @"-output-format", @"apple", bundle];
+#endif
+      NSMutableDictionary *childEnvironment = [environment mutableCopy];
+      childEnvironment[@"ARLEN_SEARCH_SHARED_STATE_PATH"] = path;
+      childEnvironment[@"ARLEN_SEARCH_PROCESS_INDEX"] = [@(index) stringValue];
+      child.environment = childEnvironment;
+      NSString *logPath = [path stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+      [[NSFileManager defaultManager] createFileAtPath:logPath contents:nil attributes:nil];
+      NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
+      [logs addObject:log];
+      child.standardOutput = log; child.standardError = log;
+      [child launch];
+      [children addObject:child];
+    }
+    for (NSUInteger index = 0; index < 2; index++) {
+      BOOL ready = ALNTestWaitCheckpoint(path, [NSString stringWithFormat:@"ready-%lu", (unsigned long)index]);
+      XCTAssertTrue(ready, @"child %lu did not reach its fixture", (unsigned long)index);
+      if (!ready) return;
+    }
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"start-0"));
+    BOOL firstReady = ALNTestWaitCheckpoint(path, @"building-0");
+    XCTAssertTrue(firstReady);
+    if (!firstReady) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"start-1"));
+    BOOL secondReady = ALNTestWaitCheckpoint(path, @"changed-1");
+    XCTAssertTrue(secondReady);
+    if (!secondReady) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"resume-0"));
+    for (NSUInteger index = 0; index < children.count; index++) {
+      NSTask *child = children[index];
+      BOOL exited = ALNTestWaitForTaskExit(child, 20.0);
+      XCTAssertTrue(exited, @"child %lu did not exit", (unsigned long)index);
+      if (!exited) return;
+      XCTAssertEqual(0, child.terminationStatus);
+      NSString *complete = [path stringByAppendingFormat:@".complete-%lu", (unsigned long)index];
+      XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:complete]);
+      NSString *logPath = [path stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+      NSString *output = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:NULL];
+      XCTAssertTrue([output containsString:@"Executed 1 test"], @"%@", output);
+    }
+  } @finally {
+    for (NSTask *child in children) XCTAssertTrue(ALNTestReapChild(child));
+    for (NSFileHandle *log in logs) [log closeFile];
   }
-  for (NSFileHandle *output in outputs) XCTAssertEqualObjects(signal, [output readDataOfLength:1]);
-  [inputs[0] writeData:signal];
-  XCTAssertEqualObjects(signal, [outputs[0] readDataOfLength:1]); // first build outside state lock
-  [inputs[1] writeData:signal];
-  XCTAssertEqualObjects(signal, [outputs[1] readDataOfLength:1]); // competing build + delete/upsert committed
-  [inputs[0] writeData:signal];
-  for (NSTask *child in children) { [child waitUntilExit]; XCTAssertEqual(0, child.terminationStatus); }
   [self registerModulesForApplication:[self applicationWithStatePath:path]];
   ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
   NSDictionary *row = [self ordersRowFromDashboard:[runtime dashboardSummary]];
