@@ -97,6 +97,11 @@ typedef NS_ENUM(NSInteger, ALNStorageModuleErrorCode) {
                                                error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)payloadForDownloadToken:(NSString *)token
                                              error:(NSError *_Nullable *_Nullable)error;
+/// Returns a checksum-verified pinned file when the attachment adapter supports
+/// streaming. Nil with no error means the adapter only supports NSData.
+- (nullable NSFileHandle *)openDownloadFileForToken:(NSString *)token
+                                            metadata:(NSDictionary *_Nullable *_Nullable)metadata
+                                               error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSData *)downloadDataForToken:(NSString *)token
                                  metadata:(NSDictionary *_Nullable *_Nullable)metadata
                                     error:(NSError *_Nullable *_Nullable)error;

@@ -26,6 +26,7 @@ set +u
 source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
+python3 -I ./tools/ci/test_sanitizer_skip_classifier.py
 python3 -I ./tools/ci/classify_sanitizer_integration_skips.py --check
 
 resource_dir="$(clang -print-resource-dir)"

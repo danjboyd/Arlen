@@ -1593,4 +1593,40 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertTrue(success, @"%@", error);
 }
 
+- (void)testLivePostgresGeneratedORMQueriesSkipResetButTrustedExpressionsDoNot {
+  NSString *dsn = [self requiredPGTestDSNForSelector:_cmd];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  NSString *table = [@"orm_reset_" stringByAppendingString:[[[NSUUID UUID] UUIDString]
+                             stringByReplacingOccurrencesOfString:@"-" withString:@""]];
+  table = [table lowercaseString];
+  NSString *create = [NSString stringWithFormat:@"CREATE TABLE %@ (id uuid PRIMARY KEY, name text NOT NULL)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:create parameters:@[] error:&error], 0);
+  gALNORMRuntimeGeneratedParentDescriptor = ALNORMRuntimeGeneratedParentDescriptorForTable(@"public", table);
+  @try {
+    ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:database];
+    ALNORMRepository *repository = [context repositoryForModelClass:[ALNORMRuntimeGeneratedParentModel class]];
+    ALNORMRuntimeGeneratedParentModel *model = [[ALNORMRuntimeGeneratedParentModel alloc] init];
+    XCTAssertTrue([model setObject:[[NSUUID UUID] UUIDString] forFieldName:@"id" error:&error]);
+    XCTAssertTrue([model setObject:@"first" forFieldName:@"name" error:&error]);
+    XCTAssertTrue([repository saveModel:model error:&error], @"%@", error);
+    NSUInteger before = [[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue];
+    XCTAssertEqual((NSUInteger)1, [[repository all:&error] count]);
+    XCTAssertEqual((NSUInteger)1, [repository count:&error]);
+    XCTAssertTrue([repository exists:&error]);
+    XCTAssertEqual(before, [[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue]);
+    ALNORMQuery *query = [repository query];
+    [query whereExpression:@"set_config('arlen.orm_tenant', 'borrower-A', false) = 'borrower-A'" parameters:@[]];
+    XCTAssertEqual((NSUInteger)1, [[repository allMatchingQuery:query error:&error] count]);
+    XCTAssertNil(error);
+    XCTAssertGreaterThan([[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue], before);
+    NSArray *rows = [database executeQuery:@"SELECT current_setting('arlen.orm_tenant', true) AS tenant" parameters:@[] error:&error];
+    XCTAssertEqualObjects(@"", rows.firstObject[@"tenant"]);
+  } @finally {
+    [database executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:NULL];
+    gALNORMRuntimeGeneratedParentDescriptor = nil;
+  }
+}
+
 @end

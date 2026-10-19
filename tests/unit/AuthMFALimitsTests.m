@@ -94,6 +94,7 @@
                                      mailAdapter:(id<ALNMailAdapter>)mailAdapter {
   [self applyAuthMigrations];
   NSMutableDictionary *authModule = [NSMutableDictionary dictionary];
+  authModule[@"allowWithoutCSRF"] = @(!csrfEnabled);
   if (attemptLimits != nil) {
     authModule[@"attemptLimits"] = attemptLimits;
   }

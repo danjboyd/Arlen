@@ -1599,7 +1599,7 @@
   // list, or the nightly lane wipes build/ under itself.
   int exitCode = -1;
   NSString *output = [self runShellCapture:[NSString stringWithFormat:
-                                                  @"cd %@ && python3 -I tools/ci/classify_sanitizer_integration_skips.py --check 2>&1",
+                                                  @"cd %@ && python3 -I tools/ci/classify_sanitizer_integration_skips.py --check && python3 -I tools/ci/test_sanitizer_skip_classifier.py 2>&1",
                                                   repoRoot]
                                   exitCode:&exitCode];
   XCTAssertEqual(0, exitCode, @"%@", output);

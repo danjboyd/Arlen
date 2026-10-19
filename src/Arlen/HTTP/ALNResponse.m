@@ -481,6 +481,7 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
 }
 
 - (void)resetFileBodyState {
+  self.fileBodyHandle = nil;
   self.fileBodyPath = nil;
   self.fileBodyLength = 0;
   self.fileBodyOffset = 0;
@@ -597,6 +598,7 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
 }
 
 - (void)setFileBodyPath:(NSString *)fileBodyPath {
+  self.fileBodyHandle = nil;
   if ((_fileBodyPath == nil && fileBodyPath == nil) ||
       [_fileBodyPath isEqualToString:fileBodyPath]) {
     return;

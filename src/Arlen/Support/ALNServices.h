@@ -289,6 +289,11 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 - (NSArray *)listAttachmentMetadata;
 - (void)reset;
 @optional
+/// Opens an immutable regular attachment for bounded-memory streaming. The
+/// caller owns the returned handle; adapters without this capability return nil.
+- (nullable NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                          metadata:(NSDictionary *_Nullable *_Nullable)metadata
+                                             error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)attachmentAdapterCapabilities;
 
 @end

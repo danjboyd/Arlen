@@ -437,4 +437,49 @@ static NSDictionary *gFileResponseTestOptions = nil;
   XCTAssertEqualObjects(emoji, response.fileBodyPath);
 }
 
+- (void)testOpenFileResponsePinsBytesAndPreservesRangeAndValidators {
+  NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:gFileResponseTestMediaPath];
+  XCTAssertNotNil(handle);
+  NSDictionary *options = @{ ALNFileResponseETagOption : @"\"pinned\"" };
+  for (NSDictionary *headers in @[ @{}, @{ @"range" : @"bytes=2-5" }, @{ @"if-none-match" : @"\"pinned\"" } ]) {
+    ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET" path:@"/download" queryString:@"" headers:headers body:[NSData data]];
+    ALNResponse *response = [[ALNResponse alloc] init];
+    XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:request fileHandle:handle contentType:@"application/octet-stream" options:options]);
+    if (headers[@"if-none-match"] != nil) {
+      XCTAssertEqual((NSInteger)304, response.statusCode);
+      XCTAssertNil(response.fileBodyHandle);
+    } else {
+      XCTAssertEqualObjects(handle, response.fileBodyHandle);
+      XCTAssertEqual(headers[@"range"] ? (NSInteger)206 : (NSInteger)200, response.statusCode);
+      XCTAssertEqual(headers[@"range"] ? 4ULL : 16ULL, response.fileBodyLength);
+    }
+  }
+  XCTAssertTrue([[@"replacement" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:gFileResponseTestMediaPath atomically:YES]);
+  [handle seekToFileOffset:0];
+  XCTAssertEqualObjects(self.payload, [handle readDataToEndOfFile]);
+  ALNResponse *head = [[ALNResponse alloc] init];
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"HEAD" path:@"/download" queryString:@"" headers:@{} body:[NSData data]];
+  XCTAssertTrue([ALNFileResponse prepareResponse:head forRequest:request fileHandle:handle contentType:nil options:options]);
+  XCTAssertEqual(16ULL, head.fileBodyLength);
+  [head clearBody];
+  XCTAssertNil(head.fileBodyHandle);
+  [handle closeFile];
+}
+
+- (void)testClearingOpenFileResponseReleasesItsHandle {
+  __weak NSFileHandle *released = nil;
+  @autoreleasepool {
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:gFileResponseTestMediaPath];
+    released = handle;
+    ALNResponse *response = [[ALNResponse alloc] init];
+    ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET" path:@"/file" queryString:@"" headers:@{} body:[NSData data]];
+    XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:request fileHandle:handle contentType:nil options:nil]);
+    handle = nil;
+    XCTAssertNotNil(response.fileBodyHandle);
+    [response clearBody];
+    XCTAssertNil(response.fileBodyHandle);
+  }
+  XCTAssertNil(released);
+}
+
 @end

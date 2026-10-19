@@ -98,6 +98,23 @@ jobs-worker variants would miss their objects, so startup logs a
 `storage_unshared_state` warning outside `test` and `development`, `propane`
 prints a warning, and `arlen module doctor` reports it.
 
+Filesystem-backed signed downloads retain an opened regular file after checking
+its size and SHA-256 in 64 KiB chunks. HTTP transmission uses that same descriptor,
+with HEAD, single byte ranges, and checksum ETags; it does not materialize the
+whole attachment. Path replacement after verification cannot substitute another
+object. Framework attachment writes use new IDs and atomic replacement; files
+must remain immutable during delivery. This does not protect against privileged
+local writers modifying an already-open file in place. Truncation causes a short
+transfer and connection closure.
+
+Custom adapters can implement `openAttachmentFileForID:metadata:error:` to opt
+into this path. NSData-only adapters retain their existing materializing download
+behavior. Variant hooks still accept NSData: `storageModule.maxVariantInputBytes`
+defaults to 16 MiB (zero restores the default), rejecting larger source records
+before reading them. File-backed reads are bounded to the limit plus one byte;
+NSData-only adapters must enforce their own read allocation bound. Trusted variant
+hooks remain responsible for the memory used to construct output data.
+
 Runtime access is available through `ALNStorageModuleRuntime`.
 
 ## Collection Metadata

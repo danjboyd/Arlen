@@ -2728,27 +2728,10 @@ static void ALNRecordRequestMetrics(ALNApplication *application,
   if (!application.metricsEnabled) {
     return;
   }
-  [application.metrics incrementCounter:@"http_requests_total"];
-  [application.metrics incrementCounter:[NSString stringWithFormat:@"http_status_%ld_total", (long)response.statusCode]];
-  if (response.statusCode >= 500) {
-    [application.metrics incrementCounter:@"http_errors_total"];
-  }
-
-  NSNumber *totalMs = [trace durationMillisecondsForStage:@"total"];
-  if (totalMs != nil) {
-    [application.metrics recordTiming:@"http_request_duration_ms"
-                         milliseconds:[totalMs doubleValue]];
-  }
-  NSNumber *routeMs = [trace durationMillisecondsForStage:@"route"];
-  if (routeMs != nil) {
-    [application.metrics recordTiming:@"http_route_duration_ms"
-                         milliseconds:[routeMs doubleValue]];
-  }
-  NSNumber *controllerMs = [trace durationMillisecondsForStage:@"controller"];
-  if (controllerMs != nil) {
-    [application.metrics recordTiming:@"http_controller_duration_ms"
-                         milliseconds:[controllerMs doubleValue]];
-  }
+  [application.metrics recordHTTPResponseStatus:response.statusCode
+                             totalMilliseconds:[trace durationMillisecondsForStage:@"total"]
+                             routeMilliseconds:[trace durationMillisecondsForStage:@"route"]
+                        controllerMilliseconds:[trace durationMillisecondsForStage:@"controller"]];
 }
 
 static ALNPerfTrace *ALNDisabledPerfTrace(void) {

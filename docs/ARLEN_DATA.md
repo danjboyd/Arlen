@@ -775,3 +775,9 @@ callback for successful early termination. Errors roll back; callback
 exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
 in your callback increases memory use; `executeQuery:` still buffers its full
 result. The cursor API does not change the SQL or limit its server-side cost.
+
+ORM-generated PostgreSQL statements that contain no raw or trusted expression
+skip session reset when released. Compiler provenance is carried internally;
+public raw-SQL APIs still mark the connection dirty. Raw predicates such as
+`set_config(..., false)` still trigger reset. Transactions and previously dirty
+connections continue to reset even if their last statement was generated.

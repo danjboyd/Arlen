@@ -27,6 +27,15 @@ extern NSString *const ALNFileResponseMIMETypesOption;    // NSDictionary extens
             contentType:(nullable NSString *)contentType
                 options:(nullable NSDictionary *)options;
 
+/// Uses the same open file for validators, byte ranges and transmission.
+/// The response retains fileHandle when it has a body; the caller must not
+/// close it or mutate the underlying file until transmission completes.
++ (BOOL)prepareResponse:(ALNResponse *)response
+             forRequest:(ALNRequest *)request
+             fileHandle:(NSFileHandle *)fileHandle
+            contentType:(nullable NSString *)contentType
+                options:(nullable NSDictionary *)options;
+
 @end
 
 NS_ASSUME_NONNULL_END

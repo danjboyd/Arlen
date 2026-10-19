@@ -173,3 +173,7 @@ concurrent security defaults and explicit header overrides.
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized)
 describes the libobjc2 `@synchronized` defect and the locking pattern to use
 in application code.
+
+Contributor performance check: after building `boomhauer`, run
+`python3 tests/performance/persistent_http.py` to check persistent-connection
+HTTP and static-file throughput. See [CONTRIBUTING.md](../CONTRIBUTING.md).

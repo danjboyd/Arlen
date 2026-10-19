@@ -1,6 +1,6 @@
 {
   identifier = "storage";
-  version = "1.3.0";
+  version = "1.4.0";
   principalClass = "ALNStorageModule";
   dependencies = (
     { identifier = "jobs"; version = ">= 1.0.0"; }
@@ -17,6 +17,7 @@
         };
         uploadSessionTTLSeconds = 900;
         downloadTokenTTLSeconds = 300;
+        maxVariantInputBytes = 16777216;
         cleanup = {
           intervalSeconds = 300;
         };

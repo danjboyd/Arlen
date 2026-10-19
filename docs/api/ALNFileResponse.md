@@ -10,3 +10,4 @@ Filesystem-backed adapter implementation for durable local environments.
 | Selector | Signature | Purpose | How to use |
 | --- | --- | --- | --- |
 | `prepareResponse:forRequest:filePath:contentType:options:` | `+ (BOOL)prepareResponse:(ALNResponse *)response forRequest:(ALNRequest *)request filePath:(NSString *)filePath contentType:(nullable NSString *)contentType options:(nullable NSDictionary *)options;` | Perform `prepare response` for `ALNFileResponse`. | Call on the class type, not on an instance. |
+| `prepareResponse:forRequest:fileHandle:contentType:options:` | `+ (BOOL)prepareResponse:(ALNResponse *)response forRequest:(ALNRequest *)request fileHandle:(NSFileHandle *)fileHandle contentType:(nullable NSString *)contentType options:(nullable NSDictionary *)options;` | Perform `prepare response` for `ALNFileResponse`. | Call on the class type, not on an instance. |
