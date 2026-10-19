@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Storage 1.4 streams verified filesystem downloads, supports ranges/HEAD and
+  checksum ETags, and bounds variant source materialization to 16 MiB by default.
+- Storage persistence now uses per-record SQLite transactions and one-time legacy
+  plist import. Stop old workers before upgrading; Linux requires `libsqlite3-0`.
+  See `docs/STORAGE_MODULE.md` for migration, backup, and custom-adapter limits.
+
 - Request metrics now store primitive numeric values and batch completion
   counters/timings under one lock, reducing lock and allocation overhead (#249).
 - PostgreSQL ORM-generated reads skip release-time session reset; raw/trusted

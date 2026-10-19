@@ -67,6 +67,10 @@ HTML-escaped by default, and template errors report the file and line.
 
 ## Install
 
+The storage module uses the operating system SQLite runtime (`libsqlite3-0` on
+Linux; system SQLite on macOS and Windows). Storage 1.4 imports existing catalogs
+once; stop older workers before upgrading. See [Storage migration and backups](docs/STORAGE_MODULE.md).
+
 One command installs the latest release and puts an `arlen` command in
 `~/.local/bin`:
 
@@ -91,7 +95,7 @@ headers Arlen links against:
 ```bash
 curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
   | sh -s -- --yes setup --user
-sudo apt-get install -y libssl-dev
+sudo apt-get install -y libssl-dev libsqlite3-0
 ```
 
 On Windows, run the PowerShell installer instead:

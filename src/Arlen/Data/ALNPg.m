@@ -1861,7 +1861,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 @property(nonatomic, copy, readwrite) NSString *connectionString;
 @property(nonatomic, assign, readwrite, getter=isOpen) BOOL open;
-@property(nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *builderCompilationCache;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *builderCompilationCache;
 @property(nonatomic, strong) NSMutableArray<NSString *> *builderCompilationCacheOrder;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *preparedStatementNamesByKey;
 @property(nonatomic, strong) NSMutableArray<NSString *> *preparedStatementCacheOrder;

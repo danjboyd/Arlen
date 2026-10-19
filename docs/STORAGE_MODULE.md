@@ -45,38 +45,47 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
 
-Processes that share the state file (propane workers, the jobs worker, CLI
-delegates on one host) stay consistent:
+The default `persistence.backend = sqlite` stores the catalog at
+`<persistence.path>.sqlite3`. Each object, upload session, and collection
+membership has its own row. A change serializes and writes only changed rows,
+inside a SQLite transaction with full synchronous durability. Catalog snapshots
+remain cached in memory; refreshing another worker's changed catalog reads all
+rows, so refresh memory/CPU still scale with catalog size.
 
-- Each change is a read-modify-write under an exclusive lock on
-  `<state file>.lock` (`flock` on POSIX, `LockFileEx` on Windows). It reloads
-  whatever another process wrote first, so no process drops another's objects
-  or upload sessions.
-- Reads reload the file when another process has replaced it, without the
-  lock: writers replace the file with a rename, so a read sees one whole
-  version. A read never waits for a writer; while one is busy it serves the
-  catalog already in memory.
-- The state file is an XML property list. Older binary files still load and
-  are rewritten as XML on the next change.
-- Object and upload-session IDs are random (`obj-<32 hex>`,
-  `upload-<32 hex>`), not per-process counters. Download tokens are bound to
-  the object they were issued for, not just to its ID.
-- Only the catalog update runs under the lock. Attachment data is written and
-  hashed before it, and an attachment whose catalog update fails is deleted
-  again.
-- A change that can't get the lock within
-  `persistence.lockTimeoutSeconds` (default `10`) fails with
-  `ALNStorageModuleErrorStateBusy` (HTTP 503 with `Retry-After: 1`) instead of waiting forever
-  behind a hung process. Waiting blocks on the lock rather than polling it.
-- At startup the module waits up to `persistence.startupLockTimeoutSeconds`
-  (default `60`) for its cleanup pass. If the lock is still busy it logs a
-  warning and starts anyway; the catalog was already loaded.
-- The state file is written owner-only (`0600`), whatever the umask. Startup
-  removes `<state file>.<hex>.tmp` files left by a process killed mid-write.
+On first startup, a transaction imports an existing XML or binary plist at
+`persistence.path`. Concurrent starters import it only once. An interrupted or
+failed import rolls back and can be retried. The original file is retained as a
+migration backup and is no longer read after import. Stop all old workers and
+jobs processes before upgrading; do not run plist and SQLite workers together.
+Back up the SQLite database with SQLite's backup facility, or stop every writer
+before copying it and any journal. Do not restore only the obsolete plist.
 
-The state file must be on a local filesystem that honours those locks, and
-every process must see the same file: this is single-host shared state, not
-multi-host storage.
+`persistence.backend = plist` explicitly retains the legacy whole-file XML
+format for unmigrated installations. There is no automatic fallback when SQLite
+is unavailable, and switching a migrated path back to plist is refused.
+
+Processes sharing a catalog must run on one host and use a local filesystem:
+
+- Changes take `<persistence.path>.lock` (`flock` on POSIX, `LockFileEx` on
+  Windows), refresh the catalog, then commit a SQLite transaction. This keeps
+  application-level read-modify-write operations coherent across workers.
+- Reads detect changed database files and refresh one consistent SQLite
+  snapshot. They do not take the cross-process application lock. If a writer
+  is busy, readers retain the last complete cached snapshot; SQLite reads have
+  a short 100 ms busy timeout.
+- Object and upload-session IDs are random; tokens bind to each object's nonce.
+  Attachment creation and hashing happen outside the catalog lock.
+- `persistence.lockTimeoutSeconds` defaults to 10; exhausted lock/SQLite busy
+  waits return `ALNStorageModuleErrorStateBusy` (HTTP 503, `Retry-After: 1`).
+  Startup cleanup allows `startupLockTimeoutSeconds` (default 60), then warns
+  and skips cleanup if busy. First-time SQLite setup allows 10 seconds.
+- POSIX databases are owner-only (`0600`). Windows uses the current-user
+  protected DACL. Keep the parent directory private too.
+
+The storage backend requires the OS SQLite runtime: Linux `libsqlite3.so.0`
+(Debian/Ubuntu package `libsqlite3-0`), macOS `libsqlite3.dylib`, or Windows
+`winsqlite3.dll`. It loads the stable C ABI without SQLite development headers
+or import libraries. Missing libraries cause an explicit module startup error.
 
 Attachment data has to be shared the same way, because the catalog names
 attachments by ID:
