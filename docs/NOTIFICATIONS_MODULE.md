@@ -52,6 +52,10 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
+State writes take a cross-process lock and merge each runtime's changed inbox,
+outbox, fanout, and preference records with the current file. Entry IDs are
+unique across workers. A runtime refreshes its in-memory view after a write or
+on restart; a process that only reads may temporarily show a cached view.
 
 Runtime access is available through `ALNNotificationsModuleRuntime`.
 
