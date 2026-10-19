@@ -66,7 +66,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 - [Admin UI Module](ADMIN_UI_MODULE.md): admin resources, filters, exports, and `/admin/api`.
 - [Durable Jobs](DURABLE_JOBS.md): PostgreSQL queues, transactional enqueue, renewable leases, crash recovery, and durable results.
 - [Jobs Module](JOBS_MODULE.md): `/jobs` HTML plus `/jobs/api` JSON/OpenAPI surface.
-- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences, email, webhook and Web Push delivery, plus admin preview/outbox/test-send flows.
+- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences, email, webhook and Web Push delivery, admin preview/outbox/test-send flows, and SQLite migration/backup guidance.
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
 - [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.

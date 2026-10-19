@@ -1,3 +1,4 @@
+#import "ALNNotificationsCatalog.h"
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
@@ -169,15 +170,12 @@
 }
 
 - (NSDictionary *)persistedStateAtPath:(NSString *)path {
-  NSData *data = [NSData dataWithContentsOfFile:path];
-  XCTAssertNotNil(data);
-  if (data == nil) return nil;
-  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
   NSError *error = nil;
-  id value = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable
-                                                        format:&format error:&error];
-  XCTAssertTrue([value isKindOfClass:[NSDictionary class]], @"%@", error);
-  return [value isKindOfClass:[NSDictionary class]] ? value : nil;
+  ALNNotificationsCatalog *catalog = [[ALNNotificationsCatalog alloc]
+      initWithPath:[path stringByAppendingString:@".sqlite3"] legacyPath:path error:&error];
+  NSDictionary *state = [catalog readStateWithError:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  return state;
 }
 
 - (void)setUp {
@@ -678,6 +676,34 @@
   XCTAssertEqual((NSUInteger)0, [(NSDictionary *)state[@"preferencesByRecipient"][@"shared-recipient"] count]);
 }
 
+- (void)testCorruptLegacyStateFailsStartupAndBinaryImportCanBeRetried {
+  NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"legacy.plist"];
+  NSData *corrupt = [@"corrupt legacy" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([corrupt writeToFile:path atomically:YES]);
+  ALNApplication *app = [self applicationWithStatePath:path];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  error = nil;
+  XCTAssertFalse([[[ALNNotificationsModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNotNil(error.localizedDescription);
+  XCTAssertEqualObjects(corrupt, [NSData dataWithContentsOfFile:path]);
+  XCTAssertFalse([[[ALNNotificationsModule alloc] init] registerWithApplication:app error:NULL]);
+  NSDictionary *legacy = @{ @"version":@1, @"outboxEntries":@[], @"inboxByRecipient":@{},
+      @"preferencesByRecipient":@{@"reader":@{@"phase16b.digest":@{@"email":@NO}}},
+      @"recentFanoutEvents":@[], @"nextEntrySequence":@0 };
+  NSData *binary = [NSPropertyListSerialization dataWithPropertyList:legacy format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+  XCTAssertTrue([binary writeToFile:path atomically:YES]);
+  [self registerModulesForApplication:[self applicationWithStatePath:path]];
+  XCTAssertEqualObjects(@NO, [[ALNNotificationsModuleRuntime sharedRuntime]
+      notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+  XCTAssertEqualObjects(binary, [NSData dataWithContentsOfFile:path]);
+  // A committed catalog remains authoritative even if its backup is damaged.
+  XCTAssertTrue([corrupt writeToFile:path atomically:YES]);
+  [self registerModulesForApplication:[self applicationWithStatePath:path]];
+  XCTAssertEqualObjects(@NO, [[ALNNotificationsModuleRuntime sharedRuntime]
+      notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+}
+
 - (void)testCorruptNotificationStateDoesNotGetOverwrittenByMutation {
   NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-corrupt-state.plist"];
   [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
@@ -686,6 +712,7 @@
   NSError *error = nil;
   XCTAssertNotNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
   XCTAssertNil(error);
+  statePath = [statePath stringByAppendingString:@".sqlite3"];
   NSData *corrupt = [@"not a property list" dataUsingEncoding:NSUTF8StringEncoding];
   XCTAssertTrue([corrupt writeToFile:statePath atomically:YES]);
   error = nil;

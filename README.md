@@ -67,9 +67,11 @@ HTML-escaped by default, and template errors report the file and line.
 
 ## Install
 
-The storage module uses the operating system SQLite runtime (`libsqlite3-0` on
-Linux; system SQLite on macOS and Windows). Storage 1.4 imports existing catalogs
-once; stop older workers before upgrading. See [Storage migration and backups](docs/STORAGE_MODULE.md).
+The storage and notifications modules use the operating system SQLite runtime
+(`libsqlite3-0` on Linux; system SQLite on macOS and Windows). Storage 1.4 and
+notifications 1.3 import legacy state once; stop older workers before upgrading.
+See [Storage migration and backups](docs/STORAGE_MODULE.md) and
+[Notifications migration and backups](docs/NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
 
 One command installs the latest release and puts an `arlen` command in
 `~/.local/bin`:

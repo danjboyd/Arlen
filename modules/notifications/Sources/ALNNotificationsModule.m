@@ -1,3 +1,4 @@
+#import "ALNNotificationsCatalog.h"
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
 #import "ALNNotificationsModule.h"
@@ -97,57 +98,6 @@ static NSString *NMResolvedPersistencePath(ALNApplication *application, NSDictio
   return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/notifications-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
-}
-
-static NSDictionary *NMReadPropertyListAtPath(NSString *path, NSError **error) {
-  NSString *statePath = NMTrimmedString(path);
-  if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
-    return nil;
-  }
-  NSData *data = ALNDataReadFromFile(statePath, 0, error);
-  if (data == nil) {
-    return nil;
-  }
-  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
-  id object = [NSPropertyListSerialization propertyListWithData:data
-                                                        options:NSPropertyListImmutable
-                                                         format:&format
-                                                          error:error];
-  if (object != nil && ![object isKindOfClass:[NSDictionary class]]) {
-    if (error != NULL) {
-      *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"notification state is not a dictionary", nil);
-    }
-    return nil;
-  }
-  return object;
-}
-
-static BOOL NMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
-  NSString *statePath = NMTrimmedString(path);
-  if ([statePath length] == 0) {
-    return YES;
-  }
-  NSString *parent = [statePath stringByDeletingLastPathComponent];
-  if ([parent length] > 0 &&
-      ![[NSFileManager defaultManager] createDirectoryAtPath:parent
-                                 withIntermediateDirectories:YES
-                                                  attributes:nil
-                                                       error:error]) {
-    return NO;
-  }
-  NSData *data = [NSPropertyListSerialization dataWithPropertyList:NMPropertyListValue(payload)
-                                                            format:NSPropertyListBinaryFormat_v1_0
-                                                           options:0
-                                                             error:error];
-  if (data == nil) {
-    return NO;
-  }
-  BOOL written = [data writeToFile:statePath options:NSDataWritingAtomic error:error];
-  if (!written && error != NULL && *error == nil) {
-    *error = NMError(ALNNotificationsModuleErrorDeliveryFailed,
-                     @"could not write notification state", @{ @"path" : statePath });
-  }
-  return written;
 }
 
 static NSString *NMFanoutChannelForRecipient(NSString *recipient) {
@@ -814,6 +764,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, strong) ALNNotificationsCatalog *catalog;
 @property(nonatomic, copy) NSDictionary *lastPersistedState;
 @property(nonatomic, assign) BOOL webPushEnabled;
 @property(nonatomic, strong) ALNWebPushVAPIDKey *webPushVAPIDKey;
@@ -1091,8 +1042,14 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                         ALNNotificationsDefaultMaxInboxEntriesPerRecipient);
   self.statePath = NMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
+  self.catalog = nil;
   [self.lock unlock];
 
+  if (self.persistenceEnabled) {
+    self.catalog = [[ALNNotificationsCatalog alloc] initWithPath:[self.statePath stringByAppendingString:@".sqlite3"]
+                                                    legacyPath:self.statePath error:error];
+    if (self.catalog == nil) return NO;
+  }
   if (![self loadPersistedStateWithError:error]) {
     return NO;
   }
@@ -1166,13 +1123,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     return YES;
   }
   NSError *readError = nil;
-  NSDictionary *state = NMReadPropertyListAtPath(self.statePath, &readError);
+  NSDictionary *state = [self.catalog readStateWithError:&readError];
   if (state == nil) {
-    if (readError != nil && error != NULL) {
-      *error = readError;
-      return NO;
-    }
-    return YES;
+    if (error != NULL) *error = readError;
+    return NO;
   }
   [self.lock lock];
   NSArray *outbox = [state[@"outboxEntries"] isKindOfClass:[NSArray class]] ? state[@"outboxEntries"] : @[];
@@ -1250,7 +1204,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
       return nil;
     }
     NSError *readError = nil;
-    authoritative = NMReadPropertyListAtPath(self.statePath, &readError) ?: @{};
+    authoritative = [self.catalog readStateWithError:&readError] ?: @{};
     if (readError != nil) {
       if (error != NULL) *error = readError;
       ALNPlatformReleaseExclusiveLock(stateLock);
@@ -1262,11 +1216,11 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   NSDictionary *result = block();
   if (result != nil && self.persistenceEnabled) {
     NSDictionary *payload = [self stateDocumentLocked];
-    if (!NMWritePropertyListAtPath(self.statePath, payload, error)) {
+    if (![self.catalog writeState:NMPropertyListValue(payload) error:error]) {
       result = nil;
       [self replaceStateLockedFromDocument:authoritative];
     } else {
-      self.lastPersistedState = NMReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+      self.lastPersistedState = [self.catalog readStateWithError:NULL] ?: @{};
     }
   }
   if (stateLock >= 0) ALNPlatformReleaseExclusiveLock(stateLock);
@@ -1292,7 +1246,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     return NO;
   }
   NSError *readError = nil;
-  NSDictionary *authoritative = NMReadPropertyListAtPath(self.statePath, &readError) ?: @{};
+  NSDictionary *authoritative = [self.catalog readStateWithError:&readError] ?: @{};
   if (readError != nil) {
     if (error != NULL) *error = readError;
     ALNPlatformReleaseExclusiveLock(stateLock);
@@ -1331,7 +1285,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   NSDictionary *payload = @{ @"version" : @1, @"nextEntrySequence" : @(sequence),
                              @"outboxEntries" : outbox, @"inboxByRecipient" : inbox,
                              @"preferencesByRecipient" : preferences, @"recentFanoutEvents" : fanout };
-  BOOL saved = NMWritePropertyListAtPath(self.statePath, payload, error);
+  BOOL saved = [self.catalog writeState:NMPropertyListValue(payload) error:error];
   if (saved) {
     self.outboxEntries = outbox;
     self.inboxByRecipient = inbox;
@@ -1340,7 +1294,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     self.nextEntrySequence = sequence;
     // The runtime mutates these containers later; retain an immutable on-disk
     // baseline so the next write can distinguish local edits from peer edits.
-    self.lastPersistedState = NMReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+    self.lastPersistedState = [self.catalog readStateWithError:NULL] ?: @{};
   } else {
     [self replaceStateLockedFromDocument:authoritative];
   }
@@ -1426,6 +1380,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"fanoutEventCount" : @([self.recentFanoutEvents count]),
     @"persistenceEnabled" : @(self.persistenceEnabled),
     @"statePath" : self.statePath ?: @"",
+    @"persistenceBackend" : self.persistenceEnabled ? @"sqlite" : @"memory",
+    @"catalogPath" : self.catalog.path ?: @"",
     @"webPush" : @{
       @"enabled" : @(self.webPushEnabled),
       @"vapidPublicKey" : self.webPushVAPIDKey.publicKey ?: @"",

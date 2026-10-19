@@ -123,9 +123,9 @@ app chooses.
 
 ## Retention limits
 
-The module keeps its outbox and inboxes in memory (and in the state file when
+The module keeps its outbox and inboxes in memory (and in the catalog when
 persistence is on), so both are capped. Adding an entry past the cap drops the
-oldest entries. The caps also apply when a state file is loaded.
+oldest entries. The caps also apply when persisted state is loaded.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -142,6 +142,57 @@ notificationsModule = {
 Values must be positive integers; anything else uses the default.
 `resolvedConfigSummary` reports the active caps as `maxOutboxEntries` and
 `maxInboxEntriesPerRecipient`.
+
+## Incremental persistence and upgrading
+
+Notifications 1.3 stores each outbox, inbox and fanout entry, and each recipient's
+preferences, in a separate SQLite row. `persistence.path` remains the legacy
+plist path; the live catalog is `<persistence.path>.sqlite3`. The summary reports
+`persistenceBackend` (`sqlite` or `memory`) and `catalogPath`. There is no silent
+plist fallback. Disabling persistence retains the in-memory behavior.
+
+Linux requires `libsqlite3.so.0` (Debian/Ubuntu package `libsqlite3-0`); macOS and
+supported Windows use their system SQLite runtime. The notifications module does
+not require installing the storage module. CI already provisions and validates
+this shared runtime dependency.
+
+To upgrade an existing deployment:
+
+1. Stop **all old workers**, including jobs workers that dispatch notifications.
+2. Back up the configured plist and its Web Push subscription sibling.
+3. Start the upgraded application. The first open atomically imports the legacy
+   plist, including binary plists. It leaves the source unchanged as a backup.
+   A failed or interrupted import rolls back and can be retried after fixing the
+   source. Invalid records or duplicate entry IDs fail startup instead of being
+   silently discarded.
+4. Start the remaining upgraded workers against the same local catalog. Older
+   workers must not run against that persistence path: they would keep writing
+   an obsolete plist. Once a committed catalog exists, it is authoritative; the
+   old plist is never automatically reimported to recover missing/corrupt data.
+
+For backups, stop all writers before copying the SQLite database and any journal
+sidecars, or use SQLite's online backup API. Restoring the old plist alone does
+not restore the catalog. Rollback to an older module requires restoring the
+pre-upgrade backup with all writers stopped and removing the newer catalog;
+post-upgrade changes will be lost. Web Push subscriptions keep their separate
+existing persistence path and format.
+
+A cross-process lock protects reload/merge/commit transactions; SQLite commits
+are atomic with full synchronous durability. UUID entries preserve independent
+appends, and inbox read markers and preference removals apply to authoritative
+state. Transport and realtime network calls run outside those locks. Corrupt,
+removed, replaced or unwritable catalogs fail closed rather than returning stale
+notification state. Use a local filesystem with working SQLite and process locks;
+this is not a distributed persistence protocol for shared network filesystems.
+
+Only changed rows are serialized and written. Trimming old entries deletes their
+rows without renumbering retained entries; SQLite reuses freed pages rather than
+shrinking the file on every mutation. A cached immutable snapshot avoids rereading
+all rows when no other connection has committed. A peer commit triggers a fresh
+snapshot. Runtime merging and diffing still inspect retained records in memory,
+so CPU and memory cost are not constant as the number of recipients grows. Caps
+bound the global outbox and each inbox, not the total number of recipients or
+preference records; applications must manage recipient lifecycle retention.
 
 ## Inbox pagination
 

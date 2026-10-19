@@ -32,9 +32,12 @@ including unresolved, non-blocking ThreadSanitizer findings.
   idempotent operations. External search engines still need one reindex writer
   per resource unless the backend provides publication fencing. See
   [Search Module](SEARCH_MODULE.md) for the full contract.
-- Notification inbox and preference changes refresh authoritative shared state;
-  corrupt or unreadable persistence fails closed. Stop older workers before
-  upgrading shared persistence paths so all writers use the new protocol.
+- Notifications 1.3 persists individual inbox/outbox/fanout entries and recipient
+  preferences in SQLite, with one-time legacy plist import. Inbox and preference
+  mutations refresh authoritative shared state; corrupt or unreadable persistence
+  fails closed. Stop all older workers and back up before upgrading. Linux needs
+  `libsqlite3-0`; see [Notifications Module](NOTIFICATIONS_MODULE.md) for migration,
+  backup, retention and remaining in-memory merge costs.
 
 
 - Windows file responses accept valid Unicode filenames using wide-character
