@@ -1217,6 +1217,9 @@
                                   "  if [[ \" $* \" == *\" boomhauer \"* ]]; then\n"
                                   "    : >\"$repo_root/build/boomhauer\"\n"
                                   "  fi\n"
+                                  "  if [[ \" $* \" == *\" runtime-concurrency-fixture \"* ]]; then\n"
+                                  "    : >\"$repo_root/build/runtime-concurrency-fixture\"\n"
+                                  "  fi\n"
                                   "  if [[ \" $* \" == *\" arlen \"* ]]; then\n"
                                   "    : >\"$repo_root/build/arlen\"\n"
                                   "    chmod 755 \"$repo_root/build/arlen\"\n"
@@ -1275,7 +1278,7 @@
 
     NSString *tsanLog = [self readFile:[artifactRoot stringByAppendingPathComponent:@"tsan.log"]];
     XCTAssertTrue([tsanLog containsString:@"ci: tsan bootstrap eocc "], @"%@", tsanLog);
-    XCTAssertTrue([tsanLog containsString:@"probe ok ./build/boomhauer 1"], @"%@", tsanLog);
+    XCTAssertTrue([tsanLog containsString:@"probe ok ./build/runtime-concurrency-fixture 1"], @"%@", tsanLog);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
