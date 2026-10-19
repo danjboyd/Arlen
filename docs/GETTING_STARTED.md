@@ -411,3 +411,14 @@ sessions use separate policies. See [Configuration reference](CONFIGURATION_REFE
 For PostgreSQL queries whose values vary per request, use bound builder
 parameters. The connection cache reuses their SQL shape while keeping each
 call's parameter values separate. See [Arlen Data](ARLEN_DATA.md).
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+Use PostgreSQL's `enumerateQuery:parameters:batchSize:usingBlock:error:` for
+large exports instead of collecting all rows with `executeQuery:`. Process
+rows as they arrive and avoid retaining them to keep client memory bounded.

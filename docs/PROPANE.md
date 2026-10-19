@@ -348,3 +348,10 @@ Apps that launch subprocesses with `NSTask`, `NSPipe`,
 Long-lived Arlen workers make small per-request leaks production-significant,
 so subprocess helpers should use explicit close/release ownership and should be
 validated with FD-count regression checks.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.

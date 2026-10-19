@@ -4311,6 +4311,61 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
   return NO;
 }
 
+- (BOOL)enumerateQuery:(NSString *)sql
+           parameters:(NSArray *)parameters
+            batchSize:(NSUInteger)batchSize
+           usingBlock:(void (^)(NSDictionary *row, BOOL *stop))block
+                error:(NSError **)error {
+  ALNPgClearError(error);
+  if (block == nil || batchSize == 0 || batchSize > 10000 || [sql length] == 0 ||
+      ALNPgFailIfTextContainsNUL(sql, @"sql", error)) {
+    if (error != NULL && *error == nil) {
+      *error = ALNPgMakeError(ALNPgErrorInvalidArgument,
+                              @"enumeration requires SQL, a callback and batchSize from 1 through 10000", nil, nil);
+    }
+    return NO;
+  }
+  ALNPgConnection *connection = [self acquireConnection:error];
+  if (connection == nil) return NO;
+  BOOL finished = NO;
+  @try {
+    if (![connection beginTransaction:error]) return NO;
+    NSString *name = [@"aln_cursor_" stringByAppendingString:
+                        [[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""]];
+    NSString *declare = [NSString stringWithFormat:@"DECLARE %@ NO SCROLL CURSOR FOR %@", name, sql];
+    if ([connection executeCommand:declare parameters:parameters error:error] < 0) return NO;
+    NSString *fetch = [NSString stringWithFormat:@"FETCH FORWARD %lu FROM %@", (unsigned long)batchSize, name];
+    BOOL stop = NO;
+    NSError *failure = nil;
+    while (!stop) {
+      @autoreleasepool {
+        // Keep failures strongly across the per-batch autorelease pool.
+        NSError *fetchError = nil;
+        NSArray *rows = [connection executeQuery:fetch parameters:@[] error:&fetchError];
+        if (rows == nil) {
+          failure = fetchError;
+          break;
+        }
+        if ([rows count] == 0) break;
+        for (NSDictionary *row in rows) {
+          @autoreleasepool { block(row, &stop); }
+          if (stop) break;
+        }
+      }
+    }
+    if (failure != nil) {
+      if (error != NULL) *error = failure;
+      return NO;
+    }
+    if ([connection executeCommand:[@"CLOSE " stringByAppendingString:name] parameters:@[] error:error] < 0) return NO;
+    finished = [connection commitTransaction:error];
+    return finished;
+  } @finally {
+    if (!finished) (void)[connection rollbackTransaction:NULL];
+    [self releaseConnection:connection];
+  }
+}
+
 - (BOOL)withTransactionUsingBlock:(BOOL (^)(id<ALNDatabaseConnection> connection,
                                             NSError **error))block
                             error:(NSError **)error {

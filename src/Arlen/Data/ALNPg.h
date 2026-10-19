@@ -213,6 +213,16 @@ typedef void (^ALNPgQueryDiagnosticsListener)(NSDictionary<NSString *, id> *even
 - (nullable ALNDatabaseResult *)executeQueryResult:(NSString *)sql
                                         parameters:(NSArray *)parameters
                                              error:(NSError *_Nullable *_Nullable)error;
+/// Enumerates a SELECT through a transaction-local cursor, retaining at most
+/// batchSize rows (1...10000) at once. The callback may set stop to YES for a
+/// successful early stop. Rows retained by the caller remain its responsibility.
+/// The connection is held until completion; callbacks are never replayed.
+- (BOOL)enumerateQuery:(NSString *)sql
+           parameters:(NSArray *)parameters
+            batchSize:(NSUInteger)batchSize
+           usingBlock:(void (^)(NSDictionary *row, BOOL *stop))block
+                error:(NSError *_Nullable *_Nullable)error;
+
 - (nullable NSArray<NSDictionary *> *)executeBuilderQuery:(ALNSQLBuilder *)builder
                                                      error:(NSError *_Nullable *_Nullable)error;
 

@@ -5380,6 +5380,17 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     return NO;
   }
+  NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
+  NSDictionary *accessories = ALNDictionaryConfigValue(self.config, @"propaneAccessories");
+  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
+  NSString *workerEnvironment = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_PROPANE_WORKERS"];
+  if ([workerEnvironment integerValue] > 0) workers = [workerEnvironment integerValue];
+  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
+    [self.logger warn:@"rate limit is per worker"
+               fields:@{ @"worker_count" : @(workers),
+                         @"requests_per_worker" : rateLimit[@"requests"] ?: @120,
+                         @"hint" : @"Use an ingress rate limiter for a deployment-wide request budget." }];
+  }
   if (self.spaFallback != nil) {
     // A missing shell is expected while a frontend dev server serves the app.
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.spaFallback[@"file"]]) {

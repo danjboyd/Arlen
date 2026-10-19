@@ -10,6 +10,7 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNMetrics.h"
+#import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
@@ -2565,7 +2566,6 @@ static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
       }];
       NSError *startError = nil;
       XCTAssertTrue([app startWithError:&startError], @"%@ %@ %@", environment, secret, startError);
-      [app shutdown];
     }
   }
 }
@@ -2924,6 +2924,28 @@ static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
   NSDictionary *json = [self JSONObjectFromResponse:allowed];
   XCTAssertEqualObjects(@(YES), json[@"ok"]);
   [app shutdown];
+}
+
+- (void)testMultiWorkerRateLimitWarnsAtStartup {
+  for (NSNumber *enabled in @[ @YES, @NO ]) {
+    for (NSNumber *workers in @[ @1, @4 ]) {
+      ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+        @"environment" : @"test", @"logFormat" : @"json",
+        @"rateLimit" : @{ @"enabled" : enabled, @"requests" : @10 },
+        @"propaneAccessories" : @{ @"workerCount" : workers },
+      }];
+      NSPipe *pipe = [NSPipe pipe];
+      app.logger.outputFileDescriptor = pipe.fileHandleForWriting.fileDescriptor;
+      XCTAssertTrue([app startWithError:NULL]);
+      XCTAssertTrue([app startWithError:NULL]);
+      [pipe.fileHandleForWriting closeFile];
+      NSString *log = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile]
+                                          encoding:NSUTF8StringEncoding];
+      NSUInteger count = [[log componentsSeparatedByString:@"rate limit is per worker"] count] - 1;
+      XCTAssertEqual(([enabled boolValue] && [workers integerValue] > 1) ? (NSUInteger)1 : (NSUInteger)0, count);
+      app.logger.outputFileDescriptor = STDERR_FILENO;
+    }
+  }
 }
 
 @end

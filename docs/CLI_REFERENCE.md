@@ -1715,3 +1715,19 @@ current parameters and reuses the matching SQL shape/prepared statement.
 Changing only values therefore reports a compile-cache hit without retaining
 another request's values. Trusted expressions are checked on each compilation
 and still trigger session cleanup on release.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+For large PostgreSQL SELECT results, use
+`-[ALNPg enumerateQuery:parameters:batchSize:usingBlock:error:]`. It holds one
+pooled connection and a transaction-local cursor, fetches 1–10,000 rows per
+batch, and drains an autorelease pool between batches. Set `*stop = YES` in the
+callback for successful early termination. Errors roll back; callback
+exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
+in your callback increases memory use; `executeQuery:` still buffers its full
+result. The cursor API does not change the SQL or limit its server-side cost.

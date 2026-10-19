@@ -831,3 +831,10 @@ Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
 `ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
 `ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
 separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- PostgreSQL supports bounded cursor enumeration through
+  `enumerateQuery:parameters:batchSize:usingBlock:error:`. It processes a batch
+  at a time, supports early stopping, and cleans up on errors or exceptions.
+- Apps configured with multiple propane workers and request rate limiting now
+  warn that the request budget is per worker. Use an ingress limiter for a
+  deployment-wide budget (#252).
+
 - Normal HTTP responses now have a total send deadline (300 seconds) and
   minimum average rate (1024 bytes/second after 10 seconds). The limits cover
   headers and file or in-memory bodies; a miss closes the connection and frees

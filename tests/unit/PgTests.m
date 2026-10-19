@@ -4215,4 +4215,50 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   [database releaseConnection:connection];
 }
 
+- (void)testCursorEnumerationBatchesAndEarlyStopReleaseTheConnection {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  __block NSUInteger count = 0;
+  BOOL ok = [database enumerateQuery:@"SELECT generate_series(1, $1::int) AS value"
+                          parameters:@[ @300000 ] batchSize:128
+                          usingBlock:^(NSDictionary *row, BOOL *stop) {
+    (void)stop;
+    count++;
+    XCTAssertEqual(count, [row[@"value"] unsignedIntegerValue]);
+  } error:&error];
+  XCTAssertTrue(ok, @"%@", error);
+  XCTAssertEqual((NSUInteger)300000, count);
+  count = 0;
+  ok = [database enumerateQuery:@"SELECT generate_series(1, $1::int) AS value"
+                     parameters:@[ @10000 ] batchSize:64 usingBlock:^(NSDictionary *row, BOOL *stop) {
+    (void)row;
+    *stop = ++count == 7;
+  } error:&error];
+  XCTAssertTrue(ok, @"%@", error);
+  XCTAssertEqual((NSUInteger)7, count);
+  XCTAssertNotNil([database executeQuery:@"SELECT 1" parameters:@[] error:&error]);
+  XCTAssertEqualObjects(@0, [database poolDiagnostics][@"in_use_connections"]);
+  XCTAssertFalse([database enumerateQuery:@"SELECT 1" parameters:@[] batchSize:0
+                               usingBlock:^(NSDictionary *row, BOOL *stop) {} error:&error]);
+  XCTAssertEqual(ALNPgErrorInvalidArgument, error.code);
+}
+
+- (void)testCursorEnumerationFailureAndCallbackExceptionReleaseTheConnection {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertFalse([database enumerateQuery:@"SELECT 1 / 0" parameters:@[] batchSize:32
+                               usingBlock:^(NSDictionary *row, BOOL *stop) {} error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertThrows([database enumerateQuery:@"SELECT 1" parameters:@[] batchSize:32
+                                usingBlock:^(NSDictionary *row, BOOL *stop) {
+    [NSException raise:@"CursorCallback" format:@"expected"];
+  } error:&error]);
+  XCTAssertNotNil([database executeQuery:@"SELECT 1" parameters:@[] error:&error]);
+  XCTAssertEqualObjects(@0, [database poolDiagnostics][@"in_use_connections"]);
+}
+
 @end
