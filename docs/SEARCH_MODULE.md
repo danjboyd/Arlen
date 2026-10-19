@@ -52,6 +52,11 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
+State writes lock the file and merge changes by resource, preserving concurrent
+updates to different resources and recent history. A process that only reads
+may show cached state until it writes or restarts. Concurrent rebuilds of the
+same resource still need scheduler coordination; run one reindex worker per
+resource at a time.
 
 Optional first-party PostgreSQL search uses the same resource/provider
 contracts:

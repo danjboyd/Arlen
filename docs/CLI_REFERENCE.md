@@ -686,10 +686,16 @@ First-party module surfaces after install:
 - Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
 - `POST /auth/api/register` defaults to a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in and duplicate-email response, with an enumeration tradeoff.
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+  Shared operator-state writes coordinate across processes; this is separate
+  from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
+  Persisted notification writes coordinate across processes sharing one state path;
+  inbox, outbox, and preference reads refresh from the shared state file.
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
+  Shared state writes merge changes by resource across processes. Schedule one
+  reindex worker per resource to avoid concurrent rebuilds of that resource.
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 

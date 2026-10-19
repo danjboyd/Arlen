@@ -109,7 +109,7 @@ static NSDictionary *NMReadPropertyListAtPath(NSString *path, NSError **error) {
   }
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
   id object = [NSPropertyListSerialization propertyListWithData:data
-                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                        options:NSPropertyListImmutable
                                                          format:&format
                                                           error:error];
   return [object isKindOfClass:[NSDictionary class]] ? object : nil;
@@ -247,6 +247,38 @@ static void NMTrimOldestEntries(NSMutableArray *entries, NSUInteger limit) {
   if (limit > 0 && [entries count] > limit) {
     [entries removeObjectsInRange:NSMakeRange(0, [entries count] - limit)];
   }
+}
+
+// Overlay only entries changed since this runtime last read the file. A second
+// worker may have committed other recipients while this worker delivered mail.
+static NSMutableArray *NMMergeChangedEntries(NSArray *authoritative, NSArray *baseline,
+                                             NSArray *local, NSUInteger limit) {
+  NSMutableDictionary *baselineByID = [NSMutableDictionary dictionary];
+  for (NSDictionary *entry in baseline) {
+    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+    NSString *entryID = NMTrimmedString(entry[@"entryID"]);
+    if ([entryID length] > 0) baselineByID[entryID] = entry;
+  }
+  NSMutableArray *merged = [NSMutableArray arrayWithArray:authoritative ?: @[]];
+  NSMutableDictionary *positions = [NSMutableDictionary dictionary];
+  for (NSUInteger index = 0; index < [merged count]; index++) {
+    NSString *entryID = NMTrimmedString([merged[index] isKindOfClass:[NSDictionary class]] ? merged[index][@"entryID"] : nil);
+    if ([entryID length] > 0) positions[entryID] = @(index);
+  }
+  for (NSDictionary *entry in local) {
+    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+    NSString *entryID = NMTrimmedString(entry[@"entryID"]);
+    if ([entryID length] > 0 && [baselineByID[entryID] isEqual:entry]) continue;
+    NSNumber *position = positions[entryID];
+    if (position != nil) {
+      merged[[position unsignedIntegerValue]] = entry;
+    } else {
+      if ([entryID length] > 0) positions[entryID] = @([merged count]);
+      [merged addObject:entry];
+    }
+  }
+  NMTrimOldestEntries(merged, limit);
+  return merged;
 }
 
 static NSError *NMError(ALNNotificationsModuleErrorCode code, NSString *message, NSDictionary *details) {
@@ -770,6 +802,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, copy) NSDictionary *lastPersistedState;
 @property(nonatomic, assign) BOOL webPushEnabled;
 @property(nonatomic, strong) ALNWebPushVAPIDKey *webPushVAPIDKey;
 @property(nonatomic, copy) NSString *webPushSubject;
@@ -803,6 +836,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
           defaultEnabled:(BOOL)defaultEnabled;
 - (BOOL)loadPersistedStateWithError:(NSError *_Nullable *_Nullable)error;
 - (BOOL)persistStateWithError:(NSError *_Nullable *_Nullable)error;
+- (void)replaceStateLockedFromDocument:(NSDictionary *)state;
+- (NSDictionary *)stateDocumentLocked;
+- (nullable NSDictionary *)mutateStateWithError:(NSError **)error
+                                           block:(NSDictionary *(^)(void))block;
 - (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
                                            channel:(NSString *)channel
                                          recipient:(NSString *)recipient
@@ -864,6 +901,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     _realtimeHub = [ALNRealtimeHub sharedHub];
     _persistenceEnabled = NO;
     _statePath = @"";
+    _lastPersistedState = @{};
     _webPushEnabled = NO;
     _webPushSubject = @"";
     _webPushDefaultTTL = 86400.0;
@@ -1033,6 +1071,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.recentFanoutEvents removeAllObjects];
   self.preferenceHook = nil;
   self.nextEntrySequence = 0;
+  self.lastPersistedState = @{};
   self.maxOutboxEntries = NMConfiguredLimit(NMNormalizeDictionary(moduleConfig[@"outbox"])[@"maxEntries"],
                                             ALNNotificationsDefaultMaxOutboxEntries);
   self.maxInboxEntriesPerRecipient =
@@ -1148,30 +1187,150 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   self.nextEntrySequence = [state[@"nextEntrySequence"] respondsToSelector:@selector(unsignedIntegerValue)]
                                ? [state[@"nextEntrySequence"] unsignedIntegerValue]
                                : self.nextEntrySequence;
+  self.lastPersistedState = [state copy];
   [self.lock unlock];
   return YES;
+}
+
+- (void)replaceStateLockedFromDocument:(NSDictionary *)state {
+  [self.outboxEntries removeAllObjects];
+  [self.outboxEntries addObjectsFromArray:NMNormalizeArray(state[@"outboxEntries"])];
+  NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
+  [self.inboxByRecipient removeAllObjects];
+  for (NSString *recipient in NMNormalizeDictionary(state[@"inboxByRecipient"])) {
+    NSMutableArray *entries = [NSMutableArray array];
+    for (id rawEntry in NMNormalizeArray(state[@"inboxByRecipient"][recipient])) {
+      [entries addObject:NMNormalizedInboxEntry(rawEntry)];
+    }
+    NMTrimOldestEntries(entries, self.maxInboxEntriesPerRecipient);
+    self.inboxByRecipient[recipient] = entries;
+  }
+  [self.preferencesByRecipient removeAllObjects];
+  [self.preferencesByRecipient addEntriesFromDictionary:NMNormalizeDictionary(state[@"preferencesByRecipient"])];
+  [self.recentFanoutEvents removeAllObjects];
+  [self.recentFanoutEvents addObjectsFromArray:NMNormalizeArray(state[@"recentFanoutEvents"])];
+  self.nextEntrySequence = [state[@"nextEntrySequence"] unsignedIntegerValue];
+  self.lastPersistedState = state ?: @{};
+}
+
+- (NSDictionary *)stateDocumentLocked {
+  NSMutableDictionary *inbox = [NSMutableDictionary dictionary];
+  for (NSString *recipient in self.inboxByRecipient) {
+    inbox[recipient] = [[NSArray alloc] initWithArray:self.inboxByRecipient[recipient] ?: @[] copyItems:YES] ?: @[];
+  }
+  return @{ @"version" : @1, @"nextEntrySequence" : @(self.nextEntrySequence),
+            @"outboxEntries" : [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES] ?: @[],
+            @"inboxByRecipient" : inbox,
+            @"preferencesByRecipient" : [NSDictionary dictionaryWithDictionary:self.preferencesByRecipient ?: @{}],
+            @"recentFanoutEvents" : [[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[] };
+}
+
+- (NSDictionary *)mutateStateWithError:(NSError **)error block:(NSDictionary *(^)(void))block {
+  if (self.persistenceEnabled && ![self persistStateWithError:error]) return nil;
+  [self.lock lock];
+  int stateLock = -1;
+  if (self.persistenceEnabled) {
+    stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+    if (stateLock < 0) {
+      if (error != NULL) *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"could not lock notification state", nil);
+      [self.lock unlock];
+      return nil;
+    }
+    NSError *readError = nil;
+    NSDictionary *authoritative = NMReadPropertyListAtPath(self.statePath, &readError);
+    if (readError != nil) {
+      if (error != NULL) *error = readError;
+      ALNPlatformReleaseExclusiveLock(stateLock);
+      [self.lock unlock];
+      return nil;
+    }
+    [self replaceStateLockedFromDocument:authoritative ?: @{}];
+  }
+  NSDictionary *result = block();
+  if (result != nil && self.persistenceEnabled) {
+    NSDictionary *payload = [self stateDocumentLocked];
+    if (!NMWritePropertyListAtPath(self.statePath, payload, error)) {
+      result = nil;
+    } else {
+      self.lastPersistedState = NMReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+    }
+  }
+  if (stateLock >= 0) ALNPlatformReleaseExclusiveLock(stateLock);
+  [self.lock unlock];
+  return result;
 }
 
 - (BOOL)persistStateWithError:(NSError **)error {
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return YES;
   }
-  NSDictionary *payload = nil;
   [self.lock lock];
-  NSMutableDictionary *inbox = [NSMutableDictionary dictionary];
-  for (NSString *recipient in self.inboxByRecipient) {
-    inbox[recipient] = [[NSArray alloc] initWithArray:self.inboxByRecipient[recipient] ?: @[] copyItems:YES] ?: @[];
+  NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                 withIntermediateDirectories:YES attributes:nil error:error]) {
+    [self.lock unlock];
+    return NO;
   }
-  payload = @{
-    @"version" : @1,
-    @"nextEntrySequence" : @(self.nextEntrySequence),
-    @"outboxEntries" : [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES] ?: @[],
-    @"inboxByRecipient" : inbox,
-    @"preferencesByRecipient" : [NSDictionary dictionaryWithDictionary:self.preferencesByRecipient ?: @{}],
-    @"recentFanoutEvents" : [[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[],
-  };
+  int stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+  if (stateLock < 0) {
+    if (error != NULL) *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"could not lock notification state", nil);
+    [self.lock unlock];
+    return NO;
+  }
+  NSError *readError = nil;
+  NSDictionary *authoritative = NMReadPropertyListAtPath(self.statePath, &readError) ?: @{};
+  if (readError != nil) {
+    if (error != NULL) *error = readError;
+    ALNPlatformReleaseExclusiveLock(stateLock);
+    [self.lock unlock];
+    return NO;
+  }
+  NSDictionary *baseline = self.lastPersistedState ?: @{};
+  if ([[self stateDocumentLocked] isEqualToDictionary:baseline]) {
+    [self replaceStateLockedFromDocument:authoritative];
+    ALNPlatformReleaseExclusiveLock(stateLock);
+    [self.lock unlock];
+    return YES;
+  }
+  NSMutableArray *outbox = NMMergeChangedEntries(NMNormalizeArray(authoritative[@"outboxEntries"]),
+                                                NMNormalizeArray(baseline[@"outboxEntries"]),
+                                                self.outboxEntries, self.maxOutboxEntries);
+  NSDictionary *authoritativeInbox = NMNormalizeDictionary(authoritative[@"inboxByRecipient"]);
+  NSDictionary *baselineInbox = NMNormalizeDictionary(baseline[@"inboxByRecipient"]);
+  NSMutableDictionary *inbox = [NSMutableDictionary dictionaryWithDictionary:authoritativeInbox];
+  for (NSString *recipient in self.inboxByRecipient) {
+    inbox[recipient] = NMMergeChangedEntries(NMNormalizeArray(authoritativeInbox[recipient]),
+                                             NMNormalizeArray(baselineInbox[recipient]),
+                                             self.inboxByRecipient[recipient], self.maxInboxEntriesPerRecipient);
+  }
+  NSDictionary *authoritativePreferences = NMNormalizeDictionary(authoritative[@"preferencesByRecipient"]);
+  NSDictionary *baselinePreferences = NMNormalizeDictionary(baseline[@"preferencesByRecipient"]);
+  NSMutableDictionary *preferences = [NSMutableDictionary dictionaryWithDictionary:authoritativePreferences];
+  for (NSString *recipient in self.preferencesByRecipient) {
+    NSDictionary *local = self.preferencesByRecipient[recipient];
+    if (![local isEqual:baselinePreferences[recipient]]) preferences[recipient] = local;
+  }
+  NSMutableArray *fanout = NMMergeChangedEntries(NMNormalizeArray(authoritative[@"recentFanoutEvents"]),
+                                                NMNormalizeArray(baseline[@"recentFanoutEvents"]),
+                                                self.recentFanoutEvents, 20);
+  NSUInteger sequence = MAX(self.nextEntrySequence, [authoritative[@"nextEntrySequence"] unsignedIntegerValue]);
+  NSDictionary *payload = @{ @"version" : @1, @"nextEntrySequence" : @(sequence),
+                             @"outboxEntries" : outbox, @"inboxByRecipient" : inbox,
+                             @"preferencesByRecipient" : preferences, @"recentFanoutEvents" : fanout };
+  BOOL saved = NMWritePropertyListAtPath(self.statePath, payload, error);
+  if (saved) {
+    self.outboxEntries = outbox;
+    self.inboxByRecipient = inbox;
+    self.preferencesByRecipient = preferences;
+    self.recentFanoutEvents = fanout;
+    self.nextEntrySequence = sequence;
+    // The runtime mutates these containers later; retain an immutable on-disk
+    // baseline so the next write can distinguish local edits from peer edits.
+    self.lastPersistedState = NMReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+  }
+  ALNPlatformReleaseExclusiveLock(stateLock);
   [self.lock unlock];
-  return NMWritePropertyListAtPath(self.statePath, payload, error);
+  return saved;
 }
 
 - (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
@@ -1186,7 +1345,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.lock lock];
   self.nextEntrySequence += 1;
   NSDictionary *entry = @{
-    @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
+    @"entryID" : [NSString stringWithFormat:@"notification-%@", [[NSUUID UUID] UUIDString].lowercaseString],
     @"notification" : NMTrimmedString(identifier),
     @"channel" : NMLowerTrimmedString(channel),
     @"recipient" : NMTrimmedString(recipient),
@@ -1233,6 +1392,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 }
 
 - (NSDictionary *)resolvedConfigSummary {
+  (void)[self persistStateWithError:NULL];
   NSDictionary *webPushSubscriptions = [self.webPushStore summary] ?: @{};
   [self.lock lock];
   NSDictionary *summary = @{
@@ -1757,6 +1917,7 @@ notificationIdentifier:(NSString *)identifier
   }
   NSString *notificationID = NMTrimmedString(identifier);
   NSString *channelID = NMLowerTrimmedString(channel);
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSDictionary *recipientPreferences = self.preferencesByRecipient[normalizedRecipient];
   NSNumber *explicitValue = [recipientPreferences[notificationID] isKindOfClass:[NSDictionary class]]
@@ -1901,7 +2062,7 @@ notificationIdentifier:(NSString *)identifier
                                   : [NSMutableArray array];
       self.nextEntrySequence += 1;
       NSDictionary *record = @{
-        @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
+        @"entryID" : [NSString stringWithFormat:@"notification-%@", [[NSUUID UUID] UUIDString].lowercaseString],
         @"notification" : identifier,
         @"recipient" : recipient,
         @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
@@ -2472,6 +2633,7 @@ notificationIdentifier:(NSString *)identifier
 }
 
 - (NSArray<NSDictionary *> *)outboxSnapshot {
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSArray *snapshot = [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES];
   [self.lock unlock];
@@ -2480,6 +2642,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSDictionary *)outboxEntryForIdentifier:(NSString *)entryID {
   NSString *targetID = NMTrimmedString(entryID);
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSDictionary *match = nil;
   for (NSDictionary *entry in self.outboxEntries) {
@@ -2494,6 +2657,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSArray<NSDictionary *> *)inboxSnapshotForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSArray *storedInbox = self.inboxByRecipient[normalizedRecipient];
   NSMutableArray *snapshot = [NSMutableArray array];
@@ -2515,6 +2679,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
   [self.lock unlock];
@@ -2558,52 +2723,38 @@ notificationIdentifier:(NSString *)identifier
     return nil;
   }
 
-  NSDictionary *result = nil;
-  [self.lock lock];
-  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
-                                    ? self.inboxByRecipient[normalizedRecipient]
-                                    : nil;
-  NSUInteger matchIndex = NSNotFound;
-  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
-    NSDictionary *entry = NMNormalizedInboxEntry(storedInbox[idx]);
-    if ([entry[@"entryID"] isEqualToString:normalizedEntryID]) {
-      matchIndex = idx;
-      break;
+  return [self mutateStateWithError:error block:^NSDictionary *{
+    NSMutableArray *storedInbox = self.inboxByRecipient[normalizedRecipient];
+    NSUInteger matchIndex = NSNotFound;
+    for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+      NSDictionary *entry = NMNormalizedInboxEntry(storedInbox[idx]);
+      if ([entry[@"entryID"] isEqualToString:normalizedEntryID]) {
+        matchIndex = idx;
+        break;
+      }
     }
-  }
-  if (matchIndex == NSNotFound) {
-    [self.lock unlock];
-    if (error != NULL) {
-      *error = NMError(ALNNotificationsModuleErrorNotFound,
-                       @"inbox entry not found",
-                       @{ @"recipient" : normalizedRecipient, @"entryID" : normalizedEntryID });
+    if (matchIndex == NSNotFound) {
+      if (error != NULL) {
+        *error = NMError(ALNNotificationsModuleErrorNotFound, @"inbox entry not found",
+                         @{ @"recipient" : normalizedRecipient, @"entryID" : normalizedEntryID });
+      }
+      return nil;
     }
-    return nil;
-  }
-
-  NSMutableDictionary *updatedEntry =
-      [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[matchIndex])];
-  updatedEntry[@"read"] = @(read);
-  if (read) {
-    updatedEntry[@"readAt"] = @([[NSDate date] timeIntervalSince1970]);
-  } else {
-    [updatedEntry removeObjectForKey:@"readAt"];
-  }
-  storedInbox[matchIndex] = updatedEntry;
-  self.inboxByRecipient[normalizedRecipient] = storedInbox;
-  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
-  result = @{
-    @"recipient" : normalizedRecipient,
-    @"entry" : [updatedEntry copy],
-    @"totalCount" : summary[@"totalCount"] ?: @0,
-    @"unreadCount" : summary[@"unreadCount"] ?: @0,
-  };
-  [self.lock unlock];
-
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
-  return result;
+    NSMutableDictionary *updatedEntry =
+        [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[matchIndex])];
+    updatedEntry[@"read"] = @(read);
+    if (read) {
+      updatedEntry[@"readAt"] = @([[NSDate date] timeIntervalSince1970]);
+    } else {
+      [updatedEntry removeObjectForKey:@"readAt"];
+    }
+    storedInbox[matchIndex] = updatedEntry;
+    self.inboxByRecipient[normalizedRecipient] = storedInbox;
+    NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+    return @{ @"recipient" : normalizedRecipient, @"entry" : [updatedEntry copy],
+              @"totalCount" : summary[@"totalCount"] ?: @0,
+              @"unreadCount" : summary[@"unreadCount"] ?: @0 };
+  }];
 }
 
 - (NSDictionary *)markAllInboxEntriesReadForRecipient:(NSString *)recipient
@@ -2618,41 +2769,30 @@ notificationIdentifier:(NSString *)identifier
     return nil;
   }
 
-  NSDictionary *result = nil;
-  [self.lock lock];
-  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
-                                    ? self.inboxByRecipient[normalizedRecipient]
-                                    : [NSMutableArray array];
-  NSUInteger updatedCount = 0;
-  NSNumber *readAt = @([[NSDate date] timeIntervalSince1970]);
-  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
-    NSMutableDictionary *entry =
-        [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[idx])];
-    if (![entry[@"read"] boolValue]) {
-      entry[@"read"] = @YES;
-      entry[@"readAt"] = readAt;
-      updatedCount += 1;
+  return [self mutateStateWithError:error block:^NSDictionary *{
+    NSMutableArray *storedInbox = self.inboxByRecipient[normalizedRecipient] ?: [NSMutableArray array];
+    NSUInteger updatedCount = 0;
+    NSNumber *readAt = @([[NSDate date] timeIntervalSince1970]);
+    for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+      NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[idx])];
+      if (![entry[@"read"] boolValue]) {
+        entry[@"read"] = @YES;
+        entry[@"readAt"] = readAt;
+        updatedCount += 1;
+      }
+      storedInbox[idx] = entry;
     }
-    storedInbox[idx] = entry;
-  }
-  self.inboxByRecipient[normalizedRecipient] = storedInbox;
-  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
-  result = @{
-    @"recipient" : normalizedRecipient,
-    @"updatedCount" : @(updatedCount),
-    @"totalCount" : summary[@"totalCount"] ?: @0,
-    @"unreadCount" : summary[@"unreadCount"] ?: @0,
-  };
-  [self.lock unlock];
-
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
-  return result;
+    self.inboxByRecipient[normalizedRecipient] = storedInbox;
+    NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+    return @{ @"recipient" : normalizedRecipient, @"updatedCount" : @(updatedCount),
+              @"totalCount" : summary[@"totalCount"] ?: @0,
+              @"unreadCount" : summary[@"unreadCount"] ?: @0 };
+  }];
 }
 
 - (NSDictionary *)notificationPreferencesForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  (void)[self persistStateWithError:NULL];
   [self.lock lock];
   NSDictionary *preferences = [self.preferencesByRecipient[normalizedRecipient] copy];
   [self.lock unlock];
@@ -2714,18 +2854,11 @@ notificationIdentifier:(NSString *)identifier
       normalized[identifier] = [NSDictionary dictionaryWithDictionary:normalizedChannels];
     }
   }
-  [self.lock lock];
-  self.preferencesByRecipient[normalizedRecipient] = [NSDictionary dictionaryWithDictionary:normalized];
-  NSDictionary *stored = [self.preferencesByRecipient[normalizedRecipient] copy];
-  [self.lock unlock];
-  NSDictionary *result = @{
-    @"recipient" : normalizedRecipient,
-    @"preferences" : stored ?: @{},
-  };
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
-  return result;
+  return [self mutateStateWithError:error block:^NSDictionary *{
+    self.preferencesByRecipient[normalizedRecipient] = [NSDictionary dictionaryWithDictionary:normalized];
+    return @{ @"recipient" : normalizedRecipient,
+              @"preferences" : [self.preferencesByRecipient[normalizedRecipient] copy] ?: @{} };
+  }];
 }
 
 - (NSDictionary *)dashboardSummary {

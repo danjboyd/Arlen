@@ -62,6 +62,30 @@ static NSArray *STNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
 }
 
+static NSMutableDictionary *STMergeChangedDictionary(NSDictionary *authoritative, NSDictionary *baseline,
+                                                     NSDictionary *local) {
+  NSMutableDictionary *merged = [NSMutableDictionary dictionaryWithDictionary:authoritative ?: @{}];
+  for (id key in local) {
+    if (![local[key] isEqual:baseline[key]]) merged[key] = local[key];
+  }
+  return merged;
+}
+
+static NSMutableArray *STMergeChangedHistory(NSArray *authoritative, NSArray *baseline,
+                                             NSArray *local, NSUInteger limit) {
+  NSMutableArray *merged = [NSMutableArray arrayWithArray:authoritative ?: @[]];
+  NSCountedSet *baselineEntries = [[NSCountedSet alloc] initWithArray:baseline ?: @[]];
+  for (id entry in local) {
+    if ([baselineEntries countForObject:entry] > 0) {
+      [baselineEntries removeObject:entry];
+    } else {
+      [merged addObject:entry];
+    }
+  }
+  while ([merged count] > limit) [merged removeObjectAtIndex:0];
+  return merged;
+}
+
 static NSData *STJSONDataFromObject(id object, NSError **error) {
   if (error != NULL) {
     *error = nil;
@@ -539,7 +563,7 @@ static NSDictionary *STReadPropertyListAtPath(NSString *path, NSError **error) {
   }
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
   id object = [NSPropertyListSerialization propertyListWithData:data
-                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                        options:NSPropertyListImmutable
                                                          format:&format
                                                           error:error];
   return [object isKindOfClass:[NSDictionary class]] ? object : nil;
@@ -794,6 +818,7 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 @property(nonatomic, strong) NSMutableArray *recentQueries;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, copy) NSDictionary *lastPersistedState;
 @property(nonatomic, assign) NSUInteger nextGeneration;
 @property(nonatomic, strong) id<ALNSearchEngine> engine;
 @property(nonatomic, copy) NSString *engineIdentifier;
@@ -4206,6 +4231,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     _recentQueries = [NSMutableArray array];
     _persistenceEnabled = NO;
     _statePath = @"";
+    _lastPersistedState = @{};
     _nextGeneration = 1U;
     _engine = [[ALNDefaultSearchEngine alloc] init];
     _engineIdentifier = @"ALNDefaultSearchEngine";
@@ -4269,6 +4295,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
   self.statePath = STResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
+  self.lastPersistedState = @{};
   self.nextGeneration = 1U;
   self.engine = engine;
   self.engineIdentifier = engineClassName;
@@ -4492,6 +4519,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   while ([self.recentQueries count] > ALNSearchHistoryLimit) {
     [self.recentQueries removeObjectAtIndex:0];
   }
+  self.lastPersistedState = state;
   [self.lock unlock];
   return YES;
 }
@@ -4500,26 +4528,76 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return YES;
   }
-  NSDictionary *payload = nil;
   [self.lock lock];
-  NSMutableDictionary *generationHistory = [NSMutableDictionary dictionary];
-  for (NSString *identifier in self.generationHistoryByResource) {
-    generationHistory[identifier] =
-        [[NSArray alloc] initWithArray:(self.generationHistoryByResource[identifier] ?: @[]) copyItems:YES] ?: @[];
+  NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                 withIntermediateDirectories:YES attributes:nil error:error]) {
+    [self.lock unlock];
+    return NO;
   }
-  payload = @{
+  int stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+  if (stateLock < 0) {
+    if (error != NULL) *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not lock search state", nil);
+    [self.lock unlock];
+    return NO;
+  }
+  NSError *readError = nil;
+  NSDictionary *authoritative = STReadPropertyListAtPath(self.statePath, &readError) ?: @{};
+  if (readError != nil) {
+    if (error != NULL) *error = readError;
+    ALNPlatformReleaseExclusiveLock(stateLock);
+    [self.lock unlock];
+    return NO;
+  }
+  NSDictionary *baseline = self.lastPersistedState ?: @{};
+  NSDictionary *authoritativeGenerations = STNormalizeDictionary(authoritative[@"generationHistoryByResource"]);
+  NSDictionary *baselineGenerations = STNormalizeDictionary(baseline[@"generationHistoryByResource"]);
+  NSMutableDictionary *generationHistory = [NSMutableDictionary dictionaryWithDictionary:authoritativeGenerations];
+  for (NSString *identifier in self.generationHistoryByResource) {
+    generationHistory[identifier] = STMergeChangedHistory(STNormalizeArray(authoritativeGenerations[identifier]),
+                                                         STNormalizeArray(baselineGenerations[identifier]),
+                                                         STNormalizeArray(self.generationHistoryByResource[identifier]),
+                                                         ALNSearchGenerationHistoryLimit);
+  }
+  NSDictionary *payload = @{
     @"version" : @1,
-    @"nextGeneration" : @(MAX((NSUInteger)1U, self.nextGeneration)),
-    @"indexedDocumentsByResource" : [NSDictionary dictionaryWithDictionary:self.indexedDocumentsByResource ?: @{}],
-    @"engineStateByResource" : [NSDictionary dictionaryWithDictionary:self.engineStateByResource ?: @{}],
-    @"pendingReplayOperationsByResource" : [NSDictionary dictionaryWithDictionary:self.pendingReplayOperationsByResource ?: @{}],
-    @"statusByResource" : [NSDictionary dictionaryWithDictionary:self.statusByResource ?: @{}],
+    @"nextGeneration" : @(MAX(MAX((NSUInteger)1U, self.nextGeneration), [authoritative[@"nextGeneration"] unsignedIntegerValue])),
+    @"indexedDocumentsByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"indexedDocumentsByResource"]),
+                                                                STNormalizeDictionary(baseline[@"indexedDocumentsByResource"]), self.indexedDocumentsByResource),
+    @"engineStateByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"engineStateByResource"]),
+                                                          STNormalizeDictionary(baseline[@"engineStateByResource"]), self.engineStateByResource),
+    @"pendingReplayOperationsByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"pendingReplayOperationsByResource"]),
+                                                                       STNormalizeDictionary(baseline[@"pendingReplayOperationsByResource"]), self.pendingReplayOperationsByResource),
+    @"statusByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"statusByResource"]),
+                                                    STNormalizeDictionary(baseline[@"statusByResource"]), self.statusByResource),
     @"generationHistoryByResource" : generationHistory,
-    @"reindexHistory" : [[NSArray alloc] initWithArray:self.reindexHistory copyItems:YES] ?: @[],
-    @"recentQueries" : [[NSArray alloc] initWithArray:self.recentQueries copyItems:YES] ?: @[],
+    @"reindexHistory" : STMergeChangedHistory(STNormalizeArray(authoritative[@"reindexHistory"]),
+                                               STNormalizeArray(baseline[@"reindexHistory"]), self.reindexHistory, ALNSearchHistoryLimit),
+    @"recentQueries" : STMergeChangedHistory(STNormalizeArray(authoritative[@"recentQueries"]),
+                                              STNormalizeArray(baseline[@"recentQueries"]), self.recentQueries, ALNSearchHistoryLimit),
   };
+  BOOL saved = STWritePropertyListAtPath(self.statePath, payload, error);
+  if (saved) {
+    self.indexedDocumentsByResource = [STNormalizeDictionary(payload[@"indexedDocumentsByResource"]) mutableCopy];
+    self.engineStateByResource = [STNormalizeDictionary(payload[@"engineStateByResource"]) mutableCopy];
+    self.pendingReplayOperationsByResource = [NSMutableDictionary dictionary];
+    for (NSString *identifier in STNormalizeDictionary(payload[@"pendingReplayOperationsByResource"])) {
+      self.pendingReplayOperationsByResource[identifier] =
+          [STNormalizeArray(payload[@"pendingReplayOperationsByResource"][identifier]) mutableCopy];
+    }
+    self.statusByResource = [STNormalizeDictionary(payload[@"statusByResource"]) mutableCopy];
+    self.generationHistoryByResource = [NSMutableDictionary dictionary];
+    for (NSString *identifier in generationHistory) {
+      self.generationHistoryByResource[identifier] = [STNormalizeArray(generationHistory[identifier]) mutableCopy];
+    }
+    self.reindexHistory = [STNormalizeArray(payload[@"reindexHistory"]) mutableCopy];
+    self.recentQueries = [STNormalizeArray(payload[@"recentQueries"]) mutableCopy];
+    self.nextGeneration = [payload[@"nextGeneration"] unsignedIntegerValue];
+    self.lastPersistedState = STReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+  }
+  ALNPlatformReleaseExclusiveLock(stateLock);
   [self.lock unlock];
-  return STWritePropertyListAtPath(self.statePath, payload, error);
+  return saved;
 }
 
 - (NSDictionary *)normalizedMetadataForDefinition:(id<ALNSearchResourceDefinition>)definition
