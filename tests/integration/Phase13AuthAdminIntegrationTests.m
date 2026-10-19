@@ -749,6 +749,29 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual((NSInteger)200, [adminHTML[@"status"] integerValue]);
     XCTAssertTrue([adminHTML[@"body"] containsString:@"Arlen Admin"]);
 
+    NSDictionary *wildcardSearch = [self curlJSONAtPort:port
+                                                   path:@"/admin/api/users?q=%25"
+                                                 method:@"GET"
+                                              cookieJar:cookieJar
+                                              csrfToken:nil
+                                                payload:nil
+                                        followRedirects:NO
+                                               exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [wildcardSearch[@"status"] integerValue]);
+    XCTAssertEqual((NSUInteger)0, [[self parseJSONDictionary:wildcardSearch[@"body"]][@"items"] count]);
+    NSDictionary *wildcardRole = [self curlJSONAtPort:port
+                                                 path:@"/admin/api/users?roles=%25"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                              payload:nil
+                                      followRedirects:NO
+                                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [wildcardRole[@"status"] integerValue]);
+    XCTAssertEqual((NSUInteger)0, [[self parseJSONDictionary:wildcardRole[@"body"]][@"items"] count]);
+
     // Subjects look like "user:<uuid>". Apple's URLPathAllowedCharacterSet
     // escapes ':' and GNUstep's does not, and route parameters are matched
     // undecoded (GitHub issue 154), so keep ':' literal on both.
@@ -2012,6 +2035,41 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [smsStart[@"status"] integerValue]);
     XCTAssertTrue([[self parseJSONDictionary:smsStart[@"body"]][@"message"] containsString:@"We sent a code"]);
+
+    // Replaying the cookie from before failed checks must not reset the SMS
+    // verification budget. The authoritative count belongs in PostgreSQL.
+    NSString *staleCookieJar = [self createTempFilePathWithPrefix:@"phase18-sms-stale-cookie" suffix:@".txt"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:cookieJar toPath:staleCookieJar error:NULL]);
+    for (NSUInteger attempt = 0; attempt < 8U; attempt++) {
+      NSDictionary *invalidSMS = [self curlJSONAtPort:port
+                                                path:@"/auth/api/mfa/sms/verify"
+                                              method:@"POST"
+                                           cookieJar:cookieJar
+                                           csrfToken:csrfToken
+                                             payload:@{ @"code" : @"000000" }
+                                     followRedirects:NO
+                                            exitCode:&exitCode];
+      XCTAssertEqual(0, exitCode);
+      XCTAssertEqual((NSInteger)422, [invalidSMS[@"status"] integerValue]);
+    }
+    XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:cookieJar error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:staleCookieJar toPath:cookieJar error:NULL]);
+    NSDictionary *replayedSMS = [self curlJSONAtPort:port
+                                               path:@"/auth/api/mfa/sms/verify"
+                                             method:@"POST"
+                                          cookieJar:cookieJar
+                                          csrfToken:csrfToken
+                                            payload:@{ @"code" : smsCode }
+                                    followRedirects:NO
+                                           exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)429, [replayedSMS[@"status"] integerValue]);
+    NSString *clearSMSLimit = [self sqlScalar:[NSString stringWithFormat:
+        @"DELETE FROM auth_attempt_limits WHERE scope = 'sms_verify' AND user_id = "
+         "(SELECT id FROM auth_users WHERE lower(email) = lower('%@')) RETURNING 'cleared';",
+        [userEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                         dsn:dsn];
+    XCTAssertTrue([clearSMSLimit containsString:@"cleared"]);
 
     sessionResponse = [self curlJSONAtPort:port
                                       path:@"/auth/api/session"

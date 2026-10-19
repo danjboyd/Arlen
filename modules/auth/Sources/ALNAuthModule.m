@@ -4072,6 +4072,29 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
+  // The session cookie can be replayed. Reserve the send against the account
+  // before contacting the provider so an old cookie cannot reset the limit.
+  if (![self attemptLimitSchemaIsAvailable]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorDatabaseUnavailable, @"SMS attempt limits are unavailable", nil);
+    }
+    return nil;
+  }
+  NSString *sendScope = [NSString stringWithFormat:@"sms_send_%@", normalizedPurpose ?: @"challenge"];
+  if (![self reserveAttemptForUserID:userID
+                               scope:sendScope
+                         maxFailures:MAX(self.smsMaxSendAttemptsPerSession, (NSUInteger)1U)
+                      lockoutSeconds:900U
+                   maxLockoutSeconds:3600U
+                               error:error]) {
+    return nil;
+  }
+  if (![self attemptLimitSchemaIsAvailable]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorDatabaseUnavailable, @"SMS attempt limits are unavailable", nil);
+    }
+    return nil;
+  }
   if (![self.smsVerifyClient sendVerificationToPhoneNumber:resolvedPhone locale:self.smsLocale error:error]) {
     return nil;
   }
@@ -4190,6 +4213,28 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  if (![self attemptLimitSchemaIsAvailable]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorDatabaseUnavailable, @"SMS attempt limits are unavailable", nil);
+    }
+    return nil;
+  }
+  if (![self reserveAttemptForUserID:userID
+                               scope:@"sms_verify"
+                         maxFailures:MAX(self.smsMaxVerifyAttemptsPerSession, (NSUInteger)1U)
+                      lockoutSeconds:900U
+                   maxLockoutSeconds:3600U
+                               error:error]) {
+    return nil;
+  }
+  if (![self attemptLimitSchemaIsAvailable]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorDatabaseUnavailable, @"SMS attempt limits are unavailable", nil);
+    }
+    return nil;
+  }
+
   BOOL approved = NO;
   NSError *providerError = nil;
   BOOL ok = [self.smsVerifyClient checkVerificationCode:code phoneNumber:phone approved:&approved error:&providerError];
@@ -4203,7 +4248,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
-  NSString *userID = AMTrimmedString(user[@"id"]);
+  [self clearAttemptFailuresForUserID:userID scope:@"sms_verify"];
   if ([purpose isEqualToString:@"enrollment"]) {
     NSDictionary *existing = [self smsEnrollmentForUserID:userID error:NULL];
     NSInteger result = 0;
@@ -5534,7 +5579,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                           context:ctx
                                                             error:&error];
   if (state == nil) {
-    [self setStatus:422];
+    [self setStatusForAuthError:error fallbackStatus:422];
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
       payload[@"status"] = @"error";
@@ -5589,7 +5634,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                           context:ctx
                                                             error:&error];
   if (state == nil) {
-    [self setStatus:422];
+    [self setStatusForAuthError:error fallbackStatus:422];
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *payload = [[self mfaJSONResponseForContext:ctx returnTo:returnTo] mutableCopy];
       payload[@"status"] = @"error";
@@ -5659,7 +5704,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifySMSCode:parameters[@"code"] user:user context:ctx error:&error];
   if (payload == nil) {
-    [self setStatus:422];
+    [self setStatusForAuthError:error fallbackStatus:422];
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       NSMutableDictionary *response = [[([purpose isEqualToString:@"challenge"] ? [self smsJSONChallengeResponseForContext:ctx returnTo:returnTo autoSend:NO error:NULL]
                                                                                 : [self mfaJSONResponseForContext:ctx returnTo:returnTo]) mutableCopy] ?: [NSMutableDictionary dictionary] mutableCopy];

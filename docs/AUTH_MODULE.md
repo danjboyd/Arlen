@@ -127,6 +127,12 @@ Current MFA factor scope:
   factor
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
+- when SMS is enabled, send and verification attempt budgets are recorded per
+  account in PostgreSQL. Replaying an older session cookie cannot restore the
+  budget. A locked account receives HTTP 429 with `Retry-After`; missing attempt
+  limit storage makes SMS requests fail with HTTP 503. The configured
+  `mfa.sms.maxSendAttemptsPerSession` and `maxVerifyAttemptsPerSession` values
+  also bound these account counters within a rolling 24-hour failure window.
 
 ### Database pool and unavailability
 

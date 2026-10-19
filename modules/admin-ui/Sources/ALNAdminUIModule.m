@@ -27,6 +27,13 @@ static NSString *AULowerTrimmedString(id value) {
   return [[AUTrimmedString(value) lowercaseString] copy];
 }
 
+static NSString *AUEscapedLikePattern(NSString *value) {
+  NSString *escaped = value ?: @"";
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"%" withString:@"\\%"];
+  return [escaped stringByReplacingOccurrencesOfString:@"_" withString:@"\\_"];
+}
+
 static NSDictionary *AUNormalizeDictionary(id value) {
   return [value isKindOfClass:[NSDictionary class]] ? value : @{};
 }
@@ -734,7 +741,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     return nil;
   }
   NSString *search = AULowerTrimmedString(parameters[@"q"]);
-  NSString *like = ([search length] > 0) ? [NSString stringWithFormat:@"%%%@%%", search] : @"";
+  NSString *like = ([search length] > 0) ? [NSString stringWithFormat:@"%%%@%%", AUEscapedLikePattern(search)] : @"";
   NSString *role = AULowerTrimmedString(parameters[@"roles"]);
   NSString *verified = AULowerTrimmedString(parameters[@"email_verified"]);
   NSString *mfaEnabled = AULowerTrimmedString(parameters[@"mfa_enabled"]);
@@ -770,7 +777,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   NSMutableArray *sqlParameters = [NSMutableArray array];
   NSUInteger parameterIndex = 1U;
   if ([search length] > 0) {
-    [sql appendFormat:@"AND ($%lu = '' OR lower(u.email) LIKE $%lu OR lower(COALESCE(u.display_name, '')) LIKE $%lu OR lower(u.subject) LIKE $%lu) ",
+    [sql appendFormat:@"AND ($%lu = '' OR lower(u.email) LIKE $%lu ESCAPE '\\' OR lower(COALESCE(u.display_name, '')) LIKE $%lu ESCAPE '\\' OR lower(u.subject) LIKE $%lu ESCAPE '\\') ",
                       (unsigned long)parameterIndex,
                       (unsigned long)(parameterIndex + 1U),
                       (unsigned long)(parameterIndex + 1U),
@@ -780,8 +787,8 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     parameterIndex += 2U;
   }
   if ([role length] > 0) {
-    [sql appendFormat:@"AND lower(COALESCE(u.roles_json, '[]')) LIKE $%lu ", (unsigned long)parameterIndex];
-    [sqlParameters addObject:[NSString stringWithFormat:@"%%\"%@\"%%", role]];
+    [sql appendFormat:@"AND lower(COALESCE(u.roles_json, '[]')) LIKE $%lu ESCAPE '\\' ", (unsigned long)parameterIndex];
+    [sqlParameters addObject:[NSString stringWithFormat:@"%%\"%@\"%%", AUEscapedLikePattern(role)]];
     parameterIndex += 1U;
   }
   if ([verified isEqualToString:@"true"] || [verified isEqualToString:@"false"]) {

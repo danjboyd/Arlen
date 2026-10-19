@@ -85,6 +85,9 @@ HTML and JSON prefixes when it is available:
 - `GET /admin/api/users/export/:format`
 - `GET /admin/api/users/autocomplete/:field`
 
+The built-in users list treats `q` and `roles` filter values as literal text.
+SQL wildcard characters such as `%` and `_` do not expand a search.
+
 Provider-defined resources may also set `legacyPath` in their metadata. When
 present, `admin-ui` now keeps full parity between the generic
 `/admin/resources/:resource...` routes and the legacy aliases for list, detail,
