@@ -147,6 +147,7 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      # Direct-binary timeout/rate tests remain instrumented; comments do not classify as build commands.
       - name: Run nightly integration sanitizer lane
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep

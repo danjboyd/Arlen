@@ -190,3 +190,8 @@ The policy in `tests/performance/policies/persistent_http.json` gates throughput
 p95 latency, and Linux server CPU per request. Reports and server logs are in
 `build/perf/persistent_http.*`, included in existing CI artifacts. This extends
 the existing required check; branch-protection check names are unchanged.
+
+The integration sanitizer skip classifier ignores C comments while preserving
+command string literals. Direct `build/boomhauer` slow-reader and request-deadline
+tests remain eligible for the existing nightly instrumentation lane; required
+checks and branch-protection names are unchanged.
