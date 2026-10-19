@@ -54,6 +54,7 @@ jobs:
         shell: powershell
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths"
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testStaticHTTPValidatorsHeadAndRanges"
 
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
