@@ -66,9 +66,6 @@ static void Phase16DResetOrderStore(void) {
 @implementation Phase16DSearchResource
 
 - (NSString *)searchModuleResourceIdentifier {
-  if ([[[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_SEARCH_SHARED_STATE_PATH"] length] > 0) {
-    return [NSString stringWithFormat:@"worker-%d", getpid()];
-  }
   return @"orders";
 }
 
