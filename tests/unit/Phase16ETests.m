@@ -7,6 +7,7 @@
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface Phase16EOpsJob : NSObject <ALNJobsJobDefinition>
 @end
@@ -226,17 +227,16 @@
     NSString *readyPrefix = [[sharedPath lastPathComponent] stringByAppendingString:@".ready."];
     NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
     XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
-    NSUInteger readyCount = 0;
-    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
+    __block NSUInteger readyCount = 0;
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.05, ^BOOL {
       NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
                                                                            error:NULL];
       readyCount = 0;
       for (NSString *name in names) {
         if ([name hasPrefix:readyPrefix]) readyCount++;
       }
-      if (readyCount >= 2U) break;
-      usleep(50000);
-    }
+      return readyCount >= 2U;
+    }));
     XCTAssertEqual((NSUInteger)2, readyCount);
     XCTAssertNotNil([runtime dashboardSummary]);
     return;
@@ -251,16 +251,32 @@
   for (NSUInteger index = 0; index < 2U; index++) {
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
+#if defined(__APPLE__)
     child.arguments = @[ @"-XCTest", @"Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+#else
+    child.arguments = @[ @"-only-testing:ArlenUnitTests/Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+#endif
+    NSPipe *output = [NSPipe pipe];
+    child.standardOutput = output;
+    child.standardError = output;
     NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
     environment[@"ARLEN_OPS_SHARED_STATE_PATH"] = statePath;
     child.environment = environment;
     [child launch];
-    [children addObject:child];
+    [children addObject:@{ @"task" : child, @"output" : output }];
   }
-  for (NSTask *child in children) {
-    [child waitUntilExit];
-    XCTAssertEqual(0, child.terminationStatus);
+  for (NSDictionary *entry in children) {
+    NSTask *child = entry[@"task"];
+    BOOL exited = ALNTestWaitForTaskExit(child, 30.0);
+    if (!exited) {
+      [child terminate];
+      [child waitUntilExit];
+    }
+    NSData *data = [[entry[@"output"] fileHandleForReading] readDataToEndOfFile];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    XCTAssertTrue(exited, @"child timed out: %@", output);
+    XCTAssertEqual(0, child.terminationStatus, @"%@", output);
+    XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
   }
   NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"historySnapshots"] count]);
