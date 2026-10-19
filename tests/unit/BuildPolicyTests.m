@@ -136,6 +136,22 @@
   XCTAssertTrue([output containsString:@"targets ok"], @"%@", output);
 }
 
+- (void)testPropaneLsofProbeFailurePreservesStartupPolicyAndValidCounts {
+#if defined(_WIN32)
+  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  NSString *repoRoot = ALNTestRepoRoot();
+  NSString *command = [NSString stringWithFormat:
+      @"bash %@ %@ 2>&1",
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"tests/fixtures/propane/fd_probe_lsof_check.sh"]),
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/propane"])];
+  int exitCode = -1;
+  NSString *output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"unavailable sample preserved startup limit and backoff"], @"%@", output);
+  XCTAssertTrue([output containsString:@"valid sample preserved count, limit and retirement event"], @"%@", output);
+}
+
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"arlen-shell-capture-large-output"];
