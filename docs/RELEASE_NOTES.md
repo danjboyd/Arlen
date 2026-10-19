@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-19
+
+This release combines the public audit fixes and security hardening work. It
+changes several authentication, persistence, and deployment defaults; review
+the upgrade notes below before replacing an existing installation.
+
+- Jobs operator-state reads now refresh shared state, and mutations use short
+  cross-process transactions. Run one scheduler: scheduler bookkeeping and job
+  enqueue are still separate operations.
+- Search state transactions reject stale rebuild and incremental results with
+  `state_conflict`. Replay claims expire after five minutes and require
+  idempotent operations. External search engines still need one reindex writer
+  per resource unless the backend provides publication fencing. See
+  [Search Module](SEARCH_MODULE.md) for the full contract.
+- Notification inbox and preference changes refresh authoritative shared state;
+  corrupt or unreadable persistence fails closed. Stop older workers before
+  upgrading shared persistence paths so all writers use the new protocol.
+
+
 - Windows file responses accept valid Unicode filenames using wide-character
   filesystem calls. Framework/app/test builds now use 64-bit file offsets,
   preventing metadata and Range truncation above 2 GiB; rebuild custom CLANG64
