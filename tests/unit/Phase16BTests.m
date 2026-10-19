@@ -704,6 +704,22 @@
       notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
 }
 
+#if defined(_WIN32)
+- (BOOL)corruptNotificationCatalogAtPath:(NSString *)path payload:(NSData *)payload {
+  NSTask *child = [[NSTask alloc] init];
+  child.launchPath = ALNTestToolPath(@"python3");
+  child.arguments = @[@"-c", @"import sqlite3,sys,base64; c=sqlite3.connect(sys.argv[1]); c.execute(\"UPDATE catalog SET value=? WHERE kind='meta'\",(base64.b64decode(sys.argv[2]),)); c.commit()",
+      path, [payload base64EncodedStringWithOptions:0]];
+  child.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  child.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [child launch];
+  BOOL exited = ALNTestWaitForTaskExit(child, 15.0);
+  if (!exited) [child terminate];
+  [child waitUntilExit];
+  return exited && child.terminationStatus == 0;
+}
+#endif
+
 - (void)testCorruptNotificationStateDoesNotGetOverwrittenByMutation {
   NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-corrupt-state.plist"];
   [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
@@ -714,7 +730,20 @@
   XCTAssertNil(error);
   statePath = [statePath stringByAppendingString:@".sqlite3"];
   NSData *corrupt = [@"not a property list" dataUsingEncoding:NSUTF8StringEncoding];
+#if defined(_WIN32)
+  // System SQLite denies delete sharing. Verify the OS prevents replacement,
+  // then commit corrupt record bytes through a peer to exercise fail-closed
+  // runtime behavior without weakening the corruption/no-overwrite assertions.
+  NSData *originalBytes = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertFalse([corrupt writeToFile:statePath options:NSDataWritingAtomic error:NULL]);
+  XCTAssertEqualObjects(originalBytes, [NSData dataWithContentsOfFile:statePath]);
+  BOOL injected = [self corruptNotificationCatalogAtPath:statePath payload:corrupt];
+  XCTAssertTrue(injected);
+  if (!injected) return;
+  corrupt = [NSData dataWithContentsOfFile:statePath];
+#else
   XCTAssertTrue([corrupt writeToFile:statePath atomically:YES]);
+#endif
   error = nil;
   XCTAssertNil([runtime updateNotificationPreferences:@{} forRecipient:@"reader" error:&error]);
   XCTAssertNotNil(error);
@@ -723,7 +752,14 @@
   XCTAssertEqual((NSUInteger)0, [[runtime outboxSnapshot] count]);
   NSData *wrongRoot = [NSPropertyListSerialization dataWithPropertyList:@[ @"not-a-dictionary" ]
                                                                   format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+#if defined(_WIN32)
+  injected = [self corruptNotificationCatalogAtPath:statePath payload:wrongRoot];
+  XCTAssertTrue(injected);
+  if (!injected) return;
+  wrongRoot = [NSData dataWithContentsOfFile:statePath];
+#else
   XCTAssertTrue([wrongRoot writeToFile:statePath atomically:YES]);
+#endif
   error = nil;
   XCTAssertNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
   XCTAssertNotNil(error);
