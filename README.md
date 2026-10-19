@@ -178,6 +178,10 @@ Adding a module takes one command:
 arlen module add auth && arlen module migrate --env development
 ```
 
+For production auth email, add `jobs`, configure a PostgreSQL jobs adapter and
+worker, and set `authModule.publicBaseURL`; see the
+[auth module guide](docs/AUTH_MODULE.md).
+
 ## Why Arlen
 
 - **Native Objective-C, end to end.** Your app is a compiled binary. You keep

@@ -26,6 +26,10 @@ The normal path for first-party modules is:
 ./build/arlen module assets --output-dir build/module_assets
 ```
 
+For production password-reset and verification mail, also install `jobs`,
+configure its PostgreSQL adapter and worker, and set
+`authModule.publicBaseURL`; see [Auth Module](AUTH_MODULE.md).
+
 That sequence installs the module, validates it, applies migrations, and stages
 its public assets.
 

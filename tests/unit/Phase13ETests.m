@@ -9,6 +9,8 @@
 #import "ALNApplication.h"
 #import "ALNController.h"
 #import "ALNAuthModule.h"
+#import "ALNJobsModule.h"
+#import "ALNPostgresJobAdapter.h"
 #import "ALNContext.h"
 #import "ALNEOCRuntime.h"
 #import "ALNMigrationRunner.h"
@@ -1029,6 +1031,7 @@ static ALNContext *ALNTestStandInContext(void) {
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
     @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"synchronous" } },
   }];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
@@ -1251,13 +1254,17 @@ static ALNContext *ALNTestStandInContext(void) {
 - (ALNApplication *)mailingApplicationWithEnvironment:(NSString *)environment
                                           authModule:(NSDictionary *)authModule
                                          mailAdapter:(ALNInMemoryMailAdapter **)mailAdapter {
-  // These tests exercise email-link policy without a browser CSRF handshake.
-  NSMutableDictionary *linkConfig = [NSMutableDictionary dictionaryWithDictionary:authModule ?: @{}];
-  linkConfig[@"allowWithoutCSRF"] = @YES;
+  // Link-policy fixtures use an explicit CSRF opt-out and legacy synchronous mail.
+  NSMutableDictionary *authConfig = [NSMutableDictionary dictionaryWithDictionary:authModule ?: @{}];
+  authConfig[@"allowWithoutCSRF"] = @YES;
+  if ([environment isEqualToString:@"production"]) {
+    authConfig[@"mailDispatch"] = @{ @"mode" : @"synchronous" };
+  }
+  authConfig[@"attemptLimits"] = @{ @"mail" : @{ @"maxPerAddress" : @10000 } };
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : environment,
     @"csrf" : @{ @"enabled" : @NO },
-    @"authModule" : linkConfig,
+    @"authModule" : authConfig,
   }];
   ALNInMemoryMailAdapter *adapter = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_link_mail"];
   [app setMailAdapter:adapter];
@@ -1298,6 +1305,72 @@ static ALNContext *ALNTestStandInContext(void) {
     [bodies addObject:message[@"textBody"] ?: @""];
   }
   return bodies;
+}
+
+- (void)testProductionAuthMailRequiresDurableQueueUnlessCompatibilityModeIsExplicit {
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"environment" : @"production",
+    @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test" },
+  }];
+  [app setMailAdapter:[[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"auth_mail_guard"]];
+  NSError *error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertEqualObjects(@"authModule.mailDispatch.mode", error.userInfo[@"key_path"]);
+  ALNApplication *explicitDurable = [self applicationWithConfig:@{
+    @"environment" : @"test",
+    @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"durable" } },
+  }];
+  error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:explicitDurable error:&error]);
+  XCTAssertEqualObjects(@"authModule.mailDispatch.mode", error.userInfo[@"key_path"]);
+}
+
+- (void)testDurableAuthMailQueuesBeforeSendingAndKeepsUnknownAddressesGeneric {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:4 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  ALNPostgresJobAdapter *jobs = [[ALNPostgresJobAdapter alloc] initWithDatabase:database
+                                                                      namespace:[NSString stringWithFormat:@"auth-mail-%@", [[NSUUID UUID] UUIDString]]
+                                                           leaseDurationSeconds:30 error:&error];
+  XCTAssertNotNil(jobs, @"%@", error);
+  XCTAssertTrue([jobs installSchemaWithError:&error], @"%@", error);
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"environment" : @"production",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test",
+                       @"attemptLimits" : @{ @"mail" : @{ @"maxPerAddress" : @10000 } } },
+  }];
+  ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"durable_auth_mail"];
+  [app setMailAdapter:mail];
+  [app setJobsAdapter:jobs];
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+
+  NSString *email = [NSString stringWithFormat:@"durable-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSDictionary *registration = @{ @"email" : email, @"display_name" : @"Durable User", @"password" : @"durable-password" };
+  ALNResponse *created = [self postJSON:registration to:@"/auth/api/register" app:app host:@"evil.example"];
+  ALNResponse *existing = [self postJSON:registration to:@"/auth/api/register" app:app host:@"evil.example"];
+  XCTAssertEqual((NSInteger)200, created.statusCode);
+  XCTAssertEqualObjects([self JSONResponseBody:created], [self JSONResponseBody:existing]);
+  XCTAssertEqual((NSUInteger)0, [[mail deliveriesSnapshot] count]);
+  XCTAssertEqual((NSUInteger)2, [[jobs jobsWithState:@"pending" error:&error] count]);
+  XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)1, [[mail deliveriesSnapshot] count]);
+  XCTAssertTrue([[[self deliveredTextBodies:mail] firstObject] containsString:@"https://app.example.test/auth/verify?token="]);
+
+  NSString *unknown = [NSString stringWithFormat:@"unknown-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  ALNResponse *knownReset = [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
+  ALNResponse *unknownReset = [self postJSON:@{ @"email" : unknown } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
+  ALNResponse *emptyReset = [self postJSON:@{ @"email" : @"" } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
+  XCTAssertEqual((NSInteger)200, knownReset.statusCode);
+  XCTAssertEqualObjects([self JSONResponseBody:knownReset], [self JSONResponseBody:unknownReset]);
+  XCTAssertEqualObjects([self JSONResponseBody:knownReset], [self JSONResponseBody:emptyReset]);
+  XCTAssertEqual((NSUInteger)1, [[mail deliveriesSnapshot] count]);
+  XCTAssertEqual((NSUInteger)3, [[jobs jobsWithState:@"pending" error:&error] count]);
+  XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)2, [[mail deliveriesSnapshot] count]);
+  XCTAssertTrue([[[self deliveredTextBodies:mail] lastObject] containsString:@"https://app.example.test/auth/password/reset?token="]);
 }
 
 - (void)testPasswordResetLinkUsesConfiguredPublicBaseURLNotHostHeader {

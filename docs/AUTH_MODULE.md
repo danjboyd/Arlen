@@ -104,9 +104,15 @@ the account exists. Registration now returns the same generic success response
 for a new or existing address. It does not start an authenticated session;
 the user follows the verification link and signs in. An existing address is
 left unchanged and receives no repeated verification message.
-The default in-memory mail adapter keeps the two paths close in time. If an
-app uses a slow synchronous mail adapter or registration hook, its request
-latency can reveal the path; use a durable enqueueing adapter for that work.
+With a configured PostgreSQL jobs adapter, registration and password-reset
+requests enqueue mail work. The jobs worker creates links and sends mail after
+the response. New-user registration and its mail job commit in one transaction;
+an existing address enqueues a no-op job. A registration hook can still affect
+request latency, so applications using custom hooks should review their timing.
+Production-like environments with local passwords and mail configured require
+the durable jobs adapter and `authModule.publicBaseURL` at startup. Explicit
+`authModule.mailDispatch.mode = "synchronous"` keeps the old delivery path;
+its provider and database latency can reveal whether an address exists.
 
 The previous registration behavior can be enabled explicitly with
 `authModule.registration.autoLogin = YES`. This compatibility setting starts
@@ -117,9 +123,10 @@ sign-in after registration must update their client flow or opt in.
 
 Password-reset and email-verification emails link to
 `authModule.publicBaseURL` (for example `publicBaseURL =
-"https://app.example.com";`). Set it in production: there, without it, the module
-sends no link rather than trusting the request's `Host` header, and logs an
-error. In `development` and `test` an unset value falls back to the request's
+"https://app.example.com";`). Set it in production: durable mail configuration
+fails startup without it. Explicit synchronous compatibility mode sends no link
+when it is absent and never trusts the request's `Host` header. In `development`
+and `test` an unset value falls back to the request's
 scheme and `Host`. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
 
@@ -936,9 +943,11 @@ development and test convenience only:
 - Even if a stub route is reached outside `development`/`test`, it answers 404
   and the stub identity never creates or signs in a user.
 
-Production apps that use local passwords must set `authModule.publicBaseURL`
-when upgrading to auth 1.6.0; without it, password-reset and verification
-emails are not sent outside `development` and `test`.
+Production apps that use local passwords and mail must set
+`authModule.publicBaseURL` and install the PostgreSQL jobs adapter and worker
+when upgrading to auth 1.6.1. See [Durable Jobs](DURABLE_JOBS.md). Explicit
+`authModule.mailDispatch.mode = "synchronous"` preserves legacy request-time
+delivery with its timing disclosure risk.
 
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login

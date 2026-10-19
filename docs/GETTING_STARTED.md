@@ -385,6 +385,11 @@ after verification. They do not get an authenticated session from the register
 request. Existing apps that require the old flow can opt in with
 `authModule.registration.autoLogin = YES`, which reveals whether an address is
 already registered; see [Auth Module](AUTH_MODULE.md).
+For production registration and password reset, configure a PostgreSQL jobs
+adapter, apply its schema, run the jobs worker, and set
+`authModule.publicBaseURL`. Auth mail is queued; the request does not wait for
+the mail provider. See [Durable Jobs](DURABLE_JOBS.md) and
+[Auth Module](AUTH_MODULE.md).
 
 When automating `arlen module migrate --json`, capture stdout and stderr
 separately. PostgreSQL notices may appear on stderr during repeated migrations;

@@ -793,12 +793,22 @@ when it is set, and it also takes precedence over the `baseURL` an app passes
 to `claimTrustedEmail:`.
 
 When it is not set, the `development` and `test` environments fall back to the
-request's scheme and `Host` header so local sign-up keeps working. Every other
-environment sends no link: the forgot-password and registration responses are
-unchanged, no token is issued, and the module logs an error naming
-`authModule.publicBaseURL` (and warns at startup when local passwords and a mail
-adapter are configured). Set it in production. `claimTrustedEmail:` keeps
-taking its `baseURL` from the caller.
+request's scheme and `Host` header so local sign-up keeps working. In other
+environments, durable auth mail configuration fails startup without this value.
+Explicit synchronous compatibility mode sends no link, logs a warning, and
+keeps the generic response. `claimTrustedEmail:` keeps taking its `baseURL`
+from the caller.
+
+`authModule.mailDispatch.mode` accepts `durable` or `synchronous`. When a
+PostgreSQL `ALNDurableJobAdapter` and the jobs module are registered, durable
+dispatch is selected automatically. Production-like environments with local
+passwords and a mail adapter fail startup without that setup unless they
+explicitly select `synchronous`. Durable dispatch enqueues generic
+`auth.mail.dispatch` jobs on `auth_mail`: registration commits user and job
+together, and password reset enqueues for both known and unknown addresses.
+Run a jobs worker for delivery. A queue failure returns 503 without reporting
+whether an account exists. The synchronous mode can expose account membership
+through mail provider latency; reserve it for compatibility.
 
 ## Auth Module Registration Privacy
 
