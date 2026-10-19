@@ -422,3 +422,9 @@ are separate from this request middleware.
 Use PostgreSQL's `enumerateQuery:parameters:batchSize:usingBlock:error:` for
 large exports instead of collecting all rows with `executeQuery:`. Process
 rows as they arrive and avoid retaining them to keep client memory bounded.
+
+Request metrics batch completed-response counters and timings under one lock
+and box their numeric values only when taking a snapshot. The metrics names
+and snapshot/Prometheus formats remain compatible. PostgreSQL ORM reads without
+raw expressions avoid a session-reset round trip; raw expressions and
+transactions retain conservative cleanup.

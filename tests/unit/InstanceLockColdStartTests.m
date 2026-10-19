@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dispatch/dispatch.h>
+#import "ALNMetrics.h"
 
 #import "../shared/ALNTestSupport.h"
 
@@ -91,6 +93,33 @@
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:temporaryDirectory error:NULL];
   }
+}
+
+- (void)testBatchedMetricsPreserveSnapshotsAndConcurrentTotals {
+  ALNMetricsRegistry *metrics = [[ALNMetricsRegistry alloc] init];
+  dispatch_apply(1000, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    @autoreleasepool {
+      [metrics addGauge:@"active" delta:1];
+      [metrics recordHTTPResponseStatus:(index % 2 ? 200 : 500)
+                      totalMilliseconds:@2 routeMilliseconds:@1 controllerMilliseconds:nil];
+      [metrics addGauge:@"active" delta:-1];
+    }
+  });
+  NSDictionary *snapshot = [metrics snapshot];
+  XCTAssertEqualObjects(@1000, snapshot[@"counters"][@"http_requests_total"]);
+  XCTAssertEqualObjects(@500, snapshot[@"counters"][@"http_errors_total"]);
+  XCTAssertEqualObjects(@500, snapshot[@"counters"][@"http_status_200_total"]);
+  XCTAssertEqualObjects(@0, snapshot[@"gauges"][@"active"]);
+  NSDictionary *timing = snapshot[@"timings"][@"http_request_duration_ms"];
+  XCTAssertEqualObjects(@1000, timing[@"count"]);
+  XCTAssertEqualObjects(@2000, timing[@"sum"]);
+  XCTAssertEqualObjects(@2, timing[@"min"]);
+  XCTAssertEqualObjects(@2, timing[@"max"]);
+  XCTAssertNil(snapshot[@"timings"][@"http_controller_duration_ms"]);
+  [metrics recordTiming:@"http_request_duration_ms" milliseconds:-1];
+  XCTAssertEqualObjects(@1000, timing[@"count"], @"snapshots remain independent of later updates");
+  XCTAssertEqualObjects(@0, [metrics snapshot][@"timings"][@"http_request_duration_ms"][@"min"]);
+  XCTAssertTrue([[metrics prometheusText] containsString:@"http_requests_total 1000"]);
 }
 
 @end

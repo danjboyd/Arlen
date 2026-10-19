@@ -41,6 +41,34 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   };
 }
 
+// Numeric storage is mutated under the registry lock and boxed only when
+// taking a snapshot, rather than allocating NSNumber objects per update.
+@interface ALNMetricValue : NSObject {
+@public
+  double value, count, sum, minimum, maximum;
+}
+@end
+@implementation ALNMetricValue
+@end
+
+static ALNMetricValue *ALNMetricCell(NSMutableDictionary *entries, NSString *name) {
+  ALNMetricValue *cell = entries[name];
+  if (cell == nil) {
+    cell = [[ALNMetricValue alloc] init];
+    entries[name] = cell;
+  }
+  return cell;
+}
+
+static void ALNMetricTiming(NSMutableDictionary *entries, NSString *name, double duration) {
+  ALNMetricValue *cell = ALNMetricCell(entries, name);
+  duration = MAX(0.0, duration);
+  cell->minimum = cell->count > 0 ? MIN(cell->minimum, duration) : duration;
+  cell->maximum = cell->count > 0 ? MAX(cell->maximum, duration) : duration;
+  cell->count += 1;
+  cell->sum += duration;
+}
+
 @interface ALNMetricsRegistry ()
 
 @property(nonatomic, strong) NSMutableDictionary *counters;
@@ -75,10 +103,7 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   }
   [self.lock lock];
   @try {
-    double current = [self.counters[name] respondsToSelector:@selector(doubleValue)]
-                         ? [self.counters[name] doubleValue]
-                         : 0.0;
-    self.counters[name] = @(current + amount);
+    ALNMetricCell(self.counters, name)->value += amount;
   } @finally {
     [self.lock unlock];
   }
@@ -90,7 +115,7 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   }
   [self.lock lock];
   @try {
-    self.gauges[name] = @(value);
+    ALNMetricCell(self.gauges, name)->value = value;
   } @finally {
     [self.lock unlock];
   }
@@ -102,10 +127,7 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   }
   [self.lock lock];
   @try {
-    double current = [self.gauges[name] respondsToSelector:@selector(doubleValue)]
-                         ? [self.gauges[name] doubleValue]
-                         : 0.0;
-    self.gauges[name] = @(current + delta);
+    ALNMetricCell(self.gauges, name)->value += delta;
   } @finally {
     [self.lock unlock];
   }
@@ -123,25 +145,25 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
 
   [self.lock lock];
   @try {
-    NSMutableDictionary *entry =
-        [self.timings[name] isKindOfClass:[NSMutableDictionary class]]
-            ? self.timings[name]
-            : [NSMutableDictionary dictionary];
-    double count = [entry[@"count"] respondsToSelector:@selector(doubleValue)] ? [entry[@"count"] doubleValue] : 0.0;
-    double sum = [entry[@"sum"] respondsToSelector:@selector(doubleValue)] ? [entry[@"sum"] doubleValue] : 0.0;
-    double min = [entry[@"min"] respondsToSelector:@selector(doubleValue)] ? [entry[@"min"] doubleValue] : duration;
-    double max = [entry[@"max"] respondsToSelector:@selector(doubleValue)] ? [entry[@"max"] doubleValue] : duration;
+    ALNMetricTiming(self.timings, name, duration);
+  } @finally {
+    [self.lock unlock];
+  }
+}
 
-    count += 1.0;
-    sum += duration;
-    min = MIN(min, duration);
-    max = MAX(max, duration);
-
-    entry[@"count"] = @(count);
-    entry[@"sum"] = @(sum);
-    entry[@"min"] = @(min);
-    entry[@"max"] = @(max);
-    self.timings[name] = entry;
+- (void)recordHTTPResponseStatus:(NSInteger)status
+              totalMilliseconds:(NSNumber *)total
+              routeMilliseconds:(NSNumber *)route
+         controllerMilliseconds:(NSNumber *)controller {
+  NSString *statusName = [NSString stringWithFormat:@"http_status_%ld_total", (long)status];
+  [self.lock lock];
+  @try {
+    ALNMetricCell(self.counters, @"http_requests_total")->value += 1;
+    ALNMetricCell(self.counters, statusName)->value += 1;
+    if (status >= 500) ALNMetricCell(self.counters, @"http_errors_total")->value += 1;
+    if (total != nil) ALNMetricTiming(self.timings, @"http_request_duration_ms", total.doubleValue);
+    if (route != nil) ALNMetricTiming(self.timings, @"http_route_duration_ms", route.doubleValue);
+    if (controller != nil) ALNMetricTiming(self.timings, @"http_controller_duration_ms", controller.doubleValue);
   } @finally {
     [self.lock unlock];
   }
@@ -151,20 +173,21 @@ static NSDictionary *ALNTimingEntry(double count, double sum, double min, double
   [self.lock lock];
   @try {
     NSMutableDictionary *timingsSnapshot = [NSMutableDictionary dictionary];
+    NSMutableDictionary *countersSnapshot = [NSMutableDictionary dictionary];
+    NSMutableDictionary *gaugesSnapshot = [NSMutableDictionary dictionary];
     for (NSString *name in self.timings) {
-      NSDictionary *entry = self.timings[name];
-      double count = [entry[@"count"] doubleValue];
-      double sum = [entry[@"sum"] doubleValue];
-      double min = [entry[@"min"] doubleValue];
-      double max = [entry[@"max"] doubleValue];
-      timingsSnapshot[name] = ALNTimingEntry(count, sum, min, max);
+      ALNMetricValue *cell = self.timings[name];
+      timingsSnapshot[name] = ALNTimingEntry(cell->count, cell->sum, cell->minimum, cell->maximum);
     }
-
-    return @{
-      @"counters" : [NSDictionary dictionaryWithDictionary:self.counters],
-      @"gauges" : [NSDictionary dictionaryWithDictionary:self.gauges],
-      @"timings" : timingsSnapshot,
-    };
+    for (NSString *name in self.counters) {
+      ALNMetricValue *cell = self.counters[name];
+      countersSnapshot[name] = @(cell->value);
+    }
+    for (NSString *name in self.gauges) {
+      ALNMetricValue *cell = self.gauges[name];
+      gaugesSnapshot[name] = @(cell->value);
+    }
+    return @{ @"counters" : countersSnapshot, @"gauges" : gaugesSnapshot, @"timings" : timingsSnapshot };
   } @finally {
     [self.lock unlock];
   }

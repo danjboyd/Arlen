@@ -1731,3 +1731,9 @@ callback for successful early termination. Errors roll back; callback
 exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
 in your callback increases memory use; `executeQuery:` still buffers its full
 result. The cursor API does not change the SQL or limit its server-side cost.
+
+Request metrics batch completed-response counters and timings under one lock
+and box their numeric values only when taking a snapshot. The metrics names
+and snapshot/Prometheus formats remain compatible. PostgreSQL ORM reads without
+raw expressions avoid a session-reset round trip; raw expressions and
+transactions retain conservative cleanup.

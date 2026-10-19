@@ -1896,6 +1896,16 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 
 @end
 
+
+@interface ALNPgConnection (ALNORMGeneratedExecution)
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+@end
+@interface ALNPg (ALNORMGeneratedExecution)
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+@end
+
 @implementation ALNPgConnection
 
 - (instancetype)initWithConnectionString:(NSString *)connectionString
@@ -2829,6 +2839,19 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     [orderedValues addObject:rowValues ?: @[]];
   }
   return ALNDatabaseResultFromRowsWithOrderedColumns(rows, columnNames, orderedValues);
+}
+
+// Called only with ORM compiler-proven generated SQL; raw/trusted fragments
+// stay on the ordinary execution path. Never clear an already-dirty session.
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try { return [self executeQuery:sql parameters:parameters error:error]; }
+  @finally { self.builderExecutionDepth -= 1; }
+}
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
+  self.builderExecutionDepth += 1;
+  @try { return [self executeCommand:sql parameters:parameters error:error]; }
+  @finally { self.builderExecutionDepth -= 1; }
 }
 
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql
@@ -4137,6 +4160,25 @@ static BOOL ALNPgErrorStatementNotSent(NSError *error) {
   if ([connection isKindOfClass:[ALNPgConnection class]]) {
     [self releaseConnection:(ALNPgConnection *)connection];
   }
+}
+
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
+  ALNPgClearError(error);
+  __block NSArray *rows = nil;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    rows = [connection aln_executeGeneratedQuery:sql parameters:parameters error:runError];
+    return rows != nil;
+  } readOnly:ALNPgSQLIsPlainRead(sql) error:error];
+  return rows;
+}
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error {
+  ALNPgClearError(error);
+  __block NSInteger affected = -1;
+  (void)[self runOnPooledConnection:^BOOL(ALNPgConnection *connection, NSError **runError) {
+    affected = [connection aln_executeGeneratedCommand:sql parameters:parameters error:runError];
+    return affected >= 0;
+  } readOnly:NO error:error];
+  return affected;
 }
 
 - (NSArray<NSDictionary *> *)executeQuery:(NSString *)sql

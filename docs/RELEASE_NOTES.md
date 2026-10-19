@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Request metrics now store primitive numeric values and batch completion
+  counters/timings under one lock, reducing lock and allocation overhead (#249).
+- PostgreSQL ORM-generated reads skip release-time session reset; raw/trusted
+  expressions and transactions continue to reset (#306).
+
 - PostgreSQL supports bounded cursor enumeration through
   `enumerateQuery:parameters:batchSize:usingBlock:error:`. It processes a batch
   at a time, supports early stopping, and cleans up on errors or exceptions.

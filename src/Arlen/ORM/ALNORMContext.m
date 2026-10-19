@@ -1,3 +1,4 @@
+#import "ALNPg.h"
 #import "ALNORMContext.h"
 #import "ALNSQLDialect.h"
 
@@ -7,6 +8,16 @@
 #import "ALNORMQuery.h"
 #import "ALNORMRelationDescriptor.h"
 #import "ALNORMRepository.h"
+
+
+@interface ALNPgConnection (ALNORMGeneratedExecution)
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+@end
+@interface ALNPg (ALNORMGeneratedExecution)
+- (NSArray *)aln_executeGeneratedQuery:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+- (NSInteger)aln_executeGeneratedCommand:(NSString *)sql parameters:(NSArray *)parameters error:(NSError **)error;
+@end
 
 static NSString *ALNORMContextClassKey(Class modelClass) {
   return NSStringFromClass(modelClass) ?: @"";
@@ -55,16 +66,19 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
 
 @interface ALNORMContext (ALNORMRepositoryRuntime)
 - (nullable NSArray<NSDictionary<NSString *, id> *> *)executeQuerySQL:(NSString *)sql
+                                      generated:(BOOL)generated
                                                            parameters:(NSArray *)parameters
                                                             modelName:(NSString *)modelName
                                                          relationName:(nullable NSString *)relationName
                                                          loadStrategy:(ALNORMRelationLoadStrategy)loadStrategy
                                                                 error:(NSError **)error;
 - (NSInteger)executeCommandSQL:(NSString *)sql
+                                      generated:(BOOL)generated
                     parameters:(NSArray *)parameters
                      modelName:(NSString *)modelName
                          error:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)executeCommandReturningOneSQL:(NSString *)sql
+                                      generated:(BOOL)generated
                                                                parameters:(NSArray *)parameters
                                                                 modelName:(NSString *)modelName
                                                                     error:(NSError **)error;
@@ -266,6 +280,7 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   NSString *sql = [plan[@"sql"] isKindOfClass:[NSString class]] ? plan[@"sql"] : @"";
   NSArray *parameters = [plan[@"parameters"] isKindOfClass:[NSArray class]] ? plan[@"parameters"] : @[];
   NSArray<NSDictionary<NSString *, id> *> *rows = [self executeQuerySQL:sql
+ generated:[plan[@"aln_generated_sql"] boolValue]
                                                              parameters:parameters
                                                               modelName:model.descriptor.entityName
                                                            relationName:nil
@@ -624,6 +639,7 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
 }
 
 - (nullable NSArray<NSDictionary<NSString *, id> *> *)executeQuerySQL:(NSString *)sql
+                                      generated:(BOOL)generated
                                                            parameters:(NSArray *)parameters
                                                             modelName:(NSString *)modelName
                                                          relationName:(NSString *)relationName
@@ -644,6 +660,12 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   }
   [self appendQueryEvent:event countAsQuery:YES];
 
+  if (generated && [self.activeConnection isKindOfClass:[ALNPgConnection class]]) {
+    return [(ALNPgConnection *)self.activeConnection aln_executeGeneratedQuery:sql parameters:parameters ?: @[] error:error];
+  }
+  if (generated && self.activeConnection == nil && [self.adapter isKindOfClass:[ALNPg class]]) {
+    return [(ALNPg *)self.adapter aln_executeGeneratedQuery:sql parameters:parameters ?: @[] error:error];
+  }
   if (self.activeConnection != nil) {
     return [self.activeConnection executeQuery:sql parameters:parameters ?: @[] error:error];
   }
@@ -651,6 +673,7 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
 }
 
 - (NSInteger)executeCommandSQL:(NSString *)sql
+                                      generated:(BOOL)generated
                     parameters:(NSArray *)parameters
                      modelName:(NSString *)modelName
                          error:(NSError **)error {
@@ -666,6 +689,12 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   }
              countAsQuery:YES];
 
+  if (generated && [self.activeConnection isKindOfClass:[ALNPgConnection class]]) {
+    return [(ALNPgConnection *)self.activeConnection aln_executeGeneratedCommand:sql parameters:parameters ?: @[] error:error];
+  }
+  if (generated && self.activeConnection == nil && [self.adapter isKindOfClass:[ALNPg class]]) {
+    return [(ALNPg *)self.adapter aln_executeGeneratedCommand:sql parameters:parameters ?: @[] error:error];
+  }
   if (self.activeConnection != nil) {
     return [self.activeConnection executeCommand:sql parameters:parameters ?: @[] error:error];
   }
@@ -673,6 +702,7 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
 }
 
 - (nullable NSDictionary<NSString *, id> *)executeCommandReturningOneSQL:(NSString *)sql
+                                      generated:(BOOL)generated
                                                                parameters:(NSArray *)parameters
                                                                 modelName:(NSString *)modelName
                                                                     error:(NSError **)error {
@@ -689,6 +719,12 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   }
              countAsQuery:YES];
 
+  if (generated && [self.activeConnection isKindOfClass:[ALNPgConnection class]]) {
+    return ALNDatabaseFirstRow([(ALNPgConnection *)self.activeConnection aln_executeGeneratedQuery:sql parameters:parameters ?: @[] error:error]);
+  }
+  if (generated && self.activeConnection == nil && [self.adapter isKindOfClass:[ALNPg class]]) {
+    return ALNDatabaseFirstRow([(ALNPg *)self.adapter aln_executeGeneratedQuery:sql parameters:parameters ?: @[] error:error]);
+  }
   if (self.activeConnection != nil) {
     if ([self.activeConnection respondsToSelector:@selector(executeQueryOne:parameters:error:)]) {
       return [self.activeConnection executeQueryOne:sql parameters:parameters ?: @[] error:error];
