@@ -254,16 +254,20 @@
 #if defined(__APPLE__)
     child.arguments = @[ @"-XCTest", @"Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
 #else
-    child.arguments = @[ @"-only-testing:ArlenUnitTests/Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+    child.arguments = @[ @"-output-format", @"apple",
+                         @"-only-testing:ArlenUnitTests/Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
 #endif
-    NSPipe *output = [NSPipe pipe];
+    NSString *outputPath = [statePath stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
     child.standardOutput = output;
     child.standardError = output;
     NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
     environment[@"ARLEN_OPS_SHARED_STATE_PATH"] = statePath;
     child.environment = environment;
     [child launch];
-    [children addObject:@{ @"task" : child, @"output" : output }];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
   }
   for (NSDictionary *entry in children) {
     NSTask *child = entry[@"task"];
@@ -272,13 +276,22 @@
       [child terminate];
       [child waitUntilExit];
     }
-    NSData *data = [[entry[@"output"] fileHandleForReading] readDataToEndOfFile];
+    NSData *data = [NSData dataWithContentsOfFile:entry[@"outputPath"]];
     NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
     XCTAssertTrue(exited, @"child timed out: %@", output);
     XCTAssertEqual(0, child.terminationStatus, @"%@", output);
     XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
+    [entry[@"outputHandle"] closeFile];
   }
-  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  NSData *stateData = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil(stateData);
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  NSError *readError = nil;
+  NSDictionary *state = [NSPropertyListSerialization propertyListWithData:stateData
+                                                                  options:NSPropertyListImmutable
+                                                                   format:&format error:&readError];
+  XCTAssertNil(readError);
+  XCTAssertTrue([state isKindOfClass:[NSDictionary class]]);
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"historySnapshots"] count]);
 }
 

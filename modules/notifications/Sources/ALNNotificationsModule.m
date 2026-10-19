@@ -140,7 +140,12 @@ static BOOL NMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   if (data == nil) {
     return NO;
   }
-  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  BOOL written = [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  if (!written && error != NULL && *error == nil) {
+    *error = NMError(ALNNotificationsModuleErrorDeliveryFailed,
+                     @"could not write notification state", @{ @"path" : statePath });
+  }
+  return written;
 }
 
 static NSString *NMFanoutChannelForRecipient(NSString *recipient) {
