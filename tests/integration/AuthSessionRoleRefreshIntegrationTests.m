@@ -92,6 +92,9 @@
                       authConfig:(NSDictionary *)authConfig
                           search:(BOOL)search {
   NSMutableDictionary *authModule = [NSMutableDictionary dictionaryWithDictionary:authConfig ?: @{}];
+  if (authModule[@"registration"] == nil) {
+    authModule[@"registration"] = @{ @"autoLogin" : @YES };
+  }
   authModule[@"bootstrapAdminEmails"] = emails ?: @[];
   NSMutableDictionary *config = [NSMutableDictionary dictionaryWithDictionary:@{
     @"environment" : @"test",
@@ -437,6 +440,7 @@
   NSString *subject = [self registerUser:client email:email];
   NSString *beforeStepUp = [self cookieHeader:client];
   [self stepUp:client subject:subject];
+  XCTAssertEqualObjects(@NO, [self replayedSessionState:beforeStepUp application:client.application][@"authenticated"]);
   NSString *beforeLogout = [self cookieHeader:client];
   ALNTestClient *otherDevice = [self signedInClientForApplication:client.application
                                                             email:email

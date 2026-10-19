@@ -515,3 +515,12 @@ Entra tenant/subject mapping and OIDC-only login defaults have deterministic
 coverage in `AuthModuleOIDCTests`; bounded GET/POST is covered by
 `MetadataTransportTests`. InvitoContext real-tenant adoption remains downstream
 acceptance, separate from upstream implementation and synthetic coverage.
+
+## v0.3 Registration Privacy Update
+
+Local registration now returns one generic accepted response for new and
+existing addresses and starts no authenticated session. Verification and an
+ordinary sign-in follow. This changes the earlier starter-flow contract,
+which logged a new registrant in immediately and reported an existing address.
+`authModule.registration.autoLogin = YES` is an explicit compatibility option
+that restores that behavior and its account-enumeration exposure.

@@ -10,6 +10,7 @@
 #import "ALNController.h"
 #import "ALNAuthModule.h"
 #import "ALNContext.h"
+#import "ALNEOCRuntime.h"
 #import "ALNMigrationRunner.h"
 #import "ALNPg.h"
 #import "ALNRequest.h"
@@ -24,6 +25,16 @@ static NSUInteger gPhase13EProvisioningCalls = 0;
 static NSUInteger gPhase13ESessionDescriptorCalls = 0;
 static NSUInteger gPhase13EPostLoginRedirectCalls = 0;
 static NSUInteger gPhase15UIContextCalls = 0;
+
+static NSString *Phase13ERegistrationResult(id context, NSError **error) {
+  (void)error;
+  return [context isKindOfClass:[NSDictionary class]] ? context[@"message"] : @"";
+}
+
+static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
+  (void)error;
+  return [context isKindOfClass:[NSDictionary class]] ? context[@"content"] : @"";
+}
 
 @interface Phase13EPasswordPolicyHook : NSObject <ALNAuthModulePasswordPolicy>
 @end
@@ -1316,6 +1327,51 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqual((NSUInteger)1, [bodies count]);
   XCTAssertTrue([[bodies firstObject] containsString:@"https://app.example.test/auth/verify?token="], @"%@", bodies);
   XCTAssertFalse([[bodies firstObject] containsString:@"evil.example"], @"%@", bodies);
+}
+
+- (void)testRegistrationDoesNotRevealExistingAddressOrStartSessionByDefault {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *adapter = nil;
+  ALNApplication *app = [self mailingApplicationWithEnvironment:@"test"
+                                                     authModule:@{ @"publicBaseURL" : @"https://app.example.test" }
+                                                    mailAdapter:&adapter];
+  NSString *email = [NSString stringWithFormat:@"registration-privacy-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSDictionary *payload = @{ @"email" : email, @"display_name" : @"Registrant", @"password" : @"register-password" };
+  ALNResponse *created = [self postJSON:payload to:@"/auth/api/register" app:app host:@"app.example.test"];
+  XCTAssertEqual((NSInteger)200, created.statusCode);
+  XCTAssertEqual((NSUInteger)1, [[adapter deliveriesSnapshot] count]);
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:1 error:NULL];
+  NSString *countSQL = @"SELECT COUNT(*)::text AS users, "
+                        "(SELECT COUNT(*)::text FROM auth_verification_tokens t JOIN auth_users v ON v.id = t.user_id "
+                        "WHERE lower(v.email) = $1) AS tokens FROM auth_users WHERE lower(email) = $1";
+  NSDictionary *before = [[database executeQuery:countSQL parameters:@[ email ] error:NULL] firstObject];
+  ALNResponse *existing = [self postJSON:payload to:@"/auth/api/register" app:app host:@"app.example.test"];
+  XCTAssertEqual(created.statusCode, existing.statusCode);
+  XCTAssertEqualObjects([self JSONResponseBody:created], [self JSONResponseBody:existing]);
+  XCTAssertEqualObjects([created headerForName:@"Set-Cookie"], [existing headerForName:@"Set-Cookie"]);
+  XCTAssertNil([self JSONResponseBody:created][@"authenticated"]);
+  XCTAssertNil([self JSONResponseBody:created][@"user"]);
+  XCTAssertEqual((NSUInteger)1, [[adapter deliveriesSnapshot] count]);
+  NSDictionary *after = [[database executeQuery:countSQL parameters:@[ email ] error:NULL] firstObject];
+  XCTAssertEqualObjects(@"1", before[@"users"]);
+  XCTAssertEqualObjects(before, after);
+  ALNEOCRegisterTemplate(@"modules/auth/result/index.html.eoc", Phase13ERegistrationResult);
+  ALNEOCRegisterTemplate(@"modules/auth/layouts/main.html.eoc", Phase13ERegistrationLayout);
+  NSString *htmlEmail = [NSString stringWithFormat:@"registration-html-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSData *htmlBody = [NSJSONSerialization dataWithJSONObject:@{
+    @"email" : htmlEmail, @"display_name" : @"Registrant", @"password" : @"register-password",
+  } options:0 error:NULL];
+  NSDictionary *htmlHeaders = @{ @"Accept" : @"text/html", @"Content-Type" : @"application/json",
+                                 @"Host" : @"app.example.test" };
+  ALNResponse *newHTML = [app dispatchRequest:[self requestWithMethod:@"POST" path:@"/auth/register"
+                                                       headers:htmlHeaders body:htmlBody]];
+  ALNResponse *existingHTML = [app dispatchRequest:[self requestWithMethod:@"POST" path:@"/auth/register"
+                                                            headers:htmlHeaders body:htmlBody]];
+  XCTAssertEqual((NSInteger)200, newHTML.statusCode);
+  XCTAssertEqual(newHTML.statusCode, existingHTML.statusCode);
+  XCTAssertEqualObjects(newHTML.bodyData, existingHTML.bodyData);
+  XCTAssertEqualObjects([newHTML headerForName:@"Set-Cookie"], [existingHTML headerForName:@"Set-Cookie"]);
+  ALNEOCClearTemplateRegistry();
 }
 
 - (void)testEmailLinksWithoutPublicBaseURLUseHostOnlyInDevelopmentAndTest {

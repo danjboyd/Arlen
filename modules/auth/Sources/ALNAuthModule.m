@@ -985,6 +985,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *layoutTemplate;
 @property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
 @property(nonatomic, copy, readwrite) NSString *uiAssetPrefix;
+@property(nonatomic, assign) BOOL registrationAutoLogin;
 - (void)mountUIAssetsForApplication:(ALNApplication *)application;
 @property(nonatomic, assign, readwrite) BOOL smsEnabled;
 @property(nonatomic, assign) BOOL smsAllowEnrollment;
@@ -1370,6 +1371,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"apiLoginPath" : @"/auth/api/provider/stub/login",
     } ];
     _uiMode = @"module-ui";
+    _registrationAutoLogin = NO;
     _layoutTemplate = @"modules/auth/layouts/main";
     _generatedPagePrefix = @"auth";
     _smsEnabled = NO;
@@ -1469,6 +1471,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.publicBaseURL = publicBaseURL;
+  NSDictionary *registrationConfig = [self.moduleConfig[@"registration"] isKindOfClass:[NSDictionary class]]
+                                         ? self.moduleConfig[@"registration"]
+                                         : @{};
+  self.registrationAutoLogin = AMConfigBool(registrationConfig[@"autoLogin"], NO);
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1765,6 +1771,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
                          @"key_path" : @"authModule.publicBaseURL" }];
   }
+  if (!self.registrationAutoLogin) {
+    (void)AMDummyPasswordHash();
+  }
   return YES;
 }
 
@@ -1805,6 +1814,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   summary[@"session"] = @{
     @"absoluteLifetimeSeconds" : @(self.absoluteSessionLifetimeSeconds),
   };
+  summary[@"registration"] = @{ @"autoLogin" : @(self.registrationAutoLogin) };
   summary[@"mfa"] = @{
     @"sms" : @{
       @"enabled" : @(self.smsEnabled),
@@ -2182,7 +2192,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   if (existingUser != nil) {
     if (error != NULL) {
-      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is already registered", @{ @"field" : @"email" });
+      *error = AMError(ALNAuthModuleErrorValidationFailed, @"Email is already registered",
+                       @{ @"field" : @"email", @"reason" : @"already_registered" });
     }
     return nil;
   }
@@ -3669,6 +3680,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
 
+  if (![self revokeSessionBeingElevatedForContext:context error:error]) {
+    return nil;
+  }
   if (![ALNAuthSession elevateAuthenticatedSessionForMethod:method
                                              assuranceLevel:2
                                             authenticatedAt:nil
@@ -4271,6 +4285,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
 
   AMSetSMSSessionState(context, nil);
+  if (![self revokeSessionBeingElevatedForContext:context error:error]) {
+    return nil;
+  }
   if (![ALNAuthSession elevateAuthenticatedSessionForMethod:@"sms"
                                              assuranceLevel:2
                                             authenticatedAt:nil
@@ -5151,7 +5168,20 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSError *error = nil;
   NSDictionary *user =
       [self.runtime createLocalUserWithEmail:email displayName:displayName password:password source:@"local_registration" error:&error];
-  if (user == nil) {
+  BOOL duplicateAccepted = !self.runtime.registrationAutoLogin && user == nil &&
+      [error.domain isEqualToString:ALNAuthModuleErrorDomain] &&
+      error.code == ALNAuthModuleErrorValidationFailed &&
+      [error.userInfo[@"reason"] isEqualToString:@"already_registered"];
+  if (!duplicateAccepted && !self.runtime.registrationAutoLogin && user == nil &&
+      [AMTrimmedString(error.userInfo[ALNPgErrorSQLStateKey]) isEqualToString:@"23505"]) {
+    duplicateAccepted = ([self.runtime userForEmail:email error:NULL] != nil);
+  }
+  if (duplicateAccepted) {
+    // New registrations hash a password. Spend the same expensive step for an
+    // existing address before returning the identical public response.
+    AMSpendDummyPasswordVerification(password);
+  }
+  if (user == nil && !duplicateAccepted) {
     [self setStatus:422];
     NSArray *errors = [self errorEntriesForError:(error ?: AMError(ALNAuthModuleErrorValidationFailed, @"Registration failed", nil))
                                            field:AMTrimmedString(error.userInfo[@"field"])];
@@ -5210,9 +5240,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
-  NSString *verificationBaseURL = [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
-                                                                             event:@"email_verification"];
-  NSString *verificationToken = ([verificationBaseURL length] > 0)
+  NSString *verificationBaseURL = (user != nil)
+                                      ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                                   event:@"email_verification"]
+                                      : nil;
+  NSString *verificationToken = ([verificationBaseURL length] > 0 && user != nil)
                                     ? [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error]
                                     : nil;
   if ([verificationToken length] > 0) {
@@ -5221,6 +5253,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                         token:verificationToken
                                       baseURL:verificationBaseURL
                                         error:NULL];
+  }
+  if (!self.runtime.registrationAutoLogin) {
+    NSString *message = @"If the address can be registered, check your email for a verification link. Then sign in.";
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      return @{ @"status" : @"ok", @"message" : message };
+    }
+    [self renderAuthPageIdentifier:@"provider_result"
+                             title:@"Registration Request"
+                           message:message
+                            errors:nil
+                          formData:nil
+                          extraCtx:@{
+                            @"resultTitle" : @"Check Your Email",
+                            @"authResultActions" : @[ @{ @"label" : @"Sign in", @"href" : self.runtime.loginPath ?: @"/auth/login" } ],
+                          }
+                             error:NULL];
+    return nil;
   }
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
   if (session == nil) {

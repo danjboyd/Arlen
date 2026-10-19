@@ -745,6 +745,16 @@ unchanged, no token is issued, and the module logs an error naming
 adapter are configured). Set it in production. `claimTrustedEmail:` keeps
 taking its `baseURL` from the caller.
 
+## Auth Module Registration Privacy
+
+`authModule.registration.autoLogin` defaults to `NO`. New and existing email
+addresses receive the same accepted registration response without an
+authenticated session. A new address receives one verification message when
+email links are configured; an existing account is unchanged. Set `YES` only
+for compatibility with the previous immediate sign-in flow, which reports
+duplicate addresses and can reveal account membership. See
+[Auth Module](AUTH_MODULE.md).
+
 ## Auth Module Sessions
 
 `authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days) is

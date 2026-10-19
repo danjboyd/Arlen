@@ -78,14 +78,30 @@ Mode behavior:
 
 Login (password, provider, or trusted email claim) and MFA step-up start a
 fresh session: other keys stored before, including the CSRF token, are dropped,
-and only `return_to` is kept. The JSON login, registration and verify responses
-return the new `csrf_token` (also at `GET /auth/api/session`); use it for the
-next unsafe request. See [Session and CSRF](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+and only `return_to` is kept. The JSON login and verify responses return the
+new `csrf_token` (also at `GET /auth/api/session`); use it for the next unsafe
+request. Registration returns one only with the explicit legacy auto-login
+setting. See [Session and CSRF](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+For module-owned sessions, MFA step-up also records the prior session ID as
+revoked before rotating it, so a copied pre-MFA cookie cannot be replayed.
 
 Local-password login answers `Invalid email or password` for both an unknown
 email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
-the account exists. (Registration still reports an already-registered email.)
+the account exists. Registration now returns the same generic success response
+for a new or existing address. It does not start an authenticated session;
+the user follows the verification link and signs in. An existing address is
+left unchanged and receives no repeated verification message.
+The default in-memory mail adapter keeps the two paths close in time. If an
+app uses a slow synchronous mail adapter or registration hook, its request
+latency can reveal the path; use a durable enqueueing adapter for that work.
+
+The previous registration behavior can be enabled explicitly with
+`authModule.registration.autoLogin = YES`. This compatibility setting starts
+a session and returns user details for new accounts, and reports an existing
+address as an error. It exposes whether an email is registered; use it only
+when that disclosure is acceptable. Existing apps that relied on automatic
+sign-in after registration must update their client flow or opt in.
 
 Password-reset and email-verification emails link to
 `authModule.publicBaseURL` (for example `publicBaseURL =
