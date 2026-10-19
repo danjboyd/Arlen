@@ -354,6 +354,12 @@ application's `ALNORMCodegen` generation step and rebuild. Current output safely
 initializes each model descriptor on concurrent first use; older generated code
 must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
 
+After upgrading the `auth` module, running `arlen module migrate` is
+recommended; it enables ending a user's sessions by stamp and lets signing out
+end the session on the server. The module reads each signed-in user's current roles from the
+database on every request, so a role change takes effect without signing in
+again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+
 When automating `arlen module migrate --json`, capture stdout and stderr
 separately. PostgreSQL notices may appear on stderr during repeated migrations;
 parse stdout as JSON and check the exit status. Framework contributors can run

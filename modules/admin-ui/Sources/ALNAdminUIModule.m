@@ -1024,6 +1024,12 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   if (updated == nil && error != NULL && *error == NULL) {
     *error = AUError(ALNAdminUIModuleErrorNotFound, @"user not found", nil);
   }
+  // Sessions already resolve roles from the user record on every request; a
+  // revocation also ends the user's existing sessions so they sign in again.
+  if (updated != nil && [normalizedAction isEqualToString:@"revoke_admin"] &&
+      ![[ALNAuthModuleRuntime sharedRuntime] bumpSessionStampForSubject:updated[@"subject"] error:error]) {
+    return nil;
+  }
   return (updated != nil) ? @{ @"record" : updated, @"message" : message ?: @"" } : nil;
 }
 
@@ -1075,6 +1081,14 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
 @end
 
 @implementation ALNAdminUIModuleRuntime
+
+- (NSArray<NSString *> *)accessRoles {
+  return @[ @"admin" ];
+}
+
+- (NSUInteger)minimumAuthAssuranceLevel {
+  return 2;
+}
 
 + (instancetype)sharedRuntime {
   static ALNAdminUIModuleRuntime *runtime = nil;
@@ -1978,7 +1992,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
                    error:NULL];
     return NO;
   }
-  if ([ctx authAssuranceLevel] < 2) {
+  if ([ctx authAssuranceLevel] < self.runtime.minimumAuthAssuranceLevel) {
     NSString *location = AUStepUpLocation(self.authRuntime, AUPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
@@ -3323,7 +3337,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
                         operationID:routeName
                                tags:@[ @"admin-ui" ]
                       requiredScopes:nil
-                       requiredRoles:@[ @"admin" ]
+                       requiredRoles:[ALNAdminUIModuleRuntime sharedRuntime].accessRoles
                      includeInOpenAPI:YES
                                error:&routeError]) {
       if (error != NULL) {
@@ -3332,7 +3346,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
       return NO;
     }
     if (![child configureAuthAssuranceForRouteNamed:routeName
-                         minimumAuthAssuranceLevel:2
+                         minimumAuthAssuranceLevel:[ALNAdminUIModuleRuntime sharedRuntime].minimumAuthAssuranceLevel
                    maximumAuthenticationAgeSeconds:0
                                         stepUpPath:AUStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                              error:&routeError]) {

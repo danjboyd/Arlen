@@ -147,6 +147,23 @@ static NSUInteger gPhase15UIContextCalls = 0;
 
 @end
 
+@interface ALNAuthModuleRuntime (Phase13ETokenAccess)
+- (nullable NSDictionary *)createLocalUserWithEmail:(NSString *)email
+                                        displayName:(NSString *)displayName
+                                           password:(NSString *)password
+                                             source:(NSString *)source
+                                              error:(NSError **)error;
+- (nullable NSString *)issueVerificationTokenForUserID:(NSString *)userID error:(NSError **)error;
+- (nullable NSString *)issuePasswordResetTokenForUserID:(NSString *)userID error:(NSError **)error;
+- (BOOL)consumeVerificationToken:(NSString *)token user:(NSDictionary **)user error:(NSError **)error;
+- (BOOL)consumePasswordResetToken:(NSString *)token
+                         password:(NSString *)password
+                             user:(NSDictionary **)user
+                            error:(NSError **)error;
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash forUserID:(NSString *)userID error:(NSError **)error;
+- (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email password:(NSString *)password error:(NSError **)error;
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -333,8 +350,14 @@ static NSUInteger gPhase15UIContextCalls = 0;
   gPhase13EPostLoginRedirectCalls = 0;
   gPhase15UIContextCalls = 0;
   NSError *error = nil;
-  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:&error]);
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:&error]);
   XCTAssertNil(error);
+}
+
+- (void)tearDown {
+  // The runtime is process-wide; leave it in the test environment for other suites.
+  [[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:NULL];
+  [super tearDown];
 }
 
 - (void)testDefaultAuthModuleConfigIsStableWithoutOverrides {
@@ -801,6 +824,44 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertTrue([message[@"textBody"] containsString:@"/auth/password/reset?token="]);
 }
 
+- (void)testTrustedEmailClaimUsesConfiguredPublicBaseURLOverCallerBaseURL {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : @{ @"publicBaseURL" : @"https://public.example.test" },
+  }];
+  ALNInMemoryMailAdapter *mailAdapter =
+      [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_claim_public_mail"];
+  [app setMailAdapter:mailAdapter];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  [app registerRouteMethod:@"POST"
+                      path:@"/claim"
+                      name:@"phase13e_claim_public"
+           controllerClass:[Phase16TrustedEmailClaimController class]
+                     action:@"claim"];
+
+  NSString *email = [NSString stringWithFormat:@"claimed-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSData *body = [NSJSONSerialization dataWithJSONObject:@{ @"email" : email, @"send_password_setup_email" : @YES }
+                                                 options:0
+                                                   error:NULL];
+  ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                                  path:@"/claim"
+                                                               headers:@{
+                                                                 @"Accept" : @"application/json",
+                                                                 @"Content-Type" : @"application/json",
+                                                               }
+                                                                  body:body]];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSArray *deliveries = [mailAdapter deliveriesSnapshot];
+  XCTAssertEqual((NSUInteger)1, [deliveries count]);
+  NSDictionary *delivery = [deliveries.firstObject isKindOfClass:[NSDictionary class]] ? deliveries.firstObject : @{};
+  NSDictionary *message = [delivery[@"message"] isKindOfClass:[NSDictionary class]] ? delivery[@"message"] : @{};
+  NSString *text = [message[@"textBody"] isKindOfClass:[NSString class]] ? message[@"textBody"] : @"";
+  XCTAssertTrue([text containsString:@"https://public.example.test/auth/password/reset?token="], @"%@", text);
+  XCTAssertFalse([text containsString:@"claim.example.test"], @"%@", text);
+}
+
 - (void)testAuthStylesheetNormalizesSharedActionTypography {
   NSString *repoRoot = [self repoRoot];
   NSString *stylesheetPath =
@@ -902,6 +963,351 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/partials/bodies/sms_challenge_body.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/auth/mfa/totp_recovery_codes.html.eoc"]]);
   XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:[tempApp stringByAppendingPathComponent:@"templates/layouts/auth_generated.html.eoc"]]);
+}
+
+#pragma mark - Stub provider environment gating
+
+- (void)testStubProviderDefaultsOnOnlyInDevelopmentAndTest {
+  for (NSString *environment in @[ @"development", @"test", @"production", @"staging", @"qa" ]) {
+    ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:environment error:&error], @"%@ %@",
+                  environment, error);
+    BOOL expected = [environment isEqualToString:@"development"] || [environment isEqualToString:@"test"];
+    XCTAssertEqual(expected, [runtime isProviderEnabled:@"stub"], @"%@", environment);
+    XCTAssertEqual((NSUInteger)(expected ? 1 : 0), runtime.loginProviders.count, @"%@", environment);
+  }
+}
+
+- (void)testStubProviderExplicitEnableIsRefusedOutsideDevelopmentAndTest {
+  NSDictionary *config = @{ @"providers" : @{ @"stub" : @{ @"enabled" : @YES } } };
+  for (NSString *environment in @[ @"production", @"staging" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:config
+                                                                  environment:environment
+                                                                        error:&error],
+                   @"%@", environment);
+    XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code, @"%@", environment);
+    XCTAssertEqualObjects(@"authModule.providers.stub.enabled", error.userInfo[@"key_path"]);
+    XCTAssertTrue([error.localizedDescription containsString:environment], @"%@", error);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:config environment:environment error:NULL], @"%@", environment);
+    XCTAssertTrue([runtime isProviderEnabled:@"stub"], @"%@", environment);
+  }
+
+  // Registration (application startup) fails the same way.
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+    @"authModule" : config,
+  }];
+  NSError *error = nil;
+  XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code);
+}
+
+- (void)testStubProviderRoutesAreAbsentInProductionByDefault {
+  ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  XCTAssertFalse([[ALNAuthModuleRuntime sharedRuntime] isProviderEnabled:@"stub"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_login"]);
+  XCTAssertNil([app.router routeNamed:@"auth_provider_stub_callback"]);
+  XCTAssertNil([app.router routeNamed:@"auth_api_provider_stub_login"]);
+  for (NSString *path in @[ @"/auth/provider/stub/login", @"/auth/provider/stub/callback",
+                            @"/auth/api/provider/stub/login" ]) {
+    ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:path
+                                                                 headers:@{ @"Accept" : @"application/json" }
+                                                                    body:nil]];
+    XCTAssertEqual((NSInteger)404, response.statusCode, @"%@", path);
+  }
+}
+
+- (void)testStubIdentityIsNotResolvedOutsideDevelopmentAndTest {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
+  NSError *error = nil;
+  NSDictionary *descriptor =
+      [runtime resolveSessionDescriptorForNormalizedIdentity:@{
+        @"provider_subject" : @"stub:stub-user@example.test",
+        @"email" : @"stub-user@example.test",
+      }
+                                       providerConfiguration:@{ @"identifier" : @"stub" }
+                                                       error:&error];
+  XCTAssertNil(descriptor);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorPolicyRejected, error.code);
+}
+
+#pragma mark - Single-use tokens
+
+- (ALNAuthModuleRuntime *)configuredRuntimeWithTokenUser:(NSDictionary **)user email:(NSString **)email {
+  ALNApplication *app = [self applicationWithConfig:@{ @"csrf" : @{ @"enabled" : @NO } }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSString *address = [NSString stringWithFormat:@"tokens-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSDictionary *created = [runtime createLocalUserWithEmail:address
+                                                displayName:@"Token User"
+                                                   password:@"original-password"
+                                                     source:@"test"
+                                                      error:&error];
+  XCTAssertNotNil(created, @"%@", error);
+  if (user != NULL) *user = created;
+  if (email != NULL) *email = address;
+  return runtime;
+}
+
+- (void)testPasswordResetTokenIsSingleUseAndRetiresOlderTokens {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  NSString *email = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:&email];
+  NSString *userID = user[@"id"];
+  NSError *error = nil;
+  NSString *older = [runtime issuePasswordResetTokenForUserID:userID error:&error];
+  NSString *newer = [runtime issuePasswordResetTokenForUserID:userID error:&error];
+  XCTAssertTrue([older length] > 0 && [newer length] > 0, @"%@", error);
+
+  XCTAssertTrue([runtime consumePasswordResetToken:newer password:@"first-new-password" user:NULL error:&error], @"%@", error);
+  XCTAssertNotNil([runtime authenticateLocalEmail:email password:@"first-new-password" error:NULL]);
+
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:newer password:@"second-new-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:older password:@"third-new-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+  XCTAssertNotNil([runtime authenticateLocalEmail:email password:@"first-new-password" error:NULL]);
+  XCTAssertNil([runtime authenticateLocalEmail:email password:@"second-new-password" error:NULL]);
+  XCTAssertNil([runtime authenticateLocalEmail:email password:@"third-new-password" error:NULL]);
+}
+
+- (void)testConcurrentPasswordResetConsumptionHasExactlyOneWinner {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  NSString *email = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:&email];
+  NSString *token = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+
+  const size_t attempts = 4;
+  __block NSInteger successes = 0;
+  NSMutableArray *winners = [NSMutableArray array];
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(attempts, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    NSString *password = [NSString stringWithFormat:@"concurrent-password-%zu", index];
+    BOOL ok = [runtime consumePasswordResetToken:token password:password user:NULL error:NULL];
+    if (ok) {
+      [lock lock];
+      successes += 1;
+      [winners addObject:password];
+      [lock unlock];
+    }
+  });
+  XCTAssertEqual((NSInteger)1, successes);
+  if ([winners count] == 1) {
+    XCTAssertNotNil([runtime authenticateLocalEmail:email password:winners[0] error:NULL]);
+  }
+}
+
+- (void)testPasswordChangeRetiresOutstandingResetTokens {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:NULL];
+  NSString *token = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+  NSError *error = nil;
+  XCTAssertTrue([runtime updateLocalPasswordHash:@"$argon2id$placeholder" forUserID:user[@"id"] error:&error], @"%@", error);
+  error = nil;
+  XCTAssertFalse([runtime consumePasswordResetToken:token password:@"after-change-password" user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+}
+
+- (void)testVerificationTokenIsSingleUse {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:NULL];
+  NSString *token = [runtime issueVerificationTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([token length] > 0);
+
+  __block NSInteger successes = 0;
+  NSLock *lock = [[NSLock alloc] init];
+  dispatch_apply(4, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(size_t index) {
+    (void)index;
+    if ([runtime consumeVerificationToken:token user:NULL error:NULL]) {
+      [lock lock];
+      successes += 1;
+      [lock unlock];
+    }
+  });
+  XCTAssertEqual((NSInteger)1, successes);
+  NSError *error = nil;
+  XCTAssertFalse([runtime consumeVerificationToken:token user:NULL error:&error]);
+  XCTAssertEqual((NSInteger)ALNAuthModuleErrorNotFound, error.code);
+}
+
+#pragma mark - Email link base URL
+
+- (void)testPublicBaseURLIsValidatedAndNormalized {
+  for (NSString *invalid in @[ @"app.example.test", @"ftp://app.example.test", @"https://app.example.test/?next=1",
+                               @"https://app.example.test/#frag", @"https://user@app.example.test", @"https://",
+                               @"https://app.example.test:99999", @"https://app.example.test:0",
+                               @"https://app.example.test:70000", @"https://app.example.test:", @"https://app.example.test:8x",
+                               @"https://[::1", @"https://[::1]x", @"https://app example.test",
+                               @"https://user:pw@app.example.test", @"https://app.example.test/../x",
+                               @"https://app.example.test/a/./b", @"https://app.example.test/..",
+                               @"https://app.example.test/%2e%2e/x", @"https://app.example.test/%2E./x",
+                               @"https://app.example.test/a/%2e/b", @"https://app.example.test/%zz",
+                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
+                                                                  environment:@"production"
+                                                                        error:&error],
+                   @"%@", invalid);
+    XCTAssertEqualObjects(@"authModule.publicBaseURL", error.userInfo[@"key_path"], @"%@", invalid);
+  }
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime new];
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @" https://app.example.test/accounts/ " }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://app.example.test/accounts", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"HTTPS://App.Example.TEST:8443/Accounts/" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://app.example.test:8443/Accounts", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://app.example.test/my%20app" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://app.example.test/my%20app", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://[::1]:8443/x/" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"https://[::1]:8443/x", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"http://[FE80::1]" }
+                                            environment:@"production"
+                                                  error:NULL]);
+  XCTAssertEqualObjects(@"http://[fe80::1]", runtime.publicBaseURL);
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
+  XCTAssertEqualObjects(@"", runtime.publicBaseURL);
+}
+
+- (ALNApplication *)mailingApplicationWithEnvironment:(NSString *)environment
+                                          authModule:(NSDictionary *)authModule
+                                         mailAdapter:(ALNInMemoryMailAdapter **)mailAdapter {
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"environment" : environment,
+    @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : authModule ?: @{},
+  }];
+  ALNInMemoryMailAdapter *adapter = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_link_mail"];
+  [app setMailAdapter:adapter];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  if (mailAdapter != NULL) *mailAdapter = adapter;
+  return app;
+}
+
+- (NSString *)createLinkUserEmail {
+  NSString *email = [NSString stringWithFormat:@"links-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSError *error = nil;
+  XCTAssertNotNil([[ALNAuthModuleRuntime sharedRuntime] createLocalUserWithEmail:email
+                                                                     displayName:@"Link User"
+                                                                        password:@"original-password"
+                                                                          source:@"test"
+                                                                           error:&error],
+                  @"%@", error);
+  return email;
+}
+
+- (ALNResponse *)postJSON:(NSDictionary *)payload to:(NSString *)path app:(ALNApplication *)app host:(NSString *)host {
+  NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+  return [app dispatchRequest:[self requestWithMethod:@"POST"
+                                                 path:path
+                                              headers:@{
+                                                @"Accept" : @"application/json",
+                                                @"Content-Type" : @"application/json",
+                                                @"Host" : host ?: @"",
+                                              }
+                                                 body:body]];
+}
+
+- (NSArray<NSString *> *)deliveredTextBodies:(ALNInMemoryMailAdapter *)adapter {
+  NSMutableArray *bodies = [NSMutableArray array];
+  for (NSDictionary *delivery in [adapter deliveriesSnapshot]) {
+    NSDictionary *message = [delivery[@"message"] isKindOfClass:[NSDictionary class]] ? delivery[@"message"] : @{};
+    [bodies addObject:message[@"textBody"] ?: @""];
+  }
+  return bodies;
+}
+
+- (void)testPasswordResetLinkUsesConfiguredPublicBaseURLNotHostHeader {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  for (NSString *environment in @[ @"test", @"production" ]) {
+    ALNInMemoryMailAdapter *adapter = nil;
+    ALNApplication *app = [self mailingApplicationWithEnvironment:environment
+                                                       authModule:@{ @"publicBaseURL" : @"https://app.example.test/" }
+                                                      mailAdapter:&adapter];
+    NSString *email = [self createLinkUserEmail];
+    ALNResponse *response = [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
+    XCTAssertEqual((NSInteger)200, response.statusCode, @"%@", environment);
+    NSArray *bodies = [self deliveredTextBodies:adapter];
+    XCTAssertEqual((NSUInteger)1, [bodies count], @"%@", environment);
+    XCTAssertTrue([[bodies firstObject] containsString:@"https://app.example.test/auth/password/reset?token="], @"%@ %@",
+                  environment, bodies);
+    XCTAssertFalse([[bodies firstObject] containsString:@"evil.example"], @"%@ %@", environment, bodies);
+  }
+}
+
+- (void)testRegistrationVerificationLinkUsesConfiguredPublicBaseURL {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *adapter = nil;
+  ALNApplication *app = [self mailingApplicationWithEnvironment:@"test"
+                                                     authModule:@{ @"publicBaseURL" : @"https://app.example.test" }
+                                                    mailAdapter:&adapter];
+  NSString *email = [NSString stringWithFormat:@"register-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  ALNResponse *response = [self postJSON:@{ @"email" : email, @"display_name" : @"Registrant", @"password" : @"register-password" }
+                                      to:@"/auth/api/register"
+                                     app:app
+                                    host:@"evil.example"];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  NSArray *bodies = [self deliveredTextBodies:adapter];
+  XCTAssertEqual((NSUInteger)1, [bodies count]);
+  XCTAssertTrue([[bodies firstObject] containsString:@"https://app.example.test/auth/verify?token="], @"%@", bodies);
+  XCTAssertFalse([[bodies firstObject] containsString:@"evil.example"], @"%@", bodies);
+}
+
+- (void)testEmailLinksWithoutPublicBaseURLUseHostOnlyInDevelopmentAndTest {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNInMemoryMailAdapter *adapter = nil;
+  ALNApplication *app = [self mailingApplicationWithEnvironment:@"test" authModule:nil mailAdapter:&adapter];
+  NSString *email = [self createLinkUserEmail];
+  XCTAssertEqual((NSInteger)200, [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app
+                                           host:@"localhost:3000"].statusCode);
+  NSArray *bodies = [self deliveredTextBodies:adapter];
+  XCTAssertEqual((NSUInteger)1, [bodies count]);
+  XCTAssertTrue([[bodies firstObject] containsString:@"http://localhost:3000/auth/password/reset?token="], @"%@", bodies);
+
+  app = [self mailingApplicationWithEnvironment:@"production" authModule:nil mailAdapter:&adapter];
+  email = [self createLinkUserEmail];
+  ALNResponse *response = [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqualObjects(@"ok", [self JSONResponseBody:response][@"status"]);
+  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
+
+  NSString *registrant = [NSString stringWithFormat:@"register-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  response = [self postJSON:@{ @"email" : registrant, @"display_name" : @"Registrant", @"password" : @"register-password" }
+                         to:@"/auth/api/register"
+                        app:app
+                       host:@"evil.example"];
+  XCTAssertEqual((NSInteger)200, response.statusCode);
+  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
 }
 
 @end

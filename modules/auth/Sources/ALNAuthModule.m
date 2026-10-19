@@ -164,6 +164,120 @@ static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *
   return expanded;
 }
 
+// YES when every '%' in `value` starts a two-hex-digit escape. Checked
+// explicitly because Foundation implementations differ on what
+// -stringByRemovingPercentEncoding returns for malformed escapes.
+static BOOL AMPercentEscapesValid(NSString *value) {
+  NSUInteger length = [value length];
+  for (NSUInteger index = 0; index < length; index++) {
+    if ([value characterAtIndex:index] != '%') {
+      continue;
+    }
+    for (NSUInteger offset = 1; offset <= 2; offset++) {
+      if (index + offset >= length) {
+        return NO;
+      }
+      unichar digit = [value characterAtIndex:index + offset];
+      BOOL hex = (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') || (digit >= 'A' && digit <= 'F');
+      if (!hex) {
+        return NO;
+      }
+    }
+    index += 2;
+  }
+  return YES;
+}
+
+static BOOL AMHostCharactersValid(NSString *host, BOOL bracketed) {
+  NSCharacterSet *allowed = bracketed
+                                ? [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF:."]
+                                : [NSCharacterSet characterSetWithCharactersInString:
+                                                      @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."];
+  return [host length] > 0 && [host rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound;
+}
+
+// `authModule.publicBaseURL`: the origin (plus optional path prefix) used for
+// links in auth emails. Returns "" when unset, nil (with an error) when invalid.
+// Parsed from the raw string rather than through NSURLComponents, whose port
+// handling and host round-trip differ between Foundation implementations.
+static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
+  if (value == nil || value == [NSNull null]) {
+    return @"";
+  }
+  NSString *trimmed = [value isKindOfClass:[NSString class]] ? AMTrimmedString(value) : nil;
+  if (trimmed != nil && [trimmed length] == 0) {
+    return @"";
+  }
+  NSString *normalized = nil;
+  NSRange separator = (trimmed != nil) ? [trimmed rangeOfString:@"://"] : NSMakeRange(NSNotFound, 0);
+  if (separator.location != NSNotFound) {
+    NSString *scheme = [[trimmed substringToIndex:separator.location] lowercaseString];
+    NSString *rest = [trimmed substringFromIndex:NSMaxRange(separator)];
+    BOOL noQueryOrFragment = [rest rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"?#"]]
+                                 .location == NSNotFound;
+    NSRange slash = [rest rangeOfString:@"/"];
+    NSString *authority = (slash.location == NSNotFound) ? rest : [rest substringToIndex:slash.location];
+    NSString *path = (slash.location == NSNotFound) ? @"" : [rest substringFromIndex:slash.location];
+    NSString *host = nil;
+    NSString *portText = nil;
+    BOOL bracketed = [authority hasPrefix:@"["];
+    BOOL authorityValid = ([authority rangeOfString:@"@"].location == NSNotFound);
+    if (bracketed) {
+      NSRange close = [authority rangeOfString:@"]"];
+      if (close.location == NSNotFound) {
+        authorityValid = NO;
+      } else {
+        host = [authority substringWithRange:NSMakeRange(1, close.location - 1)];
+        NSString *after = [authority substringFromIndex:NSMaxRange(close)];
+        if ([after hasPrefix:@":"]) {
+          portText = [after substringFromIndex:1];
+        } else if ([after length] > 0) {
+          authorityValid = NO;
+        }
+      }
+    } else {
+      NSRange colon = [authority rangeOfString:@":"];
+      host = (colon.location == NSNotFound) ? authority : [authority substringToIndex:colon.location];
+      portText = (colon.location == NSNotFound) ? nil : [authority substringFromIndex:NSMaxRange(colon)];
+    }
+    BOOL pathValid = YES;
+    for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
+      // Compare the decoded segment so %2e forms are caught too.
+      NSString *decoded = AMPercentEscapesValid(segment) ? [segment stringByRemovingPercentEncoding] : nil;
+      if (decoded == nil || [decoded isEqualToString:@"."] || [decoded isEqualToString:@".."]) {
+        pathValid = NO;
+      }
+    }
+    BOOL portValid = YES;
+    if (portText != nil) {
+      NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+      portValid = [portText length] >= 1 && [portText length] <= 5 &&
+                  [portText rangeOfCharacterFromSet:nonDigits].location == NSNotFound &&
+                  [portText integerValue] >= 1 && [portText integerValue] <= 65535;
+    }
+    if (([scheme isEqualToString:@"https"] || [scheme isEqualToString:@"http"]) && noQueryOrFragment &&
+        authorityValid && portValid && pathValid && AMHostCharactersValid(host, bracketed)) {
+      NSString *lowerHost = [host lowercaseString];
+      NSString *hostPart = bracketed ? [NSString stringWithFormat:@"[%@]", lowerHost] : lowerHost;
+      NSString *portPart = (portText != nil) ? [NSString stringWithFormat:@":%ld", (long)[portText integerValue]] : @"";
+      normalized = [NSString stringWithFormat:@"%@://%@%@%@", scheme, hostPart, portPart, path];
+    }
+  }
+  if (normalized == nil) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"authModule.publicBaseURL must be an absolute http(s) URL with a valid host and port and no "
+                       @"user info, query, fragment or dot segments, for example \"https://app.example.com\"",
+                       @{ @"key_path" : @"authModule.publicBaseURL" });
+    }
+    return nil;
+  }
+  while ([normalized hasSuffix:@"/"]) {
+    normalized = [normalized substringToIndex:[normalized length] - 1];
+  }
+  return normalized;
+}
+
 static NSString *AMEffectiveEnvironmentName(NSString *environmentName) {
   NSString *trimmed = AMTrimmedString(environmentName);
   return ([trimmed length] > 0) ? trimmed : @"development";
@@ -827,6 +941,8 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 
 @property(nonatomic, strong) ALNPg *database;
 @property(nonatomic, strong) id<ALNMailAdapter> mailAdapter;
+@property(nonatomic, strong, nullable) ALNLogger *logger;
+@property(nonatomic, copy, readwrite) NSString *publicBaseURL;
 @property(nonatomic, copy) NSDictionary *moduleConfig;
 @property(nonatomic, copy) NSString *environmentName;
 @property(nonatomic, copy, readwrite) NSString *prefix;
@@ -834,6 +950,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *loginPath;
 @property(nonatomic, copy, readwrite) NSString *registerPath;
 @property(nonatomic, copy, readwrite) NSString *logoutPath;
+@property(nonatomic, copy, readwrite) NSString *logoutAllPath;
+@property(nonatomic, assign, readwrite) NSUInteger absoluteSessionLifetimeSeconds;
+@property(nonatomic, assign) NSUInteger sessionCookieMaxAgeSeconds;
 @property(nonatomic, copy, readwrite) NSString *sessionPath;
 @property(nonatomic, copy, readwrite) NSString *verifyPath;
 @property(nonatomic, copy, readwrite) NSString *forgotPasswordPath;
@@ -959,6 +1078,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                                   error:(NSError **)error;
 - (BOOL)markEmailVerifiedForUserID:(NSString *)userID
                              error:(NSError **)error;
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash
+                      forUserID:(NSString *)userID
+                          error:(NSError **)error;
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary *_Nullable *_Nullable)user
                            error:(NSError **)error;
@@ -1007,7 +1129,18 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 - (NSDictionary *)totpRecoveryCodesFragmentContextWithCodes:(NSArray<NSString *> *)recoveryCodes
                                                    returnTo:(NSString *)returnTo;
 - (NSDictionary *)stubProviderConfigurationForBaseURL:(NSString *)baseURL;
+- (BOOL)isDevelopmentOrTestEnvironment;
+- (nullable NSString *)emailLinkBaseURLWithRequestBaseURL:(NSString *)requestBaseURL
+                                                    event:(NSString *)event;
 
+@end
+
+// Implemented in ALNAuthModuleSessionRefresh.m.
+@interface ALNAuthModuleRuntime (ALNAuthModuleSessionStampInternal)
+- (BOOL)bumpSessionStampForUserID:(NSString *)userID
+                       connection:(ALNPgConnection *)connection
+                            error:(NSError **)error;
+- (BOOL)recordCurrentSessionStampForContext:(ALNContext *)context error:(NSError **)error;
 @end
 
 @interface ALNAuthModuleController : ALNController
@@ -1202,6 +1335,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _loginPath = @"/auth/login";
     _registerPath = @"/auth/register";
     _logoutPath = @"/auth/logout";
+    _logoutAllPath = @"/auth/logout/all";
+    _absoluteSessionLifetimeSeconds = 1209600U;
+    _sessionCookieMaxAgeSeconds = 1209600U;
     _sessionPath = @"/auth/session";
     _verifyPath = @"/auth/verify";
     _forgotPasswordPath = @"/auth/password/forgot";
@@ -1263,6 +1399,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _mailMaxPerEmail = 5U;
     _mailMaxPerAddress = 20U;
     _mailWindowSeconds = 3600U;
+    _publicBaseURL = @"";
   }
   return self;
 }
@@ -1277,6 +1414,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.loginPath = AMConfiguredPath(self.moduleConfig, @"login", @"login");
   self.registerPath = AMConfiguredPath(self.moduleConfig, @"register", @"register");
   self.logoutPath = AMConfiguredPath(self.moduleConfig, @"logout", @"logout");
+  self.logoutAllPath = AMConfiguredPath(self.moduleConfig, @"logoutAll", @"logout/all");
   self.sessionPath = AMConfiguredPath(self.moduleConfig, @"session", @"session");
   self.verifyPath = AMConfiguredPath(self.moduleConfig, @"verify", @"verify");
   self.forgotPasswordPath = AMConfiguredPath(self.moduleConfig, @"forgotPassword", @"password/forgot");
@@ -1320,6 +1458,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.failureRedirect = failureRedirect;
+  NSString *publicBaseURL = AMNormalizedPublicBaseURL(self.moduleConfig[@"publicBaseURL"], error);
+  if (publicBaseURL == nil) {
+    return NO;
+  }
+  self.publicBaseURL = publicBaseURL;
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1330,6 +1473,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.layoutTemplate = ([layoutTemplate length] > 0) ? layoutTemplate : @"modules/auth/layouts/main";
   self.generatedPagePrefix = AMNormalizedTemplatePrefix(uiConfig[@"generatedPagePrefix"]);
   self.partialTemplateOverrides = AMNormalizedTemplateOverrideMap(uiConfig[@"partials"]);
+
+  NSDictionary *sessionConfig =
+      [self.moduleConfig[@"session"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"session"] : @{};
+  self.absoluteSessionLifetimeSeconds = AMConfigUnsignedInteger(sessionConfig[@"absoluteLifetimeSeconds"], 1209600U);
 
   NSDictionary *mfaConfig = [self.moduleConfig[@"mfa"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"mfa"] : @{};
   NSDictionary *smsConfig = [mfaConfig[@"sms"] isKindOfClass:[NSDictionary class]] ? mfaConfig[@"sms"] : @{};
@@ -1408,7 +1555,21 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   self.localPasswordEnabled = AMConfigBool(localPasswordConfig[@"enabled"], !hasOIDC);
-  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], !hasOIDC);
+  // The stub provider signs anyone in without credentials, so it is a
+  // development and test convenience only. Elsewhere it defaults off, and an
+  // explicit `providers.stub.enabled = YES` stops configuration.
+  BOOL developmentOrTest = [self isDevelopmentOrTestEnvironment];
+  BOOL stubEnabled = AMConfigBool(stubProvider[@"enabled"], !hasOIDC && developmentOrTest);
+  if (stubEnabled && !developmentOrTest) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       [NSString stringWithFormat:@"authModule.providers.stub.enabled is only allowed in the development "
+                                                  @"and test environments (current environment: %@)",
+                                                  AMEffectiveEnvironmentName(self.environmentName)],
+                       @{ @"key_path" : @"authModule.providers.stub.enabled" });
+    }
+    return NO;
+  }
   NSString *stubEmail = AMLowerTrimmedString(stubProvider[@"email"]);
   if ([stubEmail length] > 0) {
     self.stubProviderEmail = stubEmail;
@@ -1443,8 +1604,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
                                                  @protocol(ALNAuthModuleOIDCTransport), error) : nil;
   if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
-  BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
-                                   [self.environmentName isEqualToString:@"test"];
+  BOOL allowLoopbackHTTPRedirect = developmentOrTest;
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
   NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
@@ -1526,6 +1686,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return YES;
 }
 
+- (BOOL)isDevelopmentOrTestEnvironment {
+  NSString *environment = AMEffectiveEnvironmentName(self.environmentName);
+  return [environment isEqualToString:@"development"] || [environment isEqualToString:@"test"];
+}
+
+- (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
+                           environment:(NSString *)environment
+                                 error:(NSError **)error {
+  self.environmentName = AMEffectiveEnvironmentName(environment);
+  return [self configureHooksWithModuleConfig:moduleConfig error:error];
+}
+
 - (BOOL)configureWithApplication:(ALNApplication *)application
                            error:(NSError **)error {
   NSDictionary *moduleConfig = [application.config[@"authModule"] isKindOfClass:[NSDictionary class]]
@@ -1536,6 +1708,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![self configureHooksWithModuleConfig:moduleConfig error:error]) {
     return NO;
   }
+  NSDictionary *appSessionConfig = [application.config[@"session"] isKindOfClass:[NSDictionary class]]
+                                       ? application.config[@"session"]
+                                       : @{};
+  self.sessionCookieMaxAgeSeconds = AMConfigUnsignedInteger(appSessionConfig[@"maxAgeSeconds"], 1209600U);
   NSDictionary *database = [application.config[@"database"] isKindOfClass:[NSDictionary class]]
                                ? application.config[@"database"]
                                : @{};
@@ -1571,7 +1747,36 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.attemptLimitSchemaAvailable = NO;
   self.attemptLimitSchemaWarningLogged = NO;
   [self.attemptLimitSchemaLock unlock];
+  if ([self.publicBaseURL length] == 0 && ![self isDevelopmentOrTestEnvironment] && self.localPasswordEnabled &&
+      self.mailAdapter != nil) {
+    [self.logger warn:@"authModule.publicBaseURL is not set; password-reset and email-verification links will not be sent"
+               fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                         @"key_path" : @"authModule.publicBaseURL" }];
+  }
+  if ([self.publicBaseURL hasPrefix:@"http://"] && ![self isDevelopmentOrTestEnvironment]) {
+    [self.logger warn:@"authModule.publicBaseURL uses http; password-reset and verification links will carry tokens "
+                       "over plain HTTP. Use an https URL."
+               fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                         @"key_path" : @"authModule.publicBaseURL" }];
+  }
   return YES;
+}
+
+- (NSString *)emailLinkBaseURLWithRequestBaseURL:(NSString *)requestBaseURL
+                                           event:(NSString *)event {
+  if ([self.publicBaseURL length] > 0) {
+    return self.publicBaseURL;
+  }
+  // Without a configured base URL the request Host is the only source, and it
+  // is client-supplied. Use it only for local development and tests.
+  if ([self isDevelopmentOrTestEnvironment]) {
+    return requestBaseURL;
+  }
+  [self.logger error:@"auth email link not sent: authModule.publicBaseURL is not set"
+              fields:@{ @"event" : event ?: @"",
+                        @"environment" : AMEffectiveEnvironmentName(self.environmentName),
+                        @"key_path" : @"authModule.publicBaseURL" }];
+  return nil;
 }
 
 - (NSDictionary *)resolvedHookSummary {
@@ -1590,6 +1795,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"generatedPagePrefix" : self.generatedPagePrefix ?: @"auth",
     @"partials" : self.partialTemplateOverrides ?: @{},
     @"contextHook" : self.uiContextHook ? NSStringFromClass([self.uiContextHook class]) : @"",
+  };
+  summary[@"session"] = @{
+    @"absoluteLifetimeSeconds" : @(self.absoluteSessionLifetimeSeconds),
   };
   summary[@"mfa"] = @{
     @"sms" : @{
@@ -2279,6 +2487,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (!ok) {
     return nil;
   }
+  if (![self recordSessionStampForContext:context error:error]) {
+    [ALNAuthSession clearAuthenticatedSessionForContext:context];
+    return nil;
+  }
   return [self sessionPayloadForContext:context includeUser:YES error:error];
 }
 
@@ -2293,6 +2505,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *email = AMLowerTrimmedString(user[@"email"]);
   if ([email length] == 0) {
     return YES;
+  }
+  if ([AMTrimmedString(baseURL) length] == 0) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration, @"A base URL is required to send auth email links",
+                       @{ @"key_path" : @"authModule.publicBaseURL" });
+    }
+    return NO;
   }
   NSString *eventName = AMTrimmedString(event);
   NSString *path = [eventName isEqualToString:@"password_reset"] ? self.resetPasswordPath : self.verifyPath;
@@ -2375,6 +2594,38 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   return (updated >= 0);
 }
 
+// Any password change retires every outstanding reset token for the user, so a
+// link issued before the change cannot be used afterwards.
+- (BOOL)invalidatePasswordResetTokensForUserID:(NSString *)userID
+                                    connection:(ALNPgConnection *)connection
+                                         error:(NSError **)error {
+  NSInteger invalidated = [connection executeCommand:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
+                                                 "WHERE user_id = $1 AND consumed_at IS NULL"
+                                           parameters:@[ userID ?: @"" ]
+                                                error:error];
+  return (invalidated >= 0);
+}
+
+- (BOOL)updateLocalPasswordHash:(NSString *)encodedHash
+                      forUserID:(NSString *)userID
+                          error:(NSError **)error {
+  NSString *normalizedUserID = AMTrimmedString(userID);
+  return [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
+    NSInteger updated = [connection executeCommand:@"UPDATE auth_local_credentials "
+                                               "SET password_hash = $2, updated_at = NOW() WHERE user_id = $1"
+                                         parameters:@[ normalizedUserID, encodedHash ?: @"" ]
+                                              error:txError];
+    if (updated < 0) {
+      return NO;
+    }
+    // A new password ends the user's existing sessions.
+    if (![self bumpSessionStampForUserID:normalizedUserID connection:connection error:txError]) {
+      return NO;
+    }
+    return [self invalidatePasswordResetTokensForUserID:normalizedUserID connection:connection error:txError];
+  } error:error];
+}
+
 - (BOOL)consumeVerificationToken:(NSString *)token
                             user:(NSDictionary **)user
                            error:(NSError **)error {
@@ -2396,11 +2647,17 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
-    NSInteger marked = [connection executeCommand:@"UPDATE auth_verification_tokens SET consumed_at = NOW() "
-                                              "WHERE token = $1 AND consumed_at IS NULL"
-                                        parameters:@[ normalizedToken ]
-                                             error:txError];
-    if (marked < 0) {
+    // The conditional UPDATE is the single-use gate: of several concurrent
+    // requests with one token, only one sees a row come back.
+    NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_verification_tokens SET consumed_at = NOW() "
+                                                     "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
+                                                     "RETURNING user_id::text AS user_id"
+                                             parameters:@[ normalizedToken ]
+                                                  error:txError];
+    if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
+      if (txError != NULL && *txError == nil) {
+        *txError = AMError(ALNAuthModuleErrorNotFound, @"Verification token is invalid or expired", nil);
+      }
       return NO;
     }
     NSInteger updated = [connection executeCommand:@"UPDATE auth_users SET email_verified_at = NOW(), updated_at = NOW() "
@@ -2455,11 +2712,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   BOOL ok = [self.database withTransaction:^BOOL(ALNPgConnection *connection, NSError **txError) {
-    NSInteger marked = [connection executeCommand:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
-                                              "WHERE token = $1 AND consumed_at IS NULL"
-                                        parameters:@[ normalizedToken ]
-                                             error:txError];
-    if (marked < 0) {
+    // The conditional UPDATE is the single-use gate: of several concurrent
+    // requests with one token, only one sees a row come back and goes on to
+    // change the password.
+    NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
+                                                     "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
+                                                     "RETURNING user_id::text AS user_id"
+                                             parameters:@[ normalizedToken ]
+                                                  error:txError];
+    if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
+      if (txError != NULL && *txError == nil) {
+        *txError = AMError(ALNAuthModuleErrorNotFound, @"Password reset token is invalid or expired", nil);
+      }
       return NO;
     }
     NSInteger updated = [connection executeCommand:@"INSERT INTO auth_local_credentials "
@@ -2469,7 +2733,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                "SET password_hash = EXCLUDED.password_hash, updated_at = NOW()"
                                          parameters:@[ userID, encodedHash ]
                                               error:txError];
-    return (updated >= 0);
+    if (updated < 0) {
+      return NO;
+    }
+    // A reset ends the user's existing sessions; the reset flow signs the
+    // resetting browser in afresh.
+    if (![self bumpSessionStampForUserID:userID connection:connection error:txError]) {
+      return NO;
+    }
+    return [self invalidatePasswordResetTokensForUserID:userID connection:connection error:txError];
   } error:error];
   if (ok && user != NULL) {
     *user = [self userForSubject:AMTrimmedString(row[@"subject"]) error:NULL];
@@ -3986,6 +4258,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   AMSetSMSSessionState(context, nil);
+  // Removing a factor ends the user's other sessions; this one stays signed in.
+  if (deleted > 0 && ![self signOutOtherSessionsForContext:context error:error]) {
+    return NO;
+  }
   return YES;
 }
 
@@ -4079,7 +4355,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       }
       return nil;
     }
-    NSString *resolvedBaseURL = AMTrimmedString(baseURL);
+    // A configured authModule.publicBaseURL takes precedence; the caller's
+    // baseURL is used only when it is unset, so callers must not derive it
+    // from request headers.
+    NSString *resolvedBaseURL =
+        ([self.publicBaseURL length] > 0) ? self.publicBaseURL : AMTrimmedString(baseURL);
     if ([resolvedBaseURL length] == 0) {
       if (error != NULL) {
         *error = AMError(ALNAuthModuleErrorValidationFailed,
@@ -4133,6 +4413,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                           providerConfiguration:(NSDictionary *)providerConfiguration
                                                           error:(NSError **)error {
   NSString *provider = AMTrimmedString(providerConfiguration[@"identifier"]);
+  if ([provider isEqualToString:@"stub"] && ![self isDevelopmentOrTestEnvironment]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                       @"The stub provider is only available in the development and test environments", nil);
+    }
+    return nil;
+  }
   NSString *providerSubject = AMTrimmedString(normalizedIdentity[@"provider_subject"]);
   NSDictionary *matchedUser = [self userForProvider:provider providerSub:providerSubject error:error];
   NSString *matchedBy = @"provider_identity";
@@ -4711,10 +4998,40 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)logout:(ALNContext *)ctx {
-  (void)ctx;
-  [self clearAuthenticatedSession];
-  if ([self shouldPreferJSONForHeadlessRequest:self.context]) {
+  NSError *error = nil;
+  if (![self.runtime revokeCurrentSessionForContext:ctx error:&error]) {
+    // The session is cleared either way; only the server-side record failed.
+    [ctx.logger error:@"auth logout could not record the ended session"
+               fields:@{ @"module" : @"auth", @"error" : error.localizedDescription ?: @"" }];
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return @{ @"status" : @"ok" };
+  }
+  [self redirectTo:self.runtime.loginPath status:302];
+  return nil;
+}
+
+- (id)logoutAll:(ALNContext *)ctx {
+  if ([[ctx authSubject] length] == 0) {
+    [self setStatus:401];
+    return @{ @"status" : @"error", @"message" : @"Authentication required" };
+  }
+  NSError *error = nil;
+  BOOL endsOtherSessions = [self.runtime canEndOtherSessions];
+  if (![self.runtime signOutAllSessionsForContext:ctx error:&error]) {
+    [self setStatus:500];
+    return @{ @"status" : @"error", @"message" : error.localizedDescription ?: @"Failed to sign out other sessions" };
+  }
+  if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+    if (!endsOtherSessions) {
+      return @{
+        @"status" : @"partial",
+        @"scope" : @"current_session",
+        @"message" : @"Signed out of this session only. Other sessions can be ended after the auth module "
+                     @"migrations are applied (arlen module migrate).",
+      };
+    }
+    return @{ @"status" : @"ok", @"scope" : @"all_sessions" };
   }
   [self redirectTo:self.runtime.loginPath status:302];
   return nil;
@@ -4840,12 +5157,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
-  NSString *verificationToken = [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
+  NSString *verificationBaseURL = [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                             event:@"email_verification"];
+  NSString *verificationToken = ([verificationBaseURL length] > 0)
+                                    ? [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error]
+                                    : nil;
   if ([verificationToken length] > 0) {
     (void)[self.runtime sendNotificationEvent:@"email_verification"
                                          user:user
                                         token:verificationToken
-                                      baseURL:[self requestBaseURL:ctx]
+                                      baseURL:verificationBaseURL
                                         error:NULL];
   }
   NSDictionary *session = [self.runtime startSessionForUser:user provider:@"local" methods:@[ @"pwd" ] context:ctx error:&error];
@@ -4938,15 +5259,18 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   BOOL maySend = [self.runtime allowMailSendForEmail:email
                                        clientAddress:[self clientAddressForContext:ctx]
                                                 flow:@"password_reset"];
-  NSDictionary *user = maySend ? [self.runtime userForEmail:email error:NULL] : nil;
-  if (user != nil) {
+  NSDictionary *user = [self.runtime userForEmail:email error:NULL];
+  NSString *resetBaseURL = (user != nil) ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                                       event:@"password_reset"]
+                                         : nil;
+  if (maySend && user != nil && [resetBaseURL length] > 0) {
     NSError *error = nil;
     NSString *token = [self.runtime issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
     if ([token length] > 0) {
       (void)[self.runtime sendNotificationEvent:@"password_reset"
                                            user:user
                                           token:token
-                                        baseURL:[self requestBaseURL:ctx]
+                                        baseURL:resetBaseURL
                                           error:NULL];
     }
   }
@@ -5082,13 +5406,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : [self clientMessageForError:updateError fallback:@"Failed to hash password"] };
   }
-  NSInteger command = [self.runtime.database executeCommand:@"UPDATE auth_local_credentials "
-                                                        "SET password_hash = $2, updated_at = NOW() WHERE user_id = $1"
-                                                  parameters:@[ AMTrimmedString(user[@"id"]), encodedHash ]
-                                                       error:&updateError];
-  if (command < 0) {
+  if (![self.runtime updateLocalPasswordHash:encodedHash forUserID:AMTrimmedString(user[@"id"]) error:&updateError]) {
     [self setStatus:500];
     return @{ @"status" : @"error", @"message" : [self clientMessageForError:updateError fallback:@"Failed to update password"] };
+  }
+  // The update ended every session of this user; keep this one signed in.
+  if (![self.runtime recordCurrentSessionStampForContext:ctx error:&updateError]) {
+    [ctx.logger warn:@"auth password change could not keep the current session signed in"
+              fields:@{ @"module" : @"auth", @"error" : updateError.localizedDescription ?: @"" }];
   }
   return @{ @"status" : @"ok" };
 }
@@ -5595,7 +5920,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubLogin:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }
@@ -5625,7 +5950,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubAuthorize:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }
@@ -5642,7 +5967,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 }
 
 - (id)providerStubCallback:(ALNContext *)ctx {
-  if (![self.runtime isProviderEnabled:@"stub"]) {
+  if (![self.runtime isProviderEnabled:@"stub"] || ![self.runtime isDevelopmentOrTestEnvironment]) {
     [self setStatus:404];
     return [self shouldReturnJSON:ctx] ? @{ @"status" : @"error", @"message" : @"Provider not found" } : nil;
   }
@@ -5732,6 +6057,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (![runtime configureWithApplication:application error:error]) {
     return NO;
   }
+  ALNAuthModuleInstallSessionRefresh(application);
 
   if (![runtime isHeadlessUIMode] &&
       ![[runtime.uiMode lowercaseString] isEqualToString:@"generated-app-ui"]) {
@@ -5756,6 +6082,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
+  [application registerRouteMethod:@"POST"
+                              path:runtime.logoutAllPath
+                              name:@"auth_logout_all"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"logoutAll"];
   if (![runtime isHeadlessUIMode] && runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"GET"
                                   path:runtime.registerPath
@@ -5909,6 +6240,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                               name:@"auth_api_logout"
                    controllerClass:[ALNAuthModuleController class]
                              action:@"logout"];
+  [application registerRouteMethod:@"POST"
+                              path:@"/logout/all"
+                              name:@"auth_api_logout_all"
+                   controllerClass:[ALNAuthModuleController class]
+                             action:@"logoutAll"];
   if (runtime.localPasswordEnabled) {
     [application registerRouteMethod:@"POST"
                                 path:@"/register"
@@ -6028,6 +6364,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       @"response" : @{ @"type" : @"object" },
     },
     @"auth_api_logout" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
+    @"auth_api_logout_all" : @{ @"request" : [NSNull null], @"response" : @{ @"type" : @"object" } },
     @"auth_api_register" : @{
       @"request" : @{
         @"type" : @"object",

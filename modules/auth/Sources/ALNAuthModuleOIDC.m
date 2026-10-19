@@ -219,7 +219,7 @@ static BOOL OStrings(id values) {
 
 @interface ALNAuthModuleOIDC ()
 @property(nonatomic, copy, readwrite) NSDictionary *configuration;
-@property(nonatomic, strong) id<ALNAuthProviderSessionResolver> resolver;
+@property(nonatomic, strong, readwrite) id<ALNAuthProviderSessionResolver> resolver;
 @property(nonatomic, strong) id<ALNAuthModuleOIDCTransport> transport;
 @end
 @implementation ALNAuthModuleOIDC
@@ -469,6 +469,11 @@ static BOOL OStrings(id values) {
     descriptor = withLevel;
   }
   return descriptor;
+}
+- (BOOL)providerSessionEstablishedForDescriptor:(NSDictionary *)descriptor context:(ALNContext *)context
+                                          error:(NSError **)error {
+  if (![self.resolver respondsToSelector:_cmd]) return YES;
+  return [self.resolver providerSessionEstablishedForDescriptor:descriptor context:context error:error];
 }
 - (NSDictionary *)accountLinkingDescriptorForNormalizedIdentity:(NSDictionary *)identity
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {

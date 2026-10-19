@@ -7,6 +7,20 @@
 #import "../shared/Phase27SearchTestSupport.h"
 #import "../shared/ALNTestSupport.h"
 
+// Runtime entry point used by the query controller; declared here so the tests
+// can exercise the allowed-resource contract directly.
+@interface ALNSearchModuleRuntime (Phase27SearchAllowedResources)
+- (nullable NSDictionary *)searchQuery:(nullable NSString *)query
+                    resourceIdentifier:(nullable NSString *)resourceIdentifier
+              allowedResourceIdentifiers:(nullable NSArray<NSString *> *)allowedResourceIdentifiers
+                               filters:(nullable NSDictionary *)filters
+                                  sort:(nullable NSString *)sort
+                                 limit:(NSUInteger)limit
+                                offset:(NSUInteger)offset
+                          queryOptions:(nullable NSDictionary *)queryOptions
+                                 error:(NSError **)error;
+@end
+
 static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *Phase27StreamingBuildBatches(void) {
   static NSMutableDictionary<NSString *, NSMutableArray<NSNumber *> *> *batches = nil;
   if (batches == nil) {
@@ -484,6 +498,62 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqualObjects(@"deleted", tenantMetadata[@"visibility"][@"softDeleteField"]);
   XCTAssertEqualObjects(@"delete", tenantMetadata[@"syncPolicy"][@"softDeleteMode"]);
   XCTAssertEqualObjects(@2, tenantMetadata[@"syncPolicy"][@"bulkBatchSize"]);
+}
+
+- (void)testEmptyAllowedResourceSetMatchesNothing {
+  ALNApplication *app = [self applicationWithConfig:nil database:nil];
+  [self registerModulesForApplication:app];
+
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSError *error = nil;
+  NSDictionary *unrestricted = [runtime searchQuery:@"priority"
+                                 resourceIdentifier:nil
+                         allowedResourceIdentifiers:nil
+                                            filters:nil
+                                               sort:nil
+                                              limit:10
+                                             offset:0
+                                       queryOptions:nil
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertGreaterThan([unrestricted[@"total"] unsignedIntegerValue], (NSUInteger)0);
+
+  for (NSDictionary *options in @[ @{}, @{ @"mode" : @"autocomplete" }, @{ @"mode" : @"fuzzy", @"suggestionsLimit" : @5 } ]) {
+    error = nil;
+    NSDictionary *empty = [runtime searchQuery:@"pri"
+                            resourceIdentifier:nil
+                    allowedResourceIdentifiers:@[]
+                                       filters:nil
+                                          sort:nil
+                                         limit:10
+                                        offset:0
+                                  queryOptions:options
+                                         error:&error];
+    XCTAssertNil(error);
+    XCTAssertNotNil(empty);
+    XCTAssertEqualObjects(@0, empty[@"total"], @"%@", options);
+    XCTAssertEqualObjects(@0, empty[@"pagination"][@"total"], @"%@", options);
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(empty[@"results"] ?: @[]) count], @"%@", options);
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(empty[@"autocomplete"] ?: @[]) count], @"%@", options);
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(empty[@"suggestions"] ?: @[]) count], @"%@", options);
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(empty[@"facets"] ?: @[]) count], @"%@", options);
+    XCTAssertEqual((NSUInteger)0, [(NSArray *)(empty[@"resources"] ?: @[]) count], @"%@", options);
+  }
+
+  error = nil;
+  NSDictionary *scoped = [runtime searchQuery:@"priority"
+                           resourceIdentifier:@"products"
+                   allowedResourceIdentifiers:@[]
+                                      filters:nil
+                                         sort:nil
+                                        limit:10
+                                       offset:0
+                                 queryOptions:nil
+                                        error:&error];
+  XCTAssertNil(scoped);
+  XCTAssertEqual((NSInteger)ALNSearchModuleErrorNotFound, error.code);
 }
 
 - (void)testInvalidQueryModeFailsClosed {

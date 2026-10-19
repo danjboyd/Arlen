@@ -109,6 +109,31 @@ resource metadata when `searchModule.adminUI.autoResources = YES`. Optional
 `includeIdentifiers` and `excludeIdentifiers` lists narrow which admin
 resources are auto-indexed.
 
+### admin-ui auto-resources
+
+Auto-registered admin resources (including the built-in `users` resource) are
+searchable only by callers `admin-ui` itself would admit:
+
+- `queryPolicy = role_gated` with `queryRoles` taken from
+  `ALNAdminUIModuleRuntime.accessRoles` (`admin`)
+- `queryMinimumAuthAssuranceLevel` taken from
+  `ALNAdminUIModuleRuntime.minimumAuthAssuranceLevel` (`2`)
+- the admin resource's `adminUIResourceAllowsOperation:identifier:context:error:`
+  hook must allow the `list` operation for the request
+
+Anonymous callers get `401` from the resource query route, other callers who
+fail these checks get `403`, and unscoped queries and `GET /search/api/resources`
+leave the resource out for them.
+
+Only fields `admin-ui` displays (fields marked `list` or `detail`) are indexed,
+searched, highlighted and returned. The index keeps those fields plus the
+resource's identifier, primary, filter and sort fields; other record keys are
+dropped before indexing.
+
+To index admin resources for a different audience, set
+`adminUI.autoResources = NO` (or use `excludeIdentifiers`) and register an
+app-owned search resource with its own `queryPolicy` and `resultFields`.
+
 ## Search Contract
 
 Each search resource definition supplies metadata such as:
@@ -132,6 +157,7 @@ Each search resource definition supplies metadata such as:
 - `queryModes`
 - `queryPolicy`
 - `queryRoles`
+- `queryMinimumAuthAssuranceLevel`
 - `promotions`
 - `pathTemplate`
 - weighted fields and engine-friendly ranking hints where supported
@@ -164,6 +190,12 @@ Resource query policies are explicit:
 - `authenticated`
 - `role_gated`
 - `predicate`
+
+`queryMinimumAuthAssuranceLevel` (default `0`, no requirement) additionally
+requires an authenticated caller at or above that auth assurance level, with
+any `queryPolicy`. A caller below it gets `403` from the resource query route
+and does not see the resource in unscoped queries or in
+`GET /search/api/resources`.
 
 The module also reports engine capabilities directly in query/config payloads so
 apps can see which engines support highlights, fuzzy matching, autocomplete,
@@ -249,10 +281,22 @@ query can cost:
 - query routes are public by default
 - per-resource `queryPolicy` metadata can require authentication, roles, or an
   app callback/predicate
+- an unscoped query (`GET /search` or `GET /search/api/query`) searches only
+  the resources the caller may query; when that is none, it returns no results
+  (`total = 0`), including no autocomplete, suggestions or facets
+- `GET /search/api/resources` lists only the resources the caller may query
+- auto-indexed `admin-ui` resources require the `admin-ui` policy (admin role,
+  AAL2, the resource's `list` check); see
+  [admin-ui auto-resources](#admin-ui-auto-resources)
 - resource drilldown and reindex routes require the shared operator/admin policy:
   - authenticated session
   - either `operator` or `admin` role
   - AAL2 step-up
+- role checks (the operator/admin policy and `role_gated` resources) use
+  `+[ALNAuth context:hasAnyRole:]`, which reads the request's current roles;
+  with the auth module installed those come from `auth_users` on every request,
+  so a revoked role is denied on the user's next request (see
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles))
 
 ## Index Lifecycle
 
@@ -278,7 +322,8 @@ query can cost:
 - the same runtime supports full reindex and incremental sync without custom
   queue glue
 - when `admin-ui` is installed, the module can:
-  - index app-owned admin resources automatically
+  - index app-owned admin resources automatically, searchable only by callers
+    admitted by the `admin-ui` policy
   - contribute the shared `search_indexes` admin resource
 - the ops module consumes `ALNSearchModuleRuntime` dashboard summaries to show
   indexed-resource counts, generation state, queued replay depth, recent
@@ -376,7 +421,8 @@ Manifest defaults:
 - allowed roles: `operator`, `admin`
 - minimum auth assurance level: `2`
 - `engineClass = "ALNDefaultSearchEngine"`
-- `adminUI.autoResources = YES`
+- `adminUI.autoResources = YES` (auto-indexed admin resources are searchable
+  only by `admin-ui`'s admins)
 - `adminUI.resourceProviderClass = "ALNSearchAdminResourceProvider"`
 
 ## Current Limits

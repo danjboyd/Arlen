@@ -721,6 +721,38 @@ framework tests require no tenant or public deployment.
 
 Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). Request bodies and multipart file parts larger than `spoolThresholdBytes` (1048576) are spooled to private temporary files under `spoolDirectory` (an absolute path; default the system temp directory) instead of memory. All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
 
+## Auth Module Email Links
+
+`authModule.publicBaseURL` is the absolute `http(s)` URL that links in
+password-reset and email-verification mail start with, for example
+`"https://app.example.com"` (a path prefix such as
+`"https://example.com/app"` is allowed; a trailing slash is dropped and the
+scheme and host are lowercased; a query, fragment, user info, `.`/`..` path
+segments or a port outside 1-65535 is rejected as invalid auth module
+configuration). Outside
+`development` and `test`, an `http://` value logs a warning at startup; use
+`https`. The module never builds these links from the request's `Host` header
+when it is set, and it also takes precedence over the `baseURL` an app passes
+to `claimTrustedEmail:`.
+
+When it is not set, the `development` and `test` environments fall back to the
+request's scheme and `Host` header so local sign-up keeps working. Every other
+environment sends no link: the forgot-password and registration responses are
+unchanged, no token is issued, and the module logs an error naming
+`authModule.publicBaseURL` (and warns at startup when local passwords and a mail
+adapter are configured). Set it in production. `claimTrustedEmail:` keeps
+taking its `baseURL` from the caller.
+
+## Auth Module Sessions
+
+`authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days) is
+how long a sign-in through the auth module (or one of its OIDC providers)
+lasts, measured from sign-in. The session cookie's `session.maxAgeSeconds`
+renews on every response that writes the session; this limit does not, so a
+session in daily use still ends this long after sign-in and the user signs in
+again. Must be a positive whole number. See
+[Auth Module](AUTH_MODULE.md#sessions-and-roles).
+
 ## Auth Module OIDC Providers
 
 Configure `authModule.providers.<identifier>` with `enabled = YES` and
@@ -750,11 +782,14 @@ Its class implements `ALNAuthProviderSessionResolver` and decides whether a
 verified principal maps to an application user. There is no automatic email
 linking or user creation on this path.
 
-`authModule.localPassword.enabled` and `authModule.providers.stub.enabled`
-default to false when a real provider is enabled, true otherwise. Explicit
-values override those defaults. Older copied manifests may explicitly enable
-stub; turn it off in application configuration. The same choices apply to
-HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
+`authModule.localPassword.enabled` defaults to false when a real provider is
+enabled, true otherwise; an explicit value overrides that default.
+`authModule.providers.stub.enabled` follows the same default in the
+`development` and `test` environments only. In any other environment the stub
+provider defaults off, and an explicit `YES` is refused (the auth module's
+configuration is rejected). Older copied
+manifests may explicitly enable stub; turn it off in application configuration.
+The same choices apply to HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
 injection, primarily for deterministic tests.
 
 See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)

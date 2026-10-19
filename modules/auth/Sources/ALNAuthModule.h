@@ -84,6 +84,13 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 @property(nonatomic, copy, readonly) NSString *loginPath;
 @property(nonatomic, copy, readonly) NSString *registerPath;
 @property(nonatomic, copy, readonly) NSString *logoutPath;
+/// POST target that signs the current user out on every device
+/// (`authModule.paths.logoutAll`, default `/auth/logout/all`).
+@property(nonatomic, copy, readonly) NSString *logoutAllPath;
+/// `authModule.session.absoluteLifetimeSeconds` (default 1209600, 14 days):
+/// how long after sign-in a module session stays signed in, however often it
+/// is renewed.
+@property(nonatomic, assign, readonly) NSUInteger absoluteSessionLifetimeSeconds;
 @property(nonatomic, copy, readonly) NSString *sessionPath;
 @property(nonatomic, copy, readonly) NSString *verifyPath;
 @property(nonatomic, copy, readonly) NSString *forgotPasswordPath;
@@ -116,12 +123,23 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 // once registration mounts them there, else the framework's `/modules/auth` mount.
 @property(nonatomic, copy, readonly) NSString *uiAssetPrefix;
 @property(nonatomic, assign, readonly) BOOL smsEnabled;
+/// `authModule.publicBaseURL` without a trailing slash, or "" when unset. Links
+/// in password-reset and email-verification mail start with it. When unset,
+/// development and test fall back to the request's Host header; other
+/// environments send no link.
+@property(nonatomic, copy, readonly) NSString *publicBaseURL;
 
 + (instancetype)sharedRuntime;
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
                            error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
+                                 error:(NSError *_Nullable *_Nullable)error;
+/// Sets the environment name (as `configureWithApplication:` does from the
+/// application) before configuring. Environment-dependent defaults, such as the
+/// development/test-only stub provider, follow it.
+- (BOOL)configureHooksWithModuleConfig:(NSDictionary *)moduleConfig
+                           environment:(NSString *)environment
                                  error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)resolvedHookSummary;
 - (BOOL)registrationAllowedForRequest:(NSDictionary *)registrationRequest
@@ -189,6 +207,50 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                  error:(NSError *_Nullable *_Nullable)error;
 
 @end
+
+/// Session resolution against the current user record (see docs/AUTH_MODULE.md).
+@interface ALNAuthModuleRuntime (ALNAuthModuleSessionRefresh)
+/// Resolves the request's session identity against its current source of truth:
+/// the `auth_users` row for module sign-ins (roles, session stamp, existence), or
+/// the provider resolver's `refreshSessionDescriptorForSubject:provider:error:`
+/// for configured OIDC providers. Live roles replace the session's roles for the
+/// request; a missing user, a resolver that returns nil, or a stale session
+/// stamp signs the session out. Returns NO with `error` when the lookup fails.
+/// The module installs a middleware that calls this on every request.
+- (BOOL)refreshAuthenticatedSessionForContext:(ALNContext *)context
+                                        error:(NSError *_Nullable *_Nullable)error;
+/// Stores the signed-in user's current session stamp in the session. Module
+/// sign-ins call this; call it after establishing a session for an `auth_users`
+/// subject yourself.
+- (BOOL)recordSessionStampForContext:(ALNContext *)context
+                               error:(NSError *_Nullable *_Nullable)error;
+/// Increments the user's session stamp, which signs out every existing session
+/// for `subject` on its next request.
+- (BOOL)bumpSessionStampForSubject:(NSString *)subject
+                             error:(NSError *_Nullable *_Nullable)error;
+/// Signs the request's session out and records it as ended
+/// (`auth_revoked_sessions`), so other copies of the same session cookie stop
+/// working while the user's other sessions are unaffected. The session is
+/// always cleared from the context; returns NO with `error` only when the
+/// record could not be written.
+- (BOOL)revokeCurrentSessionForContext:(ALNContext *)context
+                                 error:(NSError *_Nullable *_Nullable)error;
+/// Ends every other session of the signed-in user (bumps the session stamp)
+/// and keeps the request's session signed in by recording the new stamp in it.
+- (BOOL)signOutOtherSessionsForContext:(ALNContext *)context
+                                 error:(NSError *_Nullable *_Nullable)error;
+/// Ends every session of the signed-in user, including the request's own.
+// NO until the session stamp migration has been applied; sign-out-everywhere
+// can then end only the current session.
+- (BOOL)canEndOtherSessions;
+- (BOOL)signOutAllSessionsForContext:(ALNContext *)context
+                               error:(NSError *_Nullable *_Nullable)error;
+@end
+
+/// Adds the per-request middleware that calls
+/// `refreshAuthenticatedSessionForContext:error:` once per application. Module
+/// registration calls this.
+FOUNDATION_EXPORT void ALNAuthModuleInstallSessionRefresh(ALNApplication *application);
 
 @interface ALNAuthModule : NSObject <ALNModule>
 @end

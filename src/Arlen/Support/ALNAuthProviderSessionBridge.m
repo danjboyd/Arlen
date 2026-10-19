@@ -162,6 +162,11 @@ static NSArray *ALNAuthProviderBridgeNormalizedMethods(id value) {
                                                          error:error]) {
     return nil;
   }
+  if ([resolver respondsToSelector:@selector(providerSessionEstablishedForDescriptor:context:error:)] &&
+      ![resolver providerSessionEstablishedForDescriptor:sessionDescriptor context:context error:error]) {
+    [ALNAuthSession clearAuthenticatedSessionForContext:context];
+    return nil;
+  }
 
   NSMutableDictionary *result = [NSMutableDictionary dictionary];
   result[@"normalizedIdentity"] = normalizedIdentity;

@@ -253,6 +253,26 @@ sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `00
 `arlen module migrate` after upgrading.
 `notifications` moved to `1.2.0` so `POST /notifications/api/queue` queues
 only for the signed-in user unless the caller has the `admin` role at AAL2.
+`auth` remains at `1.6.0`, while `search` remains at `1.1.0` and `admin-ui`
+moved to `1.1.0` for the following security fixes and configuration:
+
+- `auth`: the stub provider is development/test only; password-reset and
+  verification links are single-use; those links are built from the new
+  `authModule.publicBaseURL`; and session roles are resolved from the current
+  user record on every request (new migration `002_auth_session_stamp.sql`,
+  recommended for ending sessions by stamp; roles are read live without it).
+  Signing out ends the session server-side (new migration
+  `003_auth_revoked_sessions.sql`, recommended), password changes and resets
+  end other sessions, `POST /auth/logout/all` signs out everywhere, and
+  `authModule.session.absoluteLifetimeSeconds` limits a sign-in's lifetime.
+- `search`: an unscoped query from a caller who may query no registered
+  resource returns no results, and auto-indexed `admin-ui` resources are
+  searchable only by callers the `admin-ui` policy admits (new
+  `queryMinimumAuthAssuranceLevel` resource metadata); its role checks use
+  `+[ALNAuth context:hasAnyRole:]` and so the user's current roles.
+- `admin-ui`: reports its access policy (`accessRoles`,
+  `minimumAuthAssuranceLevel`) and ends a user's sessions when the admin role
+  is revoked; it requires `auth` `>= 1.6.0`.
 
 ## MCP tools
 

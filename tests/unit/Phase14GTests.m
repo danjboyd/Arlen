@@ -324,7 +324,7 @@
       XCTAssertTrue([modulesWithStepUpRoutes containsObject:module], @"%@ in %@", module, modulesWithStepUpRoutes);
     }
   } @finally {
-    [authRuntime configureHooksWithModuleConfig:@{} error:NULL];
+    [authRuntime configureHooksWithModuleConfig:@{} environment:@"test" error:NULL];
   }
 }
 

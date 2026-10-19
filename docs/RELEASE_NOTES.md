@@ -117,6 +117,69 @@
   afterwards.
 - `ALNTOTP` adds `matchedTimeStepForCode:...`, which returns the time step a
   code matched (or `NSNotFound`), so callers can refuse reused codes.
+- Auth module (`auth` 1.6.0): the stub OIDC provider is now available only in
+  the `development` and `test` environments. Elsewhere it defaults off, its
+  routes are not registered, and setting `authModule.providers.stub.enabled =
+  YES` is refused (the auth module's configuration is rejected). Apps that relied on the stub outside
+  development or test must configure a real provider or local passwords.
+- Auth module: password-reset and email-verification links are single-use
+  even under concurrent requests; only one request can consume a given link.
+  A successful password change (by reset link or the change-password route)
+  now retires every other outstanding reset link for that user.
+- Auth module: new `authModule.publicBaseURL` key. Password-reset and
+  email-verification links are built from it instead of the request's `Host`
+  header. When it is unset, `development` and `test` still fall back to the
+  request host; other environments send no link and log an error, so set
+  `authModule.publicBaseURL` before upgrading a production app that uses local
+  passwords.
+- `search` (`1.1.0`): an unscoped query (`GET /search`, `GET /search/api/query`)
+  from a caller who may not query any registered resource now returns no
+  results, autocomplete, suggestions or facets, with `total = 0`. It used to
+  search every resource.
+- `search` (`1.1.0`) and `admin-ui` (`1.1.0`): resources the search module
+  auto-registers from `admin-ui` (`searchModule.adminUI.autoResources`,
+  including the built-in `users` resource) now use `queryPolicy = role_gated`
+  with `admin-ui`'s roles (`admin`), AAL2 and the resource's `list` operation
+  check, instead of `public`. Anonymous and non-admin callers can no longer
+  query them, and `GET /search/api/resources` no longer lists them for those
+  callers. Only fields `admin-ui` displays (`list` or `detail`) are indexed and
+  returned. Search resources can set the new `queryMinimumAuthAssuranceLevel`
+  metadata, and `ALNAdminUIModuleRuntime` reports `accessRoles` and
+  `minimumAuthAssuranceLevel`.
+- Auth module (`1.6.0`): authorization now uses each user's current roles.
+  The module resolves the session's user against `auth_users` on every request
+  (one indexed query, nothing cached), so route contracts and the admin-ui,
+  jobs and ops APIs see a role grant or revocation on the user's next request.
+  Before, they used the roles stored in the session cookie at sign-in until the
+  cookie expired, while only the HTML admin pages read the current roles. A
+  session whose user was deleted is signed out. Running `arlen module migrate`
+  after upgrading is recommended: the new `002_auth_session_stamp.sql` adds a
+  per-user session stamp, and `bumpSessionStampForSubject:error:` ends every
+  existing session for a user. Without it, roles are still read live and
+  nothing fails; the stamp is skipped and one warning names the migration. OIDC resolvers can implement the optional
+  `refreshSessionDescriptorForSubject:provider:error:` to keep provider
+  sessions' roles current the same way. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- Auth module (`1.6.0`): signing out now ends the session on the server. The
+  session is recorded in a new `auth_revoked_sessions` table (migration
+  `003_auth_revoked_sessions.sql`; running `arlen module migrate` is
+  recommended), so another copy of the signed-out cookie no longer works, while
+  the user's other devices stay signed in. Changing the password ends the
+  user's other sessions and keeps the current one; a password reset by link
+  and removing the SMS factor end other sessions too. New sign out everywhere
+  routes (`POST /auth/logout/all`, `POST /auth/api/logout/all`) end every
+  session of the user. New `authModule.session.absoluteLifetimeSeconds`
+  (default 14 days) signs a session out that long after sign-in even when it
+  is renewed by use. Without migration 003, signing out still clears the
+  cookie and one warning names the migration. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- `search` (`1.1.0`): the operator/admin guard on drilldown and reindex routes
+  and `role_gated` resources check roles through the new
+  `+[ALNAuth context:hasAnyRole:]`, so they use the user's current roles like
+  the other modules.
+- admin-ui (`1.1.0`, requires auth `1.6.0`): revoking the admin role through
+  the users resource also ends that user's existing sessions (once the auth
+  stamp migration is applied).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

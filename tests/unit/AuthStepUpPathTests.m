@@ -12,7 +12,7 @@
 
 - (void)tearDown {
   // The runtime is process-wide and other suites expect the default paths.
-  [[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:NULL];
+  [[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:NULL];
   [super tearDown];
 }
 

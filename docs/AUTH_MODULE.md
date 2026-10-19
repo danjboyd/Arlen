@@ -26,6 +26,7 @@ Interactive HTML routes:
 - `GET /auth/login`
 - `POST /auth/login`
 - `POST /auth/logout`
+- `POST /auth/logout/all`
 - `GET /auth/register`
 - `POST /auth/register`
 - `GET /auth/session`
@@ -49,6 +50,7 @@ Stable API-first aliases:
 - `GET /auth/api/session`
 - `POST /auth/api/login`
 - `POST /auth/api/logout`
+- `POST /auth/api/logout/all`
 - `POST /auth/api/register`
 - `GET /auth/api/verify`
 - `POST /auth/api/password/forgot`
@@ -85,9 +87,24 @@ email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
 the account exists. (Registration still reports an already-registered email.)
 
+Password-reset and email-verification emails link to
+`authModule.publicBaseURL` (for example `publicBaseURL =
+"https://app.example.com";`). Set it in production: there, without it, the module
+sends no link rather than trusting the request's `Host` header, and logs an
+error. In `development` and `test` an unset value falls back to the request's
+scheme and `Host`. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
+
+Password-reset links expire after 30 minutes and email-verification links after
+one day. Each link works once, even when several requests present it at the same
+time. Any successful password change, through a reset link or the authenticated
+change-password route, retires all of that user's other outstanding reset links.
+
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
-provider CTA disappears and the stub provider routes are not registered.
+provider CTA disappears and the stub provider routes are not registered. The
+stub provider is only available in the `development` and `test` environments;
+see [Defaults and Upgrade Behavior](#defaults-and-upgrade-behavior).
 
 TOTP route behavior:
 
@@ -347,6 +364,109 @@ The intended reuse target is app-owned account/security pages and other
 server-rendered auth surfaces that want to embed framework-provided MFA/auth UI
 without forking the full-page templates.
 
+## Sessions and Roles
+
+Sessions are signed cookies. The roles written into the session at sign-in are
+not what authorization uses on later requests. On every request that carries a
+session identity, the module's middleware resolves that identity again and
+replaces the session's roles for the request with the current ones, so
+`[ctx authRoles]`, route contracts (`requiredRoles`, minimum assurance level),
+and the admin-ui, jobs, ops and other module API guards all see the user's
+current roles:
+
+- Module sign-ins (local password, email link, the stub provider) are looked up
+  in `auth_users` by subject: one indexed query per request, with no cache
+  between requests. Roles come from `roles_json`, passed through the session
+  policy hook's `authModuleSessionDescriptorForUser:defaultDescriptor:` when one
+  is configured, exactly as at sign-in. A role granted or revoked in the
+  database takes effect on the user's next request, with no new sign-in.
+- If the user row no longer exists, the session is signed out.
+- Each user has a session stamp (`auth_users.session_stamp`, added by migration
+  `002_auth_session_stamp.sql`). Sign-in records the current stamp in the
+  session; a session whose stamp no longer matches is signed out.
+  `-[ALNAuthModuleRuntime bumpSessionStampForSubject:error:]` increments the
+  stamp, which ends every existing session for that user. Revoking the admin
+  role through the admin-ui users resource does this. Sessions issued before
+  the stamp existed count as stamp `0`.
+- Sessions from a configured OIDC provider belong to the application resolver.
+  When the resolver implements `refreshSessionDescriptorForSubject:provider:error:`
+  (see [Application Identity Resolver](#application-identity-resolver)), its
+  `roles` apply on every request and a nil result signs the session out.
+  Without it, the roles the resolver returned at sign-in stay in force until the
+  session ends.
+- Sessions that application code establishes itself, for providers the module
+  does not own, are left as they are. To have the module manage one for an
+  `auth_users` subject, call `recordSessionStampForContext:error:` after
+  establishing it.
+
+Ending sessions:
+
+- Signing out (`POST /auth/logout`, `POST /auth/api/logout`) clears the session
+  and records it in `auth_revoked_sessions` (migration
+  `003_auth_revoked_sessions.sql`). Any other copy of that session cookie is
+  then signed out on its next request, including copies taken before an MFA
+  step-up. The user's sessions on other devices stay signed in. The check is
+  part of the same per-request `auth_users` query. A record is kept only until
+  the cookie would have expired anyway (`session.maxAgeSeconds`, or the
+  absolute lifetime below if that ends sooner); expired records are deleted
+  when someone signs out.
+  `-[ALNAuthModuleRuntime revokeCurrentSessionForContext:error:]` does the same
+  from application code.
+- Sign out everywhere (`POST /auth/logout/all`, `POST /auth/api/logout/all`, or
+  `signOutAllSessionsForContext:error:`) bumps the user's session stamp and
+  signs out the current session, ending every session the user has. The JSON
+  reply is `{"status":"ok","scope":"all_sessions"}`. Until migration
+  `002_auth_session_stamp.sql` is applied it can end only the current session
+  and replies `{"status":"partial","scope":"current_session",...}`;
+  `-[ALNAuthModuleRuntime canEndOtherSessions]` reports which applies.
+- Changing the password (`/auth/password/change`) bumps the stamp in the same
+  transaction as the new password, so every other session ends; the session
+  that made the change records the new stamp and stays signed in. A reset by
+  emailed link ends every existing session too, and the resetting browser is
+  signed in with a new session as before. Removing the SMS factor ends the
+  user's other sessions and keeps the current one.
+  `signOutOtherSessionsForContext:error:` does this from application code.
+- Deleting the `auth_users` row signs out every session of that user (see
+  above).
+- `authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days,
+  the same as the default `session.maxAgeSeconds`) limits how long a module or
+  OIDC sign-in lasts. The session cookie renews on use, but once this much time
+  has passed since sign-in (`auth_time`, which step-up does not change) the
+  session is signed out and the user signs in again. A session with no
+  recorded sign-in time is treated as expired.
+
+These apply to module sign-ins (local password, email link, stub). Sessions
+from a configured OIDC provider are subject to the absolute lifetime; whether
+they stay valid otherwise is decided by the application resolver (see above),
+so signing out clears them without a server-side record. Sessions application
+code establishes for identities the module does not own are not affected.
+
+Whether `auth_users.session_stamp` and `auth_revoked_sessions` exist is checked
+once per process (per database adapter) and cached, so a database without
+those migrations does not see a failing query on every request. Restart the
+application after running `arlen module migrate` for newly added objects to be
+used.
+
+Running `arlen module migrate` after upgrading is recommended: it applies
+`002_auth_session_stamp.sql`, which enables ending sessions by stamp, and
+`003_auth_revoked_sessions.sql`, which lets a sign-out refuse other copies of
+the session cookie. Until 002 runs, roles are still read live and deleted users
+are still signed out; only the stamp is skipped. The stamp comparison is not
+made, sign-ins do not record a stamp, `bumpSessionStampForSubject:error:` (and
+so password changes, sign out everywhere and admin-ui revocation) succeeds
+without changing it, and the revoked role is still denied. Until 003 runs,
+signing out still clears the session cookie and succeeds, but other copies of
+that cookie are not refused. For each missing migration the module logs one
+warning per process naming it.
+
+Any other lookup failure (for example the database is unreachable, or the
+`auth_users` table is missing) fails the request instead of continuing with the
+stored roles.
+
+The auth module always requires `database.connectionString`. Applications that
+do not install it and establish sessions with `ALNAuthSession` directly keep the
+roles they store in the session.
+
 ## Customization Hooks
 
 Use `authModule.hooks` for auth behavior and policy seams:
@@ -433,6 +553,11 @@ sendPasswordSetupEmail:YES
               context:ctx
                 error:&error];
 ```
+
+`baseURL` is used for the password setup link only when
+`authModule.publicBaseURL` is unset; a configured `publicBaseURL` always wins.
+Pass a fixed, configured value here, never one built from the request's `Host`
+or forwarding headers, because the link carries a password setup token.
 
 This flow is intended for app-owned invite-claim or verified email-link pages.
 It will:
@@ -675,6 +800,23 @@ under `identity["claims"]`. Normal OIDC `sub` validation still applies when usin
 explicit account-linking decision; nil rejects login. Arlen does not infer MFA
 assurance from the fact that a provider was used.
 
+To keep roles current for the life of a session, also implement the optional
+`refreshSessionDescriptorForSubject:provider:error:`. The module calls it on
+every request for a session from that provider, with the local subject the
+resolver returned at sign-in. Return a descriptor whose `roles` apply to the
+request, nil to sign the session out (for example a suspended person), or nil
+with an error to fail the request. Keep it to one indexed lookup; results are
+not cached. See [Sessions and Roles](#sessions-and-roles).
+
+```objc
+- (NSDictionary *)refreshSessionDescriptorForSubject:(NSString *)subject
+                                            provider:(NSString *)provider
+                                               error:(NSError **)error {
+  NSDictionary *person = [CompanyPeople activePersonForIdentifier:subject error:error];
+  return person ? @{ @"subject": subject, @"roles": person[@"roles"] ?: @[] } : nil;
+}
+```
+
 ### Provider assurance from amr and acr
 
 Module surfaces such as the admin UI need assurance level 2. A provider sign-in
@@ -740,9 +882,25 @@ re-authenticate; Arlen does not verify that it did.
 ### Defaults and Upgrade Behavior
 
 When any real OIDC provider is enabled, local password login and the stub
-provider default off. Explicit `localPassword.enabled` or
-`providers.stub.enabled` overrides are honored. Without real OIDC providers,
-the existing local-password and stub defaults remain enabled for compatibility.
+provider default off. Explicit `localPassword.enabled` overrides are honored.
+Without real OIDC providers, local-password login stays enabled for
+compatibility.
+
+The stub provider signs a visitor in without any credentials, so it is a
+development and test convenience only:
+
+- In the `development` and `test` environments it defaults on when no real
+  OIDC provider is enabled, and `providers.stub.enabled` is honored either way.
+- In every other environment (`production`, `staging`, or any custom name) it
+  defaults off. Setting `providers.stub.enabled = YES` there is refused: the
+  auth module's configuration is rejected. There is no override.
+- Even if a stub route is reached outside `development`/`test`, it answers 404
+  and the stub identity never creates or signs in a user.
+
+Production apps that use local passwords must set `authModule.publicBaseURL`
+when upgrading to auth 1.6.0; without it, password-reset and verification
+emails are not sent outside `development` and `test`.
+
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login
 page remains available and shows provider buttons without a password form.

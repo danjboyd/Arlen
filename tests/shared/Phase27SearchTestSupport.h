@@ -18,6 +18,11 @@ FOUNDATION_EXPORT NSString *Phase27SearchFixturesPath(NSString *filename);
 @interface Phase27SearchProvider : NSObject <ALNSearchResourceProvider>
 @end
 
+// Registers only role-gated resources (`products` and `finance`, both limited
+// to the `auditor` role).
+@interface Phase27SearchRoleGatedProvider : NSObject <ALNSearchResourceProvider>
+@end
+
 @interface Phase27SearchContextMiddleware : NSObject <ALNMiddleware>
 @end
 
