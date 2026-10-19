@@ -10,9 +10,10 @@ set +u
 source "$repo_root/tools/source_gnustep_env.sh"
 set -u
 
-make boomhauer
+python3 ./tools/ci/test_runtime_concurrency_probe.py
+make boomhauer runtime-concurrency-fixture
 python3 ./tools/ci/runtime_concurrency_probe.py \
-  --binary ./build/boomhauer \
+  --binary ./build/runtime-concurrency-fixture \
   --iterations "${ARLEN_RUNTIME_CONCURRENCY_ITERS:-2}"
 
 echo "ci: runtime concurrency gate complete"

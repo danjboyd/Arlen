@@ -724,3 +724,14 @@ through ResponseTests and MiddlewareTests, with static/error security-header
 checks in HTTPIntegrationTests. The optional `response-header-perf-bench` target
 provides reproducible local measurements without a timing gate or a new required
 CI lane.
+
+The Linux quality and sanitizer runtime concurrency probes assert that WebSocket
+channel clients cannot rebroadcast frames, in both concurrent and serialized
+modes. Echo coverage remains on `/ws/echo`; channel clients must stay connected
+and receive no client-originated frame. This follows the receive-only security
+contract already covered by HTTP integration tests.
+The same probe also verifies server-originated delivery to both subscribers
+(concurrent mode) and the single subscriber (serialized mode). Its separate
+`runtime-concurrency-fixture` executable accepts a command only through a pipe
+inherited from the test runner; ordinary `boomhauer` has no publishing hook or
+new network route. Failed probe runs retain their server log for diagnosis.

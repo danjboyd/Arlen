@@ -73,7 +73,7 @@ run_lane \
   "asan_ubsan_runtime_probe" \
   "true" \
   "runtime_concurrency_probe" \
-  bash -lc "make boomhauer && python3 ./tools/ci/runtime_concurrency_probe.py --binary ./build/boomhauer --iterations \"${ARLEN_SANITIZER_RUNTIME_ITERS:-1}\""
+  bash -lc "make boomhauer runtime-concurrency-fixture && python3 ./tools/ci/test_runtime_concurrency_probe.py && python3 ./tools/ci/runtime_concurrency_probe.py --binary ./build/runtime-concurrency-fixture --iterations \"${ARLEN_SANITIZER_RUNTIME_ITERS:-1}\""
 
 run_lane \
   "asan_ubsan_backend_parity" \

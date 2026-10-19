@@ -31,9 +31,10 @@ make test-unit
 if [[ "${ARLEN_SANITIZER_INCLUDE_INTEGRATION:-0}" == "1" ]]; then
   make test-integration
 fi
-make boomhauer
+python3 ./tools/ci/test_runtime_concurrency_probe.py
+make boomhauer runtime-concurrency-fixture
 python3 ./tools/ci/runtime_concurrency_probe.py \
-  --binary ./build/boomhauer \
+  --binary ./build/runtime-concurrency-fixture \
   --iterations "${ARLEN_SANITIZER_RUNTIME_ITERS:-1}"
 make test-data-layer
 
