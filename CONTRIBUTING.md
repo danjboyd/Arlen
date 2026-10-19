@@ -181,3 +181,12 @@ Open a bug report from the GitHub Issues tab. Useful reports include:
   problem before writing code.
 
 Thanks for helping make Arlen better.
+
+The required `linux-quality / quality-gate` also runs
+`python3 tests/performance/persistent_http.py` after building `boomhauer` with
+the supported clang/GNUstep toolchain. Two retained connections exercise both
+health and static-file responses; reconnects and incorrect responses fail.
+The policy in `tests/performance/policies/persistent_http.json` gates throughput,
+p95 latency, and Linux server CPU per request. Reports and server logs are in
+`build/perf/persistent_http.*`, included in existing CI artifacts. This extends
+the existing required check; branch-protection check names are unchanged.

@@ -1,0 +1,7 @@
+{
+  "connections": 2,
+  "requests_per_connection": 200,
+  "min_requests_per_second": 100,
+  "max_p95_ms": 100,
+  "max_server_cpu_us_per_request": 5000
+}

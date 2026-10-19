@@ -246,3 +246,7 @@ terms of the GNU Lesser General Public License as published by the Free
 Software Foundation, either version 2.1 of the License, or (at your option) any
 later version (LGPL-2.1-or-later), the same license family as GNUstep Base.
 See [LICENSE](LICENSE) for the full text.
+
+Contributor performance check: after building `boomhauer`, run
+`python3 tests/performance/persistent_http.py` to check persistent-connection
+HTTP and static-file throughput. See [CONTRIBUTING.md](CONTRIBUTING.md).

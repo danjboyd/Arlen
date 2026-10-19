@@ -668,3 +668,12 @@ included in the sanitizer matrix's full unit suite. It guards the
 operator sets (issue #49) by starting 32 threads on their first SQL build in
 each of many fresh processes. The companion source policy check runs with
 `BuildPolicyTests`. No required lane is added or renamed by this regression.
+
+The required `linux-quality / quality-gate` also runs
+`python3 tests/performance/persistent_http.py` after building `boomhauer` with
+the supported clang/GNUstep toolchain. Two retained connections exercise both
+health and static-file responses; reconnects and incorrect responses fail.
+The policy in `tests/performance/policies/persistent_http.json` gates throughput,
+p95 latency, and Linux server CPU per request. Reports and server logs are in
+`build/perf/persistent_http.*`, included in existing CI artifacts. This extends
+the existing required check; branch-protection check names are unchanged.
