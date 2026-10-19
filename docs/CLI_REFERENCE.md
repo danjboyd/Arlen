@@ -647,7 +647,7 @@ First-party module surfaces after install:
   from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
   Persisted notification writes coordinate across processes sharing one state path;
-  read-only processes refresh their cached view after a write or restart.
+  inbox, outbox, and preference reads refresh from the shared state file.
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`

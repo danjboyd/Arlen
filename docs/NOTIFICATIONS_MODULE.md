@@ -54,8 +54,10 @@ Production deployments should still use absolute paths under the release's
 `shared/` directory.
 State writes take a cross-process lock and merge each runtime's changed inbox,
 outbox, fanout, and preference records with the current file. Entry IDs are
-unique across workers. A runtime refreshes its in-memory view after a write or
-on restart; a process that only reads may temporarily show a cached view.
+unique across workers. Inbox, outbox, and preference reads refresh from the
+shared file. Inbox read-state and preference changes reload the authoritative
+state while holding the file lock, so a worker that started earlier can update
+entries written by another worker.
 
 Runtime access is available through `ALNNotificationsModuleRuntime`.
 
