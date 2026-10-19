@@ -247,6 +247,12 @@ accepted types no longer match HTML or SVG (a security fix).
 `search` moved to `1.1.0` to encode engine URL path segments with only
 unreserved characters and reject empty, `.` and `..` record identifiers and
 index names (a security fix).
+`auth` moved to `1.6.0` to refuse reused TOTP codes, limit failed TOTP and
+recovery-code attempts per account, slow down repeated failed password
+sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `004_auth_totp_limits`; run
+`arlen module migrate` after upgrading.
+`notifications` moved to `1.2.0` so `POST /notifications/api/queue` queues
+only for the signed-in user unless the caller has the `admin` role at AAL2.
 
 ## MCP tools
 

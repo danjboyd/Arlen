@@ -168,6 +168,31 @@ static NSDictionary *ALNResolvedAuthState(ALNContext *context) {
   return ALNSessionBackedAuthState(context);
 }
 
+// Session keys carried into the fresh session that a login or step-up starts.
+// Every other key written before (including `_csrf_token`, so a new CSRF token
+// is minted) is dropped. `return_to` lets an app remember where to send the
+// user after signing in.
+static NSArray<NSString *> *ALNAuthSessionPreservedKeys(void) {
+  return @[ @"return_to" ];
+}
+
+static void ALNAuthSessionStartFreshSession(ALNContext *context, NSDictionary *authState) {
+  NSMutableDictionary *session = [context session];
+  NSMutableDictionary *preserved = [NSMutableDictionary dictionary];
+  for (NSString *key in ALNAuthSessionPreservedKeys()) {
+    id value = session[key];
+    if (value != nil) {
+      preserved[key] = value;
+    }
+  }
+  // Same dictionary instance: callers may hold a reference to the session.
+  [session removeAllObjects];
+  [session addEntriesFromDictionary:preserved];
+  session[ALNAuthSessionStateKey] = authState;
+  [context.stash removeObjectForKey:ALNContextCSRFTokenStashKey];
+  [context markSessionDirty];
+}
+
 static NSString *ALNNewSessionIdentifier(void) {
   NSData *random = ALNSecureRandomData(16);
   return ALNLowercaseHexStringFromData(random);
@@ -313,9 +338,7 @@ static NSString *ALNNewSessionIdentifier(void) {
   }
   state[ALNAuthSessionIdentifierKey] = sessionID;
 
-  NSMutableDictionary *session = [context session];
-  session[ALNAuthSessionStateKey] = state;
-  [context markSessionDirty];
+  ALNAuthSessionStartFreshSession(context, state);
   return YES;
 }
 
@@ -396,8 +419,7 @@ static NSString *ALNNewSessionIdentifier(void) {
   state[ALNAuthSessionAssuranceLevelKey] = @(elevatedLevel);
   state[ALNAuthSessionMFASatisfiedAtKey] = @([timestamp timeIntervalSince1970]);
   state[ALNAuthSessionIdentifierKey] = sessionID;
-  session[ALNAuthSessionStateKey] = state;
-  [context markSessionDirty];
+  ALNAuthSessionStartFreshSession(context, state);
   return YES;
 }
 

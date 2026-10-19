@@ -35,6 +35,24 @@ typedef NS_ENUM(NSInteger, ALNTOTPErrorCode) {
                               period:(NSUInteger)period
                                error:(NSError *_Nullable *_Nullable)error;
 
+// Returns the TOTP time step (counter) that matched `code`, or NSNotFound when
+// the code does not match any step in the allowed window. Callers that must
+// reject reuse store the returned step and refuse codes at or below it.
++ (NSUInteger)matchedTimeStepForCode:(NSString *)code
+                              secret:(NSString *)secret
+                              atDate:(nullable NSDate *)date
+                               error:(NSError *_Nullable *_Nullable)error;
+
++ (NSUInteger)matchedTimeStepForCode:(NSString *)code
+                              secret:(NSString *)secret
+                              atDate:(nullable NSDate *)date
+                              digits:(NSUInteger)digits
+                              period:(NSUInteger)period
+                allowedPastIntervals:(NSUInteger)allowedPastIntervals
+              allowedFutureIntervals:(NSUInteger)allowedFutureIntervals
+                               error:(NSError *_Nullable *_Nullable)error;
+
+// BOOL wrappers around matchedTimeStepForCode:...; they do not track reuse.
 + (BOOL)verifyCode:(NSString *)code
             secret:(NSString *)secret
             atDate:(NSDate *)date

@@ -47,6 +47,13 @@ typedef NS_ENUM(NSInteger, ALNNotificationsModuleErrorCode) {
                                                                  error:
                                                                      (NSError *_Nullable *_Nullable)error;
 - (NSArray<NSString *> *)notificationsModuleDefaultChannels;
+// When a signed-in user queues this notification for themselves over HTTP
+// (below the admin role at AAL2), the module replaces every channel's target
+// with the caller's own: email goes only to their account address, in-app and
+// web push only to their subject. A webhook target cannot be replaced, so the
+// webhook channel is left out of those notifications unless this returns YES,
+// meaning the webhook URL never depends on the payload.
+- (BOOL)notificationsModuleAllowsWebhookForSelfQueuedNotifications;
 // The `webpush` channel. Keys: title (required unless nudge), body, url, tag,
 // topic (<= 32 base64url chars; collapses repeats), ttl (seconds), urgency
 // (very-low|low|normal|high), nudge (BOOL: send no content, the service worker

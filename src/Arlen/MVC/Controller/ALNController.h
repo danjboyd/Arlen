@@ -125,6 +125,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSDate *)authMFASatisfiedAt;
 - (nullable NSString *)authSessionIdentifier;
 - (BOOL)isMFAAuthenticated;
+// Both start a fresh session (see ALNAuthSession.h): earlier session keys other
+// than `return_to`, including the CSRF token, are dropped.
 - (BOOL)startAuthenticatedSessionForSubject:(NSString *)subject
                                    provider:(nullable NSString *)provider
                                     methods:(nullable NSArray *)methods

@@ -3253,6 +3253,91 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
                            error:nil];
 }
 
+- (void)testMigrationRunnerAppliesLowerNumberedFilesAddedAfterAHigherOne {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_gap"];
+  NSString *root = [self createTempDirectory];
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  // Migration versions are file names, so include the per-run table name to
+  // keep them unique across runs against the same database.
+  NSString *(^fileName)(NSString *) = ^NSString *(NSString *prefix) {
+    return [NSString stringWithFormat:@"%@_%@.sql", prefix, table];
+  };
+  NSDictionary<NSString *, NSString *> *initial = @{
+    fileName(@"001_create") : [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY)", table],
+    fileName(@"004_add_d") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN d TEXT", table],
+  };
+  for (NSString *name in initial) {
+    XCTAssertTrue([initial[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                  atomically:YES
+                                    encoding:NSUTF8StringEncoding
+                                       error:NULL]);
+  }
+  NSArray *applied = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&applied
+                                                    error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)2, [applied count]);
+
+  // A release can add migrations numbered below one a database already has;
+  // the runner tracks applied versions as a set, so they still run, in order.
+  NSDictionary<NSString *, NSString *> *later = @{
+    fileName(@"002_add_b") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN b TEXT", table],
+    fileName(@"003_add_c") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN c TEXT", table],
+  };
+  for (NSString *name in later) {
+    XCTAssertTrue([later[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                atomically:YES
+                                  encoding:NSUTF8StringEncoding
+                                     error:NULL]);
+  }
+  NSArray *gapFiles = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&gapFiles
+                                                    error:&error], @"%@", error);
+  NSMutableArray *gapNames = [NSMutableArray array];
+  for (NSString *file in gapFiles) {
+    [gapNames addObject:[file lastPathComponent]];
+  }
+  XCTAssertEqualObjects((@[ fileName(@"002_add_b"), fileName(@"003_add_c") ]), gapNames);
+
+  NSArray *columns = [database executeQuery:@"SELECT column_name FROM information_schema.columns "
+                                             "WHERE table_name = $1 ORDER BY column_name"
+                                 parameters:@[ table ]
+                                      error:&error];
+  NSMutableArray *columnNames = [NSMutableArray array];
+  for (NSDictionary *row in columns) {
+    [columnNames addObject:row[@"column_name"] ?: @""];
+  }
+  XCTAssertEqualObjects((@[ @"b", @"c", @"d", @"id" ]), columnNames);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+  for (NSString *prefix in @[ @"001_create", @"002_add_b", @"003_add_c", @"004_add_d" ]) {
+    NSString *file = [migrationsDir stringByAppendingPathComponent:fileName(prefix)];
+    (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                        parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                             error:nil];
+  }
+}
+
 - (void)testMigrationRunnerAppliesMultiStatementFile {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

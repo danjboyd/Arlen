@@ -592,7 +592,8 @@ database.acquireTimeout = 2.0;  // seconds; 0 (default) fails immediately
   seconds) and avoid nested acquisition.
 - `poolDiagnostics` returns `max_connections`, `in_use_connections`,
   `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-  `acquire_wait_seconds_total` and `pool_exhausted_count`. A rising
+  `acquire_wait_seconds_total`, `pool_exhausted_count` and
+  `connection_retry_count` (see below). A rising
   `pool_exhausted_count` or `acquire_wait_seconds_total` means the pool is too
   small for the load.
 - `acquireTimeout` is an optional `ALNDatabaseAdapter` property; `ALNGDL2Adapter`
@@ -629,8 +630,59 @@ database.connectionLivenessChecksEnabled = NO;         // never probe
 ```
 
 Before the threshold existed, every reuse ran `SELECT 1`. Set the threshold to
-`0` to get that back. If the server ends a session that was used within the
-threshold (for example a restart in the middle of traffic), the next statement
-on that connection fails. The failure closes the connection, so the pool does
-not reuse it. The instance `capabilityMetadata` reports the setting as
+`0` to get that back.
+
+If the server ends a session that was used within the threshold (a restart,
+failover, idle timeout or `pg_terminate_backend` in the middle of traffic),
+the next statement on that connection fails. `ALNPg` reports that as
+`ALNPgErrorConnectionFailed` with `ALNPgErrorConnectionLostKey = YES` in
+`userInfo`, whatever the last result said, and closes the connection, so a
+dead connection is never handed out again.
+
+Before each statement is sent, `ALNPg` reads whatever the server has already
+sent on the connection (without waiting). A session the server ended while
+the connection sat idle shows up there as a FATAL message or a closed
+socket; the statement is then not sent at all, and the error also carries
+`ALNPgErrorStatementNotSentKey = YES`. `ALNPg` sends with libpq's
+synchronous calls, which cannot tell a failed send from a failure while
+waiting for the result, so this check before sending is what decides that a
+statement never reached the server.
+
+Retry policy for the pool's own convenience methods (a statement is retried
+at most once, only when the connection came from the idle list, and the
+other idle connections are closed first):
+
+- Reads (`executeQuery`, `executeQueryResult` and `executeBuilderQuery` whose
+  SQL is a plain read): retried when the connection was lost at any point. A
+  plain read starts with `SELECT`, `WITH`, `VALUES`, `TABLE`, `SHOW` or
+  `EXPLAIN` (without `ANALYZE`) and contains no word that writes, locks or
+  changes session state (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`,
+  `LOCK`, `FOR SHARE`, `NEXTVAL`, `pg_advisory_*`, and so on). An
+  `INSERT ... RETURNING` through `executeQuery` is a write. A `SELECT` that
+  calls a function with side effects is still classified as a read; run it
+  with `executeCommand`.
+- Writes (`executeCommand`, `executeBuilderCommand`, and every statement
+  that is not a plain read): retried only when the statement was not sent
+  (`ALNPgErrorStatementNotSentKey`). If it was sent and the connection
+  failed while waiting for the result, the server may have run it, so the
+  connection-lost error is returned and the caller decides. Running a write
+  twice is worse than one failed request.
+- Never when a transaction is open on the connection, whether started with
+  `beginTransaction:` or by sending `BEGIN` by hand: the earlier statements
+  were rolled back, so running the failed one on its own would apply only
+  part of the transaction. A connection released with a hand-opened
+  transaction still open is closed, not reused.
+- `withTransaction:` restarts the transaction once on a new connection only
+  when `BEGIN` itself failed on a connection from the idle list (nothing has
+  run). When the connection is lost inside the block or at `COMMIT`, the
+  server rolled back what had run and the connection-lost error is returned.
+- `withTransactionReplayingOnConnectionLoss:` additionally runs the whole
+  block again from `BEGIN` on a new connection, once, when the connection is
+  lost inside the block or at `COMMIT`. Use it only for blocks that are safe
+  to run twice (idempotent, or guarded by compare-and-set), since a
+  connection lost at `COMMIT` may follow a successful commit.
+
+`connection_retry_count` in `poolDiagnostics` counts retries and restarts.
+`executeCommandBatch` and statements on a connection you acquired yourself
+are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.
