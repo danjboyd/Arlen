@@ -671,6 +671,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, copy, readwrite) NSDictionary *spaFallback;
 @property(nonatomic, strong) ALNRoute *spaFallbackRoute;
 @property(nonatomic, strong) NSError *spaFallbackConfigError;
+@property(nonatomic, strong, readwrite, nullable) NSError *moduleLoadError;
 @property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
@@ -725,6 +726,13 @@ static BOOL ALNInvokeRouteAction(id controller,
                                    rewrittenPath:(NSString *_Nullable *_Nullable)rewrittenPath;
 
 @end
+
+// Development and test keep serving after a module fails to load, so the
+// error can be fixed with the app running; every other environment refuses to
+// start rather than serve without the module.
+static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
+  return ALNEnvironmentIsDevelopmentLike(environment);
+}
 
 @implementation ALNApplication
 
@@ -1078,8 +1086,13 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
 - (instancetype)initWithConfig:(NSDictionary *)config {
   self = [super init];
   if (self) {
+    _environment = [ALNNormalizedEnvironmentName(config[@"environment"]) copy];
+    if (![config[@"environment"] isEqual:_environment]) {
+      NSMutableDictionary *normalized = [NSMutableDictionary dictionaryWithDictionary:config ?: @{}];
+      normalized[@"environment"] = _environment;
+      config = normalized;
+    }
     _config = [config copy] ?: @{};
-    _environment = [_config[@"environment"] copy] ?: @"development";
     _router = [[ALNRouter alloc] init];
     _logger = [[ALNLogger alloc] initWithFormat:_config[@"logFormat"] ?: @"text"];
     _metrics = [[ALNMetricsRegistry alloc] init];
@@ -2515,7 +2528,7 @@ static BOOL ALNOpenAPIEnabled(ALNApplication *application) {
 
 static BOOL ALNOpenAPIDocsUIEnabled(ALNApplication *application) {
   NSDictionary *openapi = ALNOpenAPIConfig(application.config);
-  BOOL defaultEnabled = ![application.environment isEqualToString:@"production"];
+  BOOL defaultEnabled = ALNEnvironmentIsDevelopmentLike(application.environment);
   return ALNBoolConfigValue(openapi[@"docsUIEnabled"], defaultEnabled);
 }
 
@@ -3168,7 +3181,7 @@ static BOOL ALNReadinessRequiresClusterQuorum(ALNApplication *application) {
 static BOOL ALNReadinessRequiresMigrations(ALNApplication *application) {
   NSDictionary *observability = ALNObservabilityConfig(application);
   return ALNBoolConfigValue(observability[@"readinessRequiresMigrations"],
-                            [application.environment isEqualToString:@"production"]);
+                            !ALNEnvironmentIsDevelopmentLike(application.environment));
 }
 
 static NSString *ALNClusterCoordinationStatus(ALNApplication *application) {
@@ -3972,8 +3985,7 @@ static void ALNApplyInternalErrorResponse(ALNApplication *application,
   // Only development and test get the detailed page (reason, stack, paths);
   // staging, preview and other environments are treated like production (#215).
   NSString *environment = application.environment ?: @"";
-  BOOL production = !([environment isEqualToString:@"development"] ||
-                      [environment isEqualToString:@"test"]);
+  BOOL production = !ALNEnvironmentIsDevelopmentLike(environment);
   BOOL apiOnly = ALNBoolConfigValue(application.config[@"apiOnly"], NO);
   BOOL prefersJSON = ALNRequestPrefersJSON(request, apiOnly);
 
@@ -4537,17 +4549,29 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+// A module that fails to load stops module loading. Outside development and
+// test, -startWithError: then refuses to start; in development and test the
+// app keeps serving and the failure is logged as an error.
 - (void)loadConfiguredModules {
   NSError *error = nil;
-  NSArray<id<ALNModule>> *modules = [ALNModuleSystem loadModulesForApplication:self error:&error];
-  if (modules == nil) {
-    if (error != nil) {
-      [self.logger warn:@"module load skipped"
-                 fields:@{
-                   @"error" : error.localizedDescription ?: @"unknown",
-                 }];
+  NSMutableArray<id<ALNModule>> *modules = [NSMutableArray array];
+  BOOL loaded = [ALNModuleSystem loadModulesForApplication:self loadedModules:modules error:&error];
+  if (!loaded) {
+    self.moduleLoadError = error ?: [NSError errorWithDomain:ALNModuleSystemErrorDomain
+                                                        code:24
+                                                    userInfo:@{
+                                                      NSLocalizedDescriptionKey : @"module load failed",
+                                                    }];
+    NSDictionary *info = self.moduleLoadError.userInfo ?: @{};
+    NSMutableDictionary *fields = [NSMutableDictionary dictionary];
+    fields[@"error"] = self.moduleLoadError.localizedDescription ?: @"unknown";
+    for (NSString *key in @[ @"module", @"key_path", @"not_loaded" ]) {
+      if (info[key] != nil) {
+        fields[key] = info[key];
+      }
     }
-    return;
+    fields[@"environment"] = self.environment ?: @"";
+    [self.logger error:@"module load failed" fields:fields];
   }
 
   for (id<ALNModule> module in modules) {
@@ -5257,6 +5281,10 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return [json writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
+- (BOOL)moduleLoadErrorPreventsStartup {
+  return self.moduleLoadError != nil && !ALNModuleLoadFailureIsTolerated(self.environment);
+}
+
 - (BOOL)startWithError:(NSError **)error {
   if (self.isStarted) {
     return YES;
@@ -5286,6 +5314,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
   if (self.spaFallbackConfigError != nil) {
     if (error != NULL) {
       *error = self.spaFallbackConfigError;
+    }
+    return NO;
+  }
+  if ([self moduleLoadErrorPreventsStartup]) {
+    if (error != NULL) {
+      *error = self.moduleLoadError;
     }
     return NO;
   }
@@ -5506,7 +5540,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     } else {
       NSString *cookieName = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
       NSUInteger maxAge = ALNUIntConfigValue(session[@"maxAgeSeconds"], 1209600, 1);
-      BOOL secureDefault = [self.environment isEqualToString:@"production"];
+      BOOL secureDefault = !ALNEnvironmentIsDevelopmentLike(self.environment);
       BOOL secure = ALNBoolConfigValue(session[@"secure"], secureDefault);
       NSString *sameSite = ALNStringConfigValue(session[@"sameSite"], @"Lax");
       [self addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:secret

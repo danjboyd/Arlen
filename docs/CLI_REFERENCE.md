@@ -563,6 +563,12 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
    framework checkout, or the running `arlen` binary's checkout), typically
    after moving the framework pin without re-running `module upgrade`
+ - `module_sessions_disabled`: an installed module's defaults enable sessions,
+   but `config/app.plist` sets `session.enabled = NO` (the `arlen new`
+   app.plist does), so the module's sessions never turn on
+- does not run module code: a module that fails to configure when the app
+  starts stops startup outside `development` and `test` (see
+  [Modules](MODULES.md#3-list-and-validate))
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -1290,6 +1296,12 @@ Behavior:
 
 - in app-root mode, runs `bin/boomhauer --no-watch --prepare-only` before launching workers
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
+- worker startup failures (a worker that exits before serving, e.g. a module
+  that fails to load) are printed once per distinct error, respawned with
+  exponential backoff up to the `respawnBackoffMaxMs` propane accessory, and
+  after `startupFailureLimit` consecutive startup failures (propane
+  accessory, default `5`) propane exits with status `3`; see
+  [Propane](PROPANE.md#propane-accessories)
 
 Core options:
 

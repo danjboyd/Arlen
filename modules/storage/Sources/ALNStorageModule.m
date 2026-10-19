@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNStorageModule.h"
 
 #import "../..//admin-ui/Sources/ALNAdminUIModule.h"
@@ -94,7 +95,7 @@ static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = SMLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:
@@ -206,8 +207,7 @@ static NSError *SMError(ALNStorageModuleErrorCode code, NSString *message, NSDic
 static const NSUInteger SMMinimumSigningSecretLength = 32;
 
 static BOOL SMEnvironmentAllowsEphemeralSigningKey(NSString *environment) {
-  NSString *normalized = [SMTrimmedString(environment) lowercaseString];
-  return [normalized isEqualToString:@"development"] || [normalized isEqualToString:@"test"];
+  return ALNEnvironmentIsDevelopmentLike(environment);
 }
 
 static NSData *SMEphemeralSigningKeyData(void) {

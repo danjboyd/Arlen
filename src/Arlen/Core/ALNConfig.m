@@ -388,6 +388,32 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   };
 }
 
+ALNEnvironmentKind ALNEnvironmentKindForName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  if ([trimmed isEqualToString:@"development"]) {
+    return ALNEnvironmentKindDevelopment;
+  }
+  if ([trimmed isEqualToString:@"test"]) {
+    return ALNEnvironmentKindTest;
+  }
+  return ALNEnvironmentKindProduction;
+}
+
+BOOL ALNEnvironmentIsDevelopmentLike(NSString *name) {
+  return ALNEnvironmentKindForName(name) != ALNEnvironmentKindProduction;
+}
+
+NSString *ALNNormalizedEnvironmentName(NSString *name) {
+  NSString *trimmed = [name isKindOfClass:[NSString class]]
+                          ? [[name stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+                                lowercaseString]
+                          : @"";
+  return ([trimmed length] > 0) ? trimmed : @"development";
+}
+
 @implementation ALNConfig
 
 + (NSDictionary *)loadConfigAtRoot:(NSString *)rootPath
@@ -400,7 +426,8 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
                        environment:(NSString *)environment
                     includeModules:(BOOL)includeModules
                              error:(NSError **)error {
-  NSString *env = ([environment length] > 0) ? environment : @"development";
+  // `--env PRODUCTION` must load environments/production.plist.
+  NSString *env = ALNNormalizedEnvironmentName(environment);
   NSString *configRoot = [rootPath stringByAppendingPathComponent:@"config"];
   NSString *basePath = [configRoot stringByAppendingPathComponent:@"app.plist"];
   NSString *envPath =
@@ -1088,13 +1115,14 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     config[@"trustedProxyCIDRs"] = configuredTrustedProxyCIDRs;
   }
   // Stage timing costs CPU on every request, and the X-Arlen-*-Ms response
-  // headers give clients a timing oracle, so production leaves both off
-  // (#215, #244). performanceHeaders only matters while performanceLogging is on.
+  // headers give clients a timing oracle, so production-like environments
+  // (every one but development and test) leave both off (#215, #244).
+  // performanceHeaders only matters while performanceLogging is on.
   if (config[@"performanceLogging"] == nil) {
-    config[@"performanceLogging"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceLogging"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"performanceHeaders"] == nil) {
-    config[@"performanceHeaders"] = @(![env isEqualToString:@"production"]);
+    config[@"performanceHeaders"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (config[@"serveStatic"] == nil) {
     config[@"serveStatic"] = @([env isEqualToString:@"development"] && !apiOnlyMode);
@@ -1192,8 +1220,9 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalSession[@"maxAgeSeconds"] == nil) {
     finalSession[@"maxAgeSeconds"] = @(1209600);
   }
+  // Production-like environments (staging, qa, ...) get Secure cookies too.
   if (finalSession[@"secure"] == nil) {
-    finalSession[@"secure"] = @([env isEqualToString:@"production"]);
+    finalSession[@"secure"] = @(!ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalSession[@"sameSite"] == nil) {
     finalSession[@"sameSite"] = @"Lax";
@@ -1268,7 +1297,7 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
     finalOpenAPI[@"enabled"] = @(YES);
   }
   if (finalOpenAPI[@"docsUIEnabled"] == nil) {
-    finalOpenAPI[@"docsUIEnabled"] = @(![env isEqualToString:@"production"]);
+    finalOpenAPI[@"docsUIEnabled"] = @(ALNEnvironmentIsDevelopmentLike(env));
   }
   if (finalOpenAPI[@"title"] == nil) {
     finalOpenAPI[@"title"] = @"Arlen API";
@@ -1358,9 +1387,10 @@ static NSDictionary *ALNSecurityProfileDefaults(NSString *profileName) {
   if (finalObservability[@"readinessRequiresClusterQuorum"] == nil) {
     finalObservability[@"readinessRequiresClusterQuorum"] = @(NO);
   }
-  // Pending schema migrations fail /readyz by default in production (GitHub issue 90).
+  // Pending schema migrations fail /readyz by default outside development and
+  // test (GitHub issue 90).
   if (finalObservability[@"readinessRequiresMigrations"] == nil) {
-    finalObservability[@"readinessRequiresMigrations"] = @([config[@"environment"] isEqual:@"production"]);
+    finalObservability[@"readinessRequiresMigrations"] = @(!ALNEnvironmentIsDevelopmentLike(config[@"environment"]));
   }
   if (finalObservability[@"metricsEnabled"] == nil) {
     finalObservability[@"metricsEnabled"] = @(YES);

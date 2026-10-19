@@ -3604,6 +3604,19 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
 @end
 
+void ALNReportStartupFailure(NSString *prefix, NSString *message) {
+  NSString *line = [NSString stringWithFormat:@"%@: startup failed: %@", prefix ?: @"server",
+                                              message ?: @"unknown error"];
+  const char *failurePath = getenv("ARLEN_STARTUP_FAILURE_FILE");
+  if (failurePath != NULL && failurePath[0] != '\0') {
+    NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    if ([data writeToFile:[NSString stringWithUTF8String:failurePath] atomically:NO]) {
+      return;
+    }
+  }
+  fprintf(stderr, "%s\n", [line UTF8String]);
+}
+
 @implementation ALNHTTPServer
 
 - (instancetype)initWithApplication:(ALNApplication *)application
@@ -4880,8 +4893,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
   NSError *startupError = nil;
   if (![self.application startWithError:&startupError]) {
-    fprintf(stderr, "%s: startup failed: %s\n", [self.serverName UTF8String],
-            [[startupError localizedDescription] UTF8String]);
+    ALNReportStartupFailure(self.serverName ?: @"server", [startupError localizedDescription]);
     return 1;
   }
 

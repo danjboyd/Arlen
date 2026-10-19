@@ -192,6 +192,47 @@
   `title` could add markup to the layout. Slot content filled with
   `slot`/`endslot` and the plain `<%@ yield %>` page body are still emitted
   as-is.
+- **Breaking (non-development environments other than `production`):**
+  environments other than `development` and `test` (`staging`, `qa`,
+  `preview`, ...) now get the same defaults as `production`: a `Secure` session
+  cookie, no `/openapi` docs UI, no performance timing logs or `X-Arlen-*-Ms`
+  headers, and `/readyz` failing while migrations are pending. Before, only an
+  environment named exactly `production` got them. An explicit setting still
+  wins, e.g. `session.secure = NO` for a staging site served over plain HTTP.
+- **Breaking (production):** an app whose configured module fails to load or
+  configure now refuses to start outside the `development` and `test`
+  environments. The server and `jobs-worker` exit non-zero with
+  `startup failed: module <id> failed to load: <reason>`. Before, the app logged
+  one `module load skipped` warning, loaded no modules at all, and kept serving
+  its own routes. In `development` and `test` the app keeps serving and logs
+  `module load failed` at error level, naming the module, its config key and
+  the modules not loaded; modules loaded before the failing one stay loaded.
+  `arlen module doctor` adds a `module_sessions_disabled` warning for a module
+  that needs sessions while `config/app.plist` sets `session.enabled = NO`
+  (#294).
+- `propane` no longer respawns a worker that fails at startup in a tight loop.
+  It prints each distinct startup error once (`worker startup failed (same
+  error) xN` for repeats), backs off exponentially from `respawnDelayMs` up to
+  the new `respawnBackoffMaxMs` propane accessory (default 30 s), and after
+  `startupFailureLimit` consecutive startup failures (propane accessory,
+  default 5) exits with status `3` so the service manager reports a failed
+  unit. Workers report startup errors through `ARLEN_STARTUP_FAILURE_FILE`,
+  which propane sets (#294).
+- A module load error names the config key whether the module reports it as
+  `key_path`, `config_key` or `keyPath`, including on an underlying error.
+- Environment names are classified once, ignoring case and surrounding
+  whitespace: `ALNEnvironmentKindForName()` and
+  `ALNEnvironmentIsDevelopmentLike()` in `ALNConfig.h`. Core uses them for the
+  module-load startup check and the detailed error page, and the `auth`
+  (OIDC loopback redirects), `jobs`, `notifications`, `search` and `storage`
+  modules use them for their development/test checks (`auth` 1.5.4, `jobs`
+  1.1.2, `notifications` 1.1.4, `search` 1.0.5, `storage` 1.1.3).
+- Config loading normalizes the environment name (trimmed, lowercased) before
+  choosing `config/environments/<name>.plist`. Before, `--env PRODUCTION`
+  counted as production but skipped `production.plist`, so its overrides
+  silently did not apply. `application.environment` and
+  `config[@"environment"]` hold the normalized name
+  (`ALNNormalizedEnvironmentName()` in `ALNConfig.h`).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

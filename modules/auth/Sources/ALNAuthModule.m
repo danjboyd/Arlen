@@ -1,3 +1,4 @@
+#import "ALNConfig.h"
 #import "ALNAuthModule.h"
 
 #import <dispatch/dispatch.h>
@@ -1261,8 +1262,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   id transport = hasOIDC ? AMInstantiateHookClass(providerHooks, @"oidcTransportClass",
                                                  @protocol(ALNAuthModuleOIDCTransport), error) : nil;
   if (hasOIDC && AMTrimmedString(providerHooks[@"oidcTransportClass"]).length && !transport) return NO;
-  BOOL allowLoopbackHTTPRedirect = [self.environmentName isEqualToString:@"development"] ||
-                                   [self.environmentName isEqualToString:@"test"];
+  BOOL allowLoopbackHTTPRedirect = ALNEnvironmentIsDevelopmentLike(self.environmentName);
   NSMutableDictionary *oidcProviders = [NSMutableDictionary dictionary];
   NSMutableDictionary *providerFailureRedirects = [NSMutableDictionary dictionary];
   NSMutableArray *loginProviders = [self.loginProviders mutableCopy];
