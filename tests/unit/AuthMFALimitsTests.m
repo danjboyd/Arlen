@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../shared/ALNTestSupport.h"
 
 #import "ALNApplication.h"
 #import "ALNAuthModule.h"
@@ -710,7 +711,7 @@
   }
                                                csrfEnabled:NO
                                                mailAdapter:mail];
-  NSString *address = [NSString stringWithFormat:@"198.51.100.%u", 100U + (unsigned)arc4random_uniform(100)];
+  NSString *address = [NSString stringWithFormat:@"198.51.100.%u", 100U + (unsigned)ALNTestRandomUniform(100)];
   NSMutableArray *emails = [NSMutableArray array];
   for (NSUInteger index = 0; index < 3; index++) {
     [emails addObject:[self registeredEmailWithPassword:@"mfa-limits-password-123" app:app]];
