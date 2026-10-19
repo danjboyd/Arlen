@@ -15,9 +15,19 @@
 #import "ALNRoutePolicyMiddleware.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNSessionMiddleware.h"
+#import "ALNSecurityHeadersMiddleware.h"
 #import "../shared/ALNWebTestSupport.h"
 
 static NSUInteger MiddlewarePingInvocationCount = 0;
+
+@interface DynamicSecurityHeadersMiddleware : ALNSecurityHeadersMiddleware
+@property(nonatomic, copy) NSString *dynamicValue;
+@end
+@implementation DynamicSecurityHeadersMiddleware
+- (NSDictionary<NSString *, NSString *> *)responseHeaders {
+  return @{ @"X-Dynamic" : self.dynamicValue ?: @"first", @"X-Injected" : @"a\r\nb" };
+}
+@end
 
 @interface MiddlewareFormController : ALNController
 @end
@@ -1340,6 +1350,22 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   ALNAssertResponseHeaderEquals(response, @"X-Content-Type-Options", @"nosniff");
   ALNAssertResponseHeaderEquals(response, @"X-Frame-Options", @"SAMEORIGIN");
   ALNAssertResponseHeaderEquals(response, @"Content-Security-Policy", @"default-src 'self'");
+}
+
+- (void)testSecurityHeaderSubclassRetainsValidatedDynamicOverrides {
+  DynamicSecurityHeadersMiddleware *middleware = [[DynamicSecurityHeadersMiddleware alloc]
+      initWithContentSecurityPolicy:@"default-src 'self'"];
+  ALNWebTestHarness *harness = [ALNWebTestHarness harnessWithConfig:@{
+      @"environment" : @"test", @"securityHeaders" : @{ @"enabled" : @NO } }
+      routeMethod:@"GET" path:@"/ping" routeName:@"ping"
+      controllerClass:[MiddlewareFormController class] action:@"ping" middlewares:@[middleware]];
+  ALNResponse *first = [harness dispatchMethod:@"GET" path:@"/ping"];
+  XCTAssertEqualObjects(@"first", [first headerForName:@"x-dynamic"]);
+  XCTAssertNil([first headerForName:@"x-injected"]);
+  middleware.dynamicValue = @"second";
+  ALNResponse *second = [harness dispatchMethod:@"GET" path:@"/ping"];
+  XCTAssertEqualObjects(@"second", [second headerForName:@"x-dynamic"]);
+  XCTAssertNil([second headerForName:@"x-injected"]);
 }
 
 @end

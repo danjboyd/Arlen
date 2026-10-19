@@ -1788,3 +1788,8 @@ legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup 
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.
+
+`make response-header-perf-bench` builds the optional focused header-construction
+benchmark. Run `./build/response-header-perf-bench 20000` (`.exe` on Windows) to
+compare middleware and dynamic-header construction; see
+[Performance Profiles](internal/PERFORMANCE_PROFILES.md) for methodology.

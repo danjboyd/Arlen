@@ -485,3 +485,9 @@ legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup 
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.
+
+Default security headers are validated once when the application is configured
+and applied without replacing response-specific values. Public header setters
+continue to reject invalid names and CR/LF/NUL injection. For local performance
+investigation, `make response-header-perf-bench` builds an optional focused
+benchmark; see [Performance Profiles](internal/PERFORMANCE_PROFILES.md).

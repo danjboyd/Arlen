@@ -718,3 +718,9 @@ Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
 need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
 CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup rules.
+
+Header-construction optimization regressions run in the existing unit lane
+through ResponseTests and MiddlewareTests, with static/error security-header
+checks in HTTPIntegrationTests. The optional `response-header-perf-bench` target
+provides reproducible local measurements without a timing gate or a new required
+CI lane.

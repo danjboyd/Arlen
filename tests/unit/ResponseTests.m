@@ -2,11 +2,43 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNResponse.h"
+#import "ALNResponseHeaderInternal.h"
 
 @interface ResponseTests : XCTestCase
 @end
 
 @implementation ResponseTests
+
+- (void)testPreparedHeadersPreserveValidationSnapshotsOrderingAndOverrides {
+  NSMutableString *name = [@" X-Caf\u00e9 " mutableCopy];
+  NSMutableString *value = [@"caf\u00e9 \U0001F680" mutableCopy];
+  const unichar zero[] = { 'a', 0, 'b' };
+  NSString *nul = [NSString stringWithCharacters:zero length:3];
+  NSMutableDictionary *input = [@{@" X-Z " : value, @"X-A" : @"first",
+      name : @"bad name", @"X-Bad\r\n" : @"bad", @"X-Nul" : nul,
+      @"X-Newline" : @"a\nb", @"Set-Cookie" : @"default=1"} mutableCopy];
+  ALNPreparedResponseHeaders *prepared = [[ALNPreparedResponseHeaders alloc] initWithHeaders:input];
+  [value setString:@"mutated"];
+  [input removeAllObjects];
+  ALNResponse *response = [[ALNResponse alloc] init];
+  [response setHeader:@"X-A" value:@"override"];
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"one=1"]);
+  XCTAssertTrue([response appendHeader:@"Set-Cookie" value:@"two=2"]);
+  [response aln_setPreparedHeadersIfMissing:prepared];
+  XCTAssertEqualObjects(@"caf\u00e9 \U0001F680", [response headerForName:@"x-z"]);
+  XCTAssertEqualObjects(@"override", [response headerForName:@"x-a"]);
+  XCTAssertEqualObjects((@[@"one=1", @"two=2"]), [response headerValuesForName:@"set-cookie"]);
+  XCTAssertNil([response headerForName:@"x-nul"]);
+  XCTAssertNil([response headerForName:@"x-newline"]);
+  NSString *wire = [[NSString alloc] initWithData:response.serializedHeaderData encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([wire rangeOfString:@"X-A: override"].location < [wire rangeOfString:@"X-Z: caf"].location);
+  NSData *cached = response.serializedHeaderData;
+  [response aln_setPreparedHeadersIfMissing:prepared];
+  XCTAssertEqual(cached, response.serializedHeaderData);
+  [response removeHeaderForName:@"x-z"];
+  [response aln_setPreparedHeadersIfMissing:prepared];
+  XCTAssertEqualObjects(@"caf\u00e9 \U0001F680", [response headerForName:@"x-z"]);
+}
 
 - (void)testSerializedHeaderDataOmitsBodyBytes {
   ALNResponse *response = [[ALNResponse alloc] init];

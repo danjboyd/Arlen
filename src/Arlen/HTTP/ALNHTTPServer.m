@@ -1,4 +1,5 @@
 #import "ALNHTTPServer.h"
+#import "ALNResponseHeaderInternal.h"
 
 #import <errno.h>
 #import <fcntl.h>
@@ -4877,7 +4878,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
           [errorResponse setHeader:@"Connection" value:@"close"];
           // These responses are written before the application runs, so add
           // the configured security headers here (#253).
-          [errorResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
+          ALNApplyBaselineSecurityHeaders(self.application, errorResponse);
           ALNEnsurePerformanceHeaders(errorResponse,
                                       performanceHeaders,
                                       parseMs,
@@ -4911,7 +4912,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
               continue;
             }
             // Static responses bypass the middleware chain (GitHub issue 81).
-            [staticResponse setHeadersIfMissing:self.application.baselineSecurityHeaders];
+            ALNApplyBaselineSecurityHeaders(self.application, staticResponse);
             // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
             BOOL keepAlive = ALNShouldKeepAliveForRequest(request, staticResponse);
             [staticResponse setHeader:@"Connection" value:(keepAlive ? @"keep-alive" : @"close")];

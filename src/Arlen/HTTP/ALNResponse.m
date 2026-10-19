@@ -1,4 +1,5 @@
 #import "ALNResponse.h"
+#import "ALNResponseHeaderInternal.h"
 
 #import "ALNJSONSerialization.h"
 #import <dispatch/dispatch.h>
@@ -110,35 +111,54 @@ static BOOL ALNHeaderNameIsValid(NSString *name) {
   if (![name isKindOfClass:[NSString class]] || [name length] == 0) {
     return NO;
   }
-  for (NSUInteger index = 0; index < [name length]; index++) {
-    unichar c = [name characterAtIndex:index];
-    if (c > 127) {
-      return NO;
-    }
-    BOOL isAlphaNum = (BOOL)(isalnum(c) != 0);
-    BOOL isTokenSymbol = (c == '!' || c == '#' || c == '$' || c == '%' || c == '&' || c == '\'' ||
-                          c == '*' || c == '+' || c == '-' || c == '.' || c == '^' || c == '_' ||
-                          c == '`' || c == '|' || c == '~');
-    if (!isAlphaNum && !isTokenSymbol) {
-      return NO;
-    }
-  }
-  return YES;
+  static NSCharacterSet *invalid;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    invalid = [[NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~"] invertedSet];
+  });
+  return [name rangeOfCharacterFromSet:invalid].location == NSNotFound;
 }
 
 static BOOL ALNHeaderValueContainsForbiddenBytes(NSString *value) {
   if (![value isKindOfClass:[NSString class]]) {
     return YES;
   }
-  NSUInteger length = [value length];
-  for (NSUInteger idx = 0; idx < length; idx++) {
-    unichar c = [value characterAtIndex:idx];
-    if (c == '\r' || c == '\n' || c == '\0') {
-      return YES;
-    }
-  }
-  return NO;
+  static NSCharacterSet *forbidden;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    const unichar characters[] = { '\r', '\n', 0 };
+    forbidden = [NSCharacterSet characterSetWithCharactersInString:
+        [NSString stringWithCharacters:characters length:3]];
+  });
+  return [value rangeOfCharacterFromSet:forbidden].location != NSNotFound;
 }
+
+@interface ALNPreparedResponseHeaders ()
+@property(nonatomic, copy) NSArray<NSArray<NSString *> *> *entries;
+@end
+
+@implementation ALNPreparedResponseHeaders
+- (instancetype)initWithHeaders:(NSDictionary<NSString *, NSString *> *)headers {
+  self = [super init];
+  if (self) {
+    NSMutableArray *entries = [NSMutableArray array];
+    for (id rawName in headers) {
+      if (ALNHeaderValueContainsForbiddenBytes(rawName)) continue;
+      NSString *key = ALNNormalizedHeaderKey(rawName);
+      if (!ALNHeaderNameIsValid(key)) continue;
+      id rawValue = headers[rawName];
+      NSString *value = [rawValue isKindOfClass:[NSString class]] ? rawValue : @"";
+      if (ALNHeaderValueContainsForbiddenBytes(value)) continue;
+      NSString *display = [rawName stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      [entries addObject:@[[key copy], [display copy], [value copy]]];
+    }
+    _entries = [entries copy];
+  }
+  return self;
+}
+@end
 
 // An explicit allowlist prevents append from introducing ambiguous framing or
 // changing singleton fields. Expand only with a documented repeated-field contract.
@@ -545,11 +565,10 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   if ([normalizedKey length] == 0) {
     return;
   }
-  if ([self.orderedHeaderKeys containsObject:normalizedKey]) {
-    return;
-  }
   NSUInteger insertion =
       ALNInsertionIndexForSortedHeaderKeys(self.orderedHeaderKeys, normalizedKey);
+  if (insertion < [self.orderedHeaderKeys count] &&
+      [self.orderedHeaderKeys[insertion] isEqualToString:normalizedKey]) return;
   [self.orderedHeaderKeys insertObject:normalizedKey atIndex:insertion];
 }
 
@@ -716,6 +735,20 @@ static NSData *ALNSharedSerializedHeaderDataForResponse(ALNResponse *response) {
   if (mutated) {
     [self invalidateSerializedHeaders];
   }
+}
+
+- (void)aln_setPreparedHeadersIfMissing:(ALNPreparedResponseHeaders *)headers {
+  BOOL mutated = NO;
+  for (NSArray<NSString *> *entry in headers.entries) {
+    NSString *key = entry[0];
+    if ([self.headers[key] isKindOfClass:[NSString class]]) continue;
+    [self insertOrderedHeaderKeyIfNeeded:key];
+    self.headers[key] = entry[2];
+    self.headerNamesByNormalizedKey[key] = entry[1];
+    [self.additionalHeaderValues removeObjectForKey:key];
+    mutated = YES;
+  }
+  if (mutated) [self invalidateSerializedHeaders];
 }
 
 - (NSString *)headerForName:(NSString *)name {

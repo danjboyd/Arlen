@@ -10,6 +10,7 @@
 #import "ALNSchemaContract.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNResponseHeaderInternal.h"
 #import "ALNController.h"
 #import "ALNContext.h"
 #import "ALNCSRFMiddleware.h"
@@ -673,6 +674,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 @property(nonatomic, strong) NSError *spaFallbackConfigError;
 @property(nonatomic, strong, readwrite, nullable) NSError *moduleLoadError;
 @property(nonatomic, copy, readwrite) NSDictionary<NSString *, NSString *> *baselineSecurityHeaders;
+@property(nonatomic, strong) ALNPreparedResponseHeaders *preparedBaselineSecurityHeaders;
 @property(nonatomic, strong, readwrite) id<ALNJobAdapter> jobsAdapter;
 @property(nonatomic, strong, readwrite) id<ALNCacheAdapter> cacheAdapter;
 @property(nonatomic, strong, readwrite) id<ALNLocalizationAdapter> localizationAdapter;
@@ -5556,12 +5558,15 @@ static void ALNFinalizeResponse(ALNApplication *application,
   NSDictionary *securityHeaders = ALNDictionaryConfigValue(self.config, @"securityHeaders");
   BOOL securityHeadersEnabled = ALNBoolConfigValue(securityHeaders[@"enabled"], YES);
   self.baselineSecurityHeaders = @{};
+  self.preparedBaselineSecurityHeaders = nil;
   if (securityHeadersEnabled) {
     NSString *csp =
         ALNStringConfigValue(securityHeaders[@"contentSecurityPolicy"], @"default-src 'self'");
     ALNSecurityHeadersMiddleware *middleware =
         [[ALNSecurityHeadersMiddleware alloc] initWithContentSecurityPolicy:csp];
     self.baselineSecurityHeaders = [middleware responseHeaders];
+    self.preparedBaselineSecurityHeaders = [[ALNPreparedResponseHeaders alloc]
+        initWithHeaders:self.baselineSecurityHeaders];
     [self addMiddleware:middleware];
   }
 
@@ -5768,7 +5773,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     (void)ALNApplyBuiltInResponse(self, request, response, reservedBuiltInPath);
     // Built-ins run before the middleware chain; apply the baseline headers here.
-    [response setHeadersIfMissing:self.baselineSecurityHeaders];
+    ALNApplyBaselineSecurityHeaders(self, response);
     ALNFinalizeResponse(self,
                         response,
                         trace,
@@ -5901,7 +5906,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
       response.committed = YES;
     }
     // Route misses and route-miss built-ins never reach the middleware chain.
-    [response setHeadersIfMissing:self.baselineSecurityHeaders];
+    ALNApplyBaselineSecurityHeaders(self, response);
     ALNFinalizeResponse(self,
                         response,
                         trace,
@@ -6553,3 +6558,7 @@ static ALNEventStreamRequestContext *ALNEventStreamRequestContextFromOptionalCon
 }
 
 @end
+
+void ALNApplyBaselineSecurityHeaders(ALNApplication *application, ALNResponse *response) {
+  [response aln_setPreparedHeadersIfMissing:application.preparedBaselineSecurityHeaders];
+}
