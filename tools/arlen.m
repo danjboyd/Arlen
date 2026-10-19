@@ -457,7 +457,9 @@ static void CloseFileHandleQuietly(NSFileHandle *handle) {
   }
 }
 
-static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
+static NSString *RunShellCaptureCommandParts(NSString *command, int *exitCode,
+                                             NSString **stderrOutput) {
+  if (stderrOutput != NULL) *stderrOutput = @"";
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = ALNPlatformBashPath();
   task.arguments = @[ @"-lc", command ?: @"" ];
@@ -495,7 +497,14 @@ static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
   [[NSFileManager defaultManager] removeItemAtPath:stderrPath error:nil];
   NSString *stdoutText = [[NSString alloc] initWithData:stdoutData encoding:NSUTF8StringEncoding] ?: @"";
   NSString *stderrText = [[NSString alloc] initWithData:stderrData encoding:NSUTF8StringEncoding] ?: @"";
-  return [stdoutText stringByAppendingString:stderrText];
+  if (stderrOutput != NULL) *stderrOutput = stderrText;
+  return stdoutText;
+}
+
+static NSString *RunShellCaptureCommand(NSString *command, int *exitCode) {
+  NSString *stderrText = nil;
+  NSString *stdoutText = RunShellCaptureCommandParts(command, exitCode, &stderrText);
+  return [stdoutText stringByAppendingString:stderrText ?: @""];
 }
 
 #if defined(_WIN32)
@@ -6966,7 +6975,9 @@ static int CommandDeploy(NSArray *args) {
         NSMutableString *pushCommand = [buildCommand mutableCopy];
         [pushCommand appendString:asJSON ? @" --json" : @""];
         int pushExitCode = 0;
-        NSString *pushOutput = RunShellCaptureCommand(pushCommand, &pushExitCode);
+        NSString *pushStderr = nil;
+        NSString *pushOutput = RunShellCaptureCommandParts(pushCommand, &pushExitCode, &pushStderr);
+        if (!asJSON) pushOutput = [pushOutput stringByAppendingString:pushStderr ?: @""];
         if (pushExitCode != 0) {
           if (asJSON) {
             NSDictionary *payload = JSONDictionaryFromString(pushOutput);
@@ -7166,7 +7177,7 @@ static int CommandDeploy(NSArray *args) {
     if (asJSON) {
       [dryrunCommand appendString:@" --json"];
       int exitCode = 0;
-      NSString *capturedOutput = RunShellCaptureCommand(dryrunCommand, &exitCode);
+      NSString *capturedOutput = RunShellCaptureCommandParts(dryrunCommand, &exitCode, NULL);
       NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
       if (exitCode != 0 || buildPayload == nil) {
         return EmitMachineError(@"deploy", workflow, @"deploy_dryrun_failed",
@@ -7297,7 +7308,7 @@ static int CommandDeploy(NSArray *args) {
       NSMutableString *pushCommand = [buildCommand mutableCopy];
       [pushCommand appendString:@" --json"];
       int exitCode = 0;
-      NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &exitCode);
+      NSString *capturedOutput = RunShellCaptureCommandParts(pushCommand, &exitCode, NULL);
       NSDictionary *buildPayload = JSONDictionaryFromString(capturedOutput);
       if (exitCode != 0 || buildPayload == nil) {
         // Surface build_release's own error (for example a failed pre-package
@@ -7786,9 +7797,11 @@ static int CommandDeploy(NSArray *args) {
   if (!releaseExists) {
     NSMutableString *pushCommand = [buildCommand mutableCopy];
     [pushCommand appendString:@" --json"];
-    NSString *capturedOutput = RunShellCaptureCommand(pushCommand, &buildExitCode);
+    NSString *buildStderr = nil;
+    NSString *capturedOutput = RunShellCaptureCommandParts(pushCommand, &buildExitCode, &buildStderr);
     buildPayload = JSONDictionaryFromString(capturedOutput);
     if (buildExitCode != 0 || buildPayload == nil) {
+      if (!asJSON) capturedOutput = [capturedOutput stringByAppendingString:buildStderr ?: @""];
       if (!asJSON && [capturedOutput length] > 0) {
         fprintf(stderr, "%s", [capturedOutput UTF8String]);
       }

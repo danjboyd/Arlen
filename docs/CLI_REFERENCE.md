@@ -348,6 +348,9 @@ Named targets:
 - local release build capture uses file-backed stdout/stderr capture, so noisy
  compiler output cannot fill an `NSPipe` and hang before JSON error emission
  (`ARLEN-BUG-027`)
+- in `--json` mode, deploy parses the packaging command's stdout separately;
+ compiler warnings on stderr do not turn a successful build into
+ `deploy_push_failed`
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
  after ship/move (`ARLEN-BUG-017`)
