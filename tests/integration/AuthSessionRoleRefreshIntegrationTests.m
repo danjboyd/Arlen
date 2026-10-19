@@ -10,6 +10,7 @@
 #import "ALNOpsModule.h"
 #import "ALNPg.h"
 #import "ALNSearchModule.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNTOTP.h"
 #import "ALNTestClient.h"
 
@@ -525,9 +526,11 @@
                                                             email:email
                                                          password:@"role-refresh-password"];
   NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *storedToken = [@"sha256:" stringByAppendingString:
+      ALNLowercaseHexStringFromData(ALNSHA256([token dataUsingEncoding:NSUTF8StringEncoding]))];
   [self execute:@"INSERT INTO auth_password_reset_tokens (user_id, token, expires_at) "
                  "SELECT id, $2, NOW() + INTERVAL '1 hour' FROM auth_users WHERE subject = $1 RETURNING id"
-     parameters:@[ subject, token ]];
+     parameters:@[ subject, storedToken ]];
 
   ALNTestClient *resetting = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
   ALNResponse *reset = [resetting post:@"/auth/api/password/reset"

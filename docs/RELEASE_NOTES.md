@@ -129,6 +129,9 @@
   even under concurrent requests; only one request can consume a given link.
   A successful password change (by reset link or the change-password route)
   now retires every other outstanding reset link for that user.
+- Auth module: new reset and verification links store only SHA-256 token
+  digests in PostgreSQL. Links issued before this upgrade with plaintext token
+  rows no longer work; users can request a new link.
 - Auth module: new `authModule.publicBaseURL` key. Password-reset and
   email-verification links are built from it instead of the request's `Host`
   header. When it is unset, `development` and `test` still fall back to the

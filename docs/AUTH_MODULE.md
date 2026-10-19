@@ -99,6 +99,9 @@ Password-reset links expire after 30 minutes and email-verification links after
 one day. Each link works once, even when several requests present it at the same
 time. Any successful password change, through a reset link or the authenticated
 change-password route, retires all of that user's other outstanding reset links.
+The token tables store only SHA-256 digests of newly issued random tokens, so a
+database read cannot recover a usable link. Links issued by older versions
+with plaintext token rows stop working after this upgrade; request a new link.
 
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
