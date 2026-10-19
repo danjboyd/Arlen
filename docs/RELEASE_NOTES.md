@@ -175,11 +175,11 @@ including unresolved, non-blocking ThreadSanitizer findings.
     matches the SQL changeset. An update the server answers with `204` (no
     representation) keeps the model's fields and ID, so later saves still
     target the same record.
-- The `storage` module (now `1.2.0`) keeps one consistent catalog across
-  processes that share its state file, such as propane workers and the jobs
-  worker:
-  - Each change reloads and rewrites the state file under an exclusive file
-    lock (`<state file>.lock`), and reads pick up other processes' writes.
+- The `storage` module (`1.4.0`) keeps one consistent catalog across
+  processes sharing a local persistence path, such as propane workers and the
+  jobs worker:
+  - Changes refresh shared state under an exclusive application lock and commit
+    changed catalog records in SQLite. Reads detect other processes' commits.
   - Object and upload-session IDs are random (`obj-<32 hex>`,
     `upload-<32 hex>`) instead of per-process counters.
   - Download tokens are bound to the object they were issued for.
@@ -202,12 +202,11 @@ including unresolved, non-blocking ThreadSanitizer findings.
     still busy.
   - Deletes remove an attachment only when its size and SHA-256 match the
     record.
-  - The state file is written `0600` whatever the umask, and startup removes
-    temporary state files left by a process killed mid-write.
-  - The state file is an XML property list. GNUstep's binary writer takes time
-    quadratic in the object count (about 12 s at 3,200 objects, past the lock
-    timeout); an XML write of 5,000 objects takes about 0.2 s. Binary files
-    from earlier releases still load.
+  - Catalog files are owner-only (`0600` on POSIX; a protected current-user
+    DACL on Windows). SQLite journals provide transaction recovery.
+  - Legacy XML and binary plists are imported once. SQLite is the default;
+    there is no silent fallback to whole-plist writes. See the migration and
+    rollback instructions in [Storage Module](STORAGE_MODULE.md).
   - Downloads and other reads no longer take the state lock: they reload a
     changed file without it, and serve the in-memory catalog while a writer
     is busy.
@@ -608,7 +607,11 @@ including unresolved, non-blocking ThreadSanitizer findings.
   `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
   check on each of about 80 appends per response. Serializing a typical
   19-header response is about 1.6-2x faster, and the bytes are unchanged
-  (#245, partial).
+  (#245). Constant security headers are also validated and prepared once per
+  middleware/application instance; public setters retain validation and ordered
+  insertion avoids a redundant linear scan. Native Windows measurements of the
+  construction followup reduced middleware benchmark time by about 32% and
+  dynamic 32-header time by about 7%, with identical output byte totals.
 
 - The vendored yyjson is updated from 0.12.0 to 0.13.0 (#269). That fixes
   upstream GHSA-f4vc-345x-4mvm: a number token with 2^32 or more significant
@@ -951,8 +954,9 @@ including unresolved, non-blocking ThreadSanitizer findings.
   `-inboxSummaryForRecipient:limit:offset:`) accepts `limit` and `offset` and
   returns a `pagination` object; without `limit` it still returns the whole
   (now bounded) inbox. Preference updates for an unregistered notification or
-  an unknown channel are rejected with `422` instead of being stored. How and
-  when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
+  an unknown channel are rejected with `422` instead of being stored. In
+  notifications 1.3, these retention and validation changes are paired with
+  incremental SQLite persistence (#227); see the upgrade instructions above.
 
 - Module hardening (#228):
   - `/metrics` and `/clusterz` can be restricted with
