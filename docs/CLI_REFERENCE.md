@@ -2,6 +2,11 @@
 
 This document describes currently implemented command-line interfaces.
 
+On Windows, the CLI's application build path sets `_FILE_OFFSET_BITS=64`,
+matching the framework and test build. Keep this flag in custom CLANG64 builds
+and rebuild after upgrading; file-response size and Range metadata must remain
+64-bit. Unicode file paths are handled through native wide-character APIs.
+
 On Windows, `propane` production startup exits with status 2 and directs you to
 `boomhauer` for development. `propane --help` remains available. Windows
 multiworker hosting and rolling reloads are unsupported.

@@ -8,6 +8,9 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *ALNTestRepoRoot(void);
+// Native pathname replacement and a delete-sharing reader for pinned-file tests.
+FOUNDATION_EXPORT BOOL ALNTestReplaceFilePath(NSData *data, NSString *path);
+FOUNDATION_EXPORT NSFileHandle *_Nullable ALNTestOpenDeleteSharingReader(NSString *path);
 FOUNDATION_EXPORT NSString *ALNTestPathFromRepoRoot(NSString *relativePath);
 FOUNDATION_EXPORT NSString *ALNTestShellQuote(NSString *value);
 FOUNDATION_EXPORT NSString *ALNTestGNUstepSourceCommandForRepoRoot(NSString *_Nullable repoRoot);

@@ -28,6 +28,14 @@ until 0.4.0; see the support statement below.
 
 ## 1. Host Entry Path
 
+Windows framework, application and test builds set `_FILE_OFFSET_BITS=64`.
+This is required for file sizes and Range offsets above 2 GiB on CLANG64;
+64-bit Windows alone does not make the CRT's default `off_t` 64-bit. Custom
+build integrations must use the same flag and rebuild their objects.
+File responses use wide-character path operations for valid Unicode filenames.
+Native descriptor cloning retains the pinned file object with independent
+positions, so concurrent responses cannot overwrite each other's seek offset.
+
 Private file-backed service storage uses a protected current-user NTFS DACL;
 POSIX permission bits do not secure Windows files. Static mounts resolve native
 final handle paths before containment/extension checks, and listen sockets use

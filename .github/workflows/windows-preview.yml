@@ -44,6 +44,7 @@ jobs:
       # 0.3.0 makes Windows a development platform. `make windows-confidence`
       # (packaged release, deploy doctor, propane, jobs-worker) is production
       # deploy coverage, deferred to 0.4.0 with Windows production (#200).
+      # Includes a sparse >2 GiB file to verify the shared 64-bit offset ABI.
       - name: Run unit tests
         shell: powershell
         run: |

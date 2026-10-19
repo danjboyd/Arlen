@@ -20,6 +20,15 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+Windows framework, generated-app and vendored-runner builds use
+`_FILE_OFFSET_BITS=64`. The existing unit job verifies a sparse file above
+2 GiB with stat, Range and HEAD checks without allocating or hashing its full
+length. Native pinned-file tests perform pathname substitution using delete
+sharing; they retain the old-byte and checksum-mismatch assertions.
+The build-flags sentinel invalidates the vendored runner as well as framework,
+generated-source and test objects; changing the Windows offset ABI cannot reuse
+an older runner build.
+
 The runtime parity suite tests watch recovery, jobs CLI smoke, and explicit
 rejection of unsupported Windows `propane` startup. It no longer attempts
 multiworker reloads on independently bound Windows sockets; that depended on
@@ -46,7 +55,7 @@ per-test time limits, JUnit reports, skips and attachments. The make wiring
 for Windows:
 
 - the vendored runner is `obj/xctest.exe` and is built with
-  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1` (the gnustep-cli Windows toolchain's
+  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64` (the gnustep-cli Windows toolchain's
   libdispatch header otherwise clashes with MinGW's `mode_t`);
 - `xctest_runtime_env` puts the vendored `XCTest-0.dll` directory on `PATH`
   instead of `LD_LIBRARY_PATH`;

@@ -84,7 +84,7 @@ ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 # gnustep-make names the runner xctest.exe on Windows, and the toolchain's
 # Foundation.h needs HAVE_MODE_T there (see FEATURE_FLAGS below).
 VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest.exe
-VENDORED_XCTEST_MAKE_ARGS := ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1
+VENDORED_XCTEST_MAKE_ARGS := 'ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64'
 else
 VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
 VENDORED_XCTEST_MAKE_ARGS :=
@@ -258,6 +258,7 @@ FEATURE_FLAGS += -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1
 # Foundation.h includes <dispatch/dispatch.h>, whose os/generic_win_base.h
 # typedefs mode_t as int unless HAVE_MODE_T is set; MinGW already defines it.
 FEATURE_FLAGS += -DHAVE_MODE_T=1
+FEATURE_FLAGS += -D_FILE_OFFSET_BITS=64
 # The gnustep-cli toolchain's gnustep-base (1.31.1) neither declares nor
 # implements NSJSONWritingSortedKeys. Give it Apple's value (1 << 1) so
 # sorted-keys requests compile, and have ALNJSONSerialization write them with
@@ -796,7 +797,7 @@ vendored-xctest: $(VENDORED_XCTEST)
 # Rebuild from clean whenever the submodule's sources change (a submodule bump
 # refreshes their mtimes), so a stale runner from an older pin is never reused.
 VENDORED_XCTEST_SOURCES := $(wildcard $(VENDORED_TOOLS_XCTEST_DIR)/GNUmakefile $(VENDORED_TOOLS_XCTEST_DIR)/main.m $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/*.[hm] $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/GNUmakefile*)
-$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)
+$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES) $(BUILD_FLAGS_SENTINEL)
 >source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) $(VENDORED_XCTEST_MAKE_ARGS)
 
 test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)

@@ -1,5 +1,9 @@
 # Getting Started
 
+Custom Windows CLANG64 build scripts must include `_FILE_OFFSET_BITS=64` and
+rebuild application objects after upgrading. The standard CLI and make paths
+set it automatically, keeping large-file sizes and Range offsets intact.
+
 When upgrading existing apps, re-vendor the first-party modules you use with
 `arlen module upgrade <name> --source <framework>/modules/<name>`, then rebuild
 and redeploy. Module source is copied into apps; upgrading framework binaries
