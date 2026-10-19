@@ -9,6 +9,8 @@ The authoritative merge gate remains:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
+- `static-analysis / scan-build`
+- `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
 
 `apple-baseline` and `windows-preview` stay visible and non-required under the

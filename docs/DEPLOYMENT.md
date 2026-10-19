@@ -401,20 +401,25 @@ Arlen reserves its built-in operability endpoints ahead of app route dispatch:
 - `GET /healthz` -> `200 ok\n`
 - `GET /readyz` -> `200 ready\n`
 - `GET /livez` -> `200 live\n`
-- `GET /metrics` -> `200` Prometheus text exposition payload
-- `GET /clusterz` -> `200` JSON cluster/runtime contract payload
+- `GET /metrics` -> `200` Prometheus text exposition payload (in production,
+  only once access is configured; see below)
+- `GET /clusterz` -> `200` JSON cluster/runtime contract payload (same)
 
 Use these for LB probes and deployment readiness checks.
 
-`/metrics` and `/clusterz` are anonymous by default, and `/clusterz` reports the
-hostname and worker layout. In production, set
+`/clusterz` reports the hostname and worker layout, so in production
+`/metrics` and `/clusterz` answer `404` until you configure access. Set
 `observability.operabilityToken` (or `ARLEN_OPERABILITY_TOKEN`) so scrapers
-must send `Authorization: Bearer <token>`, set
+must send `Authorization: Bearer <token>`, or set
 `observability.operabilityLoopbackOnly = YES` (or
-`ARLEN_OPERABILITY_LOOPBACK_ONLY=1`) for same-host scrapers, or block both
-paths at the reverse proxy. Behind a same-host proxy, loopback-only mode
-refuses requests that carry `Forwarded`, `X-Forwarded-For` or `X-Real-IP`.
-`arlen doctor --env production` warns while both endpoints are anonymous.
+`ARLEN_OPERABILITY_LOOPBACK_ONLY=1`) for same-host scrapers. Behind a same-host
+proxy, loopback-only mode refuses requests that carry `Forwarded`,
+`X-Forwarded-For` or `X-Real-IP`. `observability.operabilityAnonymous = YES`
+(or `ARLEN_OPERABILITY_ANONYMOUS=1`) restores anonymous access when the
+reverse proxy already blocks both paths. `arlen doctor --env production` warns
+while both endpoints are disabled or anonymous. `validate_operability.sh` sends
+`ARLEN_OPERABILITY_TOKEN` when set, and skips the `/metrics` contract when the
+endpoint is disabled.
 
 JSON signal payloads are available for health/readiness when requested:
 
@@ -766,7 +771,11 @@ It currently creates:
 - generated concrete systemd unit under `build/deploy/targets/<target>/systemd/`,
   or for `macos-*-apple-foundation` targets a launchd plist under
   `build/deploy/targets/<target>/launchd/<label>.plist`
-- generated env example under `build/deploy/targets/<target>/env/`
+- generated env example under `build/deploy/targets/<target>/env/` (mode
+  `0600`). It carries a freshly generated `ARLEN_SESSION_SECRET` (64 hex
+  characters) and a commented, distinct `ARLEN_STORAGE_SIGNING_SECRET`; each
+  run generates new values. Required `*_SECRET` keys get their own random
+  value, other required keys get `CHANGE_ME`.
 - generated GNUstep runtime wrappers under `build/deploy/targets/<target>/bin/`
 - generated README with operator follow-up steps
 
@@ -789,7 +798,7 @@ skipped.
 
 It does not:
 
-- create or rotate secret values
+- install or rotate secret values on the host
 - provision PostgreSQL
 - install ingress/reverse-proxy/TLS/DNS infrastructure
 - become a general-purpose machine provisioner
@@ -802,7 +811,10 @@ The intended flow is:
 4. run `arlen deploy dryrun <target>`
 5. run `arlen deploy init <target>` on the host or against the host filesystem
 6. install the generated unit/env artifacts where the host expects them
-7. populate secret values outside the release tree
+7. populate secret values outside the release tree. Production refuses
+   placeholder and published example secrets; generate real ones with
+   `openssl rand -hex 32` (see
+   [Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets))
 8. use `arlen deploy push|release <target>` for release shipping and activation
 
 ### 4.10 Arlen-Ready Debian GNUstep Host

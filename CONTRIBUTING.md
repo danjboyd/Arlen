@@ -107,7 +107,8 @@ sanitizer-built tools are never silently reused in normal lanes.
 ### CI
 
 - Required checks on `main`: `linux-quality / quality-gate`,
-  `linux-sanitizers / sanitizer-gate`, and `docs-quality / docs-gate`.
+  `linux-sanitizers / sanitizer-gate`, `static-analysis / scan-build`,
+  `static-analysis / clang-tidy`, and `docs-quality / docs-gate`.
 - Apple and Windows lanes run visibly but aren't required. Release
   certification runs separately in `release-certification`.
 - CI expects a clang-built GNUstep toolchain at `/usr/GNUstep`. Runners use

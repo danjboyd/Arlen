@@ -134,6 +134,7 @@
 
 - (NSString *)runShellCaptureUnattached:(NSString *)command exitCode:(int *)exitCode {
   NSTask *task = [[NSTask alloc] init];
+  task.environment = ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]);
   task.launchPath = ALNTestBashPath();
   task.arguments = @[ @"-lc", command ];
   NSString *capturePath = [self createTempFilePathWithPrefix:@"arlen-http-shell" suffix:@".log"];

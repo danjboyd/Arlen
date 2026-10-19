@@ -3,7 +3,6 @@
   port = 4120;
   session = {
     enabled = YES;
-    secret = "phase14-modules-demo-session-secret-0123456789abcdef";
   };
   csrf = {
     enabled = YES;

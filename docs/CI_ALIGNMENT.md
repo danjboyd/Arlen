@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-10-13
+Last updated: 2026-10-17
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -80,6 +80,11 @@ The required merge gate should reflect the current authoritative baseline:
  - blocking fault-injection/performance checks
 - Linux/GNUstep sanitizer gate
  - ASAN/UBSAN matrix and the other blocking hardening lanes
+- static-analysis gate
+ - scan-build (clang static analyzer) over first-party code, gated on a
+   reviewed baseline
+ - clang-tidy (bugprone, cert, objc checks) over first-party code, warnings
+   are errors
 - docs quality gate
  - generated API reference freshness
  - docs navigation/roadmap consistency
@@ -93,6 +98,7 @@ statement is raised:
 - Apple baseline confidence
 - Windows preview confidence
 - scheduled thread-race / experimental sanitizer follow-up lanes
+- scheduled integration-suite ASAN+UBSan lane (`integration-sanitizers-nightly`)
 
 ## Progress
 
@@ -120,6 +126,7 @@ Completed:
 
 - `linux-quality`
 - `linux-sanitizers`
+- `static-analysis`
 - `docs-quality`
 
 Additional lanes remain visible but non-blocking while their support level
@@ -129,6 +136,7 @@ stays below the authoritative Linux production baseline:
 - `apple-baseline`
 - `windows-preview`
 - nightly thread-race / experimental follow-up lanes
+- nightly integration sanitizers (`linux-sanitizers / integration-sanitizers-nightly`)
 
 ## Platform Lane Policy
 
@@ -190,7 +198,8 @@ This provisioning work does not change branch protection by itself.
 ### Per-job temp directory on self-hosted Linux runners
 
 Every job on the self-hosted `iep-apt` runner (linux-quality, both
-linux-sanitizers jobs, docs-quality, release-certification and
+linux-sanitizers jobs, both static-analysis jobs, docs-quality,
+release-certification and
 `release-assets / source-archive`) starts with a "Use a per-job temp
 directory" step. It points `TMPDIR`, `TMP` and `TEMP` at `$RUNNER_TEMP/tmp`.
 On Linux, GNUstep's `NSTemporaryDirectory()` reads `TEMP`/`TMP`, not
@@ -304,6 +313,7 @@ Use clear workflow filenames that match their actual role:
 
 - `.github/workflows/linux-quality.yml`
 - `.github/workflows/linux-sanitizers.yml`
+- `.github/workflows/static-analysis.yml`
 - `.github/workflows/docs-quality.yml`
 - `.github/workflows/apple-baseline.yml`
 - `.github/workflows/windows-preview.yml`
@@ -320,7 +330,14 @@ For `main`, require:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
+- `static-analysis / scan-build`
+- `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
+
+The two `static-analysis` contexts were added on 2026-10-17. Add them to the
+`main` branch-protection rule in repository settings when the workflow first
+reports on `main`; until then the verified state below still lists three
+checks.
 
 Do not require by default:
 
@@ -329,6 +346,7 @@ Do not require by default:
   bundles, but stays nonblocking)
 - Windows preview
 - nightly thread-race / experimental lanes
+- nightly integration sanitizers (`integration-sanitizers-nightly`)
 - release certification
 - release assets
 - linux public toolchain
@@ -356,6 +374,40 @@ Whenever CI behavior changes, update in the same change:
 - `docs/TOOLCHAIN_MATRIX.md` when toolchain assumptions change
 - this document
 - `AGENTS.md` if the contributor/agent workflow expectation changed
+
+## Static analysis lanes
+
+`.github/workflows/static-analysis.yml` runs two gating jobs on every push to
+`main` and every pull request:
+
+- `static-analysis / scan-build` runs `make ci-static-scan-build`
+  (`tools/ci/run_static_scan_build_gate.sh`). It rebuilds `all`, `boomhauer`
+  and `tech-demo-server` from a clean `build/` under the clang static analyzer
+  with the `core`, `unix`, `security`, `deadcode` and `osx.cocoa` checkers, and
+  fails on any report that is not in
+  `tests/fixtures/static_analysis/scan_build_baseline.json`. scan-build comes
+  from the `clang-tools-<major>` package matching the runner's `clang`.
+- `static-analysis / clang-tidy` runs `make ci-static-clang-tidy`
+  (`tools/ci/run_static_clang_tidy_gate.sh`). It records
+  `compile_commands.json` with `intercept-build` and runs clang-tidy, pinned to
+  `clang-tidy==22.1.8` from PyPI, on every first-party `src/` and `modules/`
+  translation unit with `--warnings-as-errors=*`. There is no baseline.
+
+Both lanes skip vendored `src/Arlen/Support/third_party` code. Both build with
+the same clang-built GNUstep toolchain as `linux-quality`; the scan-build lane
+swaps scan-build's analyzer wrapper in through the GNUmakefile's `ARLEN_CC`
+variable, which defaults to `clang`, so default builds are unchanged. The
+scan-build job uploads its HTML report as an artifact when it fails, and the
+clang-tidy job uploads its per-file logs.
+
+The older `make ci-static-analysis` lane (`run_phase10m_static_analysis.sh`)
+stays as it is. It analyzes four hot files with `clang --analyze` inside the
+`linux-sanitizers` matrix and records release-confidence artifacts, but it
+allows warnings, so it never fails on a finding. The new lanes are the
+merge-blocking static-analysis gate and cover the whole first-party tree.
+
+See `docs/TESTING_WORKFLOW.md` ("Static analysis") for local runs and baseline
+updates.
 
 ## Practical Rule For Contributors
 
@@ -485,6 +537,30 @@ request parser's multipart source dependency. Keep that standalone compile
 representative when adding request-parser dependencies; do not remove the
 feature-toggle check to address link failures. No additional required lane is
 introduced for these regressions.
+
+## Nightly integration sanitizers
+
+`linux-sanitizers / integration-sanitizers-nightly` (issue 271) runs the
+integration bundle against an ASAN+UBSan build on the schedule and on
+`workflow_dispatch`, never on pull requests, and is not a required check: one
+self-hosted runner can't take a sanitized integration run on every PR. A
+finding in Arlen code becomes a release-blocking issue.
+
+`tools/ci/run_linux_integration_sanitizers_nightly.sh` builds with clang's
+shared sanitizer runtime (`-shared-libsan`), preloads that runtime into the
+xctest runner, and collects every process's reports through `log_path` under
+`build/sanitizers/integration_nightly/` (`summary.json` classifies them).
+Reports in Arlen code, or that can't be attributed, fail the lane; reports
+raised inside `/usr/bin` tools that inherited the preload (make, dd) don't.
+
+Tests that build app roots through `bin/boomhauer`/`bin/arlen`, run `make`,
+propane or `tools/ci` scripts are skipped: `bin/boomhauer` refuses a
+sanitizer-instrumented framework and `make clean`s it. The list is
+`tests/fixtures/sanitizers/integration_nightly_skips.txt`. Its generated
+section comes from `tools/ci/classify_sanitizer_integration_skips.py`; the lane
+fails when it is stale (regenerate with `--write`) and when the instrumented
+framework archive is replaced during the run, which means a test that rebuilds
+it isn't listed.
 
 ## TSAN reliability and retained evidence
 

@@ -1,0 +1,130 @@
+name: static-analysis
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan-build:
+    name: static-analysis / scan-build
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # iep-apt's /tmp is a small shared tmpfs, and GNUstep's NSTemporaryDirectory()
+      # reads TEMP/TMP (not TMPDIR). Give each job its own on-disk temp directory,
+      # which the runner empties between jobs, so leaked test files can't fill /tmp.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
+      - name: Install build dependencies
+        env:
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      # scan-build must match the clang that builds GNUstep and Arlen, so take
+      # it from that clang's own clang-tools-<major> package.
+      - name: Install scan-build for the runner's clang
+        run: |
+          major="$(clang -dumpversion | cut -d. -f1)"
+          if ! command -v "scan-build-$major" >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y "clang-tools-$major"
+          fi
+          echo "ARLEN_STATIC_SCAN_BUILD=scan-build-$major" >>"$GITHUB_ENV"
+          "scan-build-$major" --help >/dev/null
+
+      - name: Run scan-build gate
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          source tools/source_gnustep_env.sh
+          make ci-static-scan-build
+
+      - name: Upload scan-build report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-scan-build-${{ github.run_id }}
+          path: build/static_analysis/scan_build/**
+          if-no-files-found: warn
+
+  clang-tidy:
+    name: static-analysis / clang-tidy
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # See the scan-build job: per-job on-disk temp directory.
+      - name: Use a per-job temp directory
+        run: |
+          mkdir -m 700 -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TMPDIR=$RUNNER_TEMP/tmp"
+            echo "TMP=$RUNNER_TEMP/tmp"
+            echo "TEMP=$RUNNER_TEMP/tmp"
+          } >>"$GITHUB_ENV"
+
+      - name: Install build dependencies
+        env:
+          ARLEN_CI_GNUSTEP_STRATEGY: preinstalled
+        run: |
+          bash ./tools/ci/install_ci_dependencies.sh
+
+      # intercept-build records compile_commands.json; it ships in the same
+      # clang-tools-<major> package as scan-build. clang-tidy is pinned from
+      # PyPI so check behavior does not drift with the runner's distro.
+      - name: Install intercept-build and pinned clang-tidy
+        run: |
+          major="$(clang -dumpversion | cut -d. -f1)"
+          if ! command -v "intercept-build-$major" >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y "clang-tools-$major"
+          fi
+          # The runner has no python3-venv, so fetch the pinned wheel directly
+          # (sha256-checked against PyPI) instead of pip-installing it.
+          clang_tidy="$(python3 -I ./tools/ci/fetch_clang_tidy.py "$RUNNER_TEMP/clang-tidy" 22.1.8)"
+          {
+            echo "ARLEN_STATIC_INTERCEPT_BUILD=intercept-build-$major"
+            echo "ARLEN_STATIC_CLANG_TIDY=$clang_tidy"
+          } >>"$GITHUB_ENV"
+          "$clang_tidy" --version
+
+      - name: Run clang-tidy gate
+        env:
+          GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
+        run: |
+          source tools/source_gnustep_env.sh
+          make ci-static-clang-tidy
+
+      - name: Upload clang-tidy logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-analysis-clang-tidy-${{ github.run_id }}
+          path: |
+            build/static_analysis/clang_tidy/logs/**
+            build/static_analysis/clang_tidy/failures.txt
+            build/static_analysis/clang_tidy/build.log
+          if-no-files-found: warn

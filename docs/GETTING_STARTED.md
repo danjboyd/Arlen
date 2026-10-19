@@ -157,7 +157,8 @@ curl -i http://127.0.0.1:3000/openapi
 `boomhauer` watches app files by default and rebuilds when inputs change.
 Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
 for built-in operability, so app routes should not reuse those paths.
-`/metrics` and `/clusterz` are anonymous by default; before production, see
+`/metrics` and `/clusterz` answer `404` in production until you configure
+access; see
 [Configuration Reference](CONFIGURATION_REFERENCE.md#6-rate-limits-and-security-headers)
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
@@ -362,6 +363,12 @@ see [Testing Workflow](TESTING_WORKFLOW.md#live-postgresql-regression-gate).
 If you install `storage`, set `ARLEN_STORAGE_SIGNING_SECRET` (32+ characters)
 before running outside `development` or `test`; the module refuses to start
 without it. See [Storage Module](STORAGE_MODULE.md#signing-secret).
+
+Generate signing secrets (`ARLEN_SESSION_SECRET`, `ARLEN_AUTH_BEARER_SECRET`,
+`ARLEN_STORAGE_SIGNING_SECRET`) with `openssl rand -hex 32`. Outside
+`development` and `test`, startup refuses placeholder values and secrets copied
+from the Arlen examples; see
+[Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets).
 
 When you move your Arlen framework pin, re-run `arlen module upgrade <name>
 --source <framework>/modules/<name>` for each vendored module, then

@@ -81,6 +81,11 @@ set at least:
 - `ARLEN_DATABASE_URL`
 - `ARLEN_SESSION_SECRET` when sessions are enabled
 - `ARLEN_STORAGE_SIGNING_SECRET` when the `storage` module is installed
+
+Generate each secret with `openssl rand -hex 32`. The template's `CHANGE_ME`
+values are too short to pass, and outside `development`/`test` startup also
+refuses placeholder and published example secrets (see
+[Signing secrets](CONFIGURATION_REFERENCE.md#signing-secrets)).
 - any instance-specific host/port overrides
 - any cluster or async-job overrides you need
 

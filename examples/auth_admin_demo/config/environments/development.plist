@@ -1,1 +1,7 @@
-{}
+{
+  /* Development-only session.secret. Production refuses this published value;
+     set ARLEN_SESSION_SECRET (openssl rand -hex 32) instead. */
+  session = {
+    secret = "auth-admin-demo-session-secret-0123456789abcdef";
+  };
+}

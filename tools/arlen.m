@@ -20,6 +20,7 @@
 #import "ALNPg.h"
 #import "Arlen/ORM/ALNORMTypeScriptCodegen.h"
 #import "ALNSchemaCodegen.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNWebPush.h"
 
 #if defined(_WIN32)
@@ -2326,25 +2327,51 @@ static NSString *RenderedGNUstepWrapperForTarget(NSDictionary *target, NSString 
       ShellQuote(gnustepScript ?: @""), ShellQuote(binaryPath ?: @""), argumentSuffix ?: @""];
 }
 
+// 32 random bytes as 64 lowercase hex characters, or nil if unavailable.
+static NSString *RandomSigningSecretHex(void) {
+  NSData *bytes = ALNSecureRandomData(32);
+  if ([bytes length] != 32) {
+    return nil;
+  }
+  return ALNLowercaseHexStringFromData(bytes);
+}
+
 static NSString *RenderedEnvExampleForTarget(NSDictionary *target, NSString *frameworkRoot) {
   NSString *templatePath = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy/systemd/site.env.example"];
   NSString *template = [NSString stringWithContentsOfFile:templatePath encoding:NSUTF8StringEncoding error:NULL];
   if ([template length] == 0) {
-    template = @"ARLEN_HOST=127.0.0.1\nARLEN_PORT=3000\nARLEN_DATABASE_URL=postgres://app:CHANGE_ME@127.0.0.1/app_production\nARLEN_SESSION_SECRET=replace-with-32-plus-character-secret\n";
+    template = @"ARLEN_HOST=127.0.0.1\nARLEN_PORT=3000\nARLEN_DATABASE_URL=postgres://app:CHANGE_ME@127.0.0.1/app_production\nARLEN_SESSION_SECRET=CHANGE_ME\n";
+  }
+  // Fill signing-secret placeholders with fresh random values so a copied
+  // example never carries a shared secret. Leave the placeholder (which
+  // startup refuses) if random bytes are unavailable.
+  NSString *sessionSecret = RandomSigningSecretHex();
+  if ([sessionSecret length] > 0) {
+    template = [template stringByReplacingOccurrencesOfString:@"\nARLEN_SESSION_SECRET=CHANGE_ME\n"
+                                                   withString:[NSString stringWithFormat:@"\nARLEN_SESSION_SECRET=%@\n",
+                                                                                         sessionSecret]];
+  }
+  NSString *storageSecret = RandomSigningSecretHex();
+  if ([storageSecret length] > 0) {
+    template = [template stringByReplacingOccurrencesOfString:@"\n# ARLEN_STORAGE_SIGNING_SECRET=CHANGE_ME\n"
+                                                   withString:[NSString stringWithFormat:@"\n# ARLEN_STORAGE_SIGNING_SECRET=%@\n",
+                                                                                         storageSecret]];
   }
 
-  NSString *targetName = StringValueForDeployKey(target, @"name");
   NSString *releasePath = StringValueForDeployKey(target, @"release_path");
   NSMutableString *content =
       [[template stringByReplacingOccurrencesOfString:@"/srv/arlen/<site>" withString:releasePath ?: @"/srv/arlen/app"] mutableCopy];
   [content appendString:
                @"\n# Do not pin ARLEN_APP_ROOT or ARLEN_FRAMEWORK_ROOT here.\n"
-                "# Release activation owns those paths.\n"];
+                "# Release activation owns those paths.\n"
+                "# arlen deploy init generated the signing secrets above for this copy only;\n"
+                "# keep the file private (mode 0600) and rerun deploy init for new values.\n"];
   for (NSString *requiredKey in [target[@"required_environment_keys"] isKindOfClass:[NSArray class]]
                                    ? target[@"required_environment_keys"]
                                    : @[]) {
     if ([content rangeOfString:[NSString stringWithFormat:@"%@=", requiredKey]].location == NSNotFound) {
-      [content appendFormat:@"%@=CHANGE_ME_%@\n", requiredKey, [targetName uppercaseString]];
+      NSString *generated = [requiredKey hasSuffix:@"_SECRET"] ? RandomSigningSecretHex() : nil;
+      [content appendFormat:@"%@=%@\n", requiredKey, ([generated length] > 0) ? generated : @"CHANGE_ME"];
     }
   }
   return content;
@@ -2524,6 +2551,10 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
     }
     if ([file[2] boolValue]) {
       SetExecutablePermissions(file[0], NULL);
+    }
+    if ([file[0] isEqualToString:envExamplePath]) {
+      // Holds freshly generated signing secrets; keep it owner-only.
+      [fm setAttributes:@{ NSFilePosixPermissions : @(0600) } ofItemAtPath:envExamplePath error:NULL];
     }
     [writtenFiles addObject:file[0]];
   }
@@ -8553,13 +8584,23 @@ static int CommandDoctor(NSArray *args) {
                                                         : (loopbackOnly ? @"loopback only" : @"bearer token")],
                          @"");
           passCount += 1;
-        } else {
+        } else if ([observability[@"operabilityAnonymous"] respondsToSelector:@selector(boolValue)] &&
+                   [observability[@"operabilityAnonymous"] boolValue]) {
           AddDoctorCheck(checks,
                          @"operability_endpoints",
                          @"warn",
                          @"/metrics and /clusterz answer anonymous requests (they expose counters, hostname and worker layout)",
                          @"Set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) to require a bearer token, "
                          "or observability.operabilityLoopbackOnly = YES, or block both paths at the reverse proxy.");
+          warnCount += 1;
+        } else {
+          AddDoctorCheck(checks,
+                         @"operability_endpoints",
+                         @"warn",
+                         @"/metrics and /clusterz are disabled (they answer 404 in production until access is configured)",
+                         @"To scrape them, set observability.operabilityToken (or ARLEN_OPERABILITY_TOKEN) or "
+                         "observability.operabilityLoopbackOnly = YES; observability.operabilityAnonymous = YES "
+                         "restores anonymous access.");
           warnCount += 1;
         }
       }

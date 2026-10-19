@@ -10,6 +10,7 @@
 #import "ALNLogger.h"
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
+#import "ALNResponse.h"
 #import "ALNSecurityPrimitives.h"
 
 #include <errno.h>
@@ -445,17 +446,145 @@ static NSString *SMPercentEncodedQueryComponent(NSString *value) {
   return [SMTrimmedString(value) stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
 }
 
+// RFC 9110 token characters.
+static BOOL SMIsMediaTypeTokenString(NSString *value) {
+  static NSCharacterSet *invalid = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    invalid = [[NSCharacterSet
+        characterSetWithCharactersInString:
+            @"!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"] invertedSet];
+  });
+  return [value length] > 0 && [value rangeOfCharacterFromSet:invalid].location == NSNotFound;
+}
+
+// Parses a declared content type as exactly one media type: `type/subtype`
+// with optional `; name=value` token parameters. Commas (media type lists),
+// quoted strings, control and non-ASCII characters are rejected. Returns the
+// lowercased `type/subtype`, plus `; charset=<value>` when a well-formed
+// charset parameter is present; other parameters are dropped. Returns nil when
+// the value is not a single well-formed media type, and
+// `application/octet-stream` when it is empty.
+static NSString *SMNormalizedDeclaredContentType(NSString *rawValue) {
+  NSString *value = [rawValue isKindOfClass:[NSString class]] ? SMTrimmedString(rawValue) : @"";
+  if ([value length] == 0) {
+    return @"application/octet-stream";
+  }
+  for (NSUInteger index = 0; index < [value length]; index++) {
+    unichar character = [value characterAtIndex:index];
+    if (character < 0x20 || character >= 0x7f || character == ',' || character == '"' || character == '\\') {
+      return nil;
+    }
+  }
+  NSArray<NSString *> *parts = [value componentsSeparatedByString:@";"];
+  NSArray<NSString *> *typeParts = [SMTrimmedString(parts[0]) componentsSeparatedByString:@"/"];
+  if ([typeParts count] != 2 || !SMIsMediaTypeTokenString(typeParts[0]) || !SMIsMediaTypeTokenString(typeParts[1])) {
+    return nil;
+  }
+  NSString *charset = nil;
+  for (NSUInteger index = 1; index < [parts count]; index++) {
+    NSString *parameter = SMTrimmedString(parts[index]);
+    NSRange equals = [parameter rangeOfString:@"="];
+    if (equals.location == NSNotFound) {
+      return nil;
+    }
+    NSString *name = [parameter substringToIndex:equals.location];
+    NSString *parameterValue = [parameter substringFromIndex:NSMaxRange(equals)];
+    if (!SMIsMediaTypeTokenString(name) || !SMIsMediaTypeTokenString(parameterValue)) {
+      return nil;
+    }
+    if ([[name lowercaseString] isEqualToString:@"charset"]) {
+      charset = [parameterValue lowercaseString];
+    }
+  }
+  NSString *mediaType = [[NSString stringWithFormat:@"%@/%@", typeParts[0], typeParts[1]] lowercaseString];
+  return (charset != nil) ? [NSString stringWithFormat:@"%@; charset=%@", mediaType, charset] : mediaType;
+}
+
+// The media type without parameters, lowercased: "Image/PNG; q=1" -> "image/png".
+static NSString *SMBaseContentType(NSString *contentType) {
+  NSString *type = SMLowerTrimmedString(contentType);
+  NSRange separator = [type rangeOfString:@";"];
+  if (separator.location != NSNotFound) {
+    type = SMTrimmedString([type substringToIndex:separator.location]);
+  }
+  return type;
+}
+
+// Types a browser renders as an active document (markup that can run script).
+// Wildcard patterns such as `*/*` or `image/*` never admit them; a collection
+// must list them explicitly.
+static BOOL SMContentTypeIsActiveDocument(NSString *contentType) {
+  static NSSet<NSString *> *activeTypes = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    activeTypes = [NSSet setWithArray:@[ @"text/html", @"image/svg+xml", @"application/xhtml+xml" ]];
+  });
+  return [activeTypes containsObject:SMBaseContentType(contentType)];
+}
+
 static BOOL SMContentTypeMatches(NSString *candidate, NSString *allowedPattern) {
-  NSString *type = SMLowerTrimmedString(candidate);
-  NSString *pattern = SMLowerTrimmedString(allowedPattern);
+  NSString *type = SMBaseContentType(candidate);
+  NSString *pattern = SMBaseContentType(allowedPattern);
   if ([pattern length] == 0 || [pattern isEqualToString:@"*/*"]) {
-    return YES;
+    return !SMContentTypeIsActiveDocument(type);
   }
   if ([pattern hasSuffix:@"/*"]) {
     NSString *prefix = [pattern substringToIndex:([pattern length] - 1)];
-    return [type hasPrefix:prefix];
+    return [type hasPrefix:prefix] && !SMContentTypeIsActiveDocument(type);
   }
   return [type isEqualToString:pattern];
+}
+
+// Downloads are served inline only for media types browsers display without
+// running script. Everything else is sent as an attachment.
+static BOOL SMContentTypeAllowsInlineDownload(NSString *contentType) {
+  static NSSet<NSString *> *inlineTypes = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    inlineTypes = [NSSet setWithArray:@[
+      @"image/png", @"image/jpeg", @"image/gif", @"image/webp", @"image/avif", @"application/pdf"
+    ]];
+  });
+  NSString *type = SMBaseContentType(contentType);
+  if ([inlineTypes containsObject:type]) {
+    return YES;
+  }
+  return ([type hasPrefix:@"audio/"] || [type hasPrefix:@"video/"]) && [type length] > 6;
+}
+
+// An ASCII filename safe to quote in Content-Disposition: letters, digits and
+// `._-`; anything else becomes `_`. Leading dots are dropped.
+static NSString *SMSafeDownloadFilename(NSString *name) {
+  NSString *base = [SMTrimmedString(name) lastPathComponent] ?: @"";
+  NSMutableString *safe = [NSMutableString string];
+  for (NSUInteger index = 0; index < [base length] && [safe length] < 150; index++) {
+    unichar character = [base characterAtIndex:index];
+    BOOL allowed = (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+                   (character >= '0' && character <= '9') || character == '.' || character == '-' ||
+                   character == '_';
+    if (character == '.' && [safe length] == 0) {
+      continue;
+    }
+    [safe appendString:allowed ? [NSString stringWithCharacters:&character length:1] : @"_"];
+  }
+  return ([safe length] > 0) ? [NSString stringWithString:safe] : @"download";
+}
+
+static NSString *SMContentDispositionForDownload(NSString *name, BOOL inlineDisposition) {
+  NSString *fallback = SMSafeDownloadFilename(name);
+  NSString *disposition = [NSString stringWithFormat:@"%@; filename=\"%@\"",
+                                                     inlineDisposition ? @"inline" : @"attachment",
+                                                     fallback];
+  NSString *original = [SMTrimmedString(name) lastPathComponent] ?: @"";
+  NSCharacterSet *unreserved =
+      [NSCharacterSet characterSetWithCharactersInString:
+                          @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"];
+  NSString *encoded = [original stringByAddingPercentEncodingWithAllowedCharacters:unreserved];
+  if ([encoded length] > 0 && ![encoded isEqualToString:fallback] && [encoded length] <= 600) {
+    disposition = [disposition stringByAppendingFormat:@"; filename*=UTF-8''%@", encoded];
+  }
+  return disposition;
 }
 
 static NSArray<NSString *> *SMNormalizedContentTypes(id rawValue) {
@@ -870,9 +999,25 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     if ([signingSecret length] < SMMinimumSigningSecretLength) {
       if (error != NULL) {
         *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
-                         [NSString stringWithFormat:@"storageModule.signingSecret must be at least %lu characters",
+                         [NSString stringWithFormat:@"storageModule.signingSecret (ARLEN_STORAGE_SIGNING_SECRET) must be "
+                                                    @"at least %lu characters; generate one with `openssl rand -hex 32`",
                                                     (unsigned long)SMMinimumSigningSecretLength],
                          @{ @"config_key" : @"storageModule.signingSecret", @"reason" : @"weak_secret" });
+      }
+      return NO;
+    }
+    NSString *insecureReason = ALNInsecureSigningSecretReason(signingSecret);
+    if (insecureReason != nil && !ALNEnvironmentAllowsInsecureSigningSecrets(application.environment)) {
+      if (error != NULL) {
+        NSString *kind = [insecureReason isEqualToString:@"published_example_secret"]
+                             ? @"is an example value published in the Arlen repository"
+                             : @"looks like a placeholder value";
+        *error = SMError(ALNStorageModuleErrorInvalidConfiguration,
+                         [NSString stringWithFormat:@"storageModule.signingSecret (ARLEN_STORAGE_SIGNING_SECRET) %@ and is "
+                                                    @"refused in the %@ environment; generate one with "
+                                                    @"`openssl rand -hex 32`",
+                                                    kind, application.environment ?: @"current"],
+                         @{ @"config_key" : @"storageModule.signingSecret", @"reason" : insecureReason });
       }
       return NO;
     }
@@ -1582,9 +1727,14 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     }
     return NO;
   }
-  NSString *normalizedContentType = SMLowerTrimmedString(contentType);
-  if ([normalizedContentType length] == 0) {
-    normalizedContentType = @"application/octet-stream";
+  NSString *normalizedContentType = SMNormalizedDeclaredContentType(contentType);
+  if (normalizedContentType == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorValidationFailed,
+                       @"content type must be a single media type such as image/png",
+                       @{ @"field" : @"contentType", @"collection" : collectionID ?: @"" });
+    }
+    return NO;
   }
   BOOL contentTypeAllowed = NO;
   for (NSString *allowed in (collectionMetadata[@"acceptedContentTypes"] ?: @[])) {
@@ -1649,7 +1799,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"sessionID" : sessionID,
     @"collection" : SMLowerTrimmedString(collection),
     @"name" : SMTrimmedString(name),
-    @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
+    @"contentType" : SMNormalizedDeclaredContentType(contentType) ?: @"application/octet-stream",
     @"sizeBytes" : @(sizeBytes),
     @"metadata" : SMNormalizeDictionary(metadata),
     @"createdAt" : @([[NSDate date] timeIntervalSince1970]),
@@ -1727,8 +1877,9 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                           error:error]) {
     return nil;
   }
+  NSString *storedContentType = SMNormalizedDeclaredContentType(contentType) ?: @"application/octet-stream";
   NSString *attachmentID = [self.attachmentAdapter saveAttachmentNamed:SMTrimmedString(name)
-                                                           contentType:([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream"
+                                                           contentType:storedContentType
                                                                   data:data ?: [NSData data]
                                                               metadata:metadata
                                                                  error:error];
@@ -1753,7 +1904,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       @"sizeBytes" : @0,
     } mutableCopy]];
   }
-  NSDictionary *analysis = SMAnalyzeObjectData(name, contentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
+  NSDictionary *analysis = SMAnalyzeObjectData(name, storedContentType, data ?: [NSData data], metadata ?: @{}, variantDefinitions);
 
   NSString *objectID = SMRandomIdentifier(@"obj");
   NSString *tokenNonce = SMRandomHexString(16);
@@ -1791,7 +1942,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
       @"sequence" : @(self.nextSequence),
       @"collection" : SMLowerTrimmedString(collection),
       @"name" : SMTrimmedString(name),
-      @"contentType" : ([SMLowerTrimmedString(contentType) length] > 0) ? SMLowerTrimmedString(contentType) : @"application/octet-stream",
+      @"contentType" : storedContentType,
       @"sizeBytes" : @(sizeBytes),
       @"visibility" : collectionMetadata[@"visibility"] ?: @"private",
       @"attachmentID" : attachmentID ?: @"",
@@ -2771,8 +2922,24 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Download failed" } error:NULL];
     return nil;
   }
-  NSString *contentType = SMTrimmedString(metadata[@"object"][@"contentType"]);
-  [self renderData:data contentType:([contentType length] > 0) ? contentType : @"application/octet-stream"];
+  // Send only the media type parsed and classified here, never the stored
+  // string itself; a value that does not parse is served as opaque bytes.
+  NSString *contentType = SMNormalizedDeclaredContentType(metadata[@"object"][@"contentType"]) ?: @"application/octet-stream";
+  // Stored objects carry the uploader-declared content type, so only a small
+  // set of passive media types is displayed inline; everything else is a
+  // download. A sandbox policy keeps any document that is rendered from
+  // running script on the app origin, and nosniff stops type guessing.
+  // Inline PDF keeps the app policy: browser PDF viewers refuse to run in a
+  // sandboxed document.
+  BOOL inlineDisposition = SMContentTypeAllowsInlineDownload(contentType);
+  ALNResponse *response = self.context.response;
+  [response setHeader:@"Content-Disposition"
+                value:SMContentDispositionForDownload(metadata[@"object"][@"name"], inlineDisposition)];
+  [response setHeader:@"X-Content-Type-Options" value:@"nosniff"];
+  if (!(inlineDisposition && [SMBaseContentType(contentType) isEqualToString:@"application/pdf"])) {
+    [response setHeader:@"Content-Security-Policy" value:@"sandbox"];
+  }
+  [self renderData:data contentType:contentType];
   return nil;
 }
 

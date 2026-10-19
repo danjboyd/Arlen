@@ -142,6 +142,56 @@
   `ALNPlatformOpenExclusiveLockWithTimeout()` waits for a lock for at most a
   given time (a blocking wait on a helper thread, started only when the lock
   is contended), and both lock functions retry interrupted waits.
+- **Breaking (production):** `/metrics` and `/clusterz` answer `404` in the
+  `production` environment until access is configured with
+  `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` or
+  `observability.operabilityLoopbackOnly` / `ARLEN_OPERABILITY_LOOPBACK_ONLY`.
+  Before, both were anonymous by default, and `/clusterz` reports the hostname
+  and worker layout. To keep the old behaviour behind a proxy that already
+  blocks them, set `observability.operabilityAnonymous = YES` (or
+  `ARLEN_OPERABILITY_ANONYMOUS=1`). `arlen doctor --env production` reports
+  which mode is active, and `validate_operability.sh` sends
+  `ARLEN_OPERABILITY_TOKEN` when set (#215).
+- CI: a nightly `linux-sanitizers / integration-sanitizers-nightly` job runs
+  the integration suite against an ASAN+UBSan build (clang's shared runtime,
+  per-process reports under `build/sanitizers/integration_nightly/`). It skips
+  the app-root tests listed in
+  `tests/fixtures/sanitizers/integration_nightly_skips.txt`, which
+  `tools/ci/classify_sanitizer_integration_skips.py` maintains, and is not a
+  required check (#271).
+- Outside `development` and `test`, `session.secret`, `auth.bearerSecret` and
+  `storageModule.signingSecret` now refuse placeholder values (containing
+  `replace-with`, `change-me`, `changeme`, `change_me` or `0123456789ab`) and
+  secrets committed in the Arlen repository. They used to pass whenever they
+  were 32+ characters, including the `site.env.example` placeholder. The env
+  example now uses `CHANGE_ME`, `arlen deploy init` writes a freshly generated
+  64-hex `ARLEN_SESSION_SECRET` into its `0600` env example, and the example
+  apps keep their session/bearer secrets in
+  `config/environments/development.plist`. The `storage` module is now `1.2.0`.
+  Generate secrets with `openssl rand -hex 32`.
+- Search module `1.1.0`: the Meilisearch and OpenSearch adapters encode
+  record identifiers and index names in request URLs with only unreserved
+  characters, and reject an identifier or index name that is empty, `.` or
+  `..` with a validation error instead of sending the request. A record whose
+  identifier was `..` used to turn a live-sync document delete into a request
+  for the whole index (`DELETE /<index>/`). Arlen's libcurl HTTP transport
+  (GNUstep) now sets `CURLOPT_PATH_AS_IS`, so it never collapses `.`/`..`
+  path segments.
+- Storage module `1.3.0`: declared content types must be a single media type (no lists, quotes or control characters) and are stored normalized; `GET /storage/api/download/:token` sends only that normalized type, and now sends
+  `Content-Disposition: attachment` with a sanitized filename,
+  `Content-Security-Policy: sandbox` and `X-Content-Type-Options: nosniff`.
+  Only PNG, JPEG, GIF, WebP, AVIF, PDF, audio and video objects are served
+  inline. Downloads used to be served inline with whatever content type the
+  uploader declared, so an HTML or SVG object opened as a page on the app's
+  origin. Wildcard `acceptedContentTypes` (`*/*`, the default, and `image/*`)
+  no longer match `text/html`, `image/svg+xml` or `application/xhtml+xml`;
+  collections that store them must list them exactly.
+- EOC: when no page fills a named slot, `<%@ yield "name" %>` falls back to
+  the context value with the same name. That value is now HTML-escaped like
+  `<%= %>` output; it used to be written raw, so a controller value such as
+  `title` could add markup to the layout. Slot content filled with
+  `slot`/`endslot` and the plain `<%@ yield %>` page body are still emitted
+  as-is.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

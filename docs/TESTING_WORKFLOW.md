@@ -72,6 +72,10 @@ The merge gate for `main` is:
  - local entrypoint: `make ci-quality`
 - `linux-sanitizers / sanitizer-gate`
  - local entrypoint: `make ci-sanitizers`
+- `static-analysis / scan-build`
+ - local entrypoint: `make ci-static-scan-build`
+- `static-analysis / clang-tidy`
+ - local entrypoint: `make ci-static-clang-tidy`
 - `docs-quality / docs-gate`
  - local entrypoint: `make ci-docs`
 
@@ -176,6 +180,69 @@ Test bundles compile against and link the vendored `libXCTest`, so these
 features do not depend on the host's packaged `tools-xctest`. The Windows
 preview lanes use the vendored runner too (issue #116); the gnustep-cli Windows
 toolchain ships no XCTest of its own.
+
+### Static analysis
+
+Two gating lanes analyze all first-party code (vendored
+`src/Arlen/Support/third_party` is excluded). Each one deletes `build/` and
+rebuilds `all`, `boomhauer` and `tech-demo-server`, so run them one at a time
+and expect a full rebuild afterwards.
+
+```bash
+source tools/source_gnustep_env.sh
+make ci-static-scan-build    # clang static analyzer, gated on a baseline
+make ci-static-clang-tidy    # clang-tidy, warnings are errors
+```
+
+Tools: scan-build and intercept-build come from the `clang-tools-<major>`
+package that matches your `clang` (`scan-build-19` and `intercept-build-19`
+on Debian 13). CI pins clang-tidy 22.1.8: `python3 tools/ci/fetch_clang_tidy.py <dir>`
+downloads that release's PyPI wheel, checks its sha256 and prints the path of the
+extracted binary (no pip or virtualenv needed). Use the same version locally and
+point the lane at it with `ARLEN_STATIC_CLANG_TIDY=/path/to/clang-tidy` if it is
+not first on `PATH`.
+`ARLEN_STATIC_SCAN_BUILD`, `ARLEN_STATIC_INTERCEPT_BUILD` and
+`ARLEN_STATIC_JOBS` (default 4) override the other tools and the parallelism.
+
+scan-build lane: the compiler driver is the GNUmakefile's `ARLEN_CC` (default
+`clang`), and the lane sets it to scan-build's analyzer wrapper. Enabled
+checkers are `core`, `unix`, `security`, `deadcode` and `osx.cocoa`, minus
+`security.insecureAPI.DeprecatedOrUnsafeBufferHandling` (it asks for C11
+Annex K functions that glibc does not provide) and `nullability`. HTML reports
+land in `build/static_analysis/scan_build/`; open the `index.html` there.
+`tools/ci/static_scan_build_gate.py` then compares every report against
+`tests/fixtures/static_analysis/scan_build_baseline.json`. Entries are keyed by
+file, bug type, function and clang's issue hash, so they survive line moves.
+New reports fail the lane; baseline entries that no longer occur are printed as
+`STALE` but do not fail it.
+
+To update the baseline after fixing or deliberately accepting a report:
+
+```bash
+make ci-static-scan-build    # produces the reports (fails if any are new)
+python3 tools/ci/static_scan_build_gate.py \
+  --reports build/static_analysis/scan_build --root . \
+  --baseline tests/fixtures/static_analysis/scan_build_baseline.json \
+  --write-baseline
+```
+
+`--write-baseline` keeps the `reason` of existing entries and marks new ones
+`TODO`. Replace each `TODO` with why the report is accepted before you commit.
+Accept only reports that are not defects (dead stores, analyzer convention
+checks); fix real ones. Removing a fixed entry is always fine.
+
+clang-tidy lane: checks are `bugprone-*`, `cert-*` and the applicable `objc-*`
+checks, minus a short list of style and false-positive heavy checks spelled out
+in `tools/ci/run_static_clang_tidy_gate.sh`. `misc-no-recursion` is not
+enabled because it crashes clang-tidy on Objective-C block literals, and a
+clang-tidy crash fails this lane. `clang-analyzer-*` is left to the scan-build
+lane. Per-file output is in `build/static_analysis/clang_tidy/logs/`. Fix new
+warnings rather than disabling checks; if a check must be dropped, change the
+list in the script and say why in the same change.
+
+The older `make ci-static-analysis` lane still runs inside `make ci-sanitizers`.
+It analyzes four hot files and writes release-confidence artifacts but allows
+warnings; the two lanes above are the gate.
 
 ## 1. Focused Lanes
 
@@ -560,6 +627,15 @@ with its multipart implementation while disabling both optional C backends.
 Both regressions also run in the existing Linux integration suite.
 
 ## TSAN reliability and retained evidence
+
+The nightly integration sanitizer lane
+(`bash tools/ci/run_linux_integration_sanitizers_nightly.sh`, workflow job
+`linux-sanitizers / integration-sanitizers-nightly`) runs the integration
+bundle against an ASAN+UBSan build, skipping the app-root tests listed in
+`tests/fixtures/sanitizers/integration_nightly_skips.txt`. It is informational,
+like the thread-race lane; see `docs/CI_ALIGNMENT.md`. After adding an
+integration test that builds an app root, run
+`python3 tools/ci/classify_sanitizer_integration_skips.py --write`.
 
 The nightly thread-race lane remains informational. Its library-wide
 suppressions and 14 TSAN-only test returns were retired on 2026-09-21;
