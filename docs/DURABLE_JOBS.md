@@ -62,6 +62,10 @@ connections held by handlers; do not use a one-connection pool if a handler hold
 that connection while it works. Construct pools after forking, in each worker.
 The existing `arlen jobs worker` / `jobs-worker` runner uses this adapter through
 the application's registration path.
+The auth module depends on jobs from version 1.6.1. In production-like
+environments with local passwords and mail enabled, configure this PostgreSQL
+adapter and `authModule.publicBaseURL` before registering auth, then keep a
+worker running. Auth registration and password-reset mail uses `auth_mail` jobs.
 
 ## Enqueue and transaction boundaries
 

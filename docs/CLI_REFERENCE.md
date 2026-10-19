@@ -642,6 +642,7 @@ First-party module surfaces after install:
 - Generated OpenAPI routes, including `/openapi.json`, are closed in production unless `openapi.publicInProduction = YES` is set explicitly.
 - Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
 - `POST /auth/api/register` defaults to a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in and duplicate-email response, with an enumeration tradeoff.
+- Production auth mail uses the PostgreSQL jobs adapter and jobs worker. Install the jobs schema, configure `authModule.publicBaseURL`, and register the jobs module before auth. `authModule.mailDispatch.mode = "synchronous"` explicitly preserves legacy request-time delivery; see [Auth Module](AUTH_MODULE.md).
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
   Shared operator-state writes coordinate across processes; this is separate
   from the job adapter's pending and leased records.

@@ -57,7 +57,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Modules](MODULES.md): install, doctor, migrate, assets, upgrade, eject, remove, and override guidance.
 - [Plugin + Service Guide](PLUGIN_SERVICE_GUIDE.md): generate app-local plugins and service adapters.
-- [Auth Module](AUTH_MODULE.md): first-party auth product routes, fragments, helpers, and `/auth/api` surface.
+- [Auth Module](AUTH_MODULE.md): first-party auth routes and `/auth/api`, including durable production mail setup.
 - [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui`.
 - [Admin UI Module](ADMIN_UI_MODULE.md): admin resources, filters, exports, and `/admin/api`.
 - [Durable Jobs](DURABLE_JOBS.md): PostgreSQL queues, transactional enqueue, renewable leases, crash recovery, and durable results.

@@ -13,6 +13,7 @@
 #import "ALNResponse.h"
 #import "ALNJSONSerialization.h"
 #import "ALNLogger.h"
+#import "ALNJobsModule.h"
 #import "ALNPg.h"
 #import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
@@ -27,6 +28,7 @@ NSString *const ALNAuthModuleErrorDomain = @"Arlen.Modules.Auth.Error";
 NSString *const ALNAuthModuleRetryAfterSecondsKey = @"retry_after_seconds";
 
 static NSString *const AMAttemptScopeMFA = @"mfa";
+static NSString *const AMMailDispatchJobIdentifier = @"auth.mail.dispatch";
 // auth_password_attempts.client_ip value for the account-wide row.
 static NSString *const AMPasswordAccountRowAddress = @"*";
 // Failure counts older than this start over at the next failure.
@@ -986,6 +988,7 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, copy, readwrite) NSString *generatedPagePrefix;
 @property(nonatomic, copy, readwrite) NSString *uiAssetPrefix;
 @property(nonatomic, assign) BOOL registrationAutoLogin;
+@property(nonatomic, assign) BOOL durableMailDispatchEnabled;
 - (void)mountUIAssetsForApplication:(ALNApplication *)application;
 @property(nonatomic, assign, readwrite) BOOL smsEnabled;
 @property(nonatomic, assign) BOOL smsAllowEnrollment;
@@ -1051,6 +1054,12 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                            password:(NSString *)password
                                              source:(NSString *)source
                                               error:(NSError **)error;
+- (nullable NSDictionary *)createLocalUserWithEmail:(NSString *)email
+                                        displayName:(NSString *)displayName
+                                           password:(NSString *)password
+                                             source:(NSString *)source
+                                          onCreated:(nullable BOOL (^)(ALNPgConnection *, NSDictionary *, NSError **))onCreated
+                                              error:(NSError **)error;
 - (nullable NSDictionary *)createTrustedEmailClaimUserWithEmail:(NSString *)email
                                                     displayName:(NSString *)displayName
                                                          source:(NSString *)source
@@ -1079,6 +1088,13 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                         token:(NSString *)token
                       baseURL:(NSString *)baseURL
                         error:(NSError **)error;
+- (BOOL)enqueueMailEvent:(NSString *)event
+                   email:(NSString *)email
+                 baseURL:(NSString *)baseURL
+                eligible:(BOOL)eligible
+            onConnection:(nullable ALNPgConnection *)connection
+                   error:(NSError **)error;
+- (BOOL)dispatchQueuedMailPayload:(NSDictionary *)payload error:(NSError **)error;
 - (nullable NSString *)issueVerificationTokenForUserID:(NSString *)userID
                                                  error:(NSError **)error;
 - (nullable NSString *)issuePasswordResetTokenForUserID:(NSString *)userID
@@ -1755,12 +1771,45 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   self.mailAdapter = application.mailAdapter;
   self.logger = application.logger;
+  NSDictionary *mailDispatchConfig = [moduleConfig[@"mailDispatch"] isKindOfClass:[NSDictionary class]]
+                                         ? moduleConfig[@"mailDispatch"] : @{};
+  NSString *mailDispatchMode = AMLowerTrimmedString(mailDispatchConfig[@"mode"]);
+  if ([mailDispatchMode length] > 0 && ![mailDispatchMode isEqualToString:@"durable"] &&
+      ![mailDispatchMode isEqualToString:@"synchronous"]) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"authModule.mailDispatch.mode must be durable or synchronous",
+                                       @{ @"key_path" : @"authModule.mailDispatch.mode" });
+    return NO;
+  }
+  ALNJobsModuleRuntime *jobsRuntime = [ALNJobsModuleRuntime sharedRuntime];
+  BOOL durableJobsReady = jobsRuntime.application == application &&
+      [application.jobsAdapter conformsToProtocol:@protocol(ALNDurableJobAdapter)];
+  if ([mailDispatchMode isEqualToString:@"durable"] && !durableJobsReady) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"authModule.mailDispatch.mode=durable requires a configured durable jobs adapter and jobs module",
+                                       @{ @"key_path" : @"authModule.mailDispatch.mode" });
+    return NO;
+  }
+  self.durableMailDispatchEnabled = durableJobsReady && ![mailDispatchMode isEqualToString:@"synchronous"];
+  if (!self.durableMailDispatchEnabled && ![self isDevelopmentOrTestEnvironment] && self.localPasswordEnabled &&
+      self.mailAdapter != nil && ![mailDispatchMode isEqualToString:@"synchronous"]) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"production auth mail requires a configured durable jobs adapter and jobs module",
+                                       @{ @"key_path" : @"authModule.mailDispatch.mode" });
+    return NO;
+  }
   [self.attemptLimitSchemaLock lock];
   self.attemptLimitSchemaAvailable = NO;
   self.attemptLimitSchemaWarningLogged = NO;
   [self.attemptLimitSchemaLock unlock];
   if ([self.publicBaseURL length] == 0 && ![self isDevelopmentOrTestEnvironment] && self.localPasswordEnabled &&
       self.mailAdapter != nil) {
+    if (self.durableMailDispatchEnabled) {
+      if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                         @"durable auth mail requires authModule.publicBaseURL",
+                                         @{ @"key_path" : @"authModule.publicBaseURL" });
+      return NO;
+    }
     [self.logger warn:@"authModule.publicBaseURL is not set; password-reset and email-verification links will not be sent"
                fields:@{ @"environment" : AMEffectiveEnvironmentName(self.environmentName),
                          @"key_path" : @"authModule.publicBaseURL" }];
@@ -1815,6 +1864,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"absoluteLifetimeSeconds" : @(self.absoluteSessionLifetimeSeconds),
   };
   summary[@"registration"] = @{ @"autoLogin" : @(self.registrationAutoLogin) };
+  summary[@"mailDispatch"] = @{ @"mode" : self.durableMailDispatchEnabled ? @"durable" : @"synchronous" };
   summary[@"mfa"] = @{
     @"sms" : @{
       @"enabled" : @(self.smsEnabled),
@@ -2155,6 +2205,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                   password:(NSString *)password
                                     source:(NSString *)source
                                      error:(NSError **)error {
+  return [self createLocalUserWithEmail:email displayName:displayName password:password
+                                source:source onCreated:nil error:error];
+}
+
+- (NSDictionary *)createLocalUserWithEmail:(NSString *)email
+                               displayName:(NSString *)displayName
+                                  password:(NSString *)password
+                                    source:(NSString *)source
+                                 onCreated:(BOOL (^)(ALNPgConnection *, NSDictionary *, NSError **))onCreated
+                                     error:(NSError **)error {
   NSString *normalizedEmail = AMLowerTrimmedString(email);
   if ([normalizedEmail length] == 0) {
     if (error != NULL) {
@@ -2255,7 +2315,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       return NO;
     }
     createdUser = AMUserDictionaryFromRow(row);
-    return (createdUser != nil);
+    return createdUser != nil && (onCreated == nil || onCreated(connection, createdUser, txError));
   } error:error];
   if (!ok && error != NULL && *error != NULL) {
     *error = AMTranslateMissingAuthModuleTablesError(*error, self.environmentName);
@@ -2570,6 +2630,44 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   NSString *deliveryID = [self.mailAdapter deliverMessage:message error:error];
   return ([deliveryID length] > 0);
+}
+
+- (BOOL)enqueueMailEvent:(NSString *)event
+                   email:(NSString *)email
+                 baseURL:(NSString *)baseURL
+                eligible:(BOOL)eligible
+            onConnection:(ALNPgConnection *)connection
+                   error:(NSError **)error {
+  if (!self.durableMailDispatchEnabled) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"durable auth mail dispatch is unavailable", nil);
+    return NO;
+  }
+  NSDictionary *payload = @{ @"event" : AMTrimmedString(event), @"email" : AMLowerTrimmedString(email),
+                             @"baseURL" : AMTrimmedString(baseURL), @"eligible" : @(eligible) };
+  NSString *jobID = [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:AMMailDispatchJobIdentifier
+                                                                        payload:payload
+                                                                        options:@{ @"queue" : @"auth_mail" }
+                                                                   onConnection:connection
+                                                                          error:error];
+  return [jobID length] > 0;
+}
+
+- (BOOL)dispatchQueuedMailPayload:(NSDictionary *)payload error:(NSError **)error {
+  if (![payload[@"eligible"] boolValue]) return YES;
+  NSString *email = AMLowerTrimmedString(payload[@"email"]);
+  NSString *event = AMTrimmedString(payload[@"event"]);
+  NSError *lookupError = nil;
+  NSDictionary *user = [self userForEmail:email error:&lookupError];
+  if (user == nil) {
+    if (error != NULL) *error = lookupError;
+    return lookupError == nil;
+  }
+  NSString *token = [event isEqualToString:@"password_reset"]
+                        ? [self issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:error]
+                        : [self issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:error];
+  if ([token length] == 0) return NO;
+  return [self sendNotificationEvent:event user:user token:token baseURL:AMTrimmedString(payload[@"baseURL"]) error:error];
 }
 
 - (NSString *)issueVerificationTokenForUserID:(NSString *)userID
@@ -5165,9 +5263,23 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSString *displayName = AMTrimmedString(parameters[@"display_name"]);
   NSString *password = AMTrimmedString(parameters[@"password"]);
   NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
+  BOOL durableMail = self.runtime.durableMailDispatchEnabled && !self.runtime.registrationAutoLogin;
+  NSString *durableBaseURL = durableMail
+                                 ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                              event:@"email_verification"]
+                                 : nil;
+  __block BOOL mailQueueFailed = NO;
   NSError *error = nil;
-  NSDictionary *user =
-      [self.runtime createLocalUserWithEmail:email displayName:displayName password:password source:@"local_registration" error:&error];
+  NSDictionary *user = [self.runtime createLocalUserWithEmail:email displayName:displayName password:password
+                                                       source:@"local_registration"
+                                                    onCreated:durableMail ? ^BOOL(ALNPgConnection *connection, NSDictionary *created,
+                                                                                NSError **txError) {
+    BOOL queued = [self.runtime enqueueMailEvent:@"email_verification" email:AMTrimmedString(created[@"email"])
+                                        baseURL:durableBaseURL
+                                        eligible:YES onConnection:connection error:txError];
+    if (!queued) mailQueueFailed = YES;
+    return queued;
+  } : nil error:&error];
   BOOL duplicateAccepted = !self.runtime.registrationAutoLogin && user == nil &&
       [error.domain isEqualToString:ALNAuthModuleErrorDomain] &&
       error.code == ALNAuthModuleErrorValidationFailed &&
@@ -5180,6 +5292,14 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     // New registrations hash a password. Spend the same expensive step for an
     // existing address before returning the identical public response.
     AMSpendDummyPasswordVerification(password);
+    if (durableMail && ![self.runtime enqueueMailEvent:@"email_verification" email:email baseURL:durableBaseURL
+                                             eligible:NO onConnection:nil error:&error]) {
+      mailQueueFailed = YES;
+    }
+  }
+  if (mailQueueFailed) {
+    [self setStatus:503];
+    return @{ @"status" : @"error", @"message" : @"Registration is temporarily unavailable. Try again shortly." };
   }
   if (user == nil && !duplicateAccepted) {
     [self setStatus:422];
@@ -5240,11 +5360,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return nil;
   }
 
-  NSString *verificationBaseURL = (user != nil)
+  NSString *verificationBaseURL = (user != nil && !durableMail)
                                       ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
                                                                                    event:@"email_verification"]
                                       : nil;
-  NSString *verificationToken = ([verificationBaseURL length] > 0 && user != nil)
+  NSString *verificationToken = ([verificationBaseURL length] > 0 && user != nil && !durableMail)
                                     ? [self.runtime issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:&error]
                                     : nil;
   if ([verificationToken length] > 0) {
@@ -5361,19 +5481,31 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   BOOL maySend = [self.runtime allowMailSendForEmail:email
                                        clientAddress:[self clientAddressForContext:ctx]
                                                 flow:@"password_reset"];
-  NSDictionary *user = [self.runtime userForEmail:email error:NULL];
-  NSString *resetBaseURL = (user != nil) ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
-                                                                                       event:@"password_reset"]
-                                         : nil;
-  if (maySend && user != nil && [resetBaseURL length] > 0) {
-    NSError *error = nil;
-    NSString *token = [self.runtime issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
-    if ([token length] > 0) {
-      (void)[self.runtime sendNotificationEvent:@"password_reset"
-                                           user:user
-                                          token:token
-                                        baseURL:resetBaseURL
-                                          error:NULL];
+  if (self.runtime.durableMailDispatchEnabled) {
+    NSString *baseURL = [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                  event:@"password_reset"];
+    NSError *queueError = nil;
+    NSString *queueEmail = [email length] > 0 ? email : @"invalid";
+    if (![self.runtime enqueueMailEvent:@"password_reset" email:queueEmail baseURL:baseURL
+                               eligible:(maySend && [email length] > 0) onConnection:nil error:&queueError]) {
+      [self setStatus:503];
+      return @{ @"status" : @"error", @"message" : @"Password reset is temporarily unavailable. Try again shortly." };
+    }
+  } else {
+    NSDictionary *user = [self.runtime userForEmail:email error:NULL];
+    NSString *resetBaseURL = (user != nil) ? [self.runtime emailLinkBaseURLWithRequestBaseURL:[self requestBaseURL:ctx]
+                                                                                         event:@"password_reset"]
+                                           : nil;
+    if (maySend && user != nil && [resetBaseURL length] > 0) {
+      NSError *error = nil;
+      NSString *token = [self.runtime issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:&error];
+      if ([token length] > 0) {
+        (void)[self.runtime sendNotificationEvent:@"password_reset"
+                                             user:user
+                                            token:token
+                                          baseURL:resetBaseURL
+                                            error:NULL];
+      }
     }
   }
   NSString *message = @"If the account exists, a reset link has been issued.";
@@ -6147,6 +6279,36 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 @end
 
+@interface ALNAuthMailDispatchJob : NSObject <ALNJobsJobDefinition>
+@end
+
+@implementation ALNAuthMailDispatchJob
+
+- (NSString *)jobsModuleJobIdentifier { return AMMailDispatchJobIdentifier; }
+
+- (NSDictionary *)jobsModuleJobMetadata {
+  return @{ @"title" : @"Auth mail dispatch", @"queue" : @"auth_mail", @"maxAttempts" : @3,
+            @"allowManualEnqueue" : @NO };
+}
+
+- (BOOL)jobsModuleValidatePayload:(NSDictionary *)payload error:(NSError **)error {
+  NSString *event = AMTrimmedString(payload[@"event"]);
+  NSString *email = AMLowerTrimmedString(payload[@"email"]);
+  if ((![event isEqualToString:@"email_verification"] && ![event isEqualToString:@"password_reset"]) ||
+      [email length] == 0 || ![payload[@"eligible"] respondsToSelector:@selector(boolValue)]) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorValidationFailed, @"invalid auth mail job payload", nil);
+    return NO;
+  }
+  return YES;
+}
+
+- (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context error:(NSError **)error {
+  (void)context;
+  return [[ALNAuthModuleRuntime sharedRuntime] dispatchQueuedMailPayload:payload error:error];
+}
+
+@end
+
 @implementation ALNAuthModule
 
 - (NSString *)moduleIdentifier {
@@ -6157,6 +6319,11 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                           error:(NSError **)error {
   ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
   if (![runtime configureWithApplication:application error:error]) {
+    return NO;
+  }
+  if (runtime.durableMailDispatchEnabled &&
+      ![[ALNJobsModuleRuntime sharedRuntime] registerSystemJobDefinition:[[ALNAuthMailDispatchJob alloc] init]
+                                                                  error:error]) {
     return NO;
   }
   ALNAuthModuleInstallSessionRefresh(application);
