@@ -7,6 +7,7 @@
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface Phase16EOpsJob : NSObject <ALNJobsJobDefinition>
 @end
@@ -226,17 +227,16 @@
     NSString *readyPrefix = [[sharedPath lastPathComponent] stringByAppendingString:@".ready."];
     NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
     XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
-    NSUInteger readyCount = 0;
-    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
+    __block NSUInteger readyCount = 0;
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.05, ^BOOL {
       NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
                                                                            error:NULL];
       readyCount = 0;
       for (NSString *name in names) {
         if ([name hasPrefix:readyPrefix]) readyCount++;
       }
-      if (readyCount >= 2U) break;
-      usleep(50000);
-    }
+      return readyCount >= 2U;
+    }));
     XCTAssertEqual((NSUInteger)2, readyCount);
     XCTAssertNotNil([runtime dashboardSummary]);
     return;
