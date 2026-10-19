@@ -3,7 +3,7 @@
   version = "1.6.1";
   principalClass = "ALNAuthModule";
   dependencies = (
-    { identifier = "jobs"; version = ">= 1.1.1"; }
+    { identifier = "jobs"; version = ">= 1.1.1"; required = NO; }
   );
   compatibility = {
     arlenVersion = ">= 0.1.0";

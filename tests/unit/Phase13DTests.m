@@ -326,4 +326,39 @@
   }
 }
 
+- (void)testAuthOptionalJobsDependencySupportsAuthOnlyAndAuthWithJobsDoctor {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  for (NSArray<NSString *> *moduleIDs in @[ @[ @"auth" ], @[ @"jobs", @"auth" ] ]) {
+    NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13d-auth-jobs-doctor"];
+    XCTAssertNotNil(appRoot);
+    if (appRoot == nil) continue;
+    @try {
+      NSMutableArray<NSString *> *entries = [NSMutableArray array];
+      for (NSString *identifier in moduleIDs) {
+        NSString *source = [repoRoot stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"modules/%@/module.plist", identifier]];
+        NSString *target = [appRoot stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"modules/%@/module.plist", identifier]];
+        XCTAssertTrue([self writeFile:target content:[self readFile:source]]);
+        [entries addObject:[NSString stringWithFormat:
+            @"{ identifier = \"%@\"; path = \"modules/%@\"; enabled = YES; }", identifier, identifier]];
+      }
+      NSString *registry = [NSString stringWithFormat:@"{ modules = ( %@ ); }", [entries componentsJoinedByString:@", "]];
+      XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"] content:registry]);
+      NSError *error = nil;
+      NSArray<ALNModuleDefinition *> *definitions = [ALNModuleSystem sortedModuleDefinitionsAtAppRoot:appRoot error:&error];
+      XCTAssertNotNil(definitions, @"%@", error);
+      XCTAssertEqualObjects(moduleIDs, [definitions valueForKey:@"identifier"]);
+      NSArray<NSDictionary *> *doctor = [ALNModuleSystem doctorDiagnosticsAtAppRoot:appRoot
+                                                                            config:@{ @"appRoot" : appRoot }
+                                                                             error:&error];
+      XCTAssertNotNil(doctor, @"%@", error);
+      XCTAssertTrue([[doctor valueForKey:@"code"] containsObject:@"modules_loaded"]);
+      XCTAssertFalse([[doctor valueForKey:@"code"] containsObject:@"module_validation_failed"]);
+    } @finally {
+      [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    }
+  }
+}
+
 @end
