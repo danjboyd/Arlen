@@ -113,6 +113,9 @@ Production-like environments with local passwords and mail configured require
 the durable jobs adapter and `authModule.publicBaseURL` at startup. Explicit
 `authModule.mailDispatch.mode = "synchronous"` keeps the old delivery path;
 its provider and database latency can reveal whether an address exists.
+Use the same PostgreSQL database and search path for auth and jobs so the new
+account and its mail job commit together. A failed enqueue rolls back a new
+registration and returns a generic 503 for registration or password reset.
 
 The previous registration behavior can be enabled explicitly with
 `authModule.registration.autoLogin = YES`. This compatibility setting starts

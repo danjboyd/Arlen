@@ -15,7 +15,10 @@ including unresolved, non-blocking ThreadSanitizer findings.
   `auth_mail` jobs when the durable adapter is configured. Production-like apps
   with local passwords and mail must install/configure the PostgreSQL jobs
   adapter, set `authModule.publicBaseURL`, and run the jobs worker. New-user
-  creation and its mail enqueue commit together. Explicit
+  creation and its mail enqueue commit together; auth and jobs must use the
+  same PostgreSQL database and search path. Apply
+  `tools/migrations/jobs/001_postgres_jobs.sql` before starting workers. Enqueue
+  failures roll back new registrations and return a generic 503. Explicit
   `authModule.mailDispatch.mode = "synchronous"` preserves legacy delivery with
   its account-enumeration timing risk. Review [Auth Module](AUTH_MODULE.md) and
   [Durable Jobs](DURABLE_JOBS.md) before upgrading. Custom registration hooks

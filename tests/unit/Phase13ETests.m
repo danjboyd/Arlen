@@ -161,7 +161,24 @@ static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
 
 @end
 
+@interface Phase13EFailingJobAdapter : ALNPostgresJobAdapter
+@property(nonatomic, assign) BOOL failEnqueue;
+@end
+
+@implementation Phase13EFailingJobAdapter
+- (NSString *)enqueueJobNamed:(NSString *)name payload:(NSDictionary *)payload options:(NSDictionary *)options
+                onConnection:(id<ALNDatabaseConnection>)connection error:(NSError **)error {
+  if (self.failEnqueue) {
+    if (error != NULL) *error = [NSError errorWithDomain:@"Phase13E.Queue" code:1
+                                                userInfo:@{ NSLocalizedDescriptionKey : @"test enqueue failure" }];
+    return nil;
+  }
+  return [super enqueueJobNamed:name payload:payload options:options onConnection:connection error:error];
+}
+@end
+
 @interface ALNAuthModuleRuntime (Phase13ETokenAccess)
+- (nullable NSDictionary *)userForEmail:(NSString *)email error:(NSError **)error;
 - (nullable NSDictionary *)createLocalUserWithEmail:(NSString *)email
                                         displayName:(NSString *)displayName
                                            password:(NSString *)password
@@ -1373,6 +1390,52 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error], @"%@", error);
   XCTAssertEqual((NSUInteger)2, [[mail deliveriesSnapshot] count]);
   XCTAssertTrue([[[self deliveredTextBodies:mail] lastObject] containsString:@"https://app.example.test/auth/password/reset?token="]);
+}
+
+- (void)testDurableAuthMailQueueFailureRollsBackRegistrationAndKeepsResetResponsesGeneric {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:4 error:&error];
+  Phase13EFailingJobAdapter *jobs = [[Phase13EFailingJobAdapter alloc] initWithDatabase:database
+                                                                               namespace:[NSString stringWithFormat:@"auth-failure-%@", [[NSUUID UUID] UUIDString]]
+                                                                    leaseDurationSeconds:30 error:&error];
+  XCTAssertNotNil(jobs, @"%@", error);
+  XCTAssertTrue([jobs installSchemaWithError:&error], @"%@", error);
+  ALNApplication *app = [self applicationWithConfig:@{
+    @"environment" : @"production",
+    @"csrf" : @{ @"enabled" : @NO },
+    @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test", @"allowWithoutCSRF" : @YES,
+                       @"attemptLimits" : @{ @"mail" : @{ @"maxPerAddress" : @10000 } } },
+  }];
+  ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"failing_auth_mail"];
+  [app setMailAdapter:mail];
+  [app setJobsAdapter:jobs];
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+
+  NSString *newEmail = [NSString stringWithFormat:@"rollback-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  NSString *existingEmail = [self createLinkUserEmail];
+  jobs.failEnqueue = YES;
+  NSDictionary *payload = @{ @"email" : newEmail, @"display_name" : @"Rollback", @"password" : @"rollback-password" };
+  ALNResponse *registration = [self postJSON:payload to:@"/auth/api/register" app:app host:@"app.example.test"];
+  XCTAssertEqual((NSInteger)503, registration.statusCode);
+  XCTAssertNil([[ALNAuthModuleRuntime sharedRuntime] userForEmail:newEmail error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, [[mail deliveriesSnapshot] count]);
+  ALNResponse *existingRegistration = [self postJSON:@{ @"email" : existingEmail, @"display_name" : @"Existing",
+                                                       @"password" : @"rollback-password" }
+                                                   to:@"/auth/api/register" app:app host:@"app.example.test"];
+  XCTAssertEqual((NSInteger)503, existingRegistration.statusCode);
+  XCTAssertEqualObjects([self JSONResponseBody:registration], [self JSONResponseBody:existingRegistration]);
+
+  NSString *unknownEmail = [NSString stringWithFormat:@"missing-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
+  ALNResponse *knownReset = [self postJSON:@{ @"email" : existingEmail } to:@"/auth/api/password/forgot"
+                                      app:app host:@"app.example.test"];
+  ALNResponse *unknownReset = [self postJSON:@{ @"email" : unknownEmail } to:@"/auth/api/password/forgot"
+                                        app:app host:@"app.example.test"];
+  XCTAssertEqual((NSInteger)503, knownReset.statusCode);
+  XCTAssertEqualObjects([self JSONResponseBody:knownReset], [self JSONResponseBody:unknownReset]);
+  XCTAssertEqual((NSUInteger)0, [[mail deliveriesSnapshot] count]);
 }
 
 - (void)testPasswordResetLinkUsesConfiguredPublicBaseURLNotHostHeader {
