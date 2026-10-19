@@ -82,6 +82,8 @@ NS_ASSUME_NONNULL_BEGIN
                                  error:(NSError *_Nullable *_Nullable)error;
 - (void)renderSSEEvents:(NSArray *)events;
 - (void)acceptWebSocketEcho;
+/// Accept a receive-only subscription. Authorize the channel in this route before
+/// calling; client text frames are discarded. Publish through server-side helpers.
 - (void)acceptWebSocketChannel:(NSString *)channel;
 - (void)redirectTo:(NSString *)location status:(NSInteger)statusCode;
 - (void)setStatus:(NSInteger)statusCode;

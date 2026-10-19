@@ -53,6 +53,47 @@ static void ALNSetError(NSError **error, NSInteger code, NSString *message) {
 
 static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth);
 
+// Foundation's parser recurses before returning an object. Bound nesting before
+// invoking either backend, including UTF-16/32 input accepted by Foundation.
+static BOOL ALNJSONInputDepthAllowed(NSData *data, NSError **error) {
+  const unsigned char *bytes = data.bytes;
+  NSUInteger length = data.length;
+  NSStringEncoding encoding = NSUTF8StringEncoding;
+  if (length >= 4 && ((bytes[0] == 0 && bytes[1] == 0) ||
+                     (bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0) ||
+                     (bytes[0] == 0xFF && bytes[1] == 0xFE && bytes[2] == 0))) {
+    encoding = (bytes[0] == 0) ? NSUTF32BigEndianStringEncoding : NSUTF32LittleEndianStringEncoding;
+  } else if (length >= 2 && (bytes[0] == 0 || bytes[0] == 0xFE ||
+                            bytes[1] == 0 || bytes[0] == 0xFF)) {
+    encoding = (bytes[0] == 0 || bytes[0] == 0xFE) ? NSUTF16BigEndianStringEncoding : NSUTF16LittleEndianStringEncoding;
+  }
+  NSString *text = [[NSString alloc] initWithData:data encoding:encoding];
+  if (text == nil) {
+    ALNSetError(error, ALNJSONSerializationErrorParseFailed, @"Invalid JSON text encoding");
+    return NO;
+  }
+  NSUInteger depth = 0;
+  BOOL inString = NO, escaped = NO;
+  for (NSUInteger index = 0; index < text.length; index++) {
+    unichar ch = [text characterAtIndex:index];
+    if (inString) {
+      if (escaped) escaped = NO;
+      else if (ch == '\\') escaped = YES;
+      else if (ch == '"') inString = NO;
+    } else if (ch == '"') {
+      inString = YES;
+    } else if (ch == '[' || ch == '{') {
+      if (++depth > ALNJSONMaxDepth) {
+        ALNSetError(error, ALNJSONSerializationErrorDepthExceeded, @"JSON nesting depth exceeds safety limit");
+        return NO;
+      }
+    } else if ((ch == ']' || ch == '}') && depth > 0) {
+      depth--;
+    }
+  }
+  return YES;
+}
+
 static id ALNMutableFoundationLeavesObject(id obj) {
   if ([obj isKindOfClass:[NSDictionary class]]) {
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithCapacity:[(NSDictionary *)obj count]];
@@ -474,6 +515,7 @@ static BOOL ALNValidateJSONObjectRecursive(id obj, NSUInteger depth) {
     return nil;
   }
 
+  if (!ALNJSONInputDepthAllowed(data, error)) return nil;
   if ([self backend] == ALNJSONBackendFoundation || ![self isYYJSONAvailable]) {
     id parsed = [NSJSONSerialization JSONObjectWithData:data options:options error:error];
     if (parsed == nil) {

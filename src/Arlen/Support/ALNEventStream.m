@@ -61,7 +61,10 @@ static NSDictionary *ALNNormalizedEventMaterial(NSDictionary *event, NSError **e
                                : nil;
   NSString *idempotencyKey = ALNEventStreamTrimmedString(dictionary[@"idempotency_key"]);
 
-  if ([eventType length] == 0) {
+  NSCharacterSet *eventToken = [NSCharacterSet characterSetWithCharactersInString:
+      @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-"];
+  if ([eventType length] == 0 || [eventType length] > 128 ||
+      [eventType rangeOfCharacterFromSet:eventToken.invertedSet].location != NSNotFound) {
     if (error != NULL) {
       *error = ALNEventStreamError(ALNEventStreamErrorInvalidEnvelope,
                                    @"Event type is required",

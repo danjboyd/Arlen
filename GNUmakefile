@@ -1194,6 +1194,22 @@ DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
 $(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
+$(BUILD_DIR)/file-job-probe: $(OBJ_DIR)/tests/durable_jobs/file_job_probe.o $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(UNIT_TEST_BIN): | $(BUILD_DIR)/file-job-probe
+
+# Exercise the vendored parser even on Windows, whose default backend is legacy.
+$(BUILD_DIR)/llhttp-framing-tests: tests/fixtures/http/llhttp_framing.c src/Arlen/Support/third_party/llhttp/llhttp.c src/Arlen/Support/third_party/llhttp/api.c src/Arlen/Support/third_party/llhttp/http.c src/Arlen/Support/third_party/llhttp/llhttp.h
+>@mkdir -p $(BUILD_DIR)
+>$(ARLEN_CC) $(C_COMPILE_FLAGS) -Isrc/Arlen/Support/third_party/llhttp $(filter %.c,$^) -o $@
+
+.PHONY: llhttp-framing-tests
+llhttp-framing-tests: $(BUILD_DIR)/llhttp-framing-tests
+>$(BUILD_DIR)/llhttp-framing-tests
+
+test-unit test-unit-filter: llhttp-framing-tests
+
 $(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(TEST_WAIT_OBJS) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -shared -fPIC -o $@ $(XCTEST_LINK_LIBS)

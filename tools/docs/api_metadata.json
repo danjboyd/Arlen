@@ -166,7 +166,7 @@
       "summary": "Redis-backed cache adapter implementation compatible with `ALNCacheAdapter` semantics."
     },
     "ALNFileJobAdapter": {
-      "summary": "Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery."
+      "summary": "Filesystem-persisted job queue with cross-process locking; no crashed-worker lease recovery."
     },
     "ALNFileMailAdapter": {
       "summary": "Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing."

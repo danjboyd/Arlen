@@ -595,6 +595,9 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
     NSDictionary *event = [value isKindOfClass:[NSDictionary class]] ? value : @{};
     NSString *eventName = [event[@"event"] isKindOfClass:[NSString class]] ? event[@"event"] : @"";
     NSString *eventID = [event[@"id"] isKindOfClass:[NSString class]] ? event[@"id"] : @"";
+    NSCharacterSet *unsafeField = [NSCharacterSet characterSetWithCharactersInString:@"\r\n\0"];
+    if ([eventID rangeOfCharacterFromSet:unsafeField].location != NSNotFound ||
+        [eventName rangeOfCharacterFromSet:unsafeField].location != NSNotFound) continue;
     NSString *data = ALNJSONStringFromObject(event[@"data"]);
     NSString *retry =
         [event[@"retry"] respondsToSelector:@selector(integerValue)]

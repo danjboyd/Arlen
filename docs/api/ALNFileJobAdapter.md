@@ -3,7 +3,7 @@
 - Kind: `interface`
 - Header: `src/Arlen/Support/ALNServices.h`
 
-Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
+Filesystem-persisted job queue with cross-process locking; no crashed-worker lease recovery.
 
 ## Methods
 

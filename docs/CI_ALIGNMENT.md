@@ -20,6 +20,25 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+The runtime parity suite tests watch recovery, jobs CLI smoke, and explicit
+rejection of unsupported Windows `propane` startup. It no longer attempts
+multiworker reloads on independently bound Windows sockets; that depended on
+unsafe port sharing. The supported-development scope and existing required
+check names remain unchanged. Native exclusive-binding coverage stays enabled.
+
+The ordinary unit suite builds `build/file-job-probe` and runs a four-process
+file-queue regression without PostgreSQL. This is part of existing unit lanes,
+including `windows-preview`; required check names and branch protection stay
+unchanged. Focused execution: `make test-unit-filter TEST=Phase7DTests`.
+The same Windows job also runs
+`make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths`
+for native junction/stream/short-name containment, exclusive binding, Origin
+validation, and receive-only channels. This adds a step to an existing required
+check; branch-protection check names do not change.
+`test-unit` also runs `llhttp-framing-tests` against the actual vendored C
+parser, even where Windows defaults to the legacy HTTP backend. It checks empty
+Transfer-Encoding rejection and a valid Content-Length control request.
+
 The Windows preview lanes (`make phase24-windows-db-smoke` and
 `make phase24-windows-runtime-tests`) build and run the vendored tools-xctest
 fork, the same runner as Linux and macOS (issue #116), so they get filters,

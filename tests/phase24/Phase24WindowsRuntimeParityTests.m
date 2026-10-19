@@ -526,94 +526,18 @@
   }
 }
 
-- (void)testPropaneServesRequestsAndHandlesReloadSignal {
+- (void)testPropaneRejectsUnsupportedWindowsProduction {
 #if !ARLEN_WINDOWS_PREVIEW
   return;
 #endif
-
-  NSString *repoRoot = [self repoRoot];
-  NSString *appRoot = [repoRoot stringByAppendingPathComponent:@"examples/tech_demo"];
-  NSString *runtimeRoot = [self createTempDirectoryWithPrefix:@"arlen-phase24-propane"];
-  int port = [self randomPort];
-  NSString *pidFile = [runtimeRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"manager-%d.pid", port]];
-  NSString *lifecycleLog =
-      [runtimeRoot stringByAppendingPathComponent:[NSString stringWithFormat:@"manager-%d.log", port]];
-  NSString *serverLogPath = [runtimeRoot stringByAppendingPathComponent:@"server.log"];
-  NSTask *server = [[NSTask alloc] init];
-  server.launchPath = [self resolvedBashLaunchPath];
-  server.currentDirectoryPath = repoRoot;
-  server.arguments = @[ @"-lc",
-                        [NSString stringWithFormat:
-                                      @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@ ARLEN_CLUSTER_EMIT_HEADERS=1 ARLEN_PROPANE_LIFECYCLE_LOG=%@ %@ --workers 2 --host 127.0.0.1 --port %d --env development --pid-file %@ >%@ 2>&1",
-                                      [self shellQuoted:repoRoot],
-                                      [self shellQuoted:repoRoot],
-                                      [self shellQuoted:appRoot],
-                                      [self shellQuoted:lifecycleLog],
-                                      [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/propane"]],
-                                      port,
-                                      [self shellQuoted:pidFile],
-                                      [self shellQuoted:serverLogPath]] ];
-  [server launch];
-
-  @try {
-    BOOL ready = NO;
-    NSString *firstBody = [self requestPathWithRetries:@"/healthz" port:port attempts:180 success:&ready];
-    XCTAssertTrue(ready, @"server log:\n%@",
-                  [self readTextFile:serverLogPath]);
-    XCTAssertEqualObjects(@"ok\n", firstBody);
-
-    NSError *pidReadError = nil;
-    NSString *managerPIDText = [NSString stringWithContentsOfFile:pidFile
-                                                         encoding:NSUTF8StringEncoding
-                                                            error:&pidReadError];
-    XCTAssertNotNil(managerPIDText);
-    XCTAssertNil(pidReadError);
-    int managerPID = [[managerPIDText ?: @"0"
-        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] intValue];
-    XCTAssertTrue(managerPID > 0);
-
-    XCTAssertTrue([self sendSignalNamed:@"HUP" toPID:managerPID],
-                  @"server log:\n%@",
-                  [self readTextFile:serverLogPath]);
-
-    BOOL reloaded = NO;
-    NSString *secondBody = [self requestPathWithRetries:@"/healthz" port:port attempts:180 success:&reloaded];
-    XCTAssertTrue(reloaded, @"server log:\n%@",
-                  [self readTextFile:serverLogPath]);
-    XCTAssertEqualObjects(@"ok\n", secondBody);
-
-    XCTAssertTrue([self sendSignalNamed:@"TERM" toPID:managerPID],
-                  @"server log:\n%@",
-                  [self readTextFile:serverLogPath]);
-    for (NSInteger attempt = 0; attempt < 60 && [server isRunning]; attempt++) {
-      usleep(100000);
-    }
-    if ([server isRunning]) {
-      [self terminateTask:server preferredSignalName:@"TERM"];
-    } else {
-      [server waitUntilExit];
-    }
-    XCTAssertEqual(0, server.terminationStatus, @"server log:\n%@",
-                   [self readTextFile:serverLogPath]);
-    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
-
-    NSError *readError = nil;
-    NSString *lifecycle =
-        [NSString stringWithContentsOfFile:lifecycleLog encoding:NSUTF8StringEncoding error:&readError];
-    XCTAssertNotNil(lifecycle);
-    XCTAssertNil(readError);
-    XCTAssertTrue([lifecycle containsString:@"event=manager_reload_requested"], @"%@", lifecycle);
-    XCTAssertTrue([lifecycle containsString:@"event=manager_reload_completed"], @"%@", lifecycle);
-    XCTAssertTrue([lifecycle containsString:@"event=manager_stopped"], @"%@", lifecycle);
-  } @finally {
-    if ([server isRunning]) {
-      [self terminateTask:server preferredSignalName:@"TERM"];
-    }
-    [[NSFileManager defaultManager] removeItemAtPath:pidFile error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:lifecycleLog error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:serverLogPath error:nil];
-    [[NSFileManager defaultManager] removeItemAtPath:runtimeRoot error:nil];
-  }
+  NSString *propane = [[self repoRoot] stringByAppendingPathComponent:@"bin/propane"];
+  int code = 0;
+  NSString *help = [self runShellCapture:[NSString stringWithFormat:@"%@ --help", [self shellQuoted:propane]] exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", help);
+  XCTAssertTrue([help containsString:@"Windows production hosting is unsupported"]);
+  NSString *output = [self runShellCapture:[NSString stringWithFormat:@"%@ --workers 2 --port 35001", [self shellQuoted:propane]] exitCode:&code];
+  XCTAssertEqual(2, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"Windows production hosting is not supported"], @"%@", output);
+  XCTAssertTrue([output containsString:@"boomhauer"], @"%@", output);
 }
-
 @end

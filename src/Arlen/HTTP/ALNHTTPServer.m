@@ -1200,7 +1200,13 @@ static NSString *ALNNormalizedOriginString(NSString *origin) {
 
 static BOOL ALNWebSocketOriginAllowed(ALNRequest *request, NSArray *allowedOrigins) {
   if ([allowedOrigins count] == 0) {
-    return YES;
+    NSString *rawOrigin = [request headerValueForName:@"origin"];
+    if ([rawOrigin length] == 0) return YES; // Native clients may omit Origin.
+    NSString *origin = ALNNormalizedOriginString(rawOrigin);
+    NSURL *url = [NSURL URLWithString:origin];
+    NSString *expected = ALNNormalizedOriginString([NSString stringWithFormat:@"%@://%@",
+        url.scheme, [request headerValueForName:@"host"] ?: @""]);
+    return [origin length] > 0 && [expected isEqualToString:origin];
   }
   NSString *origin = ALNNormalizedOriginString([request headerValueForName:@"origin"]);
   if ([origin length] == 0) {
@@ -1556,6 +1562,32 @@ static BOOL ALNSendAllWithBudget(ALNSocketHandle fd, const void *bytes, size_t l
     transientRetries = 0;
     cursor += (size_t)written;
     remaining -= (size_t)written;
+  }
+  return YES;
+}
+
+// Realtime writes are confined to a session thread and have a total deadline.
+// A non-reading peer must release its session even after partial progress.
+static BOOL ALNRealtimeSendAll(ALNSocketHandle fd, const void *bytes, size_t length) {
+#if defined(_WIN32)
+  DWORD timeout = 1000;
+  (void)setsockopt(ALNNativeSocketHandle(fd), SOL_SOCKET, SO_SNDTIMEO,
+                   (const char *)&timeout, sizeof(timeout));
+#else
+  struct timeval timeout = {1, 0};
+  (void)setsockopt((int)fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+  const unsigned char *cursor = bytes;
+  double deadline = ALNNowMilliseconds() + 5000.0;
+  while (length > 0) {
+    if (ALNNowMilliseconds() >= deadline) return NO;
+    ssize_t written = ALNSendWithFaults(fd, cursor, length, 0);
+    if (written <= 0) {
+      if (written < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+      return NO;
+    }
+    cursor += written;
+    length -= (size_t)written;
   }
   return YES;
 }
@@ -2001,7 +2033,7 @@ static NSData *ALNWebSocketFrameData(uint8_t opcode, NSData *payload) {
 
 static BOOL ALNWebSocketSendFrame(ALNSocketHandle fd, uint8_t opcode, NSData *payload) {
   NSData *frame = ALNWebSocketFrameData(opcode, payload ?: [NSData data]);
-  return ALNSendAll(fd, [frame bytes], [frame length]);
+  return ALNRealtimeSendAll(fd, [frame bytes], [frame length]);
 }
 
 // RFC 6455 close codes Arlen sends.
@@ -2984,7 +3016,24 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
   if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
     return nil;
   }
-#if !defined(_WIN32)
+#if defined(_WIN32)
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE handle = CreateFileW((const wchar_t *)wide.bytes, FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+      FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (handle == INVALID_HANDLE_VALUE) return nil;
+  wchar_t resolved[32768];
+  DWORD count = GetFinalPathNameByHandleW(handle, resolved, 32768, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  CloseHandle(handle);
+  if (count == 0 || count >= 32768) return nil;
+  NSString *canonical = [[NSString alloc] initWithBytes:resolved length:count * sizeof(wchar_t)
+                                              encoding:NSUTF16LittleEndianStringEncoding];
+  if ([canonical hasPrefix:@"\\\\?\\UNC\\"]) canonical = [@"\\\\" stringByAppendingString:[canonical substringFromIndex:8]];
+  else if ([canonical hasPrefix:@"\\\\?\\"]) canonical = [canonical substringFromIndex:4];
+  return [[canonical stringByReplacingOccurrencesOfString:@"\\" withString:@"/"] stringByStandardizingPath];
+#else
   char resolvedPath[PATH_MAX];
   const char *filesystemPath = ALNHTTPFilesystemPathCString(path);
   if (filesystemPath != NULL && realpath(filesystemPath, resolvedPath) != NULL) {
@@ -2995,8 +3044,8 @@ static NSString *ALNCanonicalStaticPath(NSString *path) {
     return ([canonical length] > 0) ? canonical : nil;
   }
 #endif
-  NSString *canonical = [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
-  return ([canonical length] > 0) ? canonical : nil;
+  NSString *fallback = [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
+  return ([fallback length] > 0) ? fallback : nil;
 }
 
 static BOOL ALNStaticPathIsSymbolicLink(NSString *path) {
@@ -3024,6 +3073,10 @@ static BOOL ALNStaticCandidateWithinRoot(NSString *candidate, NSString *root) {
   if ([candidate length] == 0 || [root length] == 0) {
     return NO;
   }
+#if defined(_WIN32)
+  candidate = [candidate lowercaseString];
+  root = [root lowercaseString];
+#endif
   return [candidate isEqualToString:root] ||
          [candidate hasPrefix:[root stringByAppendingString:@"/"]];
 }
@@ -3127,6 +3180,17 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   if (!ALNPathWithinStaticPrefix(request.path, prefix, &relativePath)) {
     return nil;
   }
+#if defined(_WIN32)
+  if ([relativePath containsString:@":"] || [relativePath containsString:@"\\"]) return ALNStaticNotFoundResponse();
+  for (NSString *component in [relativePath componentsSeparatedByString:@"/"]) {
+    NSString *base = [[[component componentsSeparatedByString:@"."] firstObject] uppercaseString];
+    if ([@[@"CON", @"PRN", @"AUX", @"NUL", @"CONIN$", @"CONOUT$",
+           @"COM1", @"COM2", @"COM3", @"COM4", @"COM5", @"COM6", @"COM7", @"COM8", @"COM9",
+           @"LPT1", @"LPT2", @"LPT3", @"LPT4", @"LPT5", @"LPT6", @"LPT7", @"LPT8", @"LPT9"] containsObject:base]) {
+      return ALNStaticNotFoundResponse();
+    }
+  }
+#endif
 
   if ([relativePath containsString:@".."] ||
       [relativePath hasPrefix:@"/"] ||
@@ -3148,6 +3212,12 @@ static ALNResponse *ALNStaticResponseForMount(ALNRequest *request,
   }
   NSString *standardCandidate = nil;
   if (!ALNResolveStaticCandidateWithinRoot(candidatePath, canonicalRoot, &standardCandidate)) {
+    return ALNStaticNotFoundResponse();
+  }
+  // Apply hidden-file policy to the resolved long name as well as the URL:
+  // an NTFS 8.3 alias need not preserve the leading dot of its target.
+  if (standardCandidate.length > canonicalRoot.length &&
+      ALNStaticRelativePathIsHidden([standardCandidate substringFromIndex:canonicalRoot.length + 1])) {
     return ALNStaticNotFoundResponse();
   }
 
@@ -3479,6 +3549,7 @@ static NSString *ALNJSONStringForEventEnvelope(ALNEventEnvelope *event) {
 // The SSE id is the stream sequence, so a reconnecting EventSource's
 // Last-Event-ID resumes after it (the event_id is in the data).
 static NSString *ALNSSEFrameForEventEnvelope(ALNEventEnvelope *event) {
+  if ([event.eventType rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\r\n\0"]].location != NSNotFound) return @"";
   NSMutableString *frame = [NSMutableString string];
   [frame appendFormat:@"id: %lu\n", (unsigned long)event.sequence];
   [frame appendFormat:@"event: %@\n", event.eventType ?: @"event"];
@@ -3553,6 +3624,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
   NSCondition *_condition;
   NSMutableArray<ALNEventEnvelope *> *_queued;
   BOOL _overflowed;
+  NSUInteger _queuedBytes;
   // Touched only by the session's thread.
   NSUInteger _lastSequence;
 }
@@ -3594,6 +3666,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
                                          : ((a.sequence > b.sequence) ? NSOrderedDescending : NSOrderedSame);
       }];
   [_queued removeAllObjects];
+  _queuedBytes = 0;
   BOOL overflowed = _overflowed;
   [_condition unlock];
   if (overflowed) {
@@ -3625,13 +3698,16 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 }
 
 - (void)receiveLiveEvent:(ALNEventEnvelope *)event {
+  NSUInteger bytes = [ALNJSONStringForEventEnvelope(event) lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
   [_condition lock];
   if (!_overflowed) {
-    if ([_queued count] >= ALNEventStreamDeliveryQueueLimit) {
+    if ([_queued count] >= ALNEventStreamDeliveryQueueLimit || bytes > 1024 * 1024 - _queuedBytes) {
       _overflowed = YES;
       [_queued removeAllObjects];
+      _queuedBytes = 0;
     } else {
       [_queued addObject:event];
+      _queuedBytes += bytes;
     }
   }
   [_condition signal];
@@ -3646,6 +3722,12 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 @property(nonatomic, strong, readonly) NSLock *sendLock;
 @property(nonatomic, assign) BOOL closed;
 @property(nonatomic, strong, readonly) ALNEventStreamDeliveryGate *streamGate;
+
+@property(nonatomic, strong) NSLock *outboundLock;
+@property(nonatomic, strong) NSMutableArray *outboundMessages;
+@property(nonatomic, assign) NSUInteger outboundBytes;
+@property(nonatomic, assign) BOOL outboundOverflowed;
+- (BOOL)drainRealtimeMessages;
 
 - (instancetype)initWithClientFd:(ALNSocketHandle)clientFd;
 - (BOOL)sendTextMessage:(NSString *)message;
@@ -3665,6 +3747,8 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
     _clientFd = clientFd;
     _sendLock = [[NSLock alloc] init];
     _closed = NO;
+    _outboundLock = [[NSLock alloc] init];
+    _outboundMessages = [NSMutableArray array];
     __weak ALNWebSocketClientSession *weakSelf = self;
     _streamGate = [[ALNEventStreamDeliveryGate alloc] initWithSender:^BOOL(ALNEventEnvelope *event) {
       return [weakSelf sendTextMessage:ALNJSONStringForEventEnvelope(event)];
@@ -3713,7 +3797,33 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
 - (void)receiveRealtimeMessage:(NSString *)message onChannel:(NSString *)channel {
   (void)channel;
-  (void)[self sendTextMessage:message ?: @""];
+  NSData *data = [message dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  [self.outboundLock lock];
+  if (!self.outboundOverflowed) {
+    if (self.outboundMessages.count >= 128 || data.length > 1024 * 1024 - self.outboundBytes) {
+      self.outboundOverflowed = YES;
+      [self.outboundMessages removeAllObjects];
+      self.outboundBytes = 0;
+    } else {
+      [self.outboundMessages addObject:data];
+      self.outboundBytes += data.length;
+    }
+  }
+  [self.outboundLock unlock];
+}
+
+- (BOOL)drainRealtimeMessages {
+  [self.outboundLock lock];
+  BOOL overflowed = self.outboundOverflowed;
+  NSArray *messages = [self.outboundMessages copy];
+  [self.outboundMessages removeAllObjects];
+  self.outboundBytes = 0;
+  [self.outboundLock unlock];
+  if (overflowed) return NO;
+  for (NSData *data in messages) {
+    if (![self sendBinaryPayload:data opcode:0x1]) return NO;
+  }
+  return YES;
 }
 
 - (void)receiveCommittedEvent:(ALNEventEnvelope *)event onStream:(NSString *)streamID {
@@ -3757,7 +3867,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
   NSData *payload = [frame dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
   [self.sendLock lock];
   BOOL canSend = !self.closed;
-  BOOL ok = canSend ? ALNSendAll(self.clientFd, [payload bytes], [payload length]) : NO;
+  BOOL ok = canSend ? ALNRealtimeSendAll(self.clientFd, [payload bytes], [payload length]) : NO;
   if (!ok) {
     self.closed = YES;
   }
@@ -4540,7 +4650,8 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   uint8_t fragmentOpcode = 0;
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
-      int readable = ALNWebSocketWaitReadable(clientFd, 1000);
+      if (![session drainRealtimeMessages]) break;
+      int readable = ALNWebSocketWaitReadable(clientFd, 100);
       if (readable < 0) {
         break;
       }
@@ -4632,7 +4743,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                                 encoding:NSUTF8StringEncoding] ?: @"";
 
       if ([mode isEqualToString:@"channel"]) {
-        (void)[[ALNRealtimeHub sharedHub] publishMessage:message onChannel:channel];
+        continue; // Channel subscriptions are receive-only.
       } else if ([mode isEqualToString:@"stream"]) {
         continue;
       } else {
@@ -5191,7 +5302,12 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     self.serverSocketFD = serverFd;
 
     int reuse = 1;
-    if (ALNSocketSetIntOption(serverFd, SOL_SOCKET, SO_REUSEADDR, reuse) < 0) {
+#if defined(_WIN32)
+    int reuseOption = SO_EXCLUSIVEADDRUSE;
+#else
+    int reuseOption = SO_REUSEADDR;
+#endif
+    if (ALNSocketSetIntOption(serverFd, SOL_SOCKET, reuseOption, reuse) < 0) {
       ALNReportSocketError("setsockopt(SO_REUSEADDR)");
       ALNSocketClose(serverFd);
       self.serverSocketFD = ALNInvalidSocketHandle;

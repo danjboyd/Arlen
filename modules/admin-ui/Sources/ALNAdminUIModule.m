@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNAdminUIModule.h"
 
 #import <dispatch/dispatch.h>
@@ -57,7 +58,7 @@ static NSArray *AUJSONArrayFromJSONString(id value) {
     return @[];
   }
   NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
-  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
   if (![object isKindOfClass:[NSArray class]]) {
     return @[];
   }
@@ -1884,7 +1885,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   NSString *contentType = [[[self headerValueForName:@"content-type"] lowercaseString] componentsSeparatedByString:@";"][0];
   NSDictionary *bodyParameters = @{};
   if ([contentType containsString:@"application/json"]) {
-    id object = [NSJSONSerialization JSONObjectWithData:self.context.request.body options:0 error:NULL];
+    id object = [ALNJSONSerialization JSONObjectWithData:self.context.request.body options:0 error:NULL];
     bodyParameters = [object isKindOfClass:[NSDictionary class]] ? object : @{};
   } else if ([contentType containsString:@"application/x-www-form-urlencoded"]) {
     bodyParameters = AUQueryParametersFromBody(self.context.request.body);
