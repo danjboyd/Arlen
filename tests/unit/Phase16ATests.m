@@ -231,25 +231,29 @@
   NSString *sharedPath = environment[@"ARLEN_JOBS_SHARED_STATE_PATH"];
   if ([sharedPath length] > 0) {
     [self registerJobsForApplication:[self applicationWithStatePath:sharedPath]];
-    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
-    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
-    NSUInteger readyCount = 0;
-    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
-      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
-                                                                           error:NULL];
-      readyCount = 0;
-      for (NSString *name in names) {
-        if ([name hasPrefix:[[sharedPath lastPathComponent] stringByAppendingString:@".ready."]]) readyCount++;
-      }
-      if (readyCount >= 2U) break;
-      usleep(50000);
-    }
-    XCTAssertEqual((NSUInteger)2, readyCount);
     ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+    NSFileHandle *input = [NSFileHandle fileHandleWithStandardInput];
+    NSFileHandle *output = [NSFileHandle fileHandleWithStandardOutput];
+    NSData *signal = [@"!" dataUsingEncoding:NSUTF8StringEncoding];
+    [output writeData:signal]; // Both processes have loaded the original empty state.
+    XCTAssertEqual((NSUInteger)1, [[input readDataOfLength:1] length]);
     NSError *error = nil;
-    NSString *queue = [NSString stringWithFormat:@"queue-%d", getpid()];
-    XCTAssertTrue([runtime pauseQueueNamed:queue error:&error]);
+    BOOL first = [environment[@"ARLEN_JOBS_PROCESS_INDEX"] isEqual:@"0"];
+    if (first) {
+      XCTAssertTrue([runtime pauseQueueNamed:@"shared" error:&error]);
+    } else {
+      // A cached reader must see the pause, and a stale resume must remove it.
+      XCTAssertTrue([runtime isQueuePaused:@"shared"]);
+      XCTAssertTrue([runtime resumeQueueNamed:@"shared" error:&error]);
+    }
     XCTAssertNil(error);
+    [output writeData:signal];
+    if (first) {
+      XCTAssertEqual((NSUInteger)1, [[input readDataOfLength:1] length]);
+      XCTAssertFalse([runtime isQueuePaused:@"shared"]);
+    }
+    NSString *queue = [NSString stringWithFormat:@"queue-%@", environment[@"ARLEN_JOBS_PROCESS_INDEX"]];
+    XCTAssertTrue([runtime pauseQueueNamed:queue error:&error]);
     XCTAssertNotNil([runtime runWorkerAt:[NSDate date] limit:1 error:&error]);
     XCTAssertNil(error);
     return;
@@ -259,23 +263,57 @@
   NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
   NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
   NSMutableArray *children = [NSMutableArray array];
+  NSMutableArray<NSFileHandle *> *inputs = [NSMutableArray array];
+  NSMutableArray<NSFileHandle *> *outputs = [NSMutableArray array];
+  NSData *signal = [@"!" dataUsingEncoding:NSUTF8StringEncoding];
   for (NSUInteger index = 0; index < 2U; index++) {
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
     child.arguments = @[ @"-XCTest", @"Phase16ATests/testJobsOperatorStateTransactionsAcrossProcesses", bundlePath ];
     NSMutableDictionary *childEnvironment = [environment mutableCopy];
     childEnvironment[@"ARLEN_JOBS_SHARED_STATE_PATH"] = statePath;
+    childEnvironment[@"ARLEN_JOBS_PROCESS_INDEX"] = [@(index) stringValue];
     child.environment = childEnvironment;
+    NSPipe *input = [NSPipe pipe];
+    NSPipe *output = [NSPipe pipe];
+    child.standardInput = input;
+    child.standardOutput = output;
     [child launch];
     [children addObject:child];
+    [inputs addObject:input.fileHandleForWriting];
+    [outputs addObject:output.fileHandleForReading];
   }
+  for (NSFileHandle *output in outputs) XCTAssertEqualObjects(signal, [output readDataOfLength:1]);
+  [inputs[0] writeData:signal];
+  XCTAssertEqualObjects(signal, [outputs[0] readDataOfLength:1]);
+  [inputs[1] writeData:signal];
+  XCTAssertEqualObjects(signal, [outputs[1] readDataOfLength:1]);
+  [inputs[0] writeData:signal];
   for (NSTask *child in children) {
     [child waitUntilExit];
     XCTAssertEqual(0, child.terminationStatus);
   }
-  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
-  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"pausedQueues"] count]);
-  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"runHistory"] count]);
+  // Restart a third runtime; do not rely on NSDictionary's platform-dependent
+  // convenience plist reader (GNUstep does not read binary plists there).
+  [self registerJobsForApplication:[self applicationWithStatePath:statePath]];
+  ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+  XCTAssertTrue([runtime isQueuePaused:@"queue-0"]);
+  XCTAssertTrue([runtime isQueuePaused:@"queue-1"]);
+  XCTAssertFalse([runtime isQueuePaused:@"shared"]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)[runtime dashboardSummary][@"recentRuns"] count]);
+}
+
+- (void)testJobsRejectsCorruptStateWithoutOverwritingIt {
+  NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"corrupt.plist"];
+  ALNJobsModuleRuntime *runtime = [[ALNJobsModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([runtime configureWithApplication:[self applicationWithStatePath:path] error:&error]);
+  NSData *invalid = [@"broken state" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([invalid writeToFile:path atomically:YES]);
+  XCTAssertFalse([runtime resumeQueueNamed:@"default" error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertTrue([runtime isQueuePaused:@"default"]); // Failed refresh cannot authorize work.
+  XCTAssertEqualObjects(invalid, [NSData dataWithContentsOfFile:path]);
 }
 
 @end

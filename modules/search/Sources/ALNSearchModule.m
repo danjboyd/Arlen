@@ -62,30 +62,6 @@ static NSArray *STNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
 }
 
-static NSMutableDictionary *STMergeChangedDictionary(NSDictionary *authoritative, NSDictionary *baseline,
-                                                     NSDictionary *local) {
-  NSMutableDictionary *merged = [NSMutableDictionary dictionaryWithDictionary:authoritative ?: @{}];
-  for (id key in local) {
-    if (![local[key] isEqual:baseline[key]]) merged[key] = local[key];
-  }
-  return merged;
-}
-
-static NSMutableArray *STMergeChangedHistory(NSArray *authoritative, NSArray *baseline,
-                                             NSArray *local, NSUInteger limit) {
-  NSMutableArray *merged = [NSMutableArray arrayWithArray:authoritative ?: @[]];
-  NSCountedSet *baselineEntries = [[NSCountedSet alloc] initWithArray:baseline ?: @[]];
-  for (id entry in local) {
-    if ([baselineEntries countForObject:entry] > 0) {
-      [baselineEntries removeObject:entry];
-    } else {
-      [merged addObject:entry];
-    }
-  }
-  while ([merged count] > limit) [merged removeObjectAtIndex:0];
-  return merged;
-}
-
 static NSData *STJSONDataFromObject(id object, NSError **error) {
   if (error != NULL) {
     *error = nil;
@@ -818,14 +794,15 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 @property(nonatomic, strong) NSMutableArray *recentQueries;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
-@property(nonatomic, copy) NSDictionary *lastPersistedState;
+@property(nonatomic, assign) NSUInteger stateTransactionDepth;
 @property(nonatomic, assign) NSUInteger nextGeneration;
 @property(nonatomic, strong) id<ALNSearchEngine> engine;
 @property(nonatomic, copy) NSString *engineIdentifier;
-@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, strong) NSRecursiveLock *lock;
 
-- (BOOL)loadPersistedStateWithError:(NSError **)error;
-- (BOOL)persistStateWithError:(NSError **)error;
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error;
+- (NSDictionary *)stateDocument;
+- (void)restoreStateDocument:(NSDictionary *)state;
 - (nullable NSDictionary *)normalizedMetadataForDefinition:(id<ALNSearchResourceDefinition>)definition
                                                     source:(NSString *)source
                                                      error:(NSError **)error;
@@ -4231,11 +4208,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     _recentQueries = [NSMutableArray array];
     _persistenceEnabled = NO;
     _statePath = @"";
-    _lastPersistedState = @{};
     _nextGeneration = 1U;
     _engine = [[ALNDefaultSearchEngine alloc] init];
     _engineIdentifier = @"ALNDefaultSearchEngine";
-    _lock = [[NSLock alloc] init];
+    _lock = [[NSRecursiveLock alloc] init];
   }
   return self;
 }
@@ -4295,7 +4271,6 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
   self.statePath = STResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
-  self.lastPersistedState = @{};
   self.nextGeneration = 1U;
   self.engine = engine;
   self.engineIdentifier = engineClassName;
@@ -4388,10 +4363,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
   }
 
-  if (![self loadPersistedStateWithError:error]) {
-    return NO;
-  }
-  return [self persistStateWithError:error];
+  return [self stateTransaction:nil write:NO error:error];
 }
 
 - (BOOL)registerResourceDefinition:(id)definition
@@ -4464,140 +4436,97 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   return YES;
 }
 
-- (BOOL)loadPersistedStateWithError:(NSError **)error {
-  if (!self.persistenceEnabled || [self.statePath length] == 0) {
-    return YES;
-  }
-  NSError *readError = nil;
-  NSDictionary *state = STReadPropertyListAtPath(self.statePath, &readError);
-  if (state == nil) {
-    if (readError != nil && error != NULL) {
-      *error = readError;
-      return NO;
-    }
-    return YES;
-  }
-  [self.lock lock];
-  self.nextGeneration = [state[@"nextGeneration"] respondsToSelector:@selector(unsignedIntegerValue)]
-                            ? MAX((NSUInteger)1U, [state[@"nextGeneration"] unsignedIntegerValue])
-                            : self.nextGeneration;
-  NSDictionary *persistedDocuments = STNormalizeDictionary(state[@"indexedDocumentsByResource"]);
-  NSDictionary *persistedEngineState = STNormalizeDictionary(state[@"engineStateByResource"]);
-  NSDictionary *persistedReplayState = STNormalizeDictionary(state[@"pendingReplayOperationsByResource"]);
-  NSDictionary *persistedStatus = STNormalizeDictionary(state[@"statusByResource"]);
-  NSDictionary *persistedGenerations = STNormalizeDictionary(state[@"generationHistoryByResource"]);
-  for (NSString *identifier in self.resourceMetadataByIdentifier) {
-    if ([persistedDocuments[identifier] isKindOfClass:[NSArray class]]) {
-      self.indexedDocumentsByResource[identifier] = [persistedDocuments[identifier] copy];
-    }
-    if ([persistedEngineState[identifier] isKindOfClass:[NSDictionary class]]) {
-      self.engineStateByResource[identifier] = [persistedEngineState[identifier] copy];
-    }
-    if ([persistedReplayState[identifier] isKindOfClass:[NSArray class]]) {
-      self.pendingReplayOperationsByResource[identifier] =
-          [NSMutableArray arrayWithArray:STNormalizeArray(persistedReplayState[identifier])];
-    }
-    if ([persistedStatus[identifier] isKindOfClass:[NSDictionary class]]) {
-      NSMutableDictionary *status = [NSMutableDictionary dictionaryWithDictionary:self.statusByResource[identifier] ?: @{}];
-      [status addEntriesFromDictionary:persistedStatus[identifier]];
-      status[@"engine"] = self.engineIdentifier ?: @"ALNDefaultSearchEngine";
-      status[@"indexState"] = STResolvedIndexState(status[@"indexState"]);
-      status[@"replayQueueDepth"] = @([STNormalizeArray(self.pendingReplayOperationsByResource[identifier]) count]);
-      self.statusByResource[identifier] = status;
-    }
-    if ([persistedGenerations[identifier] isKindOfClass:[NSArray class]]) {
-      self.generationHistoryByResource[identifier] = [NSMutableArray arrayWithArray:persistedGenerations[identifier]];
-    }
-  }
-  NSArray *history = STNormalizeArray(state[@"reindexHistory"]);
-  [self.reindexHistory addObjectsFromArray:history];
-  while ([self.reindexHistory count] > ALNSearchHistoryLimit) {
-    [self.reindexHistory removeObjectAtIndex:0];
-  }
-  NSArray *queries = STNormalizeArray(state[@"recentQueries"]);
-  [self.recentQueries addObjectsFromArray:queries];
-  while ([self.recentQueries count] > ALNSearchHistoryLimit) {
-    [self.recentQueries removeObjectAtIndex:0];
-  }
-  self.lastPersistedState = state;
-  [self.lock unlock];
-  return YES;
+- (NSDictionary *)stateDocument {
+  return @{
+    @"version":@1, @"nextGeneration":@(MAX((NSUInteger)1, self.nextGeneration)),
+    @"indexedDocumentsByResource":self.indexedDocumentsByResource,
+    @"engineStateByResource":self.engineStateByResource,
+    @"pendingReplayOperationsByResource":self.pendingReplayOperationsByResource,
+    @"statusByResource":self.statusByResource,
+    @"generationHistoryByResource":self.generationHistoryByResource,
+    @"reindexHistory":self.reindexHistory, @"recentQueries":self.recentQueries,
+  };
 }
 
-- (BOOL)persistStateWithError:(NSError **)error {
-  if (!self.persistenceEnabled || [self.statePath length] == 0) {
-    return YES;
+- (void)restoreStateDocument:(NSDictionary *)state {
+  self.nextGeneration = MAX((NSUInteger)1, [state[@"nextGeneration"] unsignedIntegerValue]);
+  self.indexedDocumentsByResource = [STNormalizeDictionary(state[@"indexedDocumentsByResource"]) mutableCopy];
+  self.engineStateByResource = [STNormalizeDictionary(state[@"engineStateByResource"]) mutableCopy];
+  self.statusByResource = [STNormalizeDictionary(state[@"statusByResource"]) mutableCopy];
+  self.pendingReplayOperationsByResource = [NSMutableDictionary dictionary];
+  for (NSString *key in STNormalizeDictionary(state[@"pendingReplayOperationsByResource"])) {
+    self.pendingReplayOperationsByResource[key] = [STNormalizeArray(state[@"pendingReplayOperationsByResource"][key]) mutableCopy];
   }
+  self.generationHistoryByResource = [NSMutableDictionary dictionary];
+  for (NSString *key in STNormalizeDictionary(state[@"generationHistoryByResource"])) {
+    self.generationHistoryByResource[key] = [STNormalizeArray(state[@"generationHistoryByResource"][key]) mutableCopy];
+  }
+  self.reindexHistory = [STNormalizeArray(state[@"reindexHistory"]) mutableCopy];
+  self.recentQueries = [STNormalizeArray(state[@"recentQueries"]) mutableCopy];
+  // Keep persisted resources this worker does not register, and initialize
+  // newly registered resources without discarding another worker's data.
+  for (NSString *identifier in self.resourceMetadataByIdentifier) {
+    if (!self.indexedDocumentsByResource[identifier]) self.indexedDocumentsByResource[identifier] = @[];
+    if (!self.engineStateByResource[identifier]) self.engineStateByResource[identifier] = self.resourceMetadataByIdentifier[identifier][@"engineDescriptor"] ?: @{};
+    if (!self.pendingReplayOperationsByResource[identifier]) self.pendingReplayOperationsByResource[identifier] = [NSMutableArray array];
+    if (!self.generationHistoryByResource[identifier]) self.generationHistoryByResource[identifier] = [NSMutableArray array];
+    if (!self.statusByResource[identifier]) {
+      NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:identifier metadata:self.resourceMetadataByIdentifier[identifier]];
+      [status addEntriesFromDictionary:@{@"documentCount":@0, @"activeGeneration":@0, @"buildingGeneration":@0,
+                                        @"generationCount":@0, @"stateRevision":@0, @"replayQueueDepth":@0}];
+      self.statusByResource[identifier] = status;
+    }
+  }
+}
+
+// Never run engine, provider, job-adapter or network work in this block.
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error {
   [self.lock lock];
-  NSString *directory = [self.statePath stringByDeletingLastPathComponent];
-  if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
-                                 withIntermediateDirectories:YES attributes:nil error:error]) {
-    [self.lock unlock];
-    return NO;
-  }
-  int stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
-  if (stateLock < 0) {
-    if (error != NULL) *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not lock search state", nil);
-    [self.lock unlock];
-    return NO;
-  }
-  NSError *readError = nil;
-  NSDictionary *authoritative = STReadPropertyListAtPath(self.statePath, &readError) ?: @{};
-  if (readError != nil) {
-    if (error != NULL) *error = readError;
-    ALNPlatformReleaseExclusiveLock(stateLock);
-    [self.lock unlock];
-    return NO;
-  }
-  NSDictionary *baseline = self.lastPersistedState ?: @{};
-  NSDictionary *authoritativeGenerations = STNormalizeDictionary(authoritative[@"generationHistoryByResource"]);
-  NSDictionary *baselineGenerations = STNormalizeDictionary(baseline[@"generationHistoryByResource"]);
-  NSMutableDictionary *generationHistory = [NSMutableDictionary dictionaryWithDictionary:authoritativeGenerations];
-  for (NSString *identifier in self.generationHistoryByResource) {
-    generationHistory[identifier] = STMergeChangedHistory(STNormalizeArray(authoritativeGenerations[identifier]),
-                                                         STNormalizeArray(baselineGenerations[identifier]),
-                                                         STNormalizeArray(self.generationHistoryByResource[identifier]),
-                                                         ALNSearchGenerationHistoryLimit);
-  }
-  NSDictionary *payload = @{
-    @"version" : @1,
-    @"nextGeneration" : @(MAX(MAX((NSUInteger)1U, self.nextGeneration), [authoritative[@"nextGeneration"] unsignedIntegerValue])),
-    @"indexedDocumentsByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"indexedDocumentsByResource"]),
-                                                                STNormalizeDictionary(baseline[@"indexedDocumentsByResource"]), self.indexedDocumentsByResource),
-    @"engineStateByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"engineStateByResource"]),
-                                                          STNormalizeDictionary(baseline[@"engineStateByResource"]), self.engineStateByResource),
-    @"pendingReplayOperationsByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"pendingReplayOperationsByResource"]),
-                                                                       STNormalizeDictionary(baseline[@"pendingReplayOperationsByResource"]), self.pendingReplayOperationsByResource),
-    @"statusByResource" : STMergeChangedDictionary(STNormalizeDictionary(authoritative[@"statusByResource"]),
-                                                    STNormalizeDictionary(baseline[@"statusByResource"]), self.statusByResource),
-    @"generationHistoryByResource" : generationHistory,
-    @"reindexHistory" : STMergeChangedHistory(STNormalizeArray(authoritative[@"reindexHistory"]),
-                                               STNormalizeArray(baseline[@"reindexHistory"]), self.reindexHistory, ALNSearchHistoryLimit),
-    @"recentQueries" : STMergeChangedHistory(STNormalizeArray(authoritative[@"recentQueries"]),
-                                              STNormalizeArray(baseline[@"recentQueries"]), self.recentQueries, ALNSearchHistoryLimit),
-  };
-  BOOL saved = STWritePropertyListAtPath(self.statePath, payload, error);
-  if (saved) {
-    self.indexedDocumentsByResource = [STNormalizeDictionary(payload[@"indexedDocumentsByResource"]) mutableCopy];
-    self.engineStateByResource = [STNormalizeDictionary(payload[@"engineStateByResource"]) mutableCopy];
-    self.pendingReplayOperationsByResource = [NSMutableDictionary dictionary];
-    for (NSString *identifier in STNormalizeDictionary(payload[@"pendingReplayOperationsByResource"])) {
-      self.pendingReplayOperationsByResource[identifier] =
-          [STNormalizeArray(payload[@"pendingReplayOperationsByResource"][identifier]) mutableCopy];
+  int descriptor = -1;
+  @try {
+    if (self.stateTransactionDepth > 0) return block ? block(error) : YES;
+    BOOL shared = self.persistenceEnabled && self.statePath.length > 0;
+    if (shared) {
+      NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+      if (directory.length > 0 && ![[NSFileManager defaultManager] createDirectoryAtPath:directory
+          withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+      descriptor = ALNPlatformOpenExclusiveLockWithTimeout([self.statePath stringByAppendingString:@".lock"], 10.0);
+      if (descriptor < 0) {
+        if (error) *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not lock search state", nil);
+        return NO;
+      }
+      NSError *readError = nil;
+      NSDictionary *state = STReadPropertyListAtPath(self.statePath, &readError);
+      if (readError) { if (error) *error = readError; return NO; }
+      if (state) [self restoreStateDocument:state];
+      else if ([[NSFileManager defaultManager] fileExistsAtPath:self.statePath]) {
+        if (error) *error = STError(ALNSearchModuleErrorExecutionFailed, @"search state must be a dictionary", nil);
+        return NO;
+      }
     }
-    self.statusByResource = [STNormalizeDictionary(payload[@"statusByResource"]) mutableCopy];
-    self.generationHistoryByResource = [NSMutableDictionary dictionary];
-    for (NSString *identifier in generationHistory) {
-      self.generationHistoryByResource[identifier] = [STNormalizeArray(generationHistory[identifier]) mutableCopy];
+    NSDictionary *before = nil;
+    if (write) {
+      NSData *data = [NSPropertyListSerialization dataWithPropertyList:[self stateDocument]
+          format:NSPropertyListBinaryFormat_v1_0 options:0 error:error];
+      if (!data) return NO;
+      before = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:error];
+      if (!before) return NO;
     }
-    self.reindexHistory = [STNormalizeArray(payload[@"reindexHistory"]) mutableCopy];
-    self.recentQueries = [STNormalizeArray(payload[@"recentQueries"]) mutableCopy];
-    self.nextGeneration = [payload[@"nextGeneration"] unsignedIntegerValue];
-    self.lastPersistedState = STReadPropertyListAtPath(self.statePath, NULL) ?: @{};
+    self.stateTransactionDepth++;
+    BOOL ok = NO;
+    @try {
+      ok = block ? block(error) : YES;
+      if (ok && write && shared) ok = STWritePropertyListAtPath(self.statePath, [self stateDocument], error);
+      if (!ok && before) [self restoreStateDocument:before];
+    } @catch (NSException *exception) {
+      if (before) [self restoreStateDocument:before];
+      @throw;
+    } @finally { self.stateTransactionDepth--; }
+    return ok;
+  } @finally {
+    if (descriptor >= 0) ALNPlatformReleaseExclusiveLock(descriptor);
+    [self.lock unlock];
   }
-  ALNPlatformReleaseExclusiveLock(stateLock);
-  [self.lock unlock];
-  return saved;
 }
 
 - (NSDictionary *)normalizedMetadataForDefinition:(id<ALNSearchResourceDefinition>)definition
@@ -5051,7 +4980,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 
   NSArray *targets = [resourceIdentifier isEqualToString:@"*"] ? [[self registeredResources] valueForKey:@"identifier"] : @[ resourceIdentifier ];
   NSTimeInterval queuedAt = [[NSDate date] timeIntervalSince1970];
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
   for (NSString *target in targets) {
     NSDictionary *existing = [self.statusByResource[target] isKindOfClass:[NSDictionary class]] ? self.statusByResource[target] : @{};
     NSMutableDictionary *status = [NSMutableDictionary dictionaryWithDictionary:existing];
@@ -5061,8 +4990,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     status[@"indexState"] = @"queued";
     self.statusByResource[target] = status;
   }
-  [self.lock unlock];
-  (void)[self persistStateWithError:NULL];
+    return YES;
+  } write:YES error:error]) return nil;
 
   return @{
     @"jobID" : jobID,
@@ -5111,7 +5040,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSTimeInterval queuedAt = [[NSDate date] timeIntervalSince1970];
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
   NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:resourceIdentifier
                                                                 metadata:metadata];
   status[@"lastJobID"] = jobID;
@@ -5119,8 +5048,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   status[@"lastMode"] = @"incremental";
   status[@"indexState"] = @"queued";
   self.statusByResource[resourceIdentifier] = status;
-  [self.lock unlock];
-  (void)[self persistStateWithError:NULL];
+    return YES;
+  } write:YES error:error]) return nil;
   return @{
     @"jobID" : jobID,
     @"resource" : resourceIdentifier,
@@ -5130,12 +5059,15 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 }
 
 - (NSDictionary *)snapshotForResourceIdentifier:(NSString *)identifier metadata:(NSDictionary *)metadata {
+  if (![self stateTransaction:nil write:NO error:NULL]) return nil;
   [self.lock lock];
   NSArray *documents = [self.indexedDocumentsByResource[identifier] isKindOfClass:[NSArray class]] ? self.indexedDocumentsByResource[identifier] : @[];
   NSDictionary *engineState = [self.engineStateByResource[identifier] isKindOfClass:[NSDictionary class]] ? self.engineStateByResource[identifier] : @{};
   NSDictionary *status = [self.statusByResource[identifier] isKindOfClass:[NSDictionary class]] ? self.statusByResource[identifier] : @{};
   [self.lock unlock];
   return @{
+    @"stateRevision" : status[@"stateRevision"] ?: @0,
+    @"buildingGeneration" : status[@"buildingGeneration"] ?: @0,
     @"generation" : [status[@"activeGeneration"] respondsToSelector:@selector(unsignedIntegerValue)]
                         ? @([status[@"activeGeneration"] unsignedIntegerValue])
                         : @0,
@@ -5180,6 +5112,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 
 - (NSDictionary *)reindexResourceIdentifier:(NSString *)identifier
                                       error:(NSError **)error {
+  NSError *__autoreleasing *callerError = error;
+  NSError *__autoreleasing failure = nil;
+  error = &failure;
+  __block NSUInteger generation = 0;
+  __block NSUInteger revision = 0;
+  @try {
   NSString *resourceIdentifier = STLowerTrimmedString(identifier);
   NSDictionary *metadata = [self resourceMetadataForIdentifier:resourceIdentifier];
   if (metadata == nil) {
@@ -5199,20 +5137,22 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
     return nil;
   }
-  id<ALNSearchResourceDefinition> definition = nil;
+  __block id<ALNSearchResourceDefinition> definition = nil;
+  __block NSMutableDictionary *status = nil;
   NSUInteger batchSize = MAX((NSUInteger)1U, ALNUnsignedIntegerValueOrDefault(syncPolicy[@"bulkBatchSize"], 250U));
   NSTimeInterval startedAt = [[NSDate date] timeIntervalSince1970];
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
   definition = self.resourceDefinitionsByIdentifier[resourceIdentifier];
-  NSUInteger generation = MAX((NSUInteger)1U, self.nextGeneration);
+  generation = MAX((NSUInteger)1U, self.nextGeneration);
   self.nextGeneration = generation + 1U;
-  NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:resourceIdentifier metadata:metadata];
+  status = [self mutableStatusForResourceIdentifier:resourceIdentifier metadata:metadata];
+  revision = [status[@"stateRevision"] unsignedIntegerValue];
   status[@"buildingGeneration"] = @(generation);
   status[@"indexState"] = @"rebuilding";
   status[@"lastMode"] = @"full";
   self.statusByResource[resourceIdentifier] = status;
-  [self.lock unlock];
-  (void)[self persistStateWithError:NULL];
+    return YES;
+  } write:YES error:error]) return nil;
 
   NSDictionary *snapshot = nil;
   __block NSUInteger enumeratedDocumentCount = 0U;
@@ -5274,12 +5214,20 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                               : ((documentCount + batchSize - 1U) / batchSize);
   double duration = MAX(0.001, indexedAt - startedAt);
   NSDictionary *replay = @{};
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
+    NSDictionary *current = self.statusByResource[resourceIdentifier];
+    if ([current[@"buildingGeneration"] unsignedIntegerValue] != generation ||
+        [current[@"stateRevision"] unsignedIntegerValue] != revision) {
+      if (transactionError) *transactionError = STError(ALNSearchModuleErrorExecutionFailed,
+          @"search resource changed during rebuild; retry the operation", @{ @"reason":@"state_conflict" });
+      return NO;
+    }
   self.indexedDocumentsByResource[resourceIdentifier] = STNormalizeArray(snapshot[@"documents"]);
   self.engineStateByResource[resourceIdentifier] =
       [snapshot[@"engineState"] isKindOfClass:[NSDictionary class]] ? snapshot[@"engineState"] : (metadata[@"engineDescriptor"] ?: @{});
   status = [self mutableStatusForResourceIdentifier:resourceIdentifier metadata:metadata];
   status[@"documentCount"] = @(documentCount);
+  status[@"stateRevision"] = @(revision + 1);
   status[@"activeGeneration"] = snapshot[@"generation"] ?: @(generation);
   status[@"buildingGeneration"] = @0;
   status[@"generationCount"] = @([STNormalizeArray(self.generationHistoryByResource[resourceIdentifier]) count] + 1U);
@@ -5319,18 +5267,16 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"replayed" : replay[@"replayed"] ?: @0,
     @"replayRemaining" : replay[@"remaining"] ?: @0,
   }];
-  [self.lock unlock];
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
+    return YES;
+  } write:YES error:error]) return nil;
   replay = [self drainReplayOperationsForResourceIdentifier:resourceIdentifier mode:@"full" error:NULL] ?: @{};
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
   status = [self mutableStatusForResourceIdentifier:resourceIdentifier metadata:metadata];
   status[@"lastReplayAt"] = @([[NSDate date] timeIntervalSince1970]);
   status[@"lastReplayStatus"] = ([replay[@"remaining"] unsignedIntegerValue] == 0U) ? @"drained" : @"pending";
   self.statusByResource[resourceIdentifier] = status;
-  [self.lock unlock];
-  (void)[self persistStateWithError:NULL];
+    return YES;
+  } write:YES error:error]) return nil;
 
   return @{
     @"identifier" : resourceIdentifier,
@@ -5340,11 +5286,27 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"bulkImport" : status[@"bulkImport"] ?: @{},
     @"replay" : replay ?: @{},
   };
+  } @finally {
+    if (failure && callerError) {
+      NSMutableDictionary *details = [failure.userInfo mutableCopy];
+      details[@"expectedBuildingGeneration"] = @(generation);
+      details[@"expectedStateRevision"] = @(revision);
+      *callerError = [NSError errorWithDomain:failure.domain code:failure.code userInfo:details];
+    }
+  }
 }
 
 - (NSDictionary *)applyIncrementalOperation:(NSString *)operation
                           resourceIdentifier:(NSString *)identifier
                                       record:(NSDictionary *)record
+                                       error:(NSError **)error {
+  return [self applyIncrementalOperation:operation resourceIdentifier:identifier record:record replayClaim:nil error:error];
+}
+
+- (NSDictionary *)applyIncrementalOperation:(NSString *)operation
+                          resourceIdentifier:(NSString *)identifier
+                                      record:(NSDictionary *)record
+                                 replayClaim:(NSDictionary *)replayClaim
                                        error:(NSError **)error {
   NSString *resourceIdentifier = STLowerTrimmedString(identifier);
   NSDictionary *metadata = [self resourceMetadataForIdentifier:resourceIdentifier];
@@ -5377,23 +5339,23 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     }
     normalizedOperation = @"delete";
   }
-  NSDictionary *snapshot = [self snapshotForResourceIdentifier:resourceIdentifier metadata:metadata];
-  [self.lock lock];
+  __block NSDictionary *snapshot = nil;
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
+  snapshot = [self snapshotForResourceIdentifier:resourceIdentifier metadata:metadata];
   NSUInteger generation = [snapshot[@"generation"] respondsToSelector:@selector(unsignedIntegerValue)]
                               ? [snapshot[@"generation"] unsignedIntegerValue]
                               : 0U;
   if (generation == 0U) {
     generation = MAX((NSUInteger)1U, self.nextGeneration);
     self.nextGeneration = generation + 1U;
-    snapshot = @{
-      @"generation" : @(generation),
-      @"documents" : snapshot[@"documents"] ?: @[],
-      @"metadata" : metadata ?: @{},
-    };
+    NSMutableDictionary *reserved = [snapshot mutableCopy];
+    reserved[@"generation"] = @(generation);
+    snapshot = reserved;
   } else if (self.nextGeneration <= generation) {
     self.nextGeneration = generation + 1U;
   }
-  [self.lock unlock];
+    return YES;
+  } write:YES error:error]) return nil;
   NSDictionary *updated = [self.engine searchModuleApplyOperation:normalizedOperation
                                                            record:record ?: @{}
                                                          metadata:metadata
@@ -5403,12 +5365,33 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     return nil;
   }
   NSTimeInterval syncedAt = [[NSDate date] timeIntervalSince1970];
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
+    if (replayClaim) {
+      BOOL owned = NO;
+      for (NSDictionary *entry in STNormalizeArray(self.pendingReplayOperationsByResource[resourceIdentifier])) {
+        if ([entry[@"operationID"] isEqual:replayClaim[@"operationID"]] &&
+            [entry[@"claimToken"] isEqual:replayClaim[@"claimToken"]] &&
+            [entry[@"claimUntil"] doubleValue] > [[NSDate date] timeIntervalSince1970]) { owned = YES; break; }
+      }
+      if (!owned) {
+        if (transactionError) *transactionError = STError(ALNSearchModuleErrorExecutionFailed,
+            @"search replay claim expired or changed; retry the operation", @{ @"reason":@"state_conflict" });
+        return NO;
+      }
+    }
+    NSDictionary *current = self.statusByResource[resourceIdentifier];
+    if ([current[@"stateRevision"] unsignedIntegerValue] != [snapshot[@"stateRevision"] unsignedIntegerValue] ||
+        [current[@"buildingGeneration"] unsignedIntegerValue] != [snapshot[@"buildingGeneration"] unsignedIntegerValue]) {
+      if (transactionError) *transactionError = STError(ALNSearchModuleErrorExecutionFailed,
+          @"search resource changed during incremental update; retry the operation", @{ @"reason":@"state_conflict" });
+      return NO;
+    }
   self.indexedDocumentsByResource[resourceIdentifier] = STNormalizeArray(updated[@"documents"]);
   self.engineStateByResource[resourceIdentifier] =
       [updated[@"engineState"] isKindOfClass:[NSDictionary class]] ? updated[@"engineState"] : (self.engineStateByResource[resourceIdentifier] ?: @{});
   NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:resourceIdentifier metadata:metadata];
   status[@"documentCount"] = updated[@"documentCount"] ?: @0;
+  status[@"stateRevision"] = @([snapshot[@"stateRevision"] unsignedIntegerValue] + 1);
   status[@"activeGeneration"] = updated[@"generation"] ?: snapshot[@"generation"] ?: @1;
   status[@"buildingGeneration"] = @0;
   status[@"lastError"] = @"";
@@ -5441,10 +5424,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"status" : @"succeeded",
     @"generation" : updated[@"generation"] ?: snapshot[@"generation"] ?: @1,
   }];
-  [self.lock unlock];
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
+    return YES;
+  } write:YES error:error]) return nil;
   return @{
     @"identifier" : resourceIdentifier,
     @"documentCount" : updated[@"documentCount"] ?: @0,
@@ -5474,20 +5455,29 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSUInteger totalDocuments = 0;
   for (NSString *target in targets) {
     NSDictionary *summary = nil;
+    NSError *operationError = nil;
+    NSDictionary *initial = [self snapshotForResourceIdentifier:target metadata:[self resourceMetadataForIdentifier:target] ?: @{}];
     if ([mode isEqualToString:@"incremental"]) {
       summary = [self applyIncrementalOperation:payload[@"operation"]
                               resourceIdentifier:target
                                           record:STNormalizeDictionary(payload[@"record"])
-                                           error:error];
+                                           error:&operationError];
     } else {
-      summary = [self reindexResourceIdentifier:target error:error];
+      summary = [self reindexResourceIdentifier:target error:&operationError];
     }
     if (summary == nil) {
+      if (error) *error = operationError;
+      if ([operationError.userInfo[@"reason"] isEqual:@"state_conflict"]) return nil;
       NSDictionary *metadata = [self resourceMetadataForIdentifier:target] ?: @{};
-      [self.lock lock];
+      NSString *failureDescription = operationError.localizedDescription ?: @"reindex failed";
+      (void)[self stateTransaction:^BOOL(NSError **transactionError) {
       NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:target metadata:metadata];
+      NSNumber *expectedRevision = operationError.userInfo[@"expectedStateRevision"] ?: initial[@"stateRevision"] ?: @0;
+      NSNumber *expectedBuild = operationError.userInfo[@"expectedBuildingGeneration"] ?: initial[@"buildingGeneration"] ?: @0;
+      if ([status[@"stateRevision"] unsignedIntegerValue] != expectedRevision.unsignedIntegerValue ||
+          [status[@"buildingGeneration"] unsignedIntegerValue] != expectedBuild.unsignedIntegerValue) return YES;
       status[@"buildingGeneration"] = @0;
-      status[@"lastError"] = (error != NULL && *error != nil) ? ([*error localizedDescription] ?: @"reindex failed") : @"reindex failed";
+      status[@"lastError"] = failureDescription ?: @"reindex failed";
       status[@"lastFailureAt"] = @([[NSDate date] timeIntervalSince1970]);
       status[@"indexState"] = ([status[@"activeGeneration"] unsignedIntegerValue] > 0U) ? @"degraded" : @"failing";
       status[@"lastMode"] = mode;
@@ -5512,8 +5502,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
         @"status" : @"failed",
         @"error" : status[@"lastError"] ?: @"reindex failed",
       }];
-      [self.lock unlock];
-      (void)[self persistStateWithError:NULL];
+        return YES;
+      } write:YES error:NULL];
       return nil;
     }
     if ([mode isEqualToString:@"incremental"]) {
@@ -5868,6 +5858,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                               : [NSMutableArray array];
   NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:STNormalizeDictionary(payload)];
   entry[@"queuedAt"] = @([[NSDate date] timeIntervalSince1970]);
+  entry[@"operationID"] = [[NSUUID UUID] UUIDString];
   [queue addObject:entry];
   while ([queue count] > replayLimit) {
     [queue removeObjectAtIndex:0];
@@ -5879,43 +5870,64 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                                         mode:(NSString *)mode
                                                        error:(NSError **)error {
   NSString *resourceIdentifier = STLowerTrimmedString(identifier);
-  NSMutableArray *queue = [self.pendingReplayOperationsByResource[resourceIdentifier] isKindOfClass:[NSMutableArray class]]
-                              ? self.pendingReplayOperationsByResource[resourceIdentifier]
-                              : nil;
-  if ([queue count] == 0) {
-    return @{
-      @"resource" : resourceIdentifier ?: @"",
-      @"replayed" : @0,
-      @"remaining" : @0,
-      @"mode" : STLowerTrimmedString(mode),
-    };
-  }
-
-  NSArray *pending = [NSArray arrayWithArray:queue];
-  [queue removeAllObjects];
-  NSUInteger replayed = 0U;
-  for (NSDictionary *entry in pending) {
+  NSUInteger replayed = 0;
+  __block NSUInteger remaining = 0;
+  // Bounded drain. A claim is persisted before external work and fenced by its
+  // random token. Crashed claims expire; replay is therefore at least once.
+  for (NSUInteger attempt = 0; attempt < 1000; attempt++) {
+    __block NSDictionary *entry = nil;
+    NSString *token = [[NSUUID UUID] UUIDString];
+    if (![self stateTransaction:^BOOL(NSError **transactionError) {
+      NSMutableArray *queue = self.pendingReplayOperationsByResource[resourceIdentifier];
+      remaining = queue.count;
+      if (!remaining) return YES;
+      NSDictionary *first = queue[0];
+      NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+      if ([first[@"claimUntil"] doubleValue] > now) return YES;
+      NSMutableDictionary *claimed = [first mutableCopy];
+      claimed[@"operationID"] = first[@"operationID"] ?: [[NSUUID UUID] UUIDString];
+      claimed[@"claimToken"] = token;
+      claimed[@"claimUntil"] = @(now + 300.0);
+      queue[0] = claimed;
+      entry = [claimed copy];
+      return YES;
+    } write:YES error:error]) return nil;
+    if (!entry) break;
+    NSError *applyError = nil;
     NSDictionary *result = [self applyIncrementalOperation:entry[@"operation"]
-                                        resourceIdentifier:resourceIdentifier
-                                                    record:STNormalizeDictionary(entry[@"record"])
-                                                     error:error];
-    if (result == nil) {
-      [queue addObject:entry];
-      NSUInteger failedIndex = [pending indexOfObject:entry];
-      if (failedIndex != NSNotFound && (failedIndex + 1U) < [pending count]) {
-        [queue addObjectsFromArray:[pending subarrayWithRange:NSMakeRange(failedIndex + 1U, [pending count] - failedIndex - 1U)]];
+        resourceIdentifier:resourceIdentifier record:STNormalizeDictionary(entry[@"record"]) replayClaim:entry error:&applyError];
+    __block BOOL owned = NO;
+    if (![self stateTransaction:^BOOL(NSError **transactionError) {
+      NSMutableArray *queue = self.pendingReplayOperationsByResource[resourceIdentifier];
+      for (NSUInteger index = 0; index < queue.count; index++) {
+        NSDictionary *current = queue[index];
+        if (![current[@"operationID"] isEqual:entry[@"operationID"]] ||
+            ![current[@"claimToken"] isEqual:token]) continue;
+        owned = YES;
+        if (result) [queue removeObjectAtIndex:index];
+        else {
+          NSMutableDictionary *released = [current mutableCopy];
+          [released removeObjectForKey:@"claimToken"];
+          [released removeObjectForKey:@"claimUntil"];
+          queue[index] = released;
+        }
+        break;
       }
+      remaining = queue.count;
+      NSMutableDictionary *status = [self mutableStatusForResourceIdentifier:resourceIdentifier
+          metadata:self.resourceMetadataByIdentifier[resourceIdentifier] ?: @{}];
+      status[@"replayQueueDepth"] = @(remaining);
+      self.statusByResource[resourceIdentifier] = status;
+      return YES;
+    } write:YES error:error]) return nil;
+    if (!result || !owned) {
+      if (error) *error = applyError;
       break;
     }
-    replayed += 1U;
+    replayed++;
   }
-  self.pendingReplayOperationsByResource[resourceIdentifier] = queue;
-  return @{
-    @"resource" : resourceIdentifier ?: @"",
-    @"replayed" : @(replayed),
-    @"remaining" : @([queue count]),
-    @"mode" : STLowerTrimmedString(mode),
-  };
+  return @{ @"resource":resourceIdentifier ?: @"", @"replayed":@(replayed),
+            @"remaining":@(remaining), @"mode":STLowerTrimmedString(mode) };
 }
 
 - (NSDictionary *)shapedResultForDocument:(NSDictionary *)document
@@ -6289,7 +6301,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSMutableDictionary *snapshotsByResource = [NSMutableDictionary dictionary];
   for (NSDictionary *metadata in candidateMetadata) {
     NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
-    snapshotsByResource[identifier] = [self snapshotForResourceIdentifier:identifier metadata:metadata];
+    NSDictionary *snapshot = [self snapshotForResourceIdentifier:identifier metadata:metadata];
+    if (!snapshot) {
+      if (error) *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not refresh search state", nil);
+      return nil;
+    }
+    snapshotsByResource[identifier] = snapshot;
   }
 
   NSDictionary *result = nil;
@@ -6397,7 +6414,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   if (explain || [STNormalizeDictionary(result[@"debug"]) count] > 0) {
     response[@"debug"] = STNormalizeDictionary(result[@"debug"]);
   }
-  [self.lock lock];
+  if (![self stateTransaction:^BOOL(NSError **transactionError) {
   [self recordRecentQuery:@{
     @"query" : STTrimmedString(result[@"query"] ?: query),
     @"mode" : response[@"mode"] ?: @"search",
@@ -6408,11 +6425,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"cursor" : STTrimmedString(result[@"nextCursor"]),
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
   }];
-  [self.lock unlock];
+    return YES;
+  } write:YES error:error]) return nil;
   return response;
 }
 
 - (NSDictionary *)resourceRowForIdentifier:(NSString *)identifier metadata:(NSDictionary *)metadata {
+  if (![self stateTransaction:nil write:NO error:NULL]) return nil;
   NSDictionary *status = nil;
   NSDictionary *engineState = nil;
   NSArray *pendingReplay = nil;
@@ -6454,6 +6473,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 }
 
 - (NSDictionary *)resourceDrilldownForIdentifier:(NSString *)identifier {
+  if (![self stateTransaction:nil write:NO error:NULL]) return nil;
   NSString *resourceIdentifier = STLowerTrimmedString(identifier);
   NSDictionary *metadata = [self resourceMetadataForIdentifier:resourceIdentifier];
   if (metadata == nil) {
@@ -6483,6 +6503,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 }
 
 - (NSDictionary *)dashboardSummary {
+  if (![self stateTransaction:nil write:NO error:NULL]) return nil;
   NSArray *resources = [self registeredResources];
   NSMutableArray *statusRows = [NSMutableArray array];
   NSUInteger documentCount = 0;
@@ -6490,6 +6511,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   for (NSDictionary *metadata in resources) {
     NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
     NSDictionary *row = [self resourceRowForIdentifier:identifier metadata:metadata];
+    if (!row) return nil;
     documentCount += [row[@"documentCount"] unsignedIntegerValue];
     replayQueueDepth += [row[@"replayQueueDepth"] unsignedIntegerValue];
     [statusRows addObject:row];
