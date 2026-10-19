@@ -1,5 +1,9 @@
 # Getting Started on Windows
 
+`propane` refuses production startup on Windows (exit status 2); use `boomhauer`
+for development. Its help remains available. Multiworker serving and rolling
+reloads require a future shared-listener implementation.
+
 Windows is supported for **development** from Arlen 0.3.0: install Arlen,
 create apps, build them, and run them under `boomhauer` with watch mode.
 Arlen runs on the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new)

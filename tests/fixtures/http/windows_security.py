@@ -69,6 +69,7 @@ if os.name == 'nt':
         (directory / 'ok.js').write_text('safe')
         (directory / 'token.cssx').write_text('private')
         (directory / 'secret.env').write_text('private')
+        (directory / '.secret.js').write_text('hidden-private')
         (directory / 'secret.env:stream.js').write_text('stream-private')
         assert status_for(prefix + '/ok.js') == 200
         assert status_for(prefix + '/secret.env:stream.js') == 404
@@ -82,6 +83,10 @@ if os.name == 'nt':
         short = buffer.value.replace('\\', '/').rsplit('/', 1)[-1]
         assert status_for(prefix + '/' + short) == 404
         print('short-name-alias-tested' if short.lower() != 'token.cssx' else 'short-names-disabled-on-volume')
+        count = ctypes.windll.kernel32.GetShortPathNameW(str(directory / '.secret.js'), buffer, len(buffer))
+        assert count > 0
+        hidden_short = buffer.value.replace('\\', '/').rsplit('/', 1)[-1]
+        assert status_for(prefix + '/' + hidden_short) == 404
         with tempfile.TemporaryDirectory(prefix='outside-', dir=root / 'build') as outside:
             assert Path(outside).resolve().parent == (root / 'build').resolve()
             (Path(outside) / 'leak.js').write_text('outside-private')

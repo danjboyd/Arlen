@@ -189,6 +189,30 @@
 
 @implementation Phase7DTests
 
+- (void)testWindowsPrivateStorageDACLRejectsBroadInheritedAccess {
+#if defined(_WIN32)
+  NSString *root = [[self repoRoot] stringByAppendingPathComponent:
+      [@"build/acl-" stringByAppendingString:[[NSUUID UUID] UUIDString]]];
+  NSTask *task = [NSTask new];
+  task.launchPath = @"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+  task.arguments = @[@"-NoProfile", @"-ExecutionPolicy", @"Bypass", @"-File",
+      @"tests/fixtures/windows_private_storage.ps1", @"-ProbePath",
+      [[self repoRoot] stringByAppendingPathComponent:@"build/file-job-probe.exe"],
+      @"-RootPath", root];
+  NSPipe *pipe = [NSPipe pipe];
+  task.standardOutput = pipe;
+  task.standardError = pipe;
+  [task launch];
+  NSData *data = [pipe.fileHandleForReading readDataToEndOfFile];
+  [task waitUntilExit];
+  NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+  XCTAssertEqual(0, task.terminationStatus, @"%@", output);
+  XCTAssertTrue([output containsString:@"private-acl-passed"], @"%@", output);
+#else
+  XCTSkip(@"Windows DACL evidence requires native Windows");
+#endif
+}
+
 - (void)testFileJobsCoordinateConcurrentProcesses {
   NSString *root = [self temporaryPathWithPrefix:@"file-jobs-processes"];
   NSString *storage = [root stringByAppendingPathComponent:@"jobs/state.plist"];

@@ -2,6 +2,10 @@
 
 This document describes currently implemented command-line interfaces.
 
+On Windows, `propane` production startup exits with status 2 and directs you to
+`boomhauer` for development. `propane --help` remains available. Windows
+multiworker hosting and rolling reloads are unsupported.
+
 The `queue-jobs` plugin preset stores its file queue at
 `<app-root>/var/jobs/state.plist` unless `ARLEN_JOB_STORAGE_PATH` overrides it.
 Storage initialization failure aborts registration. Independent workers

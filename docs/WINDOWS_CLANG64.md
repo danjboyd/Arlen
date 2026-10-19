@@ -137,6 +137,10 @@ Packaged release confidence lane:
 make windows-confidence
 ```
 
+This production packaging lane is not a Windows v0.3 acceptance gate and cannot
+complete while Windows `propane` is explicitly unsupported. Use the preview
+development lane; production validation is deferred to the shared-listener work.
+
 Convenience preview runner:
 
 ```sh
@@ -149,7 +153,13 @@ Those lanes are intended to verify:
 - MSSQL / ODBC
 - `boomhauer` watch-mode recovery
 - `jobs-worker` queued-job execution
-- `propane` request serving and reload handling
+- explicit rejection of unsupported `propane` production startup (`--help` works)
+
+Windows `propane` exits with status 2 before starting workers. The old preview
+test depended on multiple independently bound sockets sharing a port through
+Windows `SO_REUSEADDR`, which permitted local port interception. Exclusive
+binding remains required. A shared inherited Winsock listener is future Windows
+production work; this lane does not certify Windows production hosting.
 
 The preview lanes run through the vendored `tools-xctest` fork, the same
 runner the Linux and macOS lanes use (GitHub issue #116), so Windows runs get
