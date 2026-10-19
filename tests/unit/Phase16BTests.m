@@ -150,21 +150,34 @@
 #if defined(__APPLE__)
   return @[ @"-XCTest", [@"Phase16BTests/" stringByAppendingString:method], bundlePath ];
 #else
-  return @[ [@"-only-testing:ArlenUnitTests/Phase16BTests/" stringByAppendingString:method], bundlePath ];
+  return @[ @"-output-format", @"apple",
+            [@"-only-testing:ArlenUnitTests/Phase16BTests/" stringByAppendingString:method], bundlePath ];
 #endif
 }
 
-- (void)assertSelectedChildFinished:(NSTask *)child outputPipe:(NSPipe *)pipe {
+- (void)assertSelectedChildFinished:(NSTask *)child outputPath:(NSString *)outputPath {
   BOOL exited = ALNTestWaitForTaskExit(child, 30.0);
   if (!exited) {
     [child terminate];
     [child waitUntilExit];
   }
-  NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+  NSData *data = [NSData dataWithContentsOfFile:outputPath];
   NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
   XCTAssertTrue(exited, @"child timed out: %@", output);
   XCTAssertEqual(0, child.terminationStatus, @"%@", output);
   XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
+}
+
+- (NSDictionary *)persistedStateAtPath:(NSString *)path {
+  NSData *data = [NSData dataWithContentsOfFile:path];
+  XCTAssertNotNil(data);
+  if (data == nil) return nil;
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  NSError *error = nil;
+  id value = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable
+                                                        format:&format error:&error];
+  XCTAssertTrue([value isKindOfClass:[NSDictionary class]], @"%@", error);
+  return [value isKindOfClass:[NSDictionary class]] ? value : nil;
 }
 
 - (void)setUp {
@@ -549,19 +562,23 @@
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
     child.arguments = [self childArgumentsForMethod:@"testNotificationStateTransactionsAcrossProcesses" bundlePath:bundlePath];
-    NSPipe *output = [NSPipe pipe];
+    NSString *outputPath = [statePath stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
     child.standardOutput = output;
     child.standardError = output;
     NSMutableDictionary *childEnvironment = [environment mutableCopy];
     childEnvironment[@"ARLEN_NOTIFICATIONS_SHARED_STATE_PATH"] = statePath;
     child.environment = childEnvironment;
     [child launch];
-    [children addObject:@{ @"task" : child, @"output" : output }];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
   }
   for (NSDictionary *entry in children) {
-    [self assertSelectedChildFinished:entry[@"task"] outputPipe:entry[@"output"]];
+    [self assertSelectedChildFinished:entry[@"task"] outputPath:entry[@"outputPath"]];
+    [entry[@"outputHandle"] closeFile];
   }
-  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  NSDictionary *state = [self persistedStateAtPath:statePath];
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"outboxEntries"] count]);
   XCTAssertEqual((NSUInteger)1, [(NSDictionary *)state[@"inboxByRecipient"] count]);
   XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"inboxByRecipient"][@"shared-recipient"] count]);
@@ -637,7 +654,10 @@
     NSTask *child = [[NSTask alloc] init];
     child.launchPath = runner;
     child.arguments = [self childArgumentsForMethod:@"testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses" bundlePath:bundlePath];
-    NSPipe *output = [NSPipe pipe];
+    NSString *outputPath = [statePath stringByAppendingFormat:@".%@.log", childRole];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
     child.standardOutput = output;
     child.standardError = output;
     NSMutableDictionary *childEnvironment = [environment mutableCopy];
@@ -645,12 +665,13 @@
     childEnvironment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_ROLE"] = childRole;
     child.environment = childEnvironment;
     [child launch];
-    [children addObject:@{ @"task" : child, @"output" : output }];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
   }
   for (NSDictionary *entry in children) {
-    [self assertSelectedChildFinished:entry[@"task"] outputPipe:entry[@"output"]];
+    [self assertSelectedChildFinished:entry[@"task"] outputPath:entry[@"outputPath"]];
+    [entry[@"outputHandle"] closeFile];
   }
-  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  NSDictionary *state = [self persistedStateAtPath:statePath];
   NSArray *inbox = state[@"inboxByRecipient"][@"shared-recipient"];
   XCTAssertEqual((NSUInteger)1, [inbox count]);
   XCTAssertEqualObjects(@YES, inbox[0][@"read"]);
@@ -703,7 +724,7 @@
   } @finally {
     XCTAssertEqual(0, chmod([directory fileSystemRepresentation], 0700));
   }
-  NSDictionary *durable = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  NSDictionary *durable = [self persistedStateAtPath:statePath];
   XCTAssertEqualObjects(@NO, durable[@"preferencesByRecipient"][@"reader"][@"phase16b.digest"][@"email"]);
   XCTAssertEqualObjects(@NO, [runtime notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
 #endif
