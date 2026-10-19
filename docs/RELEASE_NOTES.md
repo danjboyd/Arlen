@@ -53,6 +53,9 @@ including unresolved, non-blocking ThreadSanitizer findings.
 - Storage persistence now uses per-record SQLite transactions and one-time legacy
   plist import. Stop old workers before upgrading; Linux requires `libsqlite3-0`.
   See `docs/STORAGE_MODULE.md` for migration, backup, and custom-adapter limits.
+- `arlen deploy push|release|dryrun --json` now parses the packaging command's
+  stdout independently of compiler warnings on stderr. Successful builds no
+  longer report a false `deploy_push_failed` when those warnings appear.
 
 - Request metrics now store primitive numeric values and batch completion
   counters/timings under one lock, reducing lock and allocation overhead (#249).

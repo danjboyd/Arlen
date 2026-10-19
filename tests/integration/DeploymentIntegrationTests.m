@@ -1386,6 +1386,71 @@ static NSString *ALNHostDeployProfile(void) {
   }
 }
 
+- (void)testDeployJSONUsesBuildStdoutWhenBuildAlsoWarnsOnStderr {
+#if defined(_WIN32)
+  XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
+#endif
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-json-app"];
+  NSString *frameworkRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-json-framework"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-deploy-json-work"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(frameworkRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || frameworkRoot == nil || workRoot == nil) return;
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ }\n"]);
+    NSString *scriptPath = [frameworkRoot stringByAppendingPathComponent:@"tools/deploy/build_release.sh"];
+    XCTAssertTrue([self writeFile:scriptPath
+                          content:@"#!/usr/bin/env bash\n"
+                                  "release_id=\"\"\n"
+                                  "while [[ $# -gt 0 ]]; do\n"
+                                  "  if [[ \"$1\" == --release-id ]]; then release_id=\"$2\"; break; fi\n"
+                                  "  shift\n"
+                                  "done\n"
+                                  "printf '%s\\n' 'compiler warning on stderr' >&2\n"
+                                  "case \"$release_id\" in\n"
+                                  "  valid) printf '%s\\n' '{\"status\":\"ok\",\"workflow\":\"deploy.build_release\"}' ;;\n"
+                                  "  invalid) printf '%s\\n' 'not-json' ;;\n"
+                                  "  nonzero) printf '%s\\n' '{\"status\":\"error\",\"error\":{\"message\":\"fixture failed\"}}'; exit 7 ;;\n"
+                                  "esac\n"]);
+    XCTAssertTrue([self makeExecutableAtPath:scriptPath]);
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    NSString *releasesDir = [workRoot stringByAppendingPathComponent:@"releases"];
+    for (NSString *releaseID in @[ @"valid", @"invalid", @"nonzero" ]) {
+      NSString *command = [NSString stringWithFormat:
+                                @"cd %@ && %@ deploy push --framework-root %@ --app-root %@ --releases-dir %@ "
+                                 "--release-id %@ --allow-missing-certification --json",
+                                [self shellQuoted:repoRoot],
+                                [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"build/arlen"]],
+                                [self shellQuoted:frameworkRoot], [self shellQuoted:appRoot],
+                                [self shellQuoted:releasesDir], [self shellQuoted:releaseID]];
+      NSString *output = [self runShellCapture:command exitCode:&code];
+      NSDictionary *payload = [self parseJSONDictionaryFromOutput:output context:releaseID];
+      if ([releaseID isEqualToString:@"valid"]) {
+        XCTAssertEqual(0, code, @"%@", output);
+        XCTAssertEqualObjects(@"ok", payload[@"status"]);
+        XCTAssertEqualObjects(@"ok", payload[@"build_release"][@"status"]);
+      } else {
+        XCTAssertEqual([releaseID isEqualToString:@"nonzero"] ? 7 : 1, code, @"%@", output);
+        XCTAssertEqualObjects(@"error", payload[@"status"]);
+        XCTAssertEqualObjects(@"deploy_push_failed", payload[@"error"][@"code"]);
+        if ([releaseID isEqualToString:@"nonzero"]) {
+          XCTAssertTrue([payload[@"error"][@"message"] containsString:@"fixture failed"]);
+        }
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:frameworkRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:NULL];
+  }
+}
+
 - (void)testArlenDeployPushAndReleaseCommandsBuildManifestAndActivateCurrent {
 #if defined(_WIN32)
   XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");
