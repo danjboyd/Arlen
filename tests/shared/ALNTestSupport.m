@@ -13,6 +13,70 @@
 #endif
 #import <errno.h>
 
+BOOL ALNTestReplaceFilePath(NSData *data, NSString *path) {
+#if defined(_WIN32)
+  NSString *temporary = [path stringByAppendingFormat:@".replace-%@", [[NSUUID UUID] UUIDString]];
+  NSMutableData *source = [[[temporary stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  NSMutableData *target = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [source appendBytes:"\0\0" length:2];
+  [target appendBytes:"\0\0" length:2];
+  HANDLE output = CreateFileW((const wchar_t *)source.bytes, GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, CREATE_NEW,
+      FILE_ATTRIBUTE_NORMAL, NULL);
+  if (output == INVALID_HANDLE_VALUE) return NO;
+  const unsigned char *cursor = data.bytes;
+  NSUInteger remaining = data.length;
+  BOOL wrote = YES;
+  while (remaining > 0) {
+    DWORD count = 0;
+    DWORD chunk = (DWORD)MIN(remaining, (NSUInteger)MAXDWORD);
+    if (!WriteFile(output, cursor, chunk, &count, NULL) || count == 0) { wrote = NO; break; }
+    remaining -= count;
+    cursor += count;
+  }
+  CloseHandle(output);
+  if (!wrote) { DeleteFileW((const wchar_t *)source.bytes); return NO; }
+  // Win32 cannot overwrite an open destination even with delete sharing. Rename
+  // the pinned original away, then install replacement bytes at its old path.
+  // This deliberately exercises pathname substitution, not atomic rename.
+  NSString *backupPath = [path stringByAppendingFormat:@".old-%@", [[NSUUID UUID] UUIDString]];
+  NSMutableData *backup = [[[backupPath stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [backup appendBytes:"\0\0" length:2];
+  BOOL movedOriginal = MoveFileExW((const wchar_t *)target.bytes, (const wchar_t *)backup.bytes,
+                                  MOVEFILE_WRITE_THROUGH);
+  BOOL ok = movedOriginal && MoveFileExW((const wchar_t *)source.bytes, (const wchar_t *)target.bytes,
+                                        MOVEFILE_WRITE_THROUGH);
+  if (ok) DeleteFileW((const wchar_t *)backup.bytes);
+  else if (movedOriginal) MoveFileExW((const wchar_t *)backup.bytes, (const wchar_t *)target.bytes,
+                                    MOVEFILE_WRITE_THROUGH);
+  if (!ok) {
+    DWORD failure = GetLastError();
+    NSLog(@"Native test file replacement failed: Windows error %lu, attributes %lu/%lu", (unsigned long)failure,
+          (unsigned long)GetFileAttributesW((const wchar_t *)source.bytes),
+          (unsigned long)GetFileAttributesW((const wchar_t *)target.bytes));
+    [[NSFileManager defaultManager] removeItemAtPath:temporary error:NULL];
+  }
+  return ok;
+#else
+  return [data writeToFile:path atomically:YES];
+#endif
+}
+
+NSFileHandle *ALNTestOpenDeleteSharingReader(NSString *path) {
+#if defined(_WIN32)
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE handle = CreateFileW((const wchar_t *)wide.bytes, GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+  if (handle == INVALID_HANDLE_VALUE) return nil;
+  int descriptor = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+  if (descriptor < 0) { CloseHandle(handle); return nil; }
+  return [[NSFileHandle alloc] initWithFileDescriptor:descriptor closeOnDealloc:YES];
+#else
+  return [NSFileHandle fileHandleForReadingAtPath:path];
+#endif
+}
+
 #import "ALNPlatform.h"
 
 static NSString *const ALNTestSupportErrorDomain = @"Arlen.TestSupport.Error";
@@ -586,10 +650,10 @@ NSString *ALNTestPlatformObjCFlags(void) {
 #if defined(ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS) && ARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS
   // The GNUmakefile's shim for gnustep-base 1.31.1, which does not declare
   // NSJSONWritingSortedKeys; direct clang compiles of Arlen sources need it too.
-  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 "
+  return @"-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 "
          "-DNSJSONWritingSortedKeys=2UL -DARLEN_FOUNDATION_JSON_LACKS_SORTED_KEYS=1";
 #else
-  return @"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
+  return @"-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1";
 #endif
 #else
   return @"";

@@ -514,7 +514,7 @@
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *doctor = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
   XCTAssertTrue([doctor containsString:@"if aln_platform_is_msys; then"]);
-  XCTAssertTrue([doctor containsString:@"probe_flags=\"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1\""]);
+  XCTAssertTrue([doctor containsString:@"probe_flags=\"-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1\""]);
   XCTAssertTrue([doctor containsString:@"clang \\$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only -"]);
   XCTAssertTrue([doctor containsString:@"\"$framework_root/build/dll/libpq.dll\""]);
   XCTAssertTrue([doctor containsString:@"/clang64/bin/libpq.dll"]);

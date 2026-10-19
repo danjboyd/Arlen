@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Windows file responses accept valid Unicode filenames using wide-character
+  filesystem calls. Framework/app/test builds now use 64-bit file offsets,
+  preventing metadata and Range truncation above 2 GiB; rebuild custom CLANG64
+  integrations with `_FILE_OFFSET_BITS=64`. Pinned file responses clone the same
+  file object with independent positions, avoiding shared-offset read races.
+
 - Storage 1.4 streams verified filesystem downloads, supports ranges/HEAD and
   checksum ETags, and bounds variant source materialization to 16 MiB by default.
 - Storage persistence now uses per-record SQLite transactions and one-time legacy

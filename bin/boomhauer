@@ -134,7 +134,7 @@ platform_objc_flags=""
 platform_link_libs="-ldl"
 if [[ $windows_preview -eq 1 ]]; then
   default_enable_llhttp=0
-  platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -DARLEN_WINDOWS_PREVIEW=1"
+  platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -DARLEN_WINDOWS_PREVIEW=1"
   platform_link_libs="-lws2_32 -lbcrypt"
 fi
 # App test bundle binary (--build-tests): GNUstep on Windows loads <name>.dll.

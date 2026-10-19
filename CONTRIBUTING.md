@@ -9,6 +9,12 @@ opening a pull request, and the conventions reviewers will check for.
 
 ## Before you start
 
+Windows CLANG64 builds require `_FILE_OFFSET_BITS=64` before system headers.
+The make targets, CLI app builder, doctor probe and test helpers provide it.
+After changing this contract, clean-rebuild the framework, apps and vendored
+XCTest runner; do not mix cached objects built with 32-bit `off_t`. The build-flags
+sentinel also invalidates runner artifacts. See [Windows CLANG64](docs/WINDOWS_CLANG64.md).
+
 - File or comment on an issue first if the change is non-trivial. This lets us
   surface design considerations before you invest implementation time.
 - For security-sensitive issues, do **not** open a public issue. Follow

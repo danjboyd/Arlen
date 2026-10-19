@@ -102,14 +102,13 @@
 }
 
 - (void)testInterruptedMigrationLeavesNoPartialCatalog {
-#if defined(__linux__)
   NSString *directory = ALNTestTemporaryDirectory(@"storage-catalog");
   NSString *legacy = [directory stringByAppendingPathComponent:@"state.plist"];
   NSString *path = [legacy stringByAppendingString:@".sqlite3"];
   NSDictionary *original = [self stateWithObjects:@{ @"alice":@{ @"tokenNonce":@"alice-only" } }];
   XCTAssertTrue([original writeToFile:legacy atomically:YES]);
   NSTask *child = [[NSTask alloc] init];
-  child.launchPath = @"/usr/bin/python3";
+  child.launchPath = ALNTestToolPath(@"python3");
   child.arguments = @[ @"-c", @"import sqlite3,sys,os; c=sqlite3.connect(sys.argv[1]); c.execute('BEGIN IMMEDIATE'); c.execute('CREATE TABLE catalog(kind TEXT NOT NULL,key TEXT NOT NULL,value BLOB NOT NULL,PRIMARY KEY(kind,key))'); c.execute(\"INSERT INTO catalog VALUES('meta','root',?)\",(b'partial',)); os._exit(7)", path ];
   [child launch]; [child waitUntilExit];
   XCTAssertEqual(7, child.terminationStatus);
@@ -117,9 +116,6 @@
   ALNStorageCatalog *catalog = [[ALNStorageCatalog alloc] initWithPath:path legacyPath:legacy error:&error];
   XCTAssertNotNil(catalog, @"%@", error);
   XCTAssertEqualObjects(original, [catalog readStateWithError:&error]);
-#else
-  XCTSkip(@"process-interruption fixture uses Linux system Python sqlite3");
-#endif
 }
 
 - (void)testMalformedLegacyCatalogFailsWithoutImporting {

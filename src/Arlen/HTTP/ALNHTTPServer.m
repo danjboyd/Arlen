@@ -1430,7 +1430,7 @@ static int ALNOpenWithFaults(const char *path, int flags) {
     errno = EINTR;
     return -1;
   }
-  return open(path, flags);
+  return ALNFileResponseOpenPath([NSString stringWithUTF8String:path], flags);
 }
 
 static int ALNFstatWithFaults(int fd, struct stat *statBuffer) {
@@ -1446,7 +1446,7 @@ static int ALNStatWithFaults(const char *path, struct stat *statBuffer) {
     errno = EINTR;
     return -1;
   }
-  return stat(path, statBuffer);
+  return ALNFileResponseStatPath([NSString stringWithUTF8String:path], statBuffer);
 }
 
 #ifdef __linux__
@@ -1857,7 +1857,7 @@ static int ALNStaticFileFDForPath(NSString *path,
     ALNStaticFileFDCacheTouchLocked(path);
   }
 
-  int duplicated = (entry.fileDescriptor >= 0) ? dup(entry.fileDescriptor) : -1;
+  int duplicated = (entry.fileDescriptor >= 0) ? ALNFileResponseDuplicateReadDescriptor(entry.fileDescriptor) : -1;
   [gALNStaticFileFDCacheLock unlock];
   return duplicated;
 }
@@ -3354,7 +3354,7 @@ static double ALNSendResponseWithBudget(ALNSocketHandle clientFd,
   long fileBodyMTimeNanoseconds = response.fileBodyMTimeNanoseconds;
   int fileBodyFd = -1;
   if ([fileBodyPath length] > 0 && fileBodyLength > 0) {
-    fileBodyFd = response.fileBodyHandle != nil ? dup(response.fileBodyHandle.fileDescriptor) :
+    fileBodyFd = response.fileBodyHandle != nil ? ALNFileResponseDuplicateReadDescriptor(response.fileBodyHandle.fileDescriptor) :
         ALNStaticFileFDForPath(fileBodyPath,
                                         fileBodyDevice,
                                         fileBodyInode,

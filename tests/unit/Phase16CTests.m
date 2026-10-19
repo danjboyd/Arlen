@@ -1152,7 +1152,7 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertNotNil(handle, @"%@", error);
   XCTAssertEqualObjects(object[@"objectID"], metadata[@"object"][@"objectID"]);
   NSString *path = [root stringByAppendingPathComponent:[object[@"attachmentID"] stringByAppendingString:@".bin"]];
-  XCTAssertTrue([[@"bobby data" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:path atomically:YES]);
+  XCTAssertTrue(ALNTestReplaceFilePath([@"bobby data" dataUsingEncoding:NSUTF8StringEncoding], path));
   XCTAssertEqualObjects(@"alice data", [[NSString alloc] initWithData:[handle readDataToEndOfFile] encoding:NSUTF8StringEncoding]);
   [handle closeFile];
   XCTAssertNil([runtime openDownloadFileForToken:token metadata:NULL error:&error]);

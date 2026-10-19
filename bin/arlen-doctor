@@ -370,7 +370,7 @@ else
   probe_flags=""
   if aln_platform_is_msys; then
     windows_clang64=1
-    probe_flags="-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1"
+    probe_flags="-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1"
     add_check "platform" "pass" "platform: Windows MSYS2 CLANG64 (gnustep-cli toolchain) path"
     toolchain_state="/state/cli-state.json"
     if [[ -f "$toolchain_state" ]]; then
