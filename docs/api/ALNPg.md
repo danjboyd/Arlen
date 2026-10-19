@@ -32,6 +32,7 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `emitDiagnosticsEventsToStderr` | `BOOL` | `nonatomic, assign` | Public `emitDiagnosticsEventsToStderr` property available on `ALNPg`. |
 | `queryDiagnosticsListener` | `ALNPgQueryDiagnosticsListener` | `nonatomic, copy, nullable` | Public `queryDiagnosticsListener` property available on `ALNPg`. |
 | `acquireTimeout` | `NSTimeInterval` | `nonatomic, assign` | Public `acquireTimeout` property available on `ALNPg`. |
+| `sessionResetPolicy` | `ALNPgSessionResetPolicy` | `nonatomic, assign` | Public `sessionResetPolicy` property available on `ALNPg`. |
 
 ## Methods
 
@@ -51,4 +52,5 @@ NSArray *rows = [db executeQuery:@"SELECT now() AS ts"
 | `executeCommandBatch:parameterSets:error:` | `- (NSInteger)executeCommandBatch:(NSString *)sql parameterSets:(NSArray<NSArray *> *)parameterSets error:(NSError *_Nullable *_Nullable)error;` | Execute a write/command operation and return affected row count. | Pass `NSError **` when you need detailed failure diagnostics. |
 | `executeBuilderCommand:error:` | `- (NSInteger)executeBuilderCommand:(ALNSQLBuilder *)builder error:(NSError *_Nullable *_Nullable)error;` | Compile and execute an `ALNSQLBuilder` command. | Pass `NSError **` when you need detailed failure diagnostics. |
 | `withTransaction:error:` | `- (BOOL)withTransaction:(BOOL (^)(ALNPgConnection *connection, NSError *_Nullable *_Nullable error))block error:(NSError *_Nullable *_Nullable)error;` | Run a scoped callback with managed lifecycle semantics. | Return `YES` from block to commit; return `NO` or set `error` to trigger rollback. |
+| `withTransactionReplayingOnConnectionLoss:error:` | `- (BOOL)withTransactionReplayingOnConnectionLoss:(BOOL (^)(ALNPgConnection *connection, NSError *_Nullable *_Nullable error))block error:(NSError *_Nullable *_Nullable)error;` | Run a scoped callback with managed lifecycle semantics. | Check the returned `BOOL`; on `NO`, inspect the `error` out-parameter. |
 | `withTransactionUsingBlock:error:` | `- (BOOL)withTransactionUsingBlock: (BOOL (^)(id<ALNDatabaseConnection> connection, NSError *_Nullable *_Nullable error))block error:(NSError *_Nullable *_Nullable)error;` | Run a callback inside a managed transaction. | Return `YES` from block to commit; return `NO` or set `error` to trigger rollback. |

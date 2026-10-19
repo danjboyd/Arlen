@@ -323,6 +323,18 @@ then is a session started and a session cookie sent. Requests that never read a
 token, including cookieless `GET`/`HEAD` for static-ish routes, get no
 `Set-Cookie`, so they cannot replace a signed-in browser's session.
 
+Signing in and completing step-up start a fresh session
+(`ALNAuthSession` establish/elevate, which the auth module and
+`-[ALNController startAuthenticatedSessionForSubject:...]` /
+`completeStepUpWithMethod:...` use). Keys stored before, including
+`_csrf_token`, are dropped, and a new CSRF token is minted the next time one is
+read. The one key kept is `return_to`, for apps that remember where to send the
+user after signing in. A token fetched before login, or before step-up, is
+rejected afterwards: clients should take the new `csrf_token` from the auth
+module's login and verify responses (or from `GET /auth/api/session`), and
+pages rendered after login carry the new token. Store other app data in the
+session after login, or keep it elsewhere if it must survive step-up.
+
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
 an empty placeholder.
@@ -365,6 +377,42 @@ envelope with the stable code `csrf_invalid`:
 Other clients get the plain-text `csrf verification failed` body. SPA clients
 can match on `error.code == "csrf_invalid"` to refresh their token and retry.
 Tokens are compared in constant time.
+
+Auth module sign-in limits (`authModule.attemptLimits`, auth 1.6.0 with
+migration `004_auth_totp_limits`) are separate from the `rateLimit`
+middleware below:
+
+- `attemptLimits.mfa.maxFailures` (default `5`), `lockoutSeconds` (`30`),
+  `maxLockoutSeconds` (`900`): per-account lock for failed TOTP and
+  recovery-code checks.
+- `attemptLimits.password.maxFailures` (default `5`), `delaySeconds` (`30`),
+  `maxDelaySeconds` (`900`): failed password sign-ins per pair of submitted
+  email and client address (`ALNRequest.effectiveRemoteAddress`). After
+  `maxFailures`, that pair waits, doubling per further failure.
+- `attemptLimits.password.accountMaxFailures` (default `50`),
+  `accountWindowSeconds` (`3600`), `accountDelaySeconds` (`30`): an
+  account-wide ceiling against distributed guessing across all addresses.
+- `attemptLimits.password.trustedPairDays` (default `30`, `0` = off): an
+  email/address pair that signed in within this many days skips the
+  account-wide ceiling (its own pair delay still applies).
+- `attemptLimits.password.maxTrackedEntries` (default `100000`) and
+  `pruneBatchSize` (`1000`): cap on stored counter rows, and the most rows one
+  background prune deletes.
+- `attemptLimits.mail.maxPerEmail` (default `5`), `maxPerAddress` (`20`),
+  `windowSeconds` (`3600`): forgot-password mail per hashed email and per
+  client address. Beyond them the reply is unchanged but no mail is sent.
+  `0` turns a mail limit off.
+- `maxFailures = 0` turns a limit off (for `password`, both the per-address
+  delay and the ceiling); `accountMaxFailures = 0` turns off only the ceiling.
+
+The auth module's own connection pool is set with
+`authModule.database.maxConnections` (default `8`) and
+`authModule.database.acquireTimeoutSeconds` (default `2`). A request that gets
+no connection in time, or finds the database unreachable, answers `503` with
+`Retry-After` and keeps the session.
+
+See [Auth Module](AUTH_MODULE.md#totp-replay-protection-and-attempt-limits)
+for the full behaviour.
 
 ## 6. Rate Limits and Security Headers
 

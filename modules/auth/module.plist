@@ -1,6 +1,6 @@
 {
   identifier = "auth";
-  version = "1.5.4";
+  version = "1.6.0";
   principalClass = "ALNAuthModule";
   compatibility = {
     arlenVersion = ">= 0.1.0";
@@ -35,6 +35,39 @@
             apiKeySecret = "";
             verifyServiceSID = "";
             testVerificationCode = "";
+          };
+        };
+        database = {
+          /* Auth module connection pool; busy requests wait up to acquireTimeoutSeconds, then answer 503. */
+          maxConnections = 8;
+          acquireTimeoutSeconds = 2;
+        };
+        attemptLimits = {
+          /* Failure counters (migration 004). maxFailures = 0 turns a limit off. */
+          mfa = {
+            maxFailures = 5;
+            lockoutSeconds = 30;
+            maxLockoutSeconds = 900;
+          };
+          password = {
+            /* Per (email, client address) pair: delay after maxFailures, doubling. */
+            maxFailures = 5;
+            delaySeconds = 30;
+            maxDelaySeconds = 900;
+            /* Account-wide ceiling against distributed guessing (0 turns it off). */
+            accountMaxFailures = 50;
+            accountWindowSeconds = 3600;
+            accountDelaySeconds = 30;
+            maxTrackedEntries = 100000;
+            pruneBatchSize = 1000;
+            /* Pairs that signed in within this many days skip the account-wide ceiling (0 = off). */
+            trustedPairDays = 30;
+          };
+          mail = {
+            /* Forgot-password sends per hashed email / client address per window (0 = off). */
+            maxPerEmail = 5;
+            maxPerAddress = 20;
+            windowSeconds = 3600;
           };
         };
         paths = {

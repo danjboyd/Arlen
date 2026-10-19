@@ -25,6 +25,8 @@
 - (BOOL)isConnectionUsable;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
 - (BOOL)hasActiveTransaction;
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll;
+- (BOOL)sessionStateDirty;
 - (NSTimeInterval)poolIdleSince;
 - (void)setPoolIdleSince:(NSTimeInterval)poolIdleSince;
 - (NSUInteger)livenessCheckCount;
@@ -57,6 +59,8 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 @property(nonatomic, assign) BOOL simulatedOpen;
 @property(nonatomic, assign) BOOL simulatedUsable;
 @property(nonatomic, assign) NSInteger closeCount;
+@property(nonatomic, assign) NSInteger resetCount;
+@property(nonatomic, assign) BOOL simulatedInTransaction;
 @end
 
 @implementation ALNFakePgConnection
@@ -78,7 +82,13 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 }
 
 - (BOOL)hasActiveTransaction {
-  return NO;
+  return self.simulatedInTransaction;
+}
+
+- (BOOL)resetSessionStateDiscardingAll:(BOOL)discardAll {
+  (void)discardAll;
+  self.resetCount += 1;
+  return self.simulatedUsable;
 }
 
 - (void)close {
@@ -161,6 +171,40 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertNil(acquireError);
   XCTAssertEqual(reused, (ALNPgConnection *)good,
                  @"a usable connection must be reused, not discarded");
+}
+
+// A connection handed back mid-transaction must never reach the next borrower:
+// its statements would run inside (and be lost with) the first borrower's
+// transaction.
+- (void)testReleaseConnectionClosesAConnectionStillInsideATransaction {
+  NSError *error = nil;
+  ALNPg *pool = [[ALNPg alloc]
+      initWithConnectionString:@"postgresql://127.0.0.1:1/arlen_pool_regression"
+                maxConnections:2
+                         error:&error];
+  XCTAssertNil(error);
+
+  ALNFakePgConnection *open = [ALNFakePgConnection new];
+  open.simulatedOpen = YES;
+  open.simulatedUsable = YES;
+  open.simulatedInTransaction = YES;
+  [pool releaseConnection:open];
+  XCTAssertEqual((NSInteger)1, open.closeCount);
+  XCTAssertEqual((NSInteger)0, open.resetCount);
+  XCTAssertEqualObjects(@1, [pool poolDiagnostics][@"released_in_transaction_count"]);
+
+  ALNFakePgConnection *idle = [ALNFakePgConnection new];
+  idle.simulatedOpen = YES;
+  idle.simulatedUsable = YES;
+  [pool releaseConnection:idle];
+  XCTAssertEqual((NSInteger)0, idle.closeCount);
+  XCTAssertEqual((NSInteger)1, idle.resetCount, @"an idle connection is reset before it is pooled");
+
+  pool.sessionResetPolicy = ALNPgSessionResetPolicyNone;
+  ALNPgConnection *reused = [pool acquireConnection:&error];
+  XCTAssertEqual(reused, (ALNPgConnection *)idle);
+  [pool releaseConnection:reused];
+  XCTAssertEqual((NSInteger)1, idle.resetCount, @"ALNPgSessionResetPolicyNone skips the reset");
 }
 
 // On-borrow liveness checks are the only thing that catches a connection that
@@ -711,6 +755,320 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqualObjects([NSSet setWithArray:ownershipModes],
                         [NSSet setWithArray:@[ @"shared_owner" ]]);
   XCTAssertEqual((NSInteger)1, maxConcurrentWorkers);
+}
+
+- (void)testStringParameterContainingNULIsRejectedInsteadOfTruncated {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *withNUL = [NSString stringWithFormat:@"victim@evil.test%C@company.example", (unichar)0];
+  NSArray *rows = [database executeQuery:@"SELECT $1::text AS value" parameters:@[ withNUL ] error:&error];
+  XCTAssertNil(rows);
+  XCTAssertEqualObjects(ALNPgErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNPgErrorInvalidArgument, error.code);
+
+  // Binary data with zero bytes still goes through as bytea.
+  error = nil;
+  const unsigned char raw[] = { 'a', 0, 'b', 0 };
+  NSData *bytes = [NSData dataWithBytes:raw length:sizeof(raw)];
+  rows = [database executeQuery:@"SELECT length($1::bytea) AS n" parameters:@[ bytes ] error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@4, rows.firstObject[@"n"]);
+}
+
+- (void)testReleasedConnectionStartsTheNextBorrowerWithACleanSession {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  ALNPg *observer = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+
+  ALNPgConnection *first = [database acquireConnection:&error];
+  XCTAssertNotNil(first);
+  NSString *user = [first executeQuery:@"SELECT current_user AS u" parameters:@[] error:&error].firstObject[@"u"];
+  NSString *defaultPath =
+      [first executeQuery:@"SELECT current_setting('search_path') AS p" parameters:@[] error:&error].firstObject[@"p"];
+  XCTAssertNotNil([first executeQuery:@"SELECT set_config('app.tenant_id', 'tenant-A', false)" parameters:@[] error:&error]);
+  XCTAssertNotNil([first executeQuery:@"SELECT pg_advisory_lock(424242)" parameters:@[] error:&error]);
+  NSArray<NSString *> *commands = @[
+    @"SET search_path TO pg_catalog",
+    [NSString stringWithFormat:@"SET ROLE \"%@\"", user],
+    @"CREATE TEMP TABLE arlen_leaked_temp (x int)",
+    @"LISTEN arlen_leaked_channel",
+  ];
+  for (NSString *sql in commands) {
+    XCTAssertGreaterThanOrEqual([first executeCommand:sql parameters:@[] error:&error], 0, @"%@: %@", sql, error);
+  }
+  [database releaseConnection:first];
+
+  ALNPgConnection *second = [database acquireConnection:&error];
+  XCTAssertEqual(first, second, @"the test needs the same pooled connection back");
+  NSDictionary *state =
+      [second executeQuery:@"SELECT coalesce(current_setting('app.tenant_id', true), '') AS tenant, "
+                           "current_setting('search_path') AS path, current_setting('role') AS role, "
+                           "to_regclass('pg_temp.arlen_leaked_temp') IS NULL AS temp_gone, "
+                           "(SELECT count(*) FROM pg_listening_channels()) AS listens"
+                parameters:@[]
+                     error:&error].firstObject;
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"", state[@"tenant"]);
+  XCTAssertEqualObjects(defaultPath, state[@"path"]);
+  XCTAssertEqualObjects(@"none", state[@"role"]);
+  XCTAssertEqualObjects(@YES, state[@"temp_gone"]);
+  XCTAssertEqualObjects(@0, state[@"listens"]);
+  NSArray *locked = [observer executeQuery:@"SELECT pg_try_advisory_lock(424242) AS ok" parameters:@[] error:&error];
+  XCTAssertEqualObjects(@YES, locked.firstObject[@"ok"], @"the advisory lock is released with the session reset");
+  [observer executeQuery:@"SELECT pg_advisory_unlock(424242)" parameters:@[] error:&error];
+  [database releaseConnection:second];
+}
+
+// A borrower who can run SQL can DEALLOCATE one of the pool's cached
+// statement names and PREPARE something else under it. The next borrower's
+// builder statement must still run the SQL it was compiled from.
+- (void)testPreparedStatementReplacedByABorrowerIsNotRunForTheNextOne {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  database.preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAlways;
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_replaced"];
+  NSString *createSQL = [NSString stringWithFormat:@"CREATE TABLE %@ (email text)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:createSQL parameters:@[] error:&error], 0);
+  NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ VALUES ($1)", table];
+  NSInteger inserted = [database executeCommand:insertSQL parameters:@[ @"victim@evil.test" ] error:&error];
+  XCTAssertEqual((NSInteger)1, inserted);
+  ALNSQLBuilder *builder = [[ALNSQLBuilder selectFrom:table columns:@[ @"email" ]] whereField:@"email"
+                                                                                       equals:@"victim@evil.test"];
+  NSArray *rows = [database executeBuilderQuery:builder error:&error];
+  XCTAssertEqualObjects(@"victim@evil.test", rows.firstObject[@"email"]);
+
+  ALNPgConnection *firstBorrower = [database acquireConnection:&error];
+  NSArray *cached = [firstBorrower executeQuery:@"SELECT name FROM pg_prepared_statements WHERE statement LIKE '%' || $1 || '%'"
+                                parameters:@[ table ]
+                                     error:&error];
+  NSString *name = cached.firstObject[@"name"];
+  XCTAssertTrue([name hasPrefix:@"aln_"], @"%@", cached);
+  NSString *deallocateSQL = [NSString stringWithFormat:@"DEALLOCATE %@", name];
+  NSString *prepareSQL =
+      [NSString stringWithFormat:@"PREPARE %@(text) AS SELECT ('REPLACED by A: ' || $1)::text AS email", name];
+  XCTAssertGreaterThanOrEqual([firstBorrower executeCommand:deallocateSQL parameters:@[] error:&error], 0);
+  XCTAssertGreaterThanOrEqual([firstBorrower executeCommand:prepareSQL parameters:@[] error:&error], 0);
+  NSArray *replaced = [firstBorrower executePreparedQueryNamed:name parameters:@[ @"victim@evil.test" ] error:&error];
+  XCTAssertEqualObjects(@"REPLACED by A: victim@evil.test", replaced.firstObject[@"email"],
+                        @"the replacement is in place before release");
+  [database releaseConnection:firstBorrower];
+
+  rows = [database executeBuilderQuery:builder error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"victim@evil.test", rows.firstObject[@"email"]);
+  [database executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:&error];
+}
+
+// Generated builder statements cannot change session state, so a connection
+// that only ran those is reused without the reset round trip.
+- (void)testConnectionThatOnlyRanGeneratedBuilderSQLSkipsTheReset {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_clean"];
+  NSString *createSQL = [NSString stringWithFormat:@"CREATE TABLE %@ (id int)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:createSQL parameters:@[] error:&error], 0);
+  NSUInteger resetsBefore = [[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue];
+
+  ALNSQLBuilder *plain = [ALNSQLBuilder selectFrom:table columns:@[ @"id" ]];
+  for (NSInteger round = 0; round < 3; round++) {
+    ALNPgConnection *connection = [database acquireConnection:&error];
+    XCTAssertNotNil([connection executeBuilderQuery:plain error:&error], @"%@", error);
+    XCTAssertFalse([connection sessionStateDirty]);
+    [database releaseConnection:connection];
+  }
+  XCTAssertEqual(resetsBefore, [[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue]);
+
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  [connection executeQuery:@"SELECT 1 AS one" parameters:@[] error:&error];
+  XCTAssertTrue([connection sessionStateDirty], @"caller SQL marks the connection");
+  [database releaseConnection:connection];
+  XCTAssertEqual(resetsBefore + 1, [[database poolDiagnostics][@"session_reset_count"] unsignedIntegerValue]);
+  [database executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:&error];
+}
+
+// A trusted expression is app SQL text, which can call set_config(..., false)
+// from inside a plain SELECT; such a statement must still reset the session.
+- (void)testBuilderTrustedExpressionCannotLeakSessionSettings {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_trusted"];
+  NSString *createSQL = [NSString stringWithFormat:@"CREATE TABLE %@ (id int)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:createSQL parameters:@[] error:&error], 0);
+  [database executeCommand:[NSString stringWithFormat:@"INSERT INTO %@ VALUES (1)", table] parameters:@[] error:&error];
+  // Run it twice: the second run is a compilation-cache hit.
+  for (NSInteger round = 0; round < 2; round++) {
+    ALNSQLBuilder *builder = [ALNSQLBuilder selectFrom:table columns:@[ @"id" ]];
+    [builder selectExpression:@"set_config('app.tenant', 'x', false)" alias:@"tenant"];
+    ALNPgConnection *connection = [database acquireConnection:&error];
+    NSArray *rows = [connection executeBuilderQuery:builder error:&error];
+    XCTAssertEqualObjects(@"x", rows.firstObject[@"tenant"], @"%@", error);
+    XCTAssertTrue([connection sessionStateDirty], @"round %ld", (long)round);
+    [database releaseConnection:connection];
+
+    rows = [database executeQuery:@"SELECT coalesce(current_setting('app.tenant', true), '') AS v"
+                       parameters:@[]
+                            error:&error];
+    XCTAssertEqualObjects(@"", rows.firstObject[@"v"], @"round %ld", (long)round);
+  }
+  [database executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:&error];
+}
+
+// Notifications that arrived for a borrower's LISTEN after it stopped reading
+// must not be handed to the next borrower.
+- (void)testQueuedNotificationsDoNotReachTheNextBorrower {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSArray *policies = @[ @(ALNPgSessionResetPolicySession), @(ALNPgSessionResetPolicyDiscardAll), @(ALNPgSessionResetPolicyNone) ];
+  for (NSNumber *policy in policies) {
+    NSError *error = nil;
+    ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+    ALNPg *notifier = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+    XCTAssertNotNil(database);
+    if (database == nil) {
+      return;
+    }
+    database.sessionResetPolicy = (ALNPgSessionResetPolicy)[policy integerValue];
+    NSString *channel = [self uniqueNameWithPrefix:@"arlen_leak_channel"];
+
+    ALNPgConnection *first = [database acquireConnection:&error];
+    NSString *listenSQL = [NSString stringWithFormat:@"LISTEN %@", channel];
+    XCTAssertGreaterThanOrEqual([first executeCommand:listenSQL parameters:@[] error:&error], 0);
+    [notifier executeQuery:@"SELECT pg_notify($1, 'secret for A')" parameters:@[ channel ] error:&error];
+    // sleep-ok: the notification must reach first's socket unread; waiting for it would read it.
+    usleep(200000);
+    [database releaseConnection:first];
+
+    ALNPgConnection *second = [database acquireConnection:&error];
+    XCTAssertEqual(first, second);
+    [second executeCommand:[NSString stringWithFormat:@"LISTEN %@", channel] parameters:@[] error:&error];
+    NSArray *received = [second waitForNotificationsWithTimeout:0.3 error:&error];
+    for (NSDictionary *notification in received) {
+      XCTAssertNotEqualObjects(@"secret for A", notification[@"payload"], @"policy %@", policy);
+    }
+    [second executeCommand:@"UNLISTEN *" parameters:@[] error:&error];
+    [database releaseConnection:second];
+  }
+}
+
+- (void)testSequenceStateDoesNotReachTheNextBorrower {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *sequence = [self uniqueNameWithPrefix:@"arlen_pg_seq"];
+  [database executeCommand:[NSString stringWithFormat:@"CREATE SEQUENCE %@", sequence] parameters:@[] error:&error];
+  NSArray *rows = [database executeQuery:@"SELECT nextval($1::regclass) AS n" parameters:@[ sequence ] error:&error];
+  XCTAssertEqualObjects(@1, rows.firstObject[@"n"]);
+  error = nil;
+  rows = [database executeQuery:@"SELECT lastval() AS n" parameters:@[] error:&error];
+  XCTAssertNil(rows, @"lastval() must not see the previous borrower's nextval");
+  XCTAssertNotNil(error);
+  error = nil;
+  [database executeCommand:[NSString stringWithFormat:@"DROP SEQUENCE %@", sequence] parameters:@[] error:&error];
+}
+
+- (void)testSQLTextContainingNULIsRejected {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *sql = [NSString stringWithFormat:@"SELECT 1 AS one%C; DROP TABLE nothing", (unichar)0];
+  XCTAssertNil([database executeQuery:sql parameters:@[] error:&error]);
+  XCTAssertEqual((NSInteger)ALNPgErrorInvalidArgument, error.code);
+  error = nil;
+  ALNPgConnection *connection = [database acquireConnection:&error];
+  XCTAssertLessThan([connection executeCommand:sql parameters:@[] error:&error], 0);
+  XCTAssertEqual((NSInteger)ALNPgErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertFalse([connection prepareStatementNamed:@"arlen_nul" sql:sql parameterCount:0 error:&error]);
+  XCTAssertEqual((NSInteger)ALNPgErrorInvalidArgument, error.code);
+  [database releaseConnection:connection];
+}
+
+- (void)testConnectionReleasedInsideAHandOpenedTransactionIsClosed {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_pg_opentx"];
+  NSString *createSQL = [NSString stringWithFormat:@"CREATE TABLE %@ (id int)", table];
+  XCTAssertGreaterThanOrEqual([database executeCommand:createSQL parameters:@[] error:&error], 0);
+
+  ALNPgConnection *first = [database acquireConnection:&error];
+  XCTAssertGreaterThanOrEqual([first executeCommand:@"BEGIN" parameters:@[] error:&error], 0);
+  NSString *insertSQL = [NSString stringWithFormat:@"INSERT INTO %@ VALUES (1)", table];
+  XCTAssertGreaterThanOrEqual([first executeCommand:insertSQL parameters:@[] error:&error], 0);
+  [database releaseConnection:first];
+  XCTAssertEqualObjects(@1, [database poolDiagnostics][@"released_in_transaction_count"]);
+
+  ALNPgConnection *second = [database acquireConnection:&error];
+  XCTAssertNotEqual(first, second, @"a connection released mid-transaction is not reused");
+  NSArray *rows = [second executeQuery:[NSString stringWithFormat:@"SELECT count(*) AS n FROM %@", table]
+                            parameters:@[]
+                                 error:&error];
+  XCTAssertEqualObjects(@0, rows.firstObject[@"n"], @"the abandoned transaction was rolled back");
+  [second executeCommand:[NSString stringWithFormat:@"DROP TABLE %@", table] parameters:@[] error:&error];
+  [database releaseConnection:second];
+}
+
+- (void)testPreparedStatementsKeepWorkingAcrossSessionResets {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  for (NSNumber *policy in @[ @(ALNPgSessionResetPolicySession), @(ALNPgSessionResetPolicyDiscardAll) ]) {
+    NSError *error = nil;
+    ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+    XCTAssertNotNil(database);
+    database.preparedStatementReusePolicy = ALNPgPreparedStatementReusePolicyAlways;
+    database.sessionResetPolicy = (ALNPgSessionResetPolicy)[policy integerValue];
+    for (NSInteger round = 0; round < 3; round++) {
+      NSArray *rows = [database executeQuery:@"SELECT $1::int + 1 AS n" parameters:@[ @(round) ] error:&error];
+      XCTAssertNil(error, @"policy %@ round %ld", policy, (long)round);
+      XCTAssertEqualObjects(@(round + 1), rows.firstObject[@"n"]);
+    }
+    XCTAssertEqualObjects(@0, [database poolDiagnostics][@"session_reset_failure_count"]);
+  }
 }
 
 - (void)testConnectionAndPreparedStatements {
@@ -3251,6 +3609,91 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
                       parameters:@[]
                            error:nil];
+}
+
+- (void)testMigrationRunnerAppliesLowerNumberedFilesAddedAfterAHigherOne {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:2 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  if (database == nil) {
+    return;
+  }
+  NSString *table = [self uniqueNameWithPrefix:@"arlen_mig_gap"];
+  NSString *root = [self createTempDirectory];
+  NSString *migrationsDir = [root stringByAppendingPathComponent:@"db/migrations"];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:migrationsDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  // Migration versions are file names, so include the per-run table name to
+  // keep them unique across runs against the same database.
+  NSString *(^fileName)(NSString *) = ^NSString *(NSString *prefix) {
+    return [NSString stringWithFormat:@"%@_%@.sql", prefix, table];
+  };
+  NSDictionary<NSString *, NSString *> *initial = @{
+    fileName(@"001_create") : [NSString stringWithFormat:@"CREATE TABLE %@(id SERIAL PRIMARY KEY)", table],
+    fileName(@"004_add_d") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN d TEXT", table],
+  };
+  for (NSString *name in initial) {
+    XCTAssertTrue([initial[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                  atomically:YES
+                                    encoding:NSUTF8StringEncoding
+                                       error:NULL]);
+  }
+  NSArray *applied = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&applied
+                                                    error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)2, [applied count]);
+
+  // A release can add migrations numbered below one a database already has;
+  // the runner tracks applied versions as a set, so they still run, in order.
+  NSDictionary<NSString *, NSString *> *later = @{
+    fileName(@"002_add_b") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN b TEXT", table],
+    fileName(@"003_add_c") : [NSString stringWithFormat:@"ALTER TABLE %@ ADD COLUMN c TEXT", table],
+  };
+  for (NSString *name in later) {
+    XCTAssertTrue([later[name] writeToFile:[migrationsDir stringByAppendingPathComponent:name]
+                                atomically:YES
+                                  encoding:NSUTF8StringEncoding
+                                     error:NULL]);
+  }
+  NSArray *gapFiles = nil;
+  XCTAssertTrue([ALNMigrationRunner applyMigrationsAtPath:migrationsDir
+                                                 database:database
+                                                   dryRun:NO
+                                             appliedFiles:&gapFiles
+                                                    error:&error], @"%@", error);
+  NSMutableArray *gapNames = [NSMutableArray array];
+  for (NSString *file in gapFiles) {
+    [gapNames addObject:[file lastPathComponent]];
+  }
+  XCTAssertEqualObjects((@[ fileName(@"002_add_b"), fileName(@"003_add_c") ]), gapNames);
+
+  NSArray *columns = [database executeQuery:@"SELECT column_name FROM information_schema.columns "
+                                             "WHERE table_name = $1 ORDER BY column_name"
+                                 parameters:@[ table ]
+                                      error:&error];
+  NSMutableArray *columnNames = [NSMutableArray array];
+  for (NSDictionary *row in columns) {
+    [columnNames addObject:row[@"column_name"] ?: @""];
+  }
+  XCTAssertEqualObjects((@[ @"b", @"c", @"d", @"id" ]), columnNames);
+
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[]
+                           error:nil];
+  for (NSString *prefix in @[ @"001_create", @"002_add_b", @"003_add_c", @"004_add_d" ]) {
+    NSString *file = [migrationsDir stringByAppendingPathComponent:fileName(prefix)];
+    (void)[database executeCommand:@"DELETE FROM arlen_schema_migrations WHERE version = $1"
+                        parameters:@[ [ALNMigrationRunner versionForMigrationFile:file] ]
+                             error:nil];
+  }
 }
 
 - (void)testMigrationRunnerAppliesMultiStatementFile {

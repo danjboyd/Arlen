@@ -293,6 +293,100 @@
   request, so they came back truncated, empty or from that next request. A
   request now keeps its own copy of the header bytes, which also ends its
   dependence on the connection buffer's lifetime.
+- `ALNPg` resets a connection's session state when it goes back to the pool
+  after the borrower ran its own SQL (any `executeQuery`/`executeCommand`/
+  script/prepare with caller SQL, a transaction, or a builder statement with a
+  trusted expression): `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`,
+  `CLOSE ALL`, `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *`,
+  `pg_advisory_unlock_all()`. Settings such as `search_path`, `SET ROLE` or a
+  `set_config` tenant ID, temporary tables, `currval`/`lastval`, `LISTEN`s
+  and session advisory locks no longer carry over to the next borrower, and
+  notifications still queued for the old `LISTEN`s are dropped. The pool's
+  cached prepared statements are checked against `pg_prepared_statements` in
+  the same round trip and all deallocated if one was replaced, so a borrower
+  cannot change what a cached statement name runs for later borrowers. A
+  connection released inside a transaction (including one opened by sending
+  `BEGIN` by hand) is now closed instead of reused. A connection that only ran
+  generated builder statements is reused without a reset. The new
+  `sessionResetPolicy` chooses `Session` (default), `DiscardAll` or `None`.
+  The reset costs one round trip (about 95 µs on a local socket).
+  `poolDiagnostics` adds `released_in_transaction_count`,
+  `session_reset_count` and `session_reset_failure_count`.
+- `ALNPg` and `ALNMSSQL` refuse SQL text (and `ALNPg` statement names) that
+  contain U+0000 with an invalid-argument error instead of letting the driver
+  end the statement at the NUL.
+- `ALNMSSQL` binds text parameters with their byte length instead of
+  `SQL_NTS`, so a value with an embedded U+0000 reaches SQL Server whole
+  instead of being cut short, and multi-byte text declares its UTF-8 length.
+- `ALNPg` refuses a string parameter containing U+0000 with
+  `ALNPgErrorInvalidArgument`. Before, libpq cut the value short at the NUL,
+  so the database matched a different value than the app had checked. Send
+  binary data as `NSData` (bound as `bytea`).
+- `auth` 1.6.0 refuses a TOTP code whose time step was already accepted for the
+  enrollment, even in another session, and limits failed verification
+  attempts. Five consecutive failed TOTP or recovery-code checks lock MFA for
+  that account for 30 seconds, doubling with each further failure up to 15
+  minutes; a success resets the count. Failed password sign-ins are counted per
+  submitted email and client address: after five, that pair waits 30 seconds,
+  doubling up to 15 minutes, and a success clears only that pair. An
+  account-wide ceiling against distributed guessing adds a wait for an email
+  after 50 failures in an hour from all addresses. Password counters are keyed
+  by the submitted email, so known and unknown emails behave the same. A pair
+  that signed in successfully in the last 30 days skips the account-wide
+  ceiling (`trustedPairDays`), and a successful sign-in never re-arms the
+  account-wide wait. Waiting requests answer `429` with
+  `Retry-After`. Forgot-password is never held back by these delays; it has
+  its own send limit (5 per email and 20 per address per hour by default,
+  under `authModule.attemptLimits.mail`), beyond which it replies as usual but
+  sends nothing. Limits are set under `authModule.attemptLimits`. A verified
+  enrollment now also accepts one of its recovery codes at the TOTP
+  challenge, once each; they were issued but could not be used before. Run
+  `arlen module migrate` to apply the new auth migration
+  `004_auth_totp_limits`; until it is applied, verification works as before and
+  the module logs one warning.
+- `ALNPg` recovers from connections the server closed while they were idle
+  (restart, failover, idle timeout, `pg_terminate_backend`). Such a failure is
+  reported as `ALNPgErrorConnectionFailed` with the new
+  `ALNPgErrorConnectionLostKey`, whatever SQLSTATE (or none) the result
+  carried, and the connection is closed and never reused. On a connection
+  from the idle list, the pool retries a plain read once on a new
+  connection; a write only when the statement had not been sent
+  (`ALNPgErrorStatementNotSentKey`: the connection was found closed before
+  sending); nothing while a transaction is open. `withTransaction:` restarts
+  only when `BEGIN` itself failed; the new
+  `withTransactionReplayingOnConnectionLoss:` also replays the whole block
+  once for blocks that are safe to run twice. `poolDiagnostics` adds
+  `connection_retry_count`. The auth module
+  treats these failures, and any database failure without a SQLSTATE, as the
+  database being unavailable (`503` with `Retry-After`), never as a failed
+  sign-in, and no longer passes driver messages to clients.
+- The auth module's connection pool size is now configurable
+  (`authModule.database.maxConnections`, default 8, was a fixed 4), and a busy
+  pool waits up to `authModule.database.acquireTimeoutSeconds` (default 2) for
+  a connection. When the database is busy or unreachable, auth routes answer
+  `503` with `Retry-After` instead of `401`, and the session is kept; password
+  sign-in answers `503` instead of `Invalid email or password`.
+- `notifications` 1.2.0: `POST /notifications/api/queue` queues only for the
+  signed-in user. It sets the payload's `recipient` to the caller's subject and
+  `email` to their own address, and answers `403` when the payload names
+  another `recipient`, `recipientSubject`, `recipients` entry or `email`.
+  Queueing for others over HTTP needs the `admin` role at AAL2, like
+  test-send. Below that, after the definition runs the module replaces every
+  channel's target with the caller's own (email to their account address,
+  in-app and web push to their subject), so no payload key can choose who or
+  where a notification goes; the `webhook` channel is left out unless the
+  definition implements `notificationsModuleAllowsWebhookForSelfQueuedNotifications`.
+  `ALNNotificationsModuleRuntime` calls from app code are unchanged.
+- Signing in and completing step-up (`ALNAuthSession`
+  establish/elevate, used by the auth module and the `ALNController` helpers)
+  now start a fresh session. Keys stored before, including `_csrf_token`, are
+  dropped, so a CSRF token issued before login no longer works after it; a new
+  token is minted when next read and is returned by the auth module's login,
+  registration and verify responses. Only `return_to` is kept. Apps that keep
+  data in the session across login or step-up need to store it again
+  afterwards.
+- `ALNTOTP` adds `matchedTimeStepForCode:...`, which returns the time step a
+  code matched (or `NSNotFound`), so callers can refuse reused codes.
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored

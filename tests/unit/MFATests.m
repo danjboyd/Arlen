@@ -123,4 +123,28 @@
   XCTAssertTrue(firstCodeStillMatchesFirstSet);
 }
 
+- (void)testTOTPMatchedTimeStepReportsWhichWindowStepMatched {
+  NSString *secret = @"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+  NSDate *issueDate = [NSDate dateWithTimeIntervalSince1970:1111111109];
+  NSUInteger issueStep = 1111111109 / 30;
+  NSError *error = nil;
+  NSString *code = [ALNTOTP codeForSecret:secret atDate:issueDate error:&error];
+  XCTAssertNil(error);
+
+  XCTAssertEqual(issueStep, [ALNTOTP matchedTimeStepForCode:code secret:secret atDate:issueDate error:&error]);
+  XCTAssertNil(error);
+  // One step later the same code still matches, and reports the step it was issued for.
+  NSDate *nextStepDate = [NSDate dateWithTimeIntervalSince1970:1111111109 + 30];
+  XCTAssertEqual(issueStep, [ALNTOTP matchedTimeStepForCode:code secret:secret atDate:nextStepDate error:&error]);
+  XCTAssertNil(error);
+  NSDate *outsideDate = [NSDate dateWithTimeIntervalSince1970:1111111109 + 90];
+  XCTAssertEqual((NSUInteger)NSNotFound, [ALNTOTP matchedTimeStepForCode:code secret:secret atDate:outsideDate error:&error]);
+  XCTAssertNil(error);
+  XCTAssertFalse([ALNTOTP verifyCode:code secret:secret atDate:outsideDate error:&error]);
+
+  XCTAssertEqual((NSUInteger)NSNotFound, [ALNTOTP matchedTimeStepForCode:@"12ab56" secret:secret atDate:issueDate error:&error]);
+  XCTAssertEqualObjects(ALNTOTPErrorDomain, error.domain);
+  XCTAssertEqual((NSInteger)ALNTOTPErrorInvalidCode, error.code);
+}
+
 @end

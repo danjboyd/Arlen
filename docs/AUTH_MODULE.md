@@ -86,6 +86,12 @@ Mode behavior:
 - `generated-app-ui` keeps the same backend routes but resolves HTML from
   app-owned templates under `templates/auth/...` by default.
 
+Login (password, provider, or trusted email claim) and MFA step-up start a
+fresh session: other keys stored before, including the CSRF token, are dropped,
+and only `return_to` is kept. The JSON login, registration and verify responses
+return the new `csrf_token` (also at `GET /auth/api/session`); use it for the
+next unsafe request. See [Session and CSRF](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+
 Local-password login answers `Invalid email or password` for both an unknown
 email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
@@ -113,6 +119,146 @@ Current MFA factor scope:
   factor
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
+
+### Database pool and unavailability
+
+The auth module keeps its own PostgreSQL connection pool:
+
+```plist
+authModule = {
+  database = {
+    maxConnections = 8;          /* default */
+    acquireTimeoutSeconds = 2;   /* default; how long a request waits for a free connection */
+  };
+};
+```
+
+When no connection becomes free within `acquireTimeoutSeconds`, or the
+database cannot be reached, auth routes answer `503` with `Retry-After: 2` and
+the message `The sign-in service is temporarily unavailable. Try again
+shortly.` They never answer `401` for that reason and never clear the session,
+so clients should keep the session and retry. A password sign-in that cannot
+reach the database also answers `503`, not `Invalid email or password`.
+Connections the server closed while idle (restart, failover, idle timeout) are
+replaced and the statement retried once (see
+[Arlen Data](ARLEN_DATA.md#connection-pool-liveness-checks)); only if that
+fails too does the route answer `503`. Database driver messages never reach
+the client: responses carry a generic message and the detail is logged.
+Size `maxConnections` for the number of auth requests you expect at once,
+within the database's own connection limit.
+
+### TOTP replay protection and attempt limits
+
+These need auth module migration `004_auth_totp_limits` (run
+`./bin/arlen module migrate --env <env>` after upgrading to auth 1.6.0):
+
+- each TOTP enrollment remembers the last time step it accepted
+  (`auth_mfa_enrollments.last_used_step`). A code for that step or an earlier
+  one is refused with `That authenticator code was already used`, even from a
+  different session, so one code cannot complete step-up twice.
+- a verified enrollment also accepts one of its recovery codes in the `code`
+  field of `POST /auth/mfa/totp/verify` and `POST /auth/api/mfa/totp/verify`.
+  Each recovery code works once, and two different codes used at the same
+  time both succeed. The session records the method as `recovery_code`
+  instead of `totp`.
+- TOTP and recovery-code checks share one failure counter per account
+  (`auth_attempt_limits`, scope `mfa`). When an account reaches
+  `mfa.maxFailures` consecutive failures it is locked for `lockoutSeconds`.
+  Each further failure after a lock ends doubles the lock, up to
+  `maxLockoutSeconds`. A successful check resets the counter, and failures
+  older than 24 hours start over.
+- local password sign-in (and the current-password check when a signed-in user
+  changes their password) is slowed down rather than locked:
+  - failures are counted per pair of submitted email and client address. After
+    `password.maxFailures` failures from one address, that pair waits
+    `delaySeconds` before its next attempt, and each further failure doubles
+    the wait, up to `maxDelaySeconds`. Other addresses are not affected, and a
+    successful sign-in clears only its own pair.
+  - an account-wide ceiling against distributed guessing counts failures for
+    the email across all addresses. Beyond `accountMaxFailures` failures within
+    `accountWindowSeconds`, every further failure adds a wait for that email
+    (`accountDelaySeconds`, doubling, up to `maxDelaySeconds`). The wait ends
+    on its own; nothing needs to be unlocked. Only failures arm it: a
+    successful sign-in never adds to, extends or re-arms the account-wide
+    wait, so after it expires the owner's correct passwords keep working.
+  - known devices: an (email, address) pair that signed in successfully within
+    the last `trustedPairDays` days (default 30; `0` turns this off) is not
+    subject to the account-wide ceiling, and its failures do not count toward
+    it. Its own pair delay still applies. The time of the last successful
+    sign-in is stored on the pair row only. An email with no account never
+    has a successful sign-in, so it never gets the exemption.
+  - the client address is the server's proxy-aware address
+    (`ALNRequest.effectiveRemoteAddress`), never a raw `X-Forwarded-For` or
+    `Forwarded` header.
+  - counters are keyed by a SHA-256 of the normalized submitted email
+    (`auth_password_attempts`), not by the account, and are checked before the
+    account is looked up. Known and unknown emails get the same counters,
+    delays, response bodies and one Argon2 verification each, so the limiter
+    does not reveal whether an account exists.
+  - the tables stay bounded: at most once a minute a sign-in starts a prune
+    on a background queue, so the request does not wait for it. Each prune
+    deletes at most `pruneBatchSize` rows (default 1000). First it removes
+    expired rows with no active wait: account-wide rows untouched for a whole
+    `accountWindowSeconds` (their count would restart anyway), pair rows
+    untouched for 24 hours unless they signed in within `trustedPairDays`, and
+    mail rows past their window. Then, above `maxTrackedEntries` rows, it
+    removes pair rows still under `maxFailures` failures with no active wait,
+    oldest first, known devices last. Account-wide rows and rows with an
+    active wait are never removed to meet the cap: if only those are left,
+    the table stays over the cap until they expire and a warning is logged.
+    Every statement is limited and walks the `updated_at` index; the only
+    count reads at most `maxTrackedEntries + pruneBatchSize` rows.
+- forgot-password is not subject to the password delays or the account-wide
+  ceiling, so the owner can always ask for a reset. It has its own limit
+  against sending lots of mail (`auth_mail_sends`): per hashed submitted email
+  (`mail.maxPerEmail`, default 5) and per hashed client address
+  (`mail.maxPerAddress`, default 20) within `mail.windowSeconds` (3600).
+  Requests are counted alike for known and unknown emails. Beyond a limit the
+  route still answers exactly as usual (the same `200` and generic reply), but
+  sends nothing and logs a warning. The module has no separate route for
+  resending the verification email; registration sends it once.
+- while a lock or wait is active, the route answers `429` with a `Retry-After`
+  header (seconds) and the error `Too many failed attempts. Try again in N
+  seconds.`, without checking the submitted code or password. HTML routes
+  render the same error on the form.
+- an attempt is counted before the code or password is checked, so parallel
+  requests cannot run more checks than the limit allows.
+
+Defaults (`maxFailures = 0` turns a counter off; for `password` it turns off
+both the per-address delay and the account-wide ceiling, and
+`accountMaxFailures = 0` turns off only the ceiling):
+
+```plist
+authModule = {
+  attemptLimits = {
+    mfa = { maxFailures = 5; lockoutSeconds = 30; maxLockoutSeconds = 900; };
+    password = {
+      maxFailures = 5;
+      delaySeconds = 30;
+      maxDelaySeconds = 900;
+      accountMaxFailures = 50;
+      accountWindowSeconds = 3600;
+      accountDelaySeconds = 30;
+      maxTrackedEntries = 100000;
+      pruneBatchSize = 1000;
+      trustedPairDays = 30;
+    };
+    mail = {
+      maxPerEmail = 5;
+      maxPerAddress = 20;
+      windowSeconds = 3600;
+    };
+  };
+};
+```
+
+While the account-wide ceiling is in effect, sign-in for that email waits from
+every address that has not signed in successfully within `trustedPairDays`. Provider (OIDC) sign-in is not counted.
+
+If migration 004 has not been applied, TOTP and password verification keep
+working without replay protection, counters or delays. The module logs one warning
+naming `arlen module migrate` and never fails the request because of the
+missing schema.
 
 ## UI Configuration
 

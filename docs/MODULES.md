@@ -289,6 +289,12 @@ index names (a security fix).
 `search` to `1.0.5` and `storage` to `1.1.3` to classify the environment with
 the framework's shared helper, so environment names match regardless of case
 (GitHub issue 294).
+`auth` moved to `1.6.0` to refuse reused TOTP codes, limit failed TOTP and
+recovery-code attempts per account, slow down repeated failed password
+sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `004_auth_totp_limits`; run
+`arlen module migrate` after upgrading.
+`notifications` moved to `1.2.0` so `POST /notifications/api/queue` queues
+only for the signed-in user unless the caller has the `admin` role at AAL2.
 
 ## MCP tools
 
