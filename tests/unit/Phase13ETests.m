@@ -1354,10 +1354,14 @@ static ALNContext *ALNTestStandInContext(void) {
                                                            leaseDurationSeconds:30 error:&error];
   XCTAssertNotNil(jobs, @"%@", error);
   XCTAssertTrue([jobs installSchemaWithError:&error], @"%@", error);
+  NSString *jobsStateDirectory = ALNTestTemporaryDirectory(@"arlen-auth-jobs-success");
+  XCTAssertNotNil(jobsStateDirectory);
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
-    @"authModule" : @{ @"allowWithoutCSRF" : @YES, @"publicBaseURL" : @"https://app.example.test",
+    @"jobsModule" : @{ @"persistence" : @{ @"path" : [jobsStateDirectory stringByAppendingPathComponent:@"state.plist"] } },
+    @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test",
+                       @"allowWithoutCSRF" : @YES,
                        @"attemptLimits" : @{ @"mail" : @{ @"maxPerAddress" : @10000 } } },
   }];
   ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"durable_auth_mail"];
@@ -1401,9 +1405,12 @@ static ALNContext *ALNTestStandInContext(void) {
                                                                     leaseDurationSeconds:30 error:&error];
   XCTAssertNotNil(jobs, @"%@", error);
   XCTAssertTrue([jobs installSchemaWithError:&error], @"%@", error);
+  NSString *jobsStateDirectory = ALNTestTemporaryDirectory(@"arlen-auth-jobs-failure");
+  XCTAssertNotNil(jobsStateDirectory);
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
+    @"jobsModule" : @{ @"persistence" : @{ @"path" : [jobsStateDirectory stringByAppendingPathComponent:@"state.plist"] } },
     @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test", @"allowWithoutCSRF" : @YES,
                        @"attemptLimits" : @{ @"mail" : @{ @"maxPerAddress" : @10000 } } },
   }];
