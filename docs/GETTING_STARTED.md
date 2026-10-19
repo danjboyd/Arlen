@@ -376,6 +376,11 @@ Production apps keep `/openapi.json` and its docs routes closed unless they set
 paths. Local development keeps the OpenAPI routes enabled.
 The ops module coordinates persisted dashboard history across processes when
 they share its configured persistence path; see [Ops Module](OPS_MODULE.md).
+New auth registrations now receive a generic accepted response and sign in
+after verification. They do not get an authenticated session from the register
+request. Existing apps that require the old flow can opt in with
+`authModule.registration.autoLogin = YES`, which reveals whether an address is
+already registered; see [Auth Module](AUTH_MODULE.md).
 
 When automating `arlen module migrate --json`, capture stdout and stderr
 separately. PostgreSQL notices may appear on stderr during repeated migrations;

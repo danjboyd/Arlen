@@ -45,6 +45,7 @@
     @"csrf" : @{ @"enabled" : @YES },
     @"database" : @{ @"connectionString" : [self pgTestDSN] ?: @"" },
     @"authModule" : @{
+      @"registration" : @{ @"autoLogin" : @YES },
       @"database" : @{ @"maxConnections" : @(poolSize), @"acquireTimeoutSeconds" : @0.2 },
     },
   }];

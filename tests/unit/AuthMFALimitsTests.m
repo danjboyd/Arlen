@@ -95,6 +95,7 @@
   [self applyAuthMigrations];
   NSMutableDictionary *authModule = [NSMutableDictionary dictionary];
   authModule[@"allowWithoutCSRF"] = @(!csrfEnabled);
+  authModule[@"registration"] = @{ @"autoLogin" : @YES };
   if (attemptLimits != nil) {
     authModule[@"attemptLimits"] = attemptLimits;
   }
@@ -897,7 +898,8 @@
     @"session" : @{ @"enabled" : @YES, @"secret" : @"auth-mfa-limits-session-secret-0123456789abcdef" },
     @"csrf" : @{ @"enabled" : @YES },
     @"database" : @{ @"connectionString" : [self pgTestDSN] },
-    @"authModule" : @{ @"attemptLimits" : @{ @"mfa" : @{ @"maxFailures" : @2 } } },
+    @"authModule" : @{ @"registration" : @{ @"autoLogin" : @YES },
+                        @"attemptLimits" : @{ @"mfa" : @{ @"maxFailures" : @2 } } },
   }];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);

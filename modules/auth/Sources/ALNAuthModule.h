@@ -235,6 +235,10 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
 /// record could not be written.
 - (BOOL)revokeCurrentSessionForContext:(ALNContext *)context
                                  error:(NSError *_Nullable *_Nullable)error;
+/// Records the current session as ended before MFA rotates its identifier,
+/// while keeping the context authenticated for that rotation.
+- (BOOL)revokeSessionBeingElevatedForContext:(ALNContext *)context
+                                      error:(NSError *_Nullable *_Nullable)error;
 /// Ends every other session of the signed-in user (bumps the session stamp)
 /// and keeps the request's session signed in by recording the new stamp in it.
 - (BOOL)signOutOtherSessionsForContext:(ALNContext *)context

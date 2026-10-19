@@ -130,6 +130,7 @@
     @"session" : @{ @"enabled" : @YES, @"secret" : @"auth-session-regeneration-secret-0123456789abcdef" },
     @"csrf" : @{ @"enabled" : @YES, @"allowQueryParamFallback" : @YES },
     @"database" : @{ @"connectionString" : [self pgTestDSN] ?: @"" },
+    @"authModule" : @{ @"registration" : @{ @"autoLogin" : @YES } },
   }];
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   return app;

@@ -462,7 +462,9 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
   [context.stash removeObjectForKey:ALNContextAuthRolesStashKey];
 }
 
-- (BOOL)revokeCurrentSessionForContext:(ALNContext *)context error:(NSError **)error {
+- (BOOL)recordRevokedSessionForContext:(ALNContext *)context
+                              signOut:(BOOL)signOut
+                                error:(NSError **)error {
   if (context == nil) {
     return YES;
   }
@@ -473,7 +475,9 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
   NSArray<NSString *> *identifiers =
       ([subject length] > 0 && !providerSession) ? ARSessionRevocationIdentifiers(context, subject) : @[];
   NSDate *authenticatedAt = [ALNAuthSession primaryAuthenticatedAtFromContext:context];
-  [self signOutSessionForContext:context];
+  if (signOut) {
+    [self signOutSessionForContext:context];
+  }
   if ([identifiers count] == 0 || [self database] == nil) {
     return YES;
   }
@@ -521,6 +525,14 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
                        parameters:@[]
                             error:NULL];
   return YES;
+}
+
+- (BOOL)revokeCurrentSessionForContext:(ALNContext *)context error:(NSError **)error {
+  return [self recordRevokedSessionForContext:context signOut:YES error:error];
+}
+
+- (BOOL)revokeSessionBeingElevatedForContext:(ALNContext *)context error:(NSError **)error {
+  return [self recordRevokedSessionForContext:context signOut:NO error:error];
 }
 
 - (BOOL)signOutOtherSessionsForContext:(ALNContext *)context error:(NSError **)error {
