@@ -687,7 +687,9 @@ google = {
   on its own, without lists.
 - Unknown keys and malformed values fail at startup. Entries must be plain
   `name@domain.tld` addresses and dotted domain names, not patterns. A missing
-  or empty `allowedEmailsEnvironmentKey` variable also fails startup.
+  or empty `allowedEmailsEnvironmentKey` variable also fails startup. An
+  explicitly empty `allowedEmails` or `allowedDomains` list fails startup;
+  omit the key when that list is not used.
 
 Rejected logins never reach the resolver or create a session. JSON callbacks
 return `403` with `{"status":"error","code":"admission_denied","message":...}`.

@@ -697,6 +697,10 @@ static void RegisterOIDCLoginTemplates(void) {
   }
   for (NSDictionary *admission in @[ @{ @"allowedEmailsEnvironmentKey": @"ARLEN_TEST_OIDC_UNSET_EMAIL_LIST" },
                                      @{ @"allowedEmailsEnvironmentKey": @"PATH" },
+                                     @{ @"allowedEmails": @[] },
+                                     @{ @"allowedDomains": @[] },
+                                     @{ @"allowedEmails": @[], @"allowedDomains": @[ @"example.test" ] },
+                                     @{ @"allowedEmails": @[ @"same@example.test" ], @"allowedDomains": @[] },
                                      @{ @"allowedEmails": @[ @"not-an-email" ] },
                                      @{ @"allowedEmails": @[ @"/opt/homebrew/opt/python@3.12/bin:/usr/bin" ] },
                                      @{ @"allowedEmails": @[ @"a@b@example.test" ] },

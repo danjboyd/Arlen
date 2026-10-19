@@ -122,6 +122,9 @@
   routes are not registered, and setting `authModule.providers.stub.enabled =
   YES` is refused (the auth module's configuration is rejected). Apps that relied on the stub outside
   development or test must configure a real provider or local passwords.
+- Auth module: an explicitly empty OIDC `admission.allowedEmails` or
+  `admission.allowedDomains` list now fails configuration instead of admitting
+  every verified identity. Omit an unused list key.
 - Auth module: password-reset and email-verification links are single-use
   even under concurrent requests; only one request can consume a given link.
   A successful password change (by reset link or the change-password route)

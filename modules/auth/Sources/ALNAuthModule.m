@@ -1006,7 +1006,6 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, assign) NSUInteger mailWindowSeconds;
 @property(nonatomic, assign) NSTimeInterval passwordAttemptsLastPrunedAt;
 @property(nonatomic, strong) id attemptLimitSchemaDatabase;
-@property(nonatomic, strong) ALNLogger *logger;
 @property(nonatomic, assign) BOOL attemptLimitSchemaAvailable;
 @property(nonatomic, assign) BOOL attemptLimitSchemaWarningLogged;
 @property(nonatomic, strong) NSLock *attemptLimitSchemaLock;

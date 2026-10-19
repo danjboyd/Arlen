@@ -94,6 +94,10 @@ static NSDictionary *OAdmissionPolicy(id admission, NSError **error) {
       !OAppendLowered(domains, admission[@"allowedDomains"], YES)) {
     OFail(error, @"OIDC admission values must be booleans, email addresses, and domains"); return nil;
   }
+  if ((admission[@"allowedEmails"] != nil && !emails.count) ||
+      (admission[@"allowedDomains"] != nil && !domains.count)) {
+    OFail(error, @"OIDC admission allowlists must not be empty"); return nil;
+  }
   id envKey = admission[@"allowedEmailsEnvironmentKey"];
   if (envKey) {
     NSString *list = OS([NSProcessInfo processInfo].environment[OS(envKey)]);
