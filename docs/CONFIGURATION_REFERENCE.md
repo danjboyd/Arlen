@@ -692,9 +692,10 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
+- `openapi.publicInProduction` (default: off; explicitly expose the route catalog
+  and docs routes outside development and test, including staging and QA)
 - `openapi.docsUIEnabled` (default: on in `development` and `test`, off in every
-  other environment; generated apps leave it unset so `/openapi` is not served
-  in production or staging)
+  other environment; generated apps leave it unset)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`

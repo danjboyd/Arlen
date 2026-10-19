@@ -194,6 +194,78 @@
   XCTAssertTrue([(NSArray *)(drilldown[@"history"] ?: @[]) count] > 0);
 }
 
+- (void)testIndependentOpsRuntimesPreserveEachOthersSnapshots {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"ops-shared-state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:statePath includeJobs:NO];
+  ALNOpsModuleRuntime *first = [[ALNOpsModuleRuntime alloc] init];
+  ALNOpsModuleRuntime *second = [[ALNOpsModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([first configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([second configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertEqual((NSUInteger)1, [(NSArray *)[first dashboardSummary][@"history"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)[second dashboardSummary][@"history"] count]);
+  XCTAssertEqual((NSUInteger)3, [(NSArray *)[first dashboardSummary][@"history"] count]);
+
+  ALNOpsModuleRuntime *restarted = [[ALNOpsModuleRuntime alloc] init];
+  XCTAssertTrue([restarted configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)4, [(NSArray *)[restarted dashboardSummary][@"history"] count]);
+}
+
+- (void)testOpsStateTransactionsAcrossProcesses {
+  NSString *sharedPath = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_OPS_SHARED_STATE_PATH"];
+  if ([sharedPath length] > 0) {
+    ALNOpsModuleRuntime *runtime = [[ALNOpsModuleRuntime alloc] init];
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureWithApplication:[self applicationWithStatePath:sharedPath includeJobs:NO]
+                                              error:&error]);
+    XCTAssertNil(error);
+    NSString *readyPrefix = [[sharedPath lastPathComponent] stringByAppendingString:@".ready."];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSUInteger readyCount = 0;
+    for (NSUInteger attempt = 0; attempt < 100U; attempt++) {
+      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
+                                                                           error:NULL];
+      readyCount = 0;
+      for (NSString *name in names) {
+        if ([name hasPrefix:readyPrefix]) readyCount++;
+      }
+      if (readyCount >= 2U) break;
+      usleep(50000);
+    }
+    XCTAssertEqual((NSUInteger)2, readyCount);
+    XCTAssertNotNil([runtime dashboardSummary]);
+    return;
+  }
+
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"ops-process-state.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  XCTAssertTrue([runner length] > 0);
+  XCTAssertTrue([bundlePath length] > 0);
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 2U; index++) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+    child.arguments = @[ @"-XCTest", @"Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+    NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    environment[@"ARLEN_OPS_SHARED_STATE_PATH"] = statePath;
+    child.environment = environment;
+    [child launch];
+    [children addObject:child];
+  }
+  for (NSTask *child in children) {
+    [child waitUntilExit];
+    XCTAssertEqual(0, child.terminationStatus);
+  }
+  NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:statePath];
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"historySnapshots"] count]);
+}
+
 - (void)testOpsRemainsUsefulWhenOnlyOpsModuleIsInstalled {
   ALNApplication *app = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"ops-state.plist"]
                                            includeJobs:NO];

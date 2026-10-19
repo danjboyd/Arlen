@@ -2523,7 +2523,16 @@ static NSDictionary *ALNOpenAPIConfig(NSDictionary *config) {
 
 static BOOL ALNOpenAPIEnabled(ALNApplication *application) {
   NSDictionary *openapi = ALNOpenAPIConfig(application.config);
-  return ALNBoolConfigValue(openapi[@"enabled"], YES);
+  if (!ALNBoolConfigValue(openapi[@"enabled"], YES)) {
+    return NO;
+  }
+  // A generated app explicitly sets enabled=YES for local development. Keep
+  // its route catalog private outside development/test unless the operator opts in.
+  if (!ALNEnvironmentIsDevelopmentLike(application.environment) &&
+      !ALNBoolConfigValue(openapi[@"publicInProduction"], NO)) {
+    return NO;
+  }
+  return YES;
 }
 
 static BOOL ALNOpenAPIDocsUIEnabled(ALNApplication *application) {
