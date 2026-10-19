@@ -1,4 +1,5 @@
 #import "ALNConfig.h"
+#import "ALNJSONSerialization.h"
 #import "ALNSearchModule.h"
 
 #import "ALNDataCompat.h"
@@ -78,7 +79,7 @@ static id STJSONObjectFromData(NSData *data, NSError **error) {
   if (![data isKindOfClass:[NSData class]] || [data length] == 0) {
     return nil;
   }
-  return [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
+  return [ALNJSONSerialization JSONObjectWithData:data options:0 error:error];
 }
 
 static NSDictionary *STJSONDictionaryFromPath(NSString *path, NSError **error) {
@@ -632,7 +633,7 @@ static NSDictionary *STJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 

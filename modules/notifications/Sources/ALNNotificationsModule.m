@@ -1,4 +1,5 @@
 #import "ALNConfig.h"
+#import "ALNJSONSerialization.h"
 #import "ALNNotificationsModule.h"
 
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
@@ -301,7 +302,7 @@ static NSDictionary *NMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 

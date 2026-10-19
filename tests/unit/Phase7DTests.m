@@ -189,6 +189,83 @@
 
 @implementation Phase7DTests
 
+- (void)testFileJobsCoordinateConcurrentProcesses {
+  NSString *root = [self temporaryPathWithPrefix:@"file-jobs-processes"];
+  NSString *storage = [root stringByAppendingPathComponent:@"jobs/state.plist"];
+  // Create the private directory with the parent before launching children;
+  // children then contend on the shared lock, rather than directory creation.
+  NSError *setupError = nil;
+  ALNFileJobAdapter *initial = [[ALNFileJobAdapter alloc] initWithStoragePath:storage adapterName:nil error:&setupError];
+  XCTAssertNotNil(initial, @"%@", setupError);
+  if (!initial) return;
+  NSMutableSet *produced = [NSMutableSet set];
+  NSMutableSet *consumed = [NSMutableSet set];
+  for (NSString *action in @[@"produce", @"consume"]) {
+    NSMutableArray *tasks = [NSMutableArray array];
+    NSMutableArray *outputs = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 4; index++) {
+      NSTask *task = [NSTask new];
+      NSString *binary = [[self repoRoot] stringByAppendingPathComponent:@"build/file-job-probe"];
+#if defined(_WIN32)
+      binary = [binary stringByAppendingString:@".exe"];
+#endif
+      task.launchPath = binary;
+      task.arguments = @[action, storage];
+      NSPipe *pipe = [NSPipe pipe];
+      task.standardOutput = pipe;
+      [tasks addObject:task];
+      [outputs addObject:pipe];
+      [task launch];
+    }
+    for (NSUInteger index = 0; index < tasks.count; index++) {
+      NSData *data = [[outputs[index] fileHandleForReading] readDataToEndOfFile];
+      NSTask *task = tasks[index];
+      [task waitUntilExit];
+      XCTAssertEqual(0, task.terminationStatus);
+      NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+      NSMutableSet *seen = [action isEqualToString:@"produce"] ? produced : consumed;
+      for (NSString *jobID in [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+        if (jobID.length == 0) continue;
+        XCTAssertFalse([seen containsObject:jobID], @"duplicate job %@", jobID);
+        [seen addObject:jobID];
+      }
+    }
+  }
+  XCTAssertEqual((NSUInteger)200, produced.count);
+  XCTAssertEqualObjects(produced, consumed);
+  [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+}
+
+- (void)testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite {
+  ALNInMemoryCacheAdapter *cache = [ALNInMemoryCacheAdapter new];
+  for (NSUInteger i = 0; i < 1024; i++) {
+    NSString *key = [NSString stringWithFormat:@"k%lu", (unsigned long)i];
+    XCTAssertTrue([cache setObject:@"value" forKey:key
+                       ttlSeconds:0 error:NULL]);
+  }
+  XCTAssertNotNil([cache objectForKey:@"k0" atTime:nil error:NULL]);
+  XCTAssertTrue([cache setObject:@"new" forKey:@"next" ttlSeconds:0 error:NULL]);
+  XCTAssertNil([cache objectForKey:@"k1" atTime:nil error:NULL]);
+  XCTAssertNotNil([cache objectForKey:@"k0" atTime:nil error:NULL]);
+  [cache clearWithError:NULL];
+  [cache setObject:@"expired" forKey:@"old" ttlSeconds:0.001 error:NULL];
+  // sleep-ok: advance past the cache's real TTL before testing write-time eviction.
+  [NSThread sleepForTimeInterval:0.01];
+  [cache setObject:@"fresh" forKey:@"new" ttlSeconds:0 error:NULL];
+  XCTAssertEqual((NSUInteger)1, [[cache valueForKey:@"entriesByKey"] count]);
+}
+
+- (void)testDefaultMailRetainsOnlyLastHundredDeliveries {
+  ALNInMemoryMailAdapter *mail = [ALNInMemoryMailAdapter new];
+  for (NSUInteger i = 0; i < 150; i++) {
+    XCTAssertNotNil([mail deliverMessage:[self sampleMailMessage] error:NULL]);
+  }
+  NSArray *deliveries = [mail deliveriesSnapshot];
+  XCTAssertEqual((NSUInteger)100, deliveries.count);
+  XCTAssertEqualObjects(@"mail-51", deliveries[0][@"deliveryID"]);
+  XCTAssertEqualObjects(@"mail-150", [deliveries lastObject][@"deliveryID"]);
+}
+
 - (NSString *)repoRoot {
   return [[NSFileManager defaultManager] currentDirectoryPath];
 }

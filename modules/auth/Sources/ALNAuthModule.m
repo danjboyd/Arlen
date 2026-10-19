@@ -438,7 +438,7 @@ static NSArray *AMJSONArrayFromJSONString(id value) {
     return @[];
   }
   NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
-  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
   if (![object isKindOfClass:[NSArray class]]) {
     return @[];
   }
@@ -516,7 +516,7 @@ static NSDictionary *AMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -1234,7 +1234,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  NSDictionary *json = [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:NULL];
+  NSDictionary *json = [ALNJSONSerialization JSONObjectWithData:bodyData options:0 error:NULL];
   NSInteger statusCode = response.statusCode;
   if (statusCode < 200 || statusCode >= 300) {
     NSString *message = AMTrimmedString(json[@"message"]);

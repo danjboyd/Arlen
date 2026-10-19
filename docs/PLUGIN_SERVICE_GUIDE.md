@@ -59,13 +59,18 @@ then leave the real backend integration for you to finish.
 
 `queue-jobs`
 
-- starts with file-backed jobs when storage is configured successfully
-- falls back to in-memory jobs if file-backed setup fails
+- uses file-backed jobs at `<app-root>/var/jobs/state.plist` by default
+- fails registration if storage cannot be initialized; never silently drops durability
+- coordinates independent processes using a lock beside the state file; the
+  generated worker timers may share this queue without duplicate leasing
 - creates a simple `ALNJobWorkerRuntime` template hook
 - useful env vars in the generated template include:
   - `ARLEN_JOB_STORAGE_PATH`
   - `ARLEN_JOB_WORKER_INTERVAL_SECONDS`
   - `ARLEN_JOB_WORKER_RETRY_DELAY_SECONDS`
+
+The file queue has no crashed-worker lease recovery. Use the PostgreSQL job
+adapter and dedicated jobs workers when recovery and result history are required.
 
 `smtp-mail`
 

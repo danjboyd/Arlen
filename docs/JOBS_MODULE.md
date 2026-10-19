@@ -187,5 +187,5 @@ errors. The new status and drain routes retain admin/AAL2 protection.
 - Plist operator run history is diagnostic, not a shared job/result store. Use
   `jobsModule.persistence.enabled = NO` or a distinct diagnostic path per process
   for separate workers. PostgreSQL retains authoritative job status and results.
-- The file adapter cannot coordinate independent processes or recover crashed
+- The file adapter coordinates independent processes with a sibling lock file but cannot recover crashed
   leases. Its private-directory initialization fix does not change those limits.

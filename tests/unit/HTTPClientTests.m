@@ -115,6 +115,26 @@
   XCTAssertEqual((NSUInteger)0, client.maxRedirects);
 }
 
+- (void)testInvalidHeadersAreRejectedBeforeTransport {
+  ALNHTTPClient *client = [self clientWith:@{}];
+  NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/", (long)_port]];
+  unichar nul = 0;
+  NSArray *headers = @[
+    @{@"X-Search": @"ok\r\nX-Injected: yes"}, @{@"X-Test": @"bad\nvalue"},
+    @{@"Bad Name": @"value"}, @{@"Bad:Name": @"value"},
+    @{@"X-Test": [NSString stringWithCharacters:&nul length:1]}
+  ];
+  for (NSDictionary *fields in headers) {
+    NSError *error = nil;
+    XCTAssertNil([client GETURL:url headers:fields error:&error]);
+    XCTAssertEqual(ALNHTTPClientErrorInvalidRequest, error.code);
+    error = nil;
+    XCTAssertNil([client POSTJSONObject:@{} toURL:url headers:fields error:&error]);
+    XCTAssertEqual(ALNHTTPClientErrorInvalidRequest, error.code);
+  }
+  XCTAssertEqual((NSUInteger)0, [self trace].count);
+}
+
 - (void)testRequestsOutsideTheAllowlistFailBeforeConnecting {
   XCTAssertTrue(_port > 0);
   ALNHTTPClient *client = [self clientWith:nil];

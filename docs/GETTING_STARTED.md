@@ -1,5 +1,12 @@
 # Getting Started
 
+When upgrading existing apps, re-vendor the first-party modules you use with
+`arlen module upgrade <name> --source <framework>/modules/<name>`, then rebuild
+and redeploy. Module source is copied into apps; upgrading framework binaries
+alone does not replace it. JSON input is limited to 512 nested containers on
+both parser backends. See the [Live UI guide](LIVE_UI.md) for receive-only
+WebSocket channels and reconnect behavior.
+
 This guide gets you from a clean checkout to a running Arlen app without
 pulling you through contributor-only release or CI material first.
 

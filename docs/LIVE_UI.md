@@ -1,5 +1,17 @@
 # Live UI Guide
 
+Channel WebSockets are receive-only: client text frames are discarded. Publish
+live operations from application code with `publishLiveOperations:onChannel:error:`.
+Authorize access in the channel's route before accepting the subscription.
+With no explicit origin allowlist, browser Origins must match the request
+authority; native clients may omit Origin. Configure explicit origins for cross-origin apps.
+
+Each channel subscriber has a queue capped at 128 frames and 1 MiB; overflow
+disconnects that subscriber. The session thread drains the queue, so publishers
+never write subscriber sockets. WebSocket and SSE writes have a five-second total
+deadline. Reconnect and refresh state after a channel disconnect; event streams
+can resume with their cursor.
+
 Arlen's live UI layer is fragment-first. It does not try to be a
 whole-page stateful diff engine. The current model is:
 

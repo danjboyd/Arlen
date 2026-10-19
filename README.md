@@ -1,5 +1,9 @@
 # Arlen
 
+Upgrading an existing app? Review [Getting Started](docs/GETTING_STARTED.md)
+for module re-vendoring and the [Live UI guide](docs/LIVE_UI.md) for channel
+subscription and reconnect behavior.
+
 **A batteries-included web framework for Objective-C.**
 
 [![License: LGPL-2.1-or-later](https://img.shields.io/badge/license-LGPL--2.1--or--later-blue.svg)](LICENSE)

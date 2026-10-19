@@ -2,6 +2,17 @@
 
 This document describes currently implemented command-line interfaces.
 
+The `queue-jobs` plugin preset stores its file queue at
+`<app-root>/var/jobs/state.plist` unless `ARLEN_JOB_STORAGE_PATH` overrides it.
+Storage initialization failure aborts registration. Independent workers
+coordinate through a sibling `.lock` file; crashed leases still require the
+PostgreSQL adapter for recovery.
+
+The default diagnostic mail adapter retains the last 100 deliveries. The default
+process-local cache holds at most 1024 entries with LRU eviction and sweeps
+expired keys on writes. Configure durable mail delivery and a shared cache for
+production apps that need those guarantees.
+
 ## Installer (`tools/install.sh`)
 
 ```bash
