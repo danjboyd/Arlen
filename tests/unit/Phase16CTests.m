@@ -872,4 +872,260 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertEqualObjects(@[], [singleRuntime resolvedConfigSummary][@"warnings"]);
 }
 
+- (void)writeStateForObjects:(NSUInteger)count
+                     likeRecord:(NSDictionary *)template
+                     collection:(NSString *)collection
+                         toPath:(NSString *)statePath
+                         format:(NSPropertyListFormat)format {
+  NSMutableDictionary *objects = [NSMutableDictionary dictionary];
+  NSMutableArray *ids = [NSMutableArray array];
+  for (NSUInteger idx = 0; idx < count; idx++) {
+    NSString *objectID = [NSString stringWithFormat:@"obj-%032lx", (unsigned long)(idx + 1)];
+    NSMutableDictionary *record = [template mutableCopy];
+    record[@"objectID"] = objectID;
+    record[@"sequence"] = @(idx + 1);
+    record[@"name"] = [NSString stringWithFormat:@"bulk-%lu.txt", (unsigned long)idx];
+    objects[objectID] = record;
+    [ids addObject:objectID];
+  }
+  NSDictionary *state = @{
+    @"version" : @1,
+    @"nextSequence" : @(count),
+    @"objectIDsByCollection" : @{ collection : ids },
+    @"objectsByIdentifier" : objects,
+    @"uploadSessionsByIdentifier" : @{},
+    @"activityLog" : @[],
+  };
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:state format:format options:0 error:NULL];
+  XCTAssertNotNil(data);
+  XCTAssertTrue([data writeToFile:statePath atomically:YES]);
+}
+
+- (void)testLargeCatalogWritesStayWellUnderTheLockTimeout {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNApplication *seedApp = [self storageApplicationWithStatePath:statePath
+                                                attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                      persistence:nil];
+  ALNStorageModuleRuntime *seed = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:seed withApplication:seedApp]);
+  NSDictionary *template = [self storeObjectInRuntime:seed named:@"template.txt" body:@"template"];
+  NSDictionary *storedTemplate = [self stateAtPath:statePath][@"objectsByIdentifier"][template[@"objectID"]];
+  XCTAssertNotNil(storedTemplate);
+
+  [self writeStateForObjects:5000
+                  likeRecord:storedTemplate
+                  collection:@"plain"
+                      toPath:statePath
+                      format:NSPropertyListXMLFormat_v1_0];
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                            attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                  persistence:nil];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:runtime withApplication:app]);
+  XCTAssertEqual((NSUInteger)5000, [[runtime listObjectsForCollection:@"plain" query:nil] count]);
+
+  // One store rewrites the whole 5,000-object catalog under the lock.
+  NSDate *started = [NSDate date];
+  XCTAssertNotNil([self storeObjectInRuntime:runtime named:@"one-more.txt" body:@"one more"]);
+  NSTimeInterval elapsed = -[started timeIntervalSinceNow];
+  XCTAssertLessThan(elapsed, 3.0);
+  NSData *written = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertTrue([[[NSString alloc] initWithData:[written subdataWithRange:NSMakeRange(0, 5)]
+                                       encoding:NSUTF8StringEncoding] isEqualToString:@"<?xml"]);
+  XCTAssertEqual((NSUInteger)5001, [[[self stateAtPath:statePath][@"objectsByIdentifier"] allKeys] count]);
+}
+
+- (void)testBinaryStateFilesFromEarlierReleasesStillLoad {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNApplication *seedApp = [self storageApplicationWithStatePath:statePath
+                                                attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                      persistence:nil];
+  ALNStorageModuleRuntime *seed = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:seed withApplication:seedApp]);
+  NSDictionary *template = [self storeObjectInRuntime:seed named:@"template.txt" body:@"template"];
+  NSDictionary *storedTemplate = [self stateAtPath:statePath][@"objectsByIdentifier"][template[@"objectID"]];
+  [self writeStateForObjects:20
+                  likeRecord:storedTemplate
+                  collection:@"plain"
+                      toPath:statePath
+                      format:NSPropertyListBinaryFormat_v1_0];
+
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                            attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                  persistence:nil];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:runtime withApplication:app]);
+  XCTAssertEqual((NSUInteger)20, [[runtime listObjectsForCollection:@"plain" query:nil] count]);
+}
+
+- (NSDictionary *)storeObjectInRuntime:(ALNStorageModuleRuntime *)runtime named:(NSString *)name body:(NSString *)body {
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                     name:name
+                                              contentType:@"text/plain"
+                                                     data:[body dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:nil
+                                                    error:&error];
+  XCTAssertNotNil(object);
+  XCTAssertNil(error);
+  return object;
+}
+
+- (void)testReadsDoNotWaitForTheStateLock {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *workerA = [[ALNStorageModuleRuntime alloc] init];
+  ALNStorageModuleRuntime *workerB = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:workerA
+                      withApplication:[self storageApplicationWithStatePath:statePath
+                                                          attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                                persistence:nil]]);
+  XCTAssertNil([self configureRuntime:workerB
+                      withApplication:[self storageApplicationWithStatePath:statePath
+                                                          attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                                persistence:nil]]);
+  NSDictionary *alice = [self storeObjectInRuntime:workerA named:@"alice.txt" body:@"alice data"];
+  NSString *aliceToken = [workerA issueDownloadTokenForObjectID:alice[@"objectID"] expiresIn:60 error:NULL];
+  // B writes, so A's copy is stale, then another holder keeps the lock.
+  NSDictionary *bob = [self storeObjectInRuntime:workerB named:@"bob.txt" body:@"bob data"];
+  int held = ALNPlatformOpenExclusiveLock([statePath stringByAppendingString:@".lock"]);
+  XCTAssertGreaterThanOrEqual(held, 0);
+
+  NSDate *started = [NSDate date];
+  XCTAssertEqualObjects(@"alice data", [self downloadedBodyForToken:aliceToken inRuntime:workerA]);
+  XCTAssertNotNil([workerA objectRecordForIdentifier:bob[@"objectID"] error:NULL]);
+  NSString *bobToken = [workerA issueDownloadTokenForObjectID:bob[@"objectID"] expiresIn:60 error:NULL];
+  XCTAssertEqualObjects(@"bob data", [self downloadedBodyForToken:bobToken inRuntime:workerA]);
+  XCTAssertLessThan(-[started timeIntervalSinceNow], 1.0);
+  ALNPlatformReleaseExclusiveLock(held);
+}
+
+- (void)testStartupRemovesStaleTemporaryStateFiles {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  ALNStorageModuleRuntime *seed = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:seed
+                      withApplication:[self storageApplicationWithStatePath:statePath
+                                                          attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                                persistence:nil]]);
+  [self storeObjectInRuntime:seed named:@"kept.txt" body:@"kept"];
+
+  // Left by a process killed between writing and renaming its state file.
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSString *stale = [statePath stringByAppendingString:@".0123456789abcdef.tmp"];
+  NSString *fresh = [statePath stringByAppendingString:@".fedcba9876543210.tmp"];
+  NSString *unrelated = [tempDir stringByAppendingPathComponent:@"other.plist.0123456789abcdef.tmp"];
+  for (NSString *path in @[ stale, fresh, unrelated ]) {
+    XCTAssertTrue([[@"partial" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:path atomically:NO]);
+  }
+  NSDate *old = [NSDate dateWithTimeIntervalSinceNow:-120];
+  XCTAssertTrue([fileManager setAttributes:@{ NSFileModificationDate : old } ofItemAtPath:stale error:NULL]);
+  XCTAssertTrue([fileManager setAttributes:@{ NSFileModificationDate : old } ofItemAtPath:unrelated error:NULL]);
+
+  ALNStorageModuleRuntime *restarted = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:restarted
+                      withApplication:[self storageApplicationWithStatePath:statePath
+                                                          attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                                persistence:nil]]);
+  XCTAssertFalse([fileManager fileExistsAtPath:stale]);
+  XCTAssertTrue([fileManager fileExistsAtPath:fresh]);
+  XCTAssertTrue([fileManager fileExistsAtPath:unrelated]);
+  XCTAssertEqual((NSUInteger)1, [[restarted listObjectsForCollection:@"plain" query:nil] count]);
+}
+
+- (void)testDownloadsDuringConcurrentWritesReturnTheRightBytesOrNotFound {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
+  NSMutableArray<ALNStorageModuleRuntime *> *runtimes = [NSMutableArray array];
+  for (NSUInteger idx = 0; idx < 4; idx++) {
+    ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+    XCTAssertNil([self configureRuntime:runtime
+                        withApplication:[self storageApplicationWithStatePath:statePath
+                                                            attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
+                                                                  persistence:nil]]);
+    [runtimes addObject:runtime];
+  }
+  NSLock *shared = [[NSLock alloc] init];
+  NSMutableArray<NSArray *> *issued = [NSMutableArray array];  // @[ token, expected body ]
+  __block NSUInteger mismatches = 0;
+  __block NSUInteger served = 0;
+  __block BOOL writing = YES;
+  dispatch_group_t writers = dispatch_group_create();
+  dispatch_group_t readers = dispatch_group_create();
+  dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+
+  // Two writers store and delete objects; two readers download whatever
+  // tokens exist. Bodies differ but share a length, so only the checksum
+  // tells them apart.
+  for (NSUInteger writer = 0; writer < 2; writer++) {
+    ALNStorageModuleRuntime *runtime = runtimes[writer];
+    dispatch_group_async(writers, queue, ^{
+      for (NSUInteger idx = 0; idx < 60; idx++) {
+        NSString *body = [NSString stringWithFormat:@"w%lu-body-%04lu", (unsigned long)writer, (unsigned long)idx];
+        NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                           name:body
+                                                    contentType:@"text/plain"
+                                                           data:[body dataUsingEncoding:NSUTF8StringEncoding]
+                                                       metadata:nil
+                                                          error:NULL];
+        if (object == nil) {
+          continue;
+        }
+        NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:120 error:NULL];
+        if (token != nil) {
+          [shared lock];
+          [issued addObject:@[ token, body ]];
+          [shared unlock];
+        }
+        if (idx % 3 == 0) {
+          (void)[runtime deleteObjectIdentifier:object[@"objectID"] error:NULL];
+        }
+      }
+    });
+  }
+  for (NSUInteger reader = 2; reader < 4; reader++) {
+    ALNStorageModuleRuntime *runtime = runtimes[reader];
+    dispatch_group_async(readers, queue, ^{
+      NSUInteger idx = 0;
+      for (;;) {
+        [shared lock];
+        BOOL keepGoing = writing;
+        NSArray *pick = ([issued count] > 0) ? issued[(idx * 7 + reader) % [issued count]] : nil;
+        [shared unlock];
+        idx += 1;
+        if (pick != nil) {
+          NSData *data = [runtime downloadDataForToken:pick[0] metadata:NULL error:NULL];
+          if (data != nil) {
+            NSString *body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            [shared lock];
+            served += 1;
+            if (![body isEqualToString:pick[1]]) {
+              mismatches += 1;
+            }
+            [shared unlock];
+          }
+        }
+        if (!keepGoing) {
+          break;
+        }
+      }
+    });
+  }
+  // Stop the readers once the writers are done.
+  XCTAssertEqual(0L, dispatch_group_wait(writers, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(180 * NSEC_PER_SEC))));
+  [shared lock];
+  writing = NO;
+  [shared unlock];
+  XCTAssertEqual(0L, dispatch_group_wait(readers, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(60 * NSEC_PER_SEC))));
+  XCTAssertEqual((NSUInteger)0, mismatches);
+  XCTAssertGreaterThan(served, (NSUInteger)0);
+}
+
 @end

@@ -52,7 +52,12 @@ delegates on one host) stay consistent:
   `<state file>.lock` (`flock` on POSIX, `LockFileEx` on Windows). It reloads
   whatever another process wrote first, so no process drops another's objects
   or upload sessions.
-- Reads reload the file when another process has replaced it.
+- Reads reload the file when another process has replaced it, without the
+  lock: writers replace the file with a rename, so a read sees one whole
+  version. A read never waits for a writer; while one is busy it serves the
+  catalog already in memory.
+- The state file is an XML property list. Older binary files still load and
+  are rewritten as XML on the next change.
 - Object and upload-session IDs are random (`obj-<32 hex>`,
   `upload-<32 hex>`), not per-process counters. Download tokens are bound to
   the object they were issued for, not just to its ID.
@@ -61,12 +66,13 @@ delegates on one host) stay consistent:
   again.
 - A change that can't get the lock within
   `persistence.lockTimeoutSeconds` (default `10`) fails with
-  `ALNStorageModuleErrorStateBusy` (HTTP 503) instead of waiting forever
+  `ALNStorageModuleErrorStateBusy` (HTTP 503 with `Retry-After: 1`) instead of waiting forever
   behind a hung process. Waiting blocks on the lock rather than polling it.
 - At startup the module waits up to `persistence.startupLockTimeoutSeconds`
   (default `60`) for its cleanup pass. If the lock is still busy it logs a
   warning and starts anyway; the catalog was already loaded.
-- The state file is written owner-only (`0600`), whatever the umask.
+- The state file is written owner-only (`0600`), whatever the umask. Startup
+  removes `<state file>.<hex>.tmp` files left by a process killed mid-write.
 
 The state file must be on a local filesystem that honours those locks, and
 every process must see the same file: this is single-host shared state, not

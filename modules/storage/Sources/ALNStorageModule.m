@@ -188,8 +188,11 @@ static BOOL SMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
                                                        error:error]) {
     return NO;
   }
+  // XML, not binary: GNUstep's binary writer takes time quadratic in the
+  // number of objects (seconds past a few thousand, all under the state
+  // lock). Reading detects the format, so older binary files still load.
   NSData *data = [NSPropertyListSerialization dataWithPropertyList:SMPropertyListValue(payload)
-                                                            format:NSPropertyListBinaryFormat_v1_0
+                                                            format:NSPropertyListXMLFormat_v1_0
                                                            options:0
                                                              error:error];
   if (data == nil) {
@@ -272,6 +275,7 @@ static NSString *SMStateFileStamp(NSString *path) {
 }
 
 static const NSTimeInterval SMDefaultLockTimeoutSeconds = 10.0;
+static const NSTimeInterval SMStaleTemporaryStateFileSeconds = 5.0;
 
 static NSString *SMRecordChecksum(NSDictionary *record) {
   NSString *checksum = SMTrimmedString(record[@"checksumSHA256"]);
@@ -1163,6 +1167,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   self.lockTimeoutSeconds = SMConfiguredStartupLockTimeoutSeconds(moduleConfig, requestTimeout);
   NSError *startupError = nil;
   BOOL cleaned = [self performStateTransaction:^BOOL(NSError **blockError) {
+    [self removeStaleTemporaryStateFiles];
     [self pruneUnknownCollectionState];
     [self pruneExpiredUploadSessionsAt:[NSDate date] recordActivity:YES];
     return [self persistStateWithError:blockError];
@@ -1181,6 +1186,29 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     *error = startupError;
   }
   return cleaned;
+}
+
+// A process killed between writing its temporary state file and renaming it
+// leaves <state file>.<hex>.tmp behind. Runs under the state lock, so no
+// write is in progress; the age check also spares any just-created file.
+- (void)removeStaleTemporaryStateFiles {
+  if (!self.persistenceEnabled || [self.statePath length] == 0) {
+    return;
+  }
+  NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+  NSString *prefix = [[self.statePath lastPathComponent] stringByAppendingString:@"."];
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-SMStaleTemporaryStateFileSeconds];
+  for (NSString *name in [fileManager contentsOfDirectoryAtPath:directory error:NULL] ?: @[]) {
+    if (![name hasPrefix:prefix] || ![name hasSuffix:@".tmp"]) {
+      continue;
+    }
+    NSString *path = [directory stringByAppendingPathComponent:name];
+    NSDate *modified = [[fileManager attributesOfItemAtPath:path error:NULL] fileModificationDate];
+    if (modified != nil && [modified compare:cutoff] == NSOrderedAscending) {
+      (void)[fileManager removeItemAtPath:path error:NULL];
+    }
+  }
 }
 
 // Without persistence each process keeps its own catalog, which is fine for
@@ -1244,6 +1272,23 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return YES;
   }
+  // Writers replace the file with a rename, so a read sees one whole version.
+  // Stamp it before reading and read again if it changed meanwhile: the
+  // stamp recorded must never be newer than the content loaded.
+  for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+    NSString *stamp = SMStateFileStamp(self.statePath);
+    if (![self loadPersistedStateVersionWithError:error]) {
+      return NO;
+    }
+    self.loadedStateStamp = stamp;
+    if ([SMStateFileStamp(self.statePath) isEqualToString:stamp]) {
+      break;
+    }
+  }
+  return YES;
+}
+
+- (BOOL)loadPersistedStateVersionWithError:(NSError **)error {
   NSError *readError = nil;
   NSDictionary *state = SMReadPropertyListAtPath(self.statePath, &readError);
   if (state == nil) {
@@ -1291,7 +1336,6 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                   : 0;
   self.nextSequence = MAX(self.nextSequence, storedSequence);
   [self.lock unlock];
-  self.loadedStateStamp = SMStateFileStamp(self.statePath);
   return YES;
 }
 
@@ -1360,19 +1404,18 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return;
   }
-  [self.transactionLock lock];
-  BOOL inTransaction = (self.transactionDepth > 0);
-  NSString *stamp = SMStateFileStamp(self.statePath);
-  BOOL changed = ![stamp isEqualToString:self.loadedStateStamp ?: @""];
-  [self.transactionLock unlock];
-  if (inTransaction || !changed) {
+  // A reader never takes the cross-process state lock, and never waits for
+  // a writer in this process (which may itself be waiting for that lock):
+  // the in-memory catalog is always one whole version, swapped under
+  // self.lock, so it is served as is when a refresh can't run now.
+  if (![self.transactionLock tryLock]) {
     return;
   }
-  (void)[self performStateTransaction:^BOOL(NSError **blockError) {
-    (void)blockError;
-    return YES;
+  if (self.transactionDepth == 0 &&
+      ![SMStateFileStamp(self.statePath) isEqualToString:self.loadedStateStamp ?: @""]) {
+    (void)[self loadPersistedStateWithError:NULL];
   }
-                                error:NULL];
+  [self.transactionLock unlock];
 }
 
 - (BOOL)persistStateWithError:(NSError **)error {
@@ -1624,7 +1667,10 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 }
 
 - (NSDictionary *)internalObjectRecordForIdentifier:(NSString *)objectID {
-  return self.objectsByIdentifier[SMTrimmedString(objectID)];
+  [self.lock lock];
+  NSDictionary *record = self.objectsByIdentifier[SMTrimmedString(objectID)];
+  [self.lock unlock];
+  return record;
 }
 
 - (NSDictionary *)publicObjectRecordFromInternalRecord:(NSDictionary *)record {
@@ -1642,11 +1688,17 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (NSArray<NSDictionary *> *)publicObjectRecordsFromIDs:(NSArray<NSString *> *)objectIDs {
   NSMutableArray *records = [NSMutableArray array];
+  NSMutableArray<NSDictionary *> *internalRecords = [NSMutableArray array];
+  [self.lock lock];
   for (NSString *objectID in objectIDs ?: @[]) {
-    NSDictionary *record = [self internalObjectRecordForIdentifier:objectID];
+    NSDictionary *record = self.objectsByIdentifier[SMTrimmedString(objectID)];
     if ([record isKindOfClass:[NSDictionary class]]) {
-      [records addObject:[self publicObjectRecordFromInternalRecord:record]];
+      [internalRecords addObject:record];
     }
+  }
+  [self.lock unlock];
+  for (NSDictionary *record in internalRecords) {
+    [records addObject:[self publicObjectRecordFromInternalRecord:record]];
   }
   [records sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
     NSNumber *leftSequence = [left[@"sequence"] respondsToSelector:@selector(integerValue)] ? left[@"sequence"] : @0;
@@ -2103,13 +2155,19 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 - (NSString *)issueDownloadTokenForObjectID:(NSString *)objectID
                                   expiresIn:(NSTimeInterval)expiresIn
                                       error:(NSError **)error {
-  NSDictionary *record = [self objectRecordForIdentifier:objectID error:error];
+  [self refreshStateIfChanged];
+  NSString *normalizedObjectID = SMTrimmedString(objectID);
+  // One lookup, so the ID and nonce come from the same version of the record.
+  NSDictionary *record = [self internalObjectRecordForIdentifier:normalizedObjectID];
   if (record == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorNotFound,
+                       [NSString stringWithFormat:@"storage object %@ was not found", normalizedObjectID ?: @""],
+                       @{ @"objectID" : normalizedObjectID ?: @"" });
+    }
     return nil;
   }
-  [self.lock lock];
-  NSString *tokenNonce = SMTrimmedString(self.objectsByIdentifier[record[@"objectID"] ?: @""][@"tokenNonce"]);
-  [self.lock unlock];
+  NSString *tokenNonce = SMTrimmedString(record[@"tokenNonce"]);
   NSTimeInterval ttl = (expiresIn > 0.0) ? expiresIn : self.defaultDownloadTokenTTLSeconds;
   // objectNonce ties the token to this object, not just to its ID.
   return SMCreateSignedToken(@{
@@ -2136,13 +2194,19 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   if (payload == nil) {
     return nil;
   }
-  NSDictionary *record = [self objectRecordForIdentifier:payload[@"objectID"] error:error];
-  if (record == nil) {
+  [self refreshStateIfChanged];
+  NSString *objectID = SMTrimmedString(payload[@"objectID"]);
+  NSDictionary *stored = [self internalObjectRecordForIdentifier:objectID];
+  if (stored == nil) {
+    if (error != NULL) {
+      *error = SMError(ALNStorageModuleErrorNotFound,
+                       [NSString stringWithFormat:@"storage object %@ was not found", objectID ?: @""],
+                       @{ @"objectID" : objectID ?: @"" });
+    }
     return nil;
   }
-  [self.lock lock];
-  NSString *tokenNonce = SMTrimmedString(self.objectsByIdentifier[record[@"objectID"] ?: @""][@"tokenNonce"]);
-  [self.lock unlock];
+  NSDictionary *record = [self publicObjectRecordFromInternalRecord:stored];
+  NSString *tokenNonce = SMTrimmedString(stored[@"tokenNonce"]);
   if ([tokenNonce length] == 0 || ![SMTrimmedString(payload[@"objectNonce"]) isEqualToString:tokenNonce]) {
     if (error != NULL) {
       *error = SMError(ALNStorageModuleErrorTokenRejected, @"token does not match the stored object", nil);
@@ -2150,15 +2214,15 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return nil;
   }
   NSDictionary *adapterMetadata = nil;
-  NSData *data = [self.attachmentAdapter attachmentDataForID:record[@"attachmentID"] metadata:&adapterMetadata error:error];
+  NSData *data = [self.attachmentAdapter attachmentDataForID:stored[@"attachmentID"] metadata:&adapterMetadata error:error];
   if (data == nil) {
     return nil;
   }
-  if (!SMAttachmentDataMatchesRecord(data, record)) {
+  if (!SMAttachmentDataMatchesRecord(data, stored)) {
     if (error != NULL) {
       *error = SMError(ALNStorageModuleErrorNotFound,
                        @"stored object data does not match its record",
-                       @{ @"objectID" : record[@"objectID"] ?: @"" });
+                       @{ @"objectID" : objectID ?: @"" });
     }
     return nil;
   }
@@ -2637,6 +2701,16 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 @implementation ALNStorageModuleController
 
+// A busy state lock is temporary: answer 503 and say when to retry.
+- (void)setStorageErrorStatus:(NSError *)error otherwise:(NSInteger)status {
+  if (error.code == ALNStorageModuleErrorStateBusy) {
+    [self setStatus:503];
+    [self.context.response setHeader:@"Retry-After" value:@"1"];
+    return;
+  }
+  [self setStatus:status];
+}
+
 - (instancetype)init {
   self = [super init];
   if (self != nil) {
@@ -2868,7 +2942,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                                                expiresIn:[parameters[@"expiresIn"] respondsToSelector:@selector(doubleValue)] ? [parameters[@"expiresIn"] doubleValue] : 0.0
                                                                    error:&error];
   if (session == nil) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorNotFound) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Upload session failed" } error:NULL];
     return nil;
   }
@@ -2886,7 +2960,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                                  token:token
                                                  error:&error];
   if (object == nil) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorNotFound || error.code == ALNStorageModuleErrorTokenRejected) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorNotFound || error.code == ALNStorageModuleErrorTokenRejected) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Upload failed" } error:NULL];
     return nil;
   }
@@ -2901,7 +2975,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
                                                       expiresIn:[parameters[@"expiresIn"] respondsToSelector:@selector(doubleValue)] ? [parameters[@"expiresIn"] doubleValue] : 0.0
                                                           error:&error];
   if ([token length] == 0) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorNotFound) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Download token failed" } error:NULL];
     return nil;
   }
@@ -2918,7 +2992,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSDictionary *metadata = nil;
   NSData *data = [self.runtime downloadDataForToken:[self stringParamForName:@"token"] ?: @"" metadata:&metadata error:&error];
   if (data == nil) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorTokenRejected || error.code == ALNStorageModuleErrorNotFound) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorTokenRejected || error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Download failed" } error:NULL];
     return nil;
   }
@@ -2948,7 +3022,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSError *error = nil;
   BOOL ok = [self.runtime deleteObjectIdentifier:[self stringParamForName:@"objectID"] ?: @"" error:&error];
   if (!ok) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorNotFound) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Delete failed" } error:NULL];
     return nil;
   }
@@ -2961,7 +3035,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSError *error = nil;
   NSDictionary *summary = [self.runtime queueVariantGenerationForObjectID:[self stringParamForName:@"objectID"] ?: @"" error:&error];
   if (summary == nil) {
-    [self setStatus:(error.code == ALNStorageModuleErrorStateBusy) ? 503 : ((error.code == ALNStorageModuleErrorNotFound) ? 404 : 422)];
+    [self setStorageErrorStatus:error otherwise:(error.code == ALNStorageModuleErrorNotFound) ? 404 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"Variant queue failed" } error:NULL];
     return nil;
   }
