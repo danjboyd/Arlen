@@ -831,7 +831,8 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
   ALNApplication *app = [self applicationWithConfig:@{
     @"csrf" : @{ @"enabled" : @NO },
-    @"authModule" : @{ @"publicBaseURL" : @"https://public.example.test" },
+    // This controller test isolates trusted email URL selection from CSRF.
+    @"authModule" : @{ @"publicBaseURL" : @"https://public.example.test", @"allowWithoutCSRF" : @YES },
   }];
   ALNInMemoryMailAdapter *mailAdapter =
       [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_claim_public_mail"];
@@ -1051,7 +1052,7 @@ static ALNContext *ALNTestStandInContext(void) {
 #pragma mark - Single-use tokens
 
 - (ALNAuthModuleRuntime *)configuredRuntimeWithTokenUser:(NSDictionary **)user email:(NSString **)email {
-  ALNApplication *app = [self applicationWithConfig:@{ @"csrf" : @{ @"enabled" : @NO } }];
+  ALNApplication *app = [self applicationWithConfig:@{}];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
@@ -1204,10 +1205,13 @@ static ALNContext *ALNTestStandInContext(void) {
 - (ALNApplication *)mailingApplicationWithEnvironment:(NSString *)environment
                                           authModule:(NSDictionary *)authModule
                                          mailAdapter:(ALNInMemoryMailAdapter **)mailAdapter {
+  // These tests exercise email-link policy without a browser CSRF handshake.
+  NSMutableDictionary *linkConfig = [NSMutableDictionary dictionaryWithDictionary:authModule ?: @{}];
+  linkConfig[@"allowWithoutCSRF"] = @YES;
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : environment,
     @"csrf" : @{ @"enabled" : @NO },
-    @"authModule" : authModule ?: @{},
+    @"authModule" : linkConfig,
   }];
   ALNInMemoryMailAdapter *adapter = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"phase13e_link_mail"];
   [app setMailAdapter:adapter];
