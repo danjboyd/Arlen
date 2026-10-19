@@ -640,7 +640,9 @@ openapi = {
 
 Useful keys:
 
-- `openapi.enabled`
+- `openapi.enabled` (enabled by default outside production)
+- `openapi.publicInProduction` (default: off; explicitly expose the generated
+  route catalog and related docs routes in production)
 - `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
   it unset so `/openapi` is not served in production)
 - `openapi.docsUIStyle`

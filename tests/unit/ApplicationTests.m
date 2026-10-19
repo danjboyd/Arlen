@@ -1853,6 +1853,23 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   }
 }
 
+- (void)testOpenAPIRouteCatalogRequiresExplicitProductionOptIn {
+  ALNApplication *closed = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"openapi" : @{ @"enabled" : @YES, @"docsUIEnabled" : @YES },
+  }];
+  for (NSString *path in @[ @"/openapi.json", @"/.well-known/openapi.json", @"/openapi" ]) {
+    XCTAssertEqual((NSInteger)404, [closed dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+  ALNApplication *open = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"production",
+    @"openapi" : @{ @"enabled" : @YES, @"docsUIEnabled" : @YES, @"publicInProduction" : @YES },
+  }];
+  for (NSString *path in @[ @"/openapi.json", @"/.well-known/openapi.json", @"/openapi" ]) {
+    XCTAssertEqual((NSInteger)200, [open dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+}
+
 - (void)testClusterStatusPayloadIncludesQuorumAndCapabilityMatrix {
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
