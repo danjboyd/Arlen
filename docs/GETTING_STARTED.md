@@ -494,3 +494,6 @@ and applied without replacing response-specific values. Public header setters
 continue to reject invalid names and CR/LF/NUL injection. For local performance
 investigation, `make response-header-perf-bench` builds an optional focused
 benchmark; see [Performance Profiles](internal/PERFORMANCE_PROFILES.md).
+
+Auth-only apps can build without the optional jobs module. Durable auth mail
+still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).

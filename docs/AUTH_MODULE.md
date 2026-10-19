@@ -19,6 +19,10 @@ The module ships three explicit reuse paths:
 Optional SMS MFA through Twilio Verify is available as a disabled-by-default
 secondary factor without changing the core TOTP-first auth/session contract.
 
+Auth-only applications can link without installing the optional jobs module.
+Durable mail mode still requires that module and a configured durable adapter;
+production mail requirements are enforced at startup.
+
 ## Sessions and CSRF
 
 The module runs on the session cookie, so it requires CSRF protection. With

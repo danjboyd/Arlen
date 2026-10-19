@@ -1798,3 +1798,6 @@ budget and close the connection after the fallback 500 response.
 benchmark. Run `./build/response-header-perf-bench 20000` (`.exe` on Windows) to
 compare middleware and dynamic-header construction; see
 [Performance Profiles](internal/PERFORMANCE_PROFILES.md) for methodology.
+
+Auth-only apps can build without the optional jobs module. Durable auth mail
+still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).

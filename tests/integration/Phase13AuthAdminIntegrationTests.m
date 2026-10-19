@@ -538,6 +538,9 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                       exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", addAuth);
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+    // This generated app must link and serve without the optional jobs module.
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [appRoot stringByAppendingPathComponent:@"modules/jobs"]]);
 
     NSString *addAdmin = [self runShellCapture:[NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add admin-ui --json",

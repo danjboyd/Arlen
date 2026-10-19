@@ -30,6 +30,12 @@ NSString *const ALNAuthModuleRetryAfterSecondsKey = @"retry_after_seconds";
 
 static NSString *const AMAttemptScopeMFA = @"mfa";
 static NSString *const AMMailDispatchJobIdentifier = @"auth.mail.dispatch";
+
+// Keep a typed interface without linking auth-only apps to the optional module.
+static ALNJobsModuleRuntime *AMOptionalJobsRuntime(void) {
+  return [NSClassFromString(@"ALNJobsModuleRuntime") sharedRuntime];
+}
+
 // auth_password_attempts.client_ip value for the account-wide row.
 static NSString *const AMPasswordAccountRowAddress = @"*";
 // Failure counts older than this start over at the next failure.
@@ -1815,7 +1821,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                        @{ @"key_path" : @"authModule.mailDispatch.mode" });
     return NO;
   }
-  ALNJobsModuleRuntime *jobsRuntime = [ALNJobsModuleRuntime sharedRuntime];
+  ALNJobsModuleRuntime *jobsRuntime = AMOptionalJobsRuntime();
   BOOL durableJobsReady = jobsRuntime.application == application &&
       [application.jobsAdapter conformsToProtocol:@protocol(ALNDurableJobAdapter)];
   if ([mailDispatchMode isEqualToString:@"durable"] && !durableJobsReady) {
@@ -2679,7 +2685,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   NSDictionary *payload = @{ @"event" : AMTrimmedString(event), @"email" : AMLowerTrimmedString(email),
                              @"baseURL" : AMTrimmedString(baseURL), @"eligible" : @(eligible) };
-  NSString *jobID = [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:AMMailDispatchJobIdentifier
+  NSString *jobID = [AMOptionalJobsRuntime() enqueueJobIdentifier:AMMailDispatchJobIdentifier
                                                                         payload:payload
                                                                         options:@{ @"queue" : @"auth_mail" }
                                                                    onConnection:connection
@@ -6356,7 +6362,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   if (runtime.durableMailDispatchEnabled &&
-      ![[ALNJobsModuleRuntime sharedRuntime] registerSystemJobDefinition:[[ALNAuthMailDispatchJob alloc] init]
+      ![AMOptionalJobsRuntime() registerSystemJobDefinition:[[ALNAuthMailDispatchJob alloc] init]
                                                                   error:error]) {
     return NO;
   }
