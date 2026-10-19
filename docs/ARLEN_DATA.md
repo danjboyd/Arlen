@@ -759,3 +759,10 @@ an embedded U+0000 reaches SQL Server unchanged (SQL Server stores NUL inside
 Both adapters also refuse SQL text (and `ALNPg` statement names) that contain
 U+0000 with an invalid-argument error. The drivers take statement text as a C
 string, so the statement would otherwise end silently at the NUL.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.

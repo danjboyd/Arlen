@@ -407,3 +407,7 @@ from occupying every HTTP worker. For unusually slow bulk downloads, adjust
 `requestLimits.responseSendTimeoutSeconds`, `responseMinBytesPerSecond`, and
 `responseMinRateGraceSeconds` in your app configuration. SSE and WebSocket
 sessions use separate policies. See [Configuration reference](CONFIGURATION_REFERENCE.md).
+
+For PostgreSQL queries whose values vary per request, use bound builder
+parameters. The connection cache reuses their SQL shape while keeping each
+call's parameter values separate. See [Arlen Data](ARLEN_DATA.md).

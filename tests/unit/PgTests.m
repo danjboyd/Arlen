@@ -3456,8 +3456,9 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
     }
   }
   XCTAssertEqual((NSUInteger)4, [warmCompileEvents count]);
-  for (NSDictionary *event in warmCompileEvents) {
-    XCTAssertFalse([event[ALNPgQueryEventCacheHitKey] boolValue]);
+  for (NSUInteger index = 0; index < [warmCompileEvents count]; index++) {
+    // Parameter values differ, but the compiled SQL shape is identical.
+    XCTAssertEqual(index > 0, [warmCompileEvents[index][ALNPgQueryEventCacheHitKey] boolValue]);
   }
 
   [connection resetExecutionCaches];
@@ -3489,7 +3490,7 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqual((NSUInteger)soakIterations, [compileEvents count]);
   XCTAssertEqual((NSUInteger)soakIterations, [executeEvents count]);
   XCTAssertFalse([compileEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
-  XCTAssertFalse([compileEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
+  XCTAssertTrue([compileEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
   XCTAssertFalse([executeEvents[0][ALNPgQueryEventCacheHitKey] boolValue]);
   XCTAssertTrue([executeEvents[1][ALNPgQueryEventCacheHitKey] boolValue]);
 

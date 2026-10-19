@@ -1708,3 +1708,10 @@ Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
 `ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
 `ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
 separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.

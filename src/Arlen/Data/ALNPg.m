@@ -103,10 +103,6 @@ static void ALNPgFreeExecParamsBuffer(ALNPgExecParamsBuffer *buffer);
 static uint64_t ALNPgFNV1a64(NSString *value);
 static NSString *ALNPgSQLHash(NSString *sql);
 static NSString *ALNPgSQLToken(NSString *sql);
-static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
-                                          id value,
-                                          NSMutableSet *visited);
-static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
@@ -567,170 +563,6 @@ static NSDictionary *ALNPgDiagnosticsFromResult(PGresult *result) {
     diagnostics[ALNPgErrorServerConstraintKey] = constraint;
   }
   return [NSDictionary dictionaryWithDictionary:diagnostics];
-}
-
-static NSArray<NSString *> *ALNPgBuilderSnapshotKeys(void) {
-  static NSArray<NSString *> *keys = nil;
-  if (keys == nil) {
-    keys = @[
-      @"kind",
-      @"tableName",
-      @"tableAlias",
-      @"selectColumns",
-      @"values",
-      @"whereClauses",
-      @"havingClauses",
-      @"orderByClauses",
-      @"joins",
-      @"groupByFields",
-      @"ctes",
-      @"windowClauses",
-      @"setOperations",
-      @"returningColumns",
-      @"limitValue",
-      @"offsetValue",
-      @"hasLimit",
-      @"hasOffset",
-      @"rowLockMode",
-      @"rowLockTables",
-      @"rowLockSkipLocked",
-      @"conflictMode",
-      @"conflictColumns",
-      @"conflictUpdateFields",
-      @"conflictUpdateAssignments",
-      @"conflictDoUpdateWhereExpression",
-      @"conflictDoUpdateWhereParameters",
-    ];
-  }
-  return keys;
-}
-
-static id ALNPgBuilderValueForKey(ALNSQLBuilder *builder, NSString *key) {
-  if (builder == nil || [key length] == 0) {
-    return [NSNull null];
-  }
-  // Only ALNPostgresSQLBuilder has the conflict* keys; asking a plain builder
-  // raised and caught NSUnknownKeyException six times per query (#232).
-  if (![builder respondsToSelector:NSSelectorFromString(key)]) {
-    return [NSNull null];
-  }
-  @try {
-    id value = [builder valueForKey:key];
-    return value ?: [NSNull null];
-  } @catch (NSException *exception) {
-    (void)exception;
-    return [NSNull null];
-  }
-}
-
-static BOOL ALNPgCanonicalizeBuilderValue(NSMutableString *out,
-                                          id value,
-                                          NSMutableSet *visited) {
-  if (out == nil) {
-    return NO;
-  }
-
-  if (value == nil || value == [NSNull null]) {
-    [out appendString:@"n;"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSString class]]) {
-    NSString *text = (NSString *)value;
-    [out appendFormat:@"s:%lu:%@;", (unsigned long)[text length], text];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSNumber class]]) {
-    [out appendFormat:@"#:%@;", [(NSNumber *)value stringValue]];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSDate class]]) {
-    [out appendFormat:@"d:%.6f;", [(NSDate *)value timeIntervalSince1970]];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSData class]]) {
-    NSString *base64 = [(NSData *)value base64EncodedStringWithOptions:0];
-    [out appendFormat:@"b:%lu:%@;", (unsigned long)[base64 length], base64];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSArray class]]) {
-    NSArray *array = (NSArray *)value;
-    [out appendFormat:@"a:%lu:[", (unsigned long)[array count]];
-    for (id element in array) {
-      if (!ALNPgCanonicalizeBuilderValue(out, element, visited)) {
-        return NO;
-      }
-    }
-    [out appendString:@"];"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[NSDictionary class]]) {
-    NSDictionary *dictionary = (NSDictionary *)value;
-    NSArray *keys = [[dictionary allKeys] sortedArrayUsingComparator:^NSComparisonResult(id lhs, id rhs) {
-      NSString *left = [lhs isKindOfClass:[NSString class]] ? lhs : [lhs description];
-      NSString *right = [rhs isKindOfClass:[NSString class]] ? rhs : [rhs description];
-      return [left compare:right];
-    }];
-    [out appendFormat:@"m:%lu:{", (unsigned long)[keys count]];
-    for (id key in keys) {
-      NSString *keyText = [key isKindOfClass:[NSString class]] ? key : [key description];
-      [out appendFormat:@"k:%lu:%@=", (unsigned long)[keyText length], keyText];
-      if (!ALNPgCanonicalizeBuilderValue(out, dictionary[key], visited)) {
-        return NO;
-      }
-    }
-    [out appendString:@"};"];
-    return YES;
-  }
-
-  if ([value isKindOfClass:[ALNSQLBuilder class]]) {
-    NSString *identity = [NSString stringWithFormat:@"%p", value];
-    if ([visited containsObject:identity]) {
-      [out appendString:@"builder:<cycle>;"];
-      return YES;
-    }
-
-    [visited addObject:identity];
-    [out appendString:@"builder:{"];
-    for (NSString *key in ALNPgBuilderSnapshotKeys()) {
-      [out appendString:key];
-      [out appendString:@"="];
-      id nested = ALNPgBuilderValueForKey((ALNSQLBuilder *)value, key);
-      if (!ALNPgCanonicalizeBuilderValue(out, nested, visited)) {
-        [visited removeObject:identity];
-        return NO;
-      }
-      [out appendString:@"|"];
-    }
-    [out appendString:@"};"];
-    [visited removeObject:identity];
-    return YES;
-  }
-
-  NSString *text = [value description] ?: @"";
-  [out appendFormat:@"o:%@:%lu:%@;",
-                    NSStringFromClass([value class]) ?: @"NSObject",
-                    (unsigned long)[text length],
-                    text];
-  return YES;
-}
-
-static NSString *ALNPgBuilderCompilationSignature(ALNSQLBuilder *builder) {
-  if (builder == nil) {
-    return nil;
-  }
-
-  NSMutableString *encoded = [NSMutableString string];
-  NSMutableSet *visited = [NSMutableSet set];
-  if (!ALNPgCanonicalizeBuilderValue(encoded, builder, visited)) {
-    return nil;
-  }
-  return [NSString stringWithString:encoded];
 }
 
 static uint64_t ALNPgFNV1a64(NSString *value) {
@@ -2566,20 +2398,6 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     *cacheHit = NO;
   }
 
-  NSString *signature = ALNPgBuilderCompilationSignature(builder);
-  if ([signature length] > 0) {
-    NSDictionary *cached = self.builderCompilationCache[signature];
-    if ([cached isKindOfClass:[NSDictionary class]]) {
-      if (cacheHit != NULL) {
-        *cacheHit = YES;
-      }
-      if ([cached[@"trusted_sql"] boolValue]) {
-        self.sessionStateDirty = YES;
-      }
-      return cached;
-    }
-  }
-
   NSUInteger trustedBefore = ALNSQLBuilderTrustedExpressionCompileCount();
   NSError *buildError = nil;
   NSDictionary *built = [builder buildWithDialect:[ALNPostgresDialect sharedDialect] error:&buildError];
@@ -2612,22 +2430,27 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     return nil;
   }
 
+  // Compile current values on every invocation, but retain only the SQL shape.
+  // This avoids a second KVC traversal of the builder and never retains a
+  // borrower's parameter values in the connection cache.
+  NSString *signature = [NSString stringWithFormat:@"%lu:%@", (unsigned long)[parameters count], sql];
+  NSString *cachedSQL = self.builderCompilationCache[signature];
+  if (cacheHit != NULL) *cacheHit = cachedSQL != nil;
+  if (cachedSQL != nil) sql = cachedSQL;
   NSDictionary *normalized = @{
     @"sql" : sql,
     @"parameters" : [NSArray arrayWithArray:parameters],
     @"trusted_sql" : @(trustedSQL),
   };
-
-  if ([signature length] > 0 && self.builderCompilationCacheLimit > 0) {
-    if (self.builderCompilationCache[signature] == nil &&
-        [self.builderCompilationCache count] >= self.builderCompilationCacheLimit) {
-      NSString *oldest = [self.builderCompilationCacheOrder firstObject];
-      if ([oldest length] > 0) {
+  if (self.builderCompilationCacheLimit > 0) {
+    if (cachedSQL == nil && [self.builderCompilationCache count] >= self.builderCompilationCacheLimit) {
+      NSString *oldest = self.builderCompilationCacheOrder.firstObject;
+      if (oldest != nil) {
         [self.builderCompilationCache removeObjectForKey:oldest];
         [self.builderCompilationCacheOrder removeObjectAtIndex:0];
       }
     }
-    self.builderCompilationCache[signature] = normalized;
+    self.builderCompilationCache[signature] = sql;
     [self.builderCompilationCacheOrder removeObject:signature];
     [self.builderCompilationCacheOrder addObject:signature];
   }
