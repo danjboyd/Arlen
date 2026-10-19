@@ -1310,6 +1310,7 @@ static ALNContext *ALNTestStandInContext(void) {
 - (void)testProductionAuthMailRequiresDurableQueueUnlessCompatibilityModeIsExplicit {
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : @"production",
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
     @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test" },
   }];
   [app setMailAdapter:[[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"auth_mail_guard"]];
@@ -1318,6 +1319,7 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqualObjects(@"authModule.mailDispatch.mode", error.userInfo[@"key_path"]);
   ALNApplication *explicitDurable = [self applicationWithConfig:@{
     @"environment" : @"test",
+    @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
     @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"durable" } },
   }];
   error = nil;
@@ -1338,7 +1340,7 @@ static ALNContext *ALNTestStandInContext(void) {
   ALNApplication *app = [self applicationWithConfig:@{
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
-    @"authModule" : @{ @"publicBaseURL" : @"https://app.example.test",
+    @"authModule" : @{ @"allowWithoutCSRF" : @YES, @"publicBaseURL" : @"https://app.example.test",
                        @"attemptLimits" : @{ @"mail" : @{ @"maxPerAddress" : @10000 } } },
   }];
   ALNInMemoryMailAdapter *mail = [[ALNInMemoryMailAdapter alloc] initWithAdapterName:@"durable_auth_mail"];

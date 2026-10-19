@@ -8,6 +8,19 @@ This release combines the public audit fixes and security hardening work. It
 changes several authentication, persistence, and deployment defaults; review
 the upgrade notes below before replacing an existing installation.
 
+Known limitations remain documented in the [Known Risk Register](KNOWN_RISK_REGISTER.md),
+including unresolved, non-blocking ThreadSanitizer findings.
+
+- Auth 1.6.1 moves registration verification and password-reset mail to durable
+  `auth_mail` jobs when the durable adapter is configured. Production-like apps
+  with local passwords and mail must install/configure the PostgreSQL jobs
+  adapter, set `authModule.publicBaseURL`, and run the jobs worker. New-user
+  creation and its mail enqueue commit together. Explicit
+  `authModule.mailDispatch.mode = "synchronous"` preserves legacy delivery with
+  its account-enumeration timing risk. Review [Auth Module](AUTH_MODULE.md) and
+  [Durable Jobs](DURABLE_JOBS.md) before upgrading. Custom registration hooks
+  still need their own timing review.
+
 - Jobs operator-state reads now refresh shared state, and mutations use short
   cross-process transactions. Run one scheduler: scheduler bookkeeping and job
   enqueue are still separate operations.
