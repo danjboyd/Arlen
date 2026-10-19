@@ -15,6 +15,7 @@
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRouter.h"
+#import "ALNSecurityPrimitives.h"
 #import "ALNServices.h"
 #import "../shared/ALNTestSupport.h"
 
@@ -1050,6 +1051,40 @@ static ALNContext *ALNTestStandInContext(void) {
 }
 
 #pragma mark - Single-use tokens
+
+- (void)testBearerLinksStoreOnlyTokenDigests {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSDictionary *user = nil;
+  ALNAuthModuleRuntime *runtime = [self configuredRuntimeWithTokenUser:&user email:NULL];
+  NSString *verificationToken = [runtime issueVerificationTokenForUserID:user[@"id"] error:NULL];
+  NSString *resetToken = [runtime issuePasswordResetTokenForUserID:user[@"id"] error:NULL];
+  XCTAssertTrue([verificationToken length] > 0 && [resetToken length] > 0);
+
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:1 error:&error];
+  XCTAssertNotNil(database, @"%@", error);
+  NSDictionary *verification = [[database executeQuery:@"SELECT token FROM auth_verification_tokens "
+                                                        "WHERE user_id = $1 ORDER BY id DESC LIMIT 1"
+                                             parameters:@[ user[@"id"] ] error:&error] firstObject];
+  NSDictionary *reset = [[database executeQuery:@"SELECT token FROM auth_password_reset_tokens "
+                                                 "WHERE user_id = $1 ORDER BY id DESC LIMIT 1"
+                                      parameters:@[ user[@"id"] ] error:&error] firstObject];
+  for (NSArray *pair in @[ @[ verificationToken, verification[@"token"] ?: @"" ],
+                          @[ resetToken, reset[@"token"] ?: @"" ] ]) {
+    NSString *raw = pair[0];
+    NSString *stored = pair[1];
+    NSString *digest = ALNLowercaseHexStringFromData(ALNSHA256([raw dataUsingEncoding:NSUTF8StringEncoding]));
+    XCTAssertNotEqualObjects(raw, stored);
+    XCTAssertEqualObjects([@"sha256:" stringByAppendingString:digest], stored);
+  }
+
+  NSString *legacyToken = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSInteger inserted = [database executeCommand:@"INSERT INTO auth_password_reset_tokens (user_id, token, expires_at) "
+                                                "VALUES ($1, $2, NOW() + INTERVAL '30 minutes')"
+                                     parameters:@[ user[@"id"], legacyToken ] error:&error];
+  XCTAssertTrue(inserted >= 0, @"%@", error);
+  XCTAssertFalse([runtime consumePasswordResetToken:legacyToken password:@"new-password" user:NULL error:NULL]);
+}
 
 - (ALNAuthModuleRuntime *)configuredRuntimeWithTokenUser:(NSDictionary **)user email:(NSString **)email {
   ALNApplication *app = [self applicationWithConfig:@{}];

@@ -8,6 +8,7 @@
 #import <unistd.h>
 
 #import "ALNTOTP.h"
+#import "ALNSecurityPrimitives.h"
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
 
@@ -15,6 +16,11 @@
 @end
 
 @implementation Phase13AuthAdminIntegrationTests
+
+- (NSString *)storedBearerTokenForTestToken:(NSString *)token {
+  NSData *digest = ALNSHA256([token dataUsingEncoding:NSUTF8StringEncoding]);
+  return [@"sha256:" stringByAppendingString:ALNLowercaseHexStringFromData(digest)];
+}
 
 - (NSString *)pgTestDSN {
   const char *value = getenv("ARLEN_PG_TEST_DSN");
@@ -823,12 +829,15 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual((NSInteger)403, [deniedAction[@"status"] integerValue]);
     XCTAssertTrue([[self parseJSONDictionary:deniedAction[@"body"]][@"message"] length] > 0);
 
-    NSString *verificationToken = [self sqlScalar:[NSString stringWithFormat:
-        @"SELECT t.token FROM auth_verification_tokens t JOIN auth_users u ON u.id = t.user_id "
-         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1;",
-        [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
-                                         dsn:dsn];
-    XCTAssertTrue([verificationToken length] > 0);
+    NSString *verificationToken = [[[NSUUID UUID] UUIDString] lowercaseString];
+    NSString *verificationDigest = [self storedBearerTokenForTestToken:verificationToken];
+    NSString *updatedVerification = [self sqlScalar:[NSString stringWithFormat:
+        @"UPDATE auth_verification_tokens SET token = '%@' WHERE id = "
+         "(SELECT t.id FROM auth_verification_tokens t JOIN auth_users u ON u.id = t.user_id "
+         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1) RETURNING token;",
+        verificationDigest, [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                                  dsn:dsn];
+    XCTAssertTrue([updatedVerification hasPrefix:verificationDigest], @"%@", updatedVerification);
     NSDictionary *verifyResponse = [self curlJSONAtPort:port
                                                    path:[NSString stringWithFormat:@"/auth/api/verify?token=%@", verificationToken]
                                                  method:@"GET"
@@ -864,12 +873,15 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [forgotResponse[@"status"] integerValue]);
 
-    NSString *resetToken = [self sqlScalar:[NSString stringWithFormat:
-        @"SELECT t.token FROM auth_password_reset_tokens t JOIN auth_users u ON u.id = t.user_id "
-         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1;",
-        [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
-                                  dsn:dsn];
-    XCTAssertTrue([resetToken length] > 0);
+    NSString *resetToken = [[[NSUUID UUID] UUIDString] lowercaseString];
+    NSString *resetDigest = [self storedBearerTokenForTestToken:resetToken];
+    NSString *updatedReset = [self sqlScalar:[NSString stringWithFormat:
+        @"UPDATE auth_password_reset_tokens SET token = '%@' WHERE id = "
+         "(SELECT t.id FROM auth_password_reset_tokens t JOIN auth_users u ON u.id = t.user_id "
+         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1) RETURNING token;",
+        resetDigest, [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                         dsn:dsn];
+    XCTAssertTrue([updatedReset hasPrefix:resetDigest], @"%@", updatedReset);
     NSDictionary *resetResponse = [self curlJSONAtPort:port
                                                   path:@"/auth/api/password/reset"
                                                 method:@"POST"

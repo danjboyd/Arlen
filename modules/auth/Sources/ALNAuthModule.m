@@ -392,6 +392,13 @@ static NSString *AMPasswordAttemptKeyForEmail(NSString *normalizedEmail) {
   return ALNLowercaseHexStringFromData(digest) ?: @"";
 }
 
+// One-time bearer links have high-entropy random tokens. Keep only a digest in
+// the database so reading a token table does not grant access to the link.
+static NSString *AMStoredBearerToken(NSString *token) {
+  NSData *digest = ALNSHA256([(token ?: @"") dataUsingEncoding:NSUTF8StringEncoding]);
+  return [@"sha256:" stringByAppendingString:ALNLowercaseHexStringFromData(digest) ?: @""];
+}
+
 static NSString *AMPasswordAttemptAddress(NSString *clientAddress) {
   NSString *address = AMLowerTrimmedString(clientAddress);
   if ([address length] == 0 || [address isEqualToString:AMPasswordAccountRowAddress]) {
@@ -2594,7 +2601,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSInteger result = [self.database executeCommand:@"INSERT INTO auth_verification_tokens "
                                                "(user_id, token, purpose, expires_at, created_at) "
                                                "VALUES ($1, $2, 'email_verify', NOW() + INTERVAL '1 day', NOW())"
-                                         parameters:@[ userID ?: @"", token ?: @"" ]
+                                         parameters:@[ userID ?: @"", AMStoredBearerToken(token) ]
                                               error:error];
   return (result >= 0) ? token : nil;
 }
@@ -2605,7 +2612,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSInteger result = [self.database executeCommand:@"INSERT INTO auth_password_reset_tokens "
                                                "(user_id, token, expires_at, created_at) "
                                                "VALUES ($1, $2, NOW() + INTERVAL '30 minutes', NOW())"
-                                         parameters:@[ userID ?: @"", token ?: @"" ]
+                                         parameters:@[ userID ?: @"", AMStoredBearerToken(token) ]
                                               error:error];
   return (result >= 0) ? token : nil;
 }
@@ -2663,6 +2670,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                             user:(NSDictionary **)user
                            error:(NSError **)error {
   NSString *normalizedToken = AMTrimmedString(token);
+  NSString *storedToken = AMStoredBearerToken(normalizedToken);
   NSDictionary *row = [[self.database executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
                                                  "COALESCE(u.display_name, '') AS display_name, "
                                                  "COALESCE(u.roles_json, '[]') AS roles_json, '' AS email_verified_at "
@@ -2670,7 +2678,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                  "JOIN auth_users u ON u.id = t.user_id "
                                                  "WHERE t.token = $1 AND t.consumed_at IS NULL AND t.expires_at > NOW() "
                                                  "ORDER BY t.id DESC LIMIT 1"
-                                       parameters:@[ normalizedToken ]
+                                       parameters:@[ storedToken ]
                                             error:error] firstObject];
   NSString *userID = AMTrimmedString(row[@"id"]);
   if ([userID length] == 0) {
@@ -2685,7 +2693,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_verification_tokens SET consumed_at = NOW() "
                                                      "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
                                                      "RETURNING user_id::text AS user_id"
-                                             parameters:@[ normalizedToken ]
+                                             parameters:@[ storedToken ]
                                                   error:txError];
     if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
       if (txError != NULL && *txError == nil) {
@@ -2717,6 +2725,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     return NO;
   }
   NSString *normalizedToken = AMTrimmedString(token);
+  NSString *storedToken = AMStoredBearerToken(normalizedToken);
   NSDictionary *row = [[self.database executeQuery:@"SELECT u.id::text AS id, u.subject, u.email, "
                                                  "COALESCE(u.display_name, '') AS display_name, "
                                                  "COALESCE(u.roles_json, '[]') AS roles_json, "
@@ -2725,7 +2734,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                  "JOIN auth_users u ON u.id = t.user_id "
                                                  "WHERE t.token = $1 AND t.consumed_at IS NULL AND t.expires_at > NOW() "
                                                  "ORDER BY t.id DESC LIMIT 1"
-                                       parameters:@[ normalizedToken ]
+                                       parameters:@[ storedToken ]
                                             error:error] firstObject];
   NSString *userID = AMTrimmedString(row[@"id"]);
   if ([userID length] == 0) {
@@ -2751,7 +2760,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     NSDictionary *claimed = [connection executeQueryOne:@"UPDATE auth_password_reset_tokens SET consumed_at = NOW() "
                                                      "WHERE token = $1 AND consumed_at IS NULL AND expires_at > NOW() "
                                                      "RETURNING user_id::text AS user_id"
-                                             parameters:@[ normalizedToken ]
+                                             parameters:@[ storedToken ]
                                                   error:txError];
     if (![AMTrimmedString(claimed[@"user_id"]) isEqualToString:userID]) {
       if (txError != NULL && *txError == nil) {
