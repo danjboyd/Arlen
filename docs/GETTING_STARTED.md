@@ -440,3 +440,8 @@ Filesystem-backed storage downloads stream the verified open file, support HEAD
 and byte ranges, and use checksum ETags. Variant source data defaults to a 16 MiB
 limit (`storageModule.maxVariantInputBytes`). See [Storage Module](STORAGE_MODULE.md)
 for custom-adapter behavior and file immutability requirements.
+
+Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup rules.

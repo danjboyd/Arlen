@@ -137,6 +137,7 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
       @"persistence" : @{
         @"enabled" : @YES,
         @"path" : statePath ?: @"",
+        @"backend" : @"plist",
       },
       @"uploadSessionTTLSeconds" : @1,
     },
@@ -527,7 +528,7 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
                                    attachmentAdapter:(id<ALNAttachmentAdapter>)attachmentAdapter
                                          persistence:(NSDictionary *)persistence
                                            overrides:(NSDictionary *)overrides {
-  NSMutableDictionary *persistenceConfig = [@{ @"enabled" : @YES, @"path" : statePath ?: @"" } mutableCopy];
+  NSMutableDictionary *persistenceConfig = [@{ @"enabled" : @YES, @"path" : statePath ?: @"", @"backend" : @"plist" } mutableCopy];
   [persistenceConfig addEntriesFromDictionary:persistence ?: @{}];
   NSMutableDictionary *config = [@{
     @"environment" : @"test",
@@ -700,6 +701,14 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
 }
 
 - (void)testConcurrentWritersOnOneStateFileAllSucceedPromptly {
+  [self assertConcurrentWritersWithBackend:@"plist"];
+}
+
+- (void)testSQLiteConcurrentWritersPreserveEveryObject {
+  [self assertConcurrentWritersWithBackend:@"sqlite"];
+}
+
+- (void)assertConcurrentWritersWithBackend:(NSString *)backend {
   NSString *tempDir = [self temporaryDirectory];
   NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
   NSString *attachmentRoot = [tempDir stringByAppendingPathComponent:@"attachments"];
@@ -711,7 +720,7 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
     // separate worker processes have.
     ALNApplication *app = [self storageApplicationWithStatePath:statePath
                                               attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
-                                                    persistence:nil];
+                                                    persistence:@{ @"backend" : backend }];
     ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
     XCTAssertNil([self configureRuntime:runtime withApplication:app]);
     [runtimes addObject:runtime];
@@ -748,7 +757,7 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
 
   ALNApplication *reader = [self storageApplicationWithStatePath:statePath
                                                attachmentAdapter:[self filesystemAdapterAtPath:attachmentRoot]
-                                                     persistence:nil];
+                                                     persistence:@{ @"backend" : backend }];
   ALNStorageModuleRuntime *check = [[ALNStorageModuleRuntime alloc] init];
   XCTAssertNil([self configureRuntime:check withApplication:reader]);
   XCTAssertEqual(writers * perWriter, [[check listObjectsForCollection:@"plain" query:nil] count]);

@@ -701,3 +701,8 @@ The integration sanitizer skip classifier ignores C comments while preserving
 command string literals. Direct `build/boomhauer` slow-reader and request-deadline
 tests remain eligible for the existing nightly instrumentation lane; required
 checks and branch-protection names are unchanged.
+
+Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup rules.

@@ -1,6 +1,7 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
 #import "ALNStorageModule.h"
+#import "ALNStorageCatalog.h"
 
 #import "../..//admin-ui/Sources/ALNAdminUIModule.h"
 #import "../..//auth/Sources/ALNAuthModule.h"
@@ -830,6 +831,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 @property(nonatomic, assign) NSUInteger nextSequence;
 @property(nonatomic, strong) NSMutableArray<NSDictionary *> *activityLog;
 @property(nonatomic, assign) BOOL persistenceEnabled;
+@property(nonatomic, strong) ALNStorageCatalog *catalog;
 @property(nonatomic, copy) NSString *statePath;
 // Serializes state transactions in this process; the lock file next to the
 // state file serializes them across processes.
@@ -1107,6 +1109,21 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   self.attachmentAdapter = attachmentAdapter;
   [self.lock unlock];
 
+  self.catalog = nil;
+  NSString *backend = SMLowerTrimmedString(moduleConfig[@"persistence"][@"backend"]);
+  if (backend.length > 0 && ![backend isEqualToString:@"sqlite"] && ![backend isEqualToString:@"plist"]) {
+    if (error != NULL) *error = SMError(ALNStorageModuleErrorInvalidConfiguration, @"storage persistence.backend must be sqlite or plist", nil);
+    return NO;
+  }
+  if (self.persistenceEnabled && [backend isEqualToString:@"plist"] &&
+      [[NSFileManager defaultManager] fileExistsAtPath:[self.statePath stringByAppendingString:@".sqlite3"]]) {
+    if (error != NULL) *error = SMError(ALNStorageModuleErrorInvalidConfiguration, @"cannot switch a migrated SQLite catalog back to its stale legacy plist", nil);
+    return NO;
+  }
+  if (self.persistenceEnabled && ![backend isEqualToString:@"plist"]) {
+    self.catalog = [[ALNStorageCatalog alloc] initWithPath:[self.statePath stringByAppendingString:@".sqlite3"] legacyPath:self.statePath error:error];
+    if (self.catalog == nil) return NO;
+  }
   if (![self loadPersistedStateWithError:error]) {
     return NO;
   }
@@ -1278,12 +1295,12 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   // Stamp it before reading and read again if it changed meanwhile: the
   // stamp recorded must never be newer than the content loaded.
   for (NSUInteger attempt = 0; attempt < 3; attempt++) {
-    NSString *stamp = SMStateFileStamp(self.statePath);
+    NSString *stamp = SMStateFileStamp(self.catalog != nil ? self.catalog.path : self.statePath);
     if (![self loadPersistedStateVersionWithError:error]) {
       return NO;
     }
     self.loadedStateStamp = stamp;
-    if ([SMStateFileStamp(self.statePath) isEqualToString:stamp]) {
+    if ([SMStateFileStamp(self.catalog != nil ? self.catalog.path : self.statePath) isEqualToString:stamp]) {
       break;
     }
   }
@@ -1292,7 +1309,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
 
 - (BOOL)loadPersistedStateVersionWithError:(NSError **)error {
   NSError *readError = nil;
-  NSDictionary *state = SMReadPropertyListAtPath(self.statePath, &readError);
+  NSDictionary *state = self.catalog != nil ? [self.catalog readStateWithError:&readError] : SMReadPropertyListAtPath(self.statePath, &readError);
   if (state == nil) {
     if (readError != nil && error != NULL) {
       *error = readError;
@@ -1374,7 +1391,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     NSError *loadError = nil;
     // Holding the lock, nobody can replace the file between this check and
     // the block's write, so an unchanged stamp means memory is current.
-    BOOL current = [SMStateFileStamp(self.statePath) isEqualToString:self.loadedStateStamp ?: @""];
+    BOOL current = [SMStateFileStamp(self.catalog != nil ? self.catalog.path : self.statePath) isEqualToString:self.loadedStateStamp ?: @""];
     if (!current && ![self loadPersistedStateWithError:&loadError]) {
       ALNPlatformReleaseExclusiveLock(descriptor);
       self.stateLockDescriptor = -1;
@@ -1414,7 +1431,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     return;
   }
   if (self.transactionDepth == 0 &&
-      ![SMStateFileStamp(self.statePath) isEqualToString:self.loadedStateStamp ?: @""]) {
+      ![SMStateFileStamp(self.catalog != nil ? self.catalog.path : self.statePath) isEqualToString:self.loadedStateStamp ?: @""]) {
     (void)[self loadPersistedStateWithError:NULL];
   }
   [self.transactionLock unlock];
@@ -1456,9 +1473,10 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
     @"activityLog" : [[NSArray alloc] initWithArray:self.activityLog copyItems:YES] ?: @[],
   };
   [self.lock unlock];
-  BOOL written = SMWritePropertyListAtPath(self.statePath, payload, error);
+  self.catalog.writeTimeoutSeconds = self.lockTimeoutSeconds;
+  BOOL written = self.catalog != nil ? [self.catalog writeState:payload error:error] : SMWritePropertyListAtPath(self.statePath, payload, error);
   if (written) {
-    self.loadedStateStamp = SMStateFileStamp(self.statePath);
+    self.loadedStateStamp = SMStateFileStamp(self.catalog != nil ? self.catalog.path : self.statePath);
   }
   ALNPlatformReleaseExclusiveLock(bareDescriptor);
   [self.transactionLock unlock];

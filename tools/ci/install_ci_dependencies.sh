@@ -87,6 +87,7 @@ install_apt_toolchain() {
     clang \
     curl \
     libcurl4-openssl-dev \
+    libsqlite3-0 \
     jq \
     make \
     pandoc \
@@ -133,6 +134,11 @@ validate_clang_gnustep_toolchain() {
     echo "ci: xctest is required after sourcing $gnustep_sh" >&2
     exit 1
   fi
+
+  python3 - <<'SQLITE_PROBE'
+import ctypes
+ctypes.CDLL("libsqlite3.so.0")
+SQLITE_PROBE
 
   local gnustep_objc_flags
   gnustep_objc_flags="$(gnustep-config --objc-flags)"
