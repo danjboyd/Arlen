@@ -2,7 +2,7 @@
 # Install an Arlen release and put an `arlen` command on your PATH.
 #
 #   curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
-#   curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --version 0.2.1
+#   curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --version 0.2.2
 #
 # Options:
 #   --version X.Y.Z   release to install (default: the latest release)

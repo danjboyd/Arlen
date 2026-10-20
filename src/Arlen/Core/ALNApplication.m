@@ -634,6 +634,7 @@ static BOOL ALNInvokeRouteAction(id controller,
 
 @interface ALNApplication ()
 @property(nonatomic, strong) NSNumber *cachedLargestRouteMaxBodyBytes;
+@property(nonatomic, strong) NSLock *largestRouteMaxBodyBytesLock;
 @property(nonatomic, strong) NSLock *migrationReadinessLock;
 @property(nonatomic, copy) NSDictionary *migrationReadiness;
 @property(nonatomic, strong) NSDate *migrationReadinessCheckedAt;
@@ -1180,6 +1181,7 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
     _configuredRoutesLoaded = NO;
     _routeCompilationLock = [[NSLock alloc] init];
     _migrationReadinessLock = [[NSLock alloc] init];
+    _largestRouteMaxBodyBytesLock = [[NSLock alloc] init];
     _mutableDataverseClients = [NSMutableDictionary dictionary];
     _dataverseClientLock = [[NSLock alloc] init];
     ALNLogLevel defaultLogLevel =
@@ -4551,8 +4553,12 @@ static void ALNFinalizeResponse(ALNApplication *application,
 }
 
 - (NSUInteger)largestRouteMaxBodyBytes {
-  // Routes are fixed once started; the server asks on every connection.
+  // Routes are fixed once started; the server asks on every connection, from
+  // many threads at once, so the cache is only touched under its lock.
+  NSLock *lock = self.largestRouteMaxBodyBytesLock;
+  [lock lock];
   NSNumber *cached = self.cachedLargestRouteMaxBodyBytes;
+  [lock unlock];
   if (cached != nil) {
     return [cached unsignedIntegerValue];
   }
@@ -4567,7 +4573,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
   if (self.isStarted) {
+    [lock lock];
     self.cachedLargestRouteMaxBodyBytes = @(largest);
+    [lock unlock];
   }
   return largest;
 }

@@ -202,7 +202,7 @@ and docs lanes.
 | macOS, Apple runtime | Verified for development and production (propane, launchd deploys). See [Apple Platform](docs/APPLE_PLATFORM.md) for the Linux-only test lanes. |
 | Windows, CLANG64 | Preview. |
 
-The current release is **v0.2.1**. Arlen follows semantic versioning; while it
+The current release is **v0.2.2**. Arlen follows semantic versioning; while it
 is on `0.x`, minor releases may still change public API, with migration notes.
 See [Releases](https://github.com/danjboyd/Arlen/releases) and
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md). The capability-level
