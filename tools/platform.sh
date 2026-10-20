@@ -103,6 +103,18 @@ aln_platform_sha256() {
 
 aln_platform_brew_prefix() {
   local formula="$1"
+  # Homebrew can fetch API metadata for `brew --prefix <formula>` when HOME has
+  # no cache, even if the formula is already installed. Prefer the stable opt
+  # link on macOS so a newly created account can build an app offline.
+  if aln_platform_is_macos; then
+    local homebrew_root
+    for homebrew_root in /opt/homebrew /usr/local; do
+      if [[ -d "$homebrew_root/opt/$formula" ]]; then
+        printf '%s\n' "$homebrew_root/opt/$formula"
+        return 0
+      fi
+    done
+  fi
   if ! command -v brew >/dev/null 2>&1; then
     return 1
   fi

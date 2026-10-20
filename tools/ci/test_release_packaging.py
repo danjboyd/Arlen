@@ -103,6 +103,32 @@ class ManagedToolchainEnvTests(unittest.TestCase):
             self.assertEqual(ld, "/existing")
 
 
+@unittest.skipUnless(
+    os.uname().sysname == "Darwin"
+    and Path("/opt/homebrew/opt/openssl@3/include/openssl").is_dir(),
+    "requires macOS with Homebrew openssl@3",
+)
+class AppleBrewPrefixTests(unittest.TestCase):
+    def test_installed_opt_link_works_with_uncached_home_and_offline_brew(self):
+        with tempfile.TemporaryDirectory() as home:
+            stub_dir = Path(home) / "stub"
+            stub_dir.mkdir()
+            marker = Path(home) / "brew-called"
+            brew = stub_dir / "brew"
+            brew.write_text("#!/bin/sh\nprintf called > \"$BREW_MARKER\"\nexit 42\n")
+            brew.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-c", 'source "$1"; aln_platform_first_brew_prefix openssl@3',
+                 "test", str(REPO_ROOT / "tools/platform.sh")],
+                env={"PATH": f"{stub_dir}:/usr/bin:/bin", "HOME": home,
+                     "BREW_MARKER": str(marker)},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "/opt/homebrew/opt/openssl@3")
+            self.assertFalse(marker.exists(), "installed formula must not query Brew API")
+
+
 class WindowsBundledDllListTests(unittest.TestCase):
     LIST = REPO_ROOT / "tools/release/windows_bundled_dlls.txt"
     SHA256 = r"^[0-9a-f]{64}$"
