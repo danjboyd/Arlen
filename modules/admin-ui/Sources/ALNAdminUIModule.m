@@ -1,4 +1,5 @@
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNAdminUIModule.h"
 
 #import <dispatch/dispatch.h>
@@ -194,11 +195,11 @@ static NSDictionary *AUQueryParametersFromBody(NSData *body) {
       name = [pair substringToIndex:separator.location];
       value = [pair substringFromIndex:(separator.location + 1)];
     }
-    NSString *decodedName = [[name stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding] ?: @"";
+    NSString *decodedName = ALNPercentDecodedString(name, YES) ?: @"";
     if ([decodedName length] == 0) {
       continue;
     }
-    NSString *decodedValue = [[value stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding] ?: @"";
+    NSString *decodedValue = ALNPercentDecodedString(value, YES) ?: @"";
     parameters[decodedName] = decodedValue;
   }
   return parameters;

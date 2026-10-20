@@ -4,6 +4,7 @@
 #import <stdlib.h>
 
 #import "ALNRequest.h"
+#import "ALNPercentDecoding.h"
 #import "../shared/ALNTestSupport.h"
 
 @interface RequestTests : XCTestCase
@@ -35,6 +36,38 @@
 
 - (NSString *)backendName:(ALNHTTPParserBackend)backend {
   return [ALNRequest parserBackendNameForBackend:backend] ?: @"unknown";
+}
+
+- (void)testStrictPercentDecoderHasOneCrossPlatformPolicy {
+  XCTAssertEqualObjects(@"a b", ALNPercentDecodedString(@"a+b", YES));
+  XCTAssertEqualObjects(@"a+b", ALNPercentDecodedString(@"a+b", NO));
+  XCTAssertEqualObjects(@"a/b", ALNPercentDecodedString(@"a%2Fb", NO));
+  XCTAssertEqualObjects(@"caf\u00e9", ALNPercentDecodedString(@"caf%C3%A9", YES));
+  XCTAssertEqualObjects(@"%41", ALNPercentDecodedString(@"%2541", YES));
+  for (NSString *invalid in @[ @"%zz", @"a%2", @"%G1", @"a%00b", @"%C0%AF",
+                               @"%ED%A0%80", @"%F4%90%80%80", @"%FF" ]) {
+    XCTAssertNil(ALNPercentDecodedString(invalid, YES), @"%@", invalid);
+  }
+}
+
+- (void)testMalformedQueryEscapesRemainWholeAcrossBackends {
+  NSString *raw = @"GET /?bad=a%00b&malformed=a%2&utf=%C0%AF&good=a%2Fb&space=a+b HTTP/1.1\r\n"
+                  "Host: localhost\r\n\r\n";
+  for (NSNumber *backendValue in [self allBackends]) {
+    ALNHTTPParserBackend backend = (ALNHTTPParserBackend)[backendValue unsignedIntegerValue];
+    NSError *error = nil;
+    ALNRequest *request = [ALNRequest requestFromRawData:[raw dataUsingEncoding:NSUTF8StringEncoding]
+                                                   backend:backend error:&error];
+    XCTAssertNotNil(request, @"backend=%@ error=%@", [self backendName:backend], error);
+    if (request == nil) continue;
+    NSDictionary *expected = @{ @"bad" : @"a%00b", @"malformed" : @"a%2", @"utf" : @"%C0%AF",
+                                @"good" : @"a/b", @"space" : @"a b" };
+    XCTAssertEqualObjects(expected, request.queryParams, @"backend=%@", [self backendName:backend]);
+    for (NSString *key in expected) {
+      XCTAssertEqualObjects(expected[key], [request queryValueForName:key], @"backend=%@ key=%@",
+                            [self backendName:backend], key);
+    }
+  }
 }
 
 - (void)testParsesRequestLineAndQueryParamsAcrossBackends {

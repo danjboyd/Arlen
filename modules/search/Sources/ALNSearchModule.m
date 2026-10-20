@@ -1,5 +1,6 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNSearchModule.h"
 
 #import "ALNDataCompat.h"
@@ -638,8 +639,7 @@ static NSDictionary *STJSONParametersFromBody(NSData *body) {
 }
 
 static NSString *STQueryDecodeComponent(NSString *component) {
-  NSString *value = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding];
-  return value ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *STFormParametersFromBody(NSData *body) {

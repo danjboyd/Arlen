@@ -144,6 +144,11 @@ it automatically.
 ## 5. Params, Validation, Session, and Auth Helpers
 
 Arlen merges route, query, and request-body params for common controller reads.
+Query and form values decode `+` as a space and decode valid percent-encoded
+UTF-8 once. Route parameters keep `+` literally. Malformed escapes, invalid
+UTF-8, and `%00` are never partially decoded: a route or core query value stays
+as sent; module form parsers use an empty value and skip an invalid name. For example,
+`?name=Peggy+Hill` yields `Peggy Hill`, but `?name=a%00b` yields `a%00b`.
 The helpers you will use most often are:
 
 - `stringParamForName:`

@@ -1235,7 +1235,9 @@ static ALNContext *ALNTestStandInContext(void) {
                                @"https://app.example.test/a/./b", @"https://app.example.test/..",
                                @"https://app.example.test/%2e%2e/x", @"https://app.example.test/%2E./x",
                                @"https://app.example.test/a/%2e/b", @"https://app.example.test/%zz",
-                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%" ]) {
+                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%",
+                               @"https://app.example.test/%00", @"https://app.example.test/%C0%AF",
+                               @"https://app.example.test/%ED%A0%80" ]) {
     NSError *error = nil;
     XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
                                                                   environment:@"production"

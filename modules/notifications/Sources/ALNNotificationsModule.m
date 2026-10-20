@@ -1,6 +1,7 @@
 #import "ALNNotificationsCatalog.h"
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNNotificationsModule.h"
 
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
@@ -287,9 +288,7 @@ static NSString *NMConfiguredPath(NSDictionary *moduleConfig, NSString *key, NSS
 }
 
 static NSString *NMQueryDecodeComponent(NSString *component) {
-  NSString *withSpaces = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "]
-      stringByRemovingPercentEncoding];
-  return withSpaces ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *NMJSONParametersFromBody(NSData *body) {

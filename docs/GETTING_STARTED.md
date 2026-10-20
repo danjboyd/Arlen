@@ -125,6 +125,11 @@ curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/openapi
 ```
 
+When you add routes that read query or form parameters, Arlen decodes valid
+percent-encoded UTF-8 once and treats `+` as a space. Malformed escapes and
+encoded NUL are kept whole in core query values; see the
+[App Authoring Guide](APP_AUTHORING_GUIDE.md#5-params-validation-session-and-auth-helpers).
+
 `boomhauer` watches app files by default and rebuilds when inputs change.
 Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
 for built-in operability, so app routes should not reuse those paths.
