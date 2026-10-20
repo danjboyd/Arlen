@@ -29,4 +29,16 @@ FOUNDATION_EXPORT NSString *ALNStaticCacheControlForPath(NSArray *rules, NSStrin
 // is the one public dot-directory and is not hidden.
 FOUNDATION_EXPORT BOOL ALNStaticRelativePathIsHidden(NSString *relativePath);
 
+// The C string for a file path, or NULL when the path is empty or holds a
+// control character. An NSString can contain U+0000, which a C path ends at,
+// so a check made on the NSString (such as hasSuffix:@".pdf") would describe
+// a different file than the one stat()/open() reach.
+FOUNDATION_EXPORT const char *ALNFileResponseFilesystemPathCString(NSString *path);
+// Same validated paths with native wide-character Windows filesystem calls.
+FOUNDATION_EXPORT int ALNFileResponseStatPath(NSString *path, struct stat *info);
+FOUNDATION_EXPORT int ALNFileResponseOpenPath(NSString *path, int flags);
+// Windows returns an independent file position on the same pinned file object;
+// POSIX callers use pread, so dup is sufficient there.
+FOUNDATION_EXPORT int ALNFileResponseDuplicateReadDescriptor(int descriptor);
+
 #endif

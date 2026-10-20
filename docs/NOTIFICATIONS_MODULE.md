@@ -52,6 +52,15 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
+State writes take a cross-process lock and merge each runtime's changed inbox,
+outbox, fanout, and preference records with the current file. Entry IDs are
+unique across workers. Inbox, outbox, and preference reads refresh from the
+shared file. Inbox read-state and preference changes reload the authoritative
+state while holding the file lock, so a worker that started earlier can update
+entries written by another worker.
+Malformed or unreadable state files stop inbox/preference mutations and suppress
+channel delivery until the file is repaired; a failed write restores the last
+durable state in memory.
 
 Runtime access is available through `ALNNotificationsModuleRuntime`.
 
@@ -74,11 +83,49 @@ Runtime access is available through `ALNNotificationsModuleRuntime`.
 
 Requested channels are validated against the notification definition before queueing or previewing.
 
+## Queueing over HTTP
+
+`POST /notifications/api/queue` takes `notification`, `payload` and optional
+`channels`. A signed-in user can queue notifications only for themselves:
+
+- a payload that names anyone else is refused with `403` and
+  `meta.error` = `queueing a notification for another recipient or email
+  address requires the admin role and AAL2`. That covers a `recipient` or
+  `recipientSubject` other than the caller, any `recipients` entry other than
+  the caller, and an `email` other than their own
+- otherwise the notification is queued for the caller only. Your definition
+  receives the payload with `recipient` set to the caller's auth subject and
+  `email` set to their account email (the auth module account, or a verified
+  `email` claim for bearer-token apps; removed when there is none), and
+  `recipients` removed
+- whatever the definition returns, the module then replaces every delivery
+  target with the caller's own: the email goes only to the caller's address
+  (`to` replaced, `cc`, `bcc` and `To`/`Cc`/`Bcc` headers dropped), the
+  in-app entry and web push go only to the caller's subject. No payload key,
+  at any depth and under any name, can choose who or where it is delivered
+- a webhook target cannot be replaced, so the `webhook` channel is left out
+  of these notifications unless the definition implements
+  `notificationsModuleAllowsWebhookForSelfQueuedNotifications` and returns
+  `YES` (promising its webhook URL never depends on the payload). If only
+  `webhook` was requested, the queue answers `403`
+- the `email` channel needs an email address for the caller; without one the
+  queue answers `422`
+- callers with the `admin` role at AAL2 (the test-send policy) can queue for
+  any recipient or address; their payload and the definition's targets are
+  used unchanged
+
+The rest of the payload reaches your definition as the caller sent it, so
+treat it as user input for message content.
+
+App code that calls `ALNNotificationsModuleRuntime`
+(`queueNotificationIdentifier:...`) is not affected: it addresses whoever the
+app chooses.
+
 ## Retention limits
 
-The module keeps its outbox and inboxes in memory (and in the state file when
+The module keeps its outbox and inboxes in memory (and in the catalog when
 persistence is on), so both are capped. Adding an entry past the cap drops the
-oldest entries. The caps also apply when a state file is loaded.
+oldest entries. The caps also apply when persisted state is loaded.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -95,6 +142,71 @@ notificationsModule = {
 Values must be positive integers; anything else uses the default.
 `resolvedConfigSummary` reports the active caps as `maxOutboxEntries` and
 `maxInboxEntriesPerRecipient`.
+
+## Incremental persistence and upgrading
+
+Notifications 1.3 stores each outbox, inbox and fanout entry, and each recipient's
+preferences, in a separate SQLite row. `persistence.path` remains the legacy
+plist path; the live catalog is `<persistence.path>.sqlite3`. The summary reports
+`persistenceBackend` (`sqlite` or `memory`) and `catalogPath`. A permanent
+`<catalogPath>.initialized` marker prevents stale legacy reimport after catalog
+loss; keep it with the database. Persistence paths reject control characters,
+including embedded NUL. There is no silent
+plist fallback. Disabling persistence retains the in-memory behavior.
+
+Linux requires `libsqlite3.so.0` (Debian/Ubuntu package `libsqlite3-0`); macOS and
+supported Windows use their system SQLite runtime. The notifications module does
+not require installing the storage module. CI already provisions and validates
+this shared runtime dependency.
+
+To upgrade an existing deployment:
+
+1. Stop **all old workers**, including jobs workers that dispatch notifications.
+2. Back up the configured plist and its Web Push subscription sibling.
+3. Start the upgraded application. The first open atomically imports the legacy
+   plist, including binary plists. It leaves the source unchanged as a backup.
+   A failed or interrupted import rolls back and can be retried after fixing the
+   source. Invalid records or duplicate entry IDs fail startup instead of being
+   silently discarded.
+4. Start the remaining upgraded workers against the same local catalog. Older
+   workers must not run against that persistence path: they would keep writing
+   an obsolete plist. Once a committed catalog exists, it is authoritative; the
+   old plist is never automatically reimported to recover missing/corrupt data.
+
+Before any runtime can write, initialization flushes the marker to durable
+storage. A crash before the initial commit permits import retry; a committed
+catalog missing its marker completes marker installation on restart without
+reimport. A marker with a missing or truncated catalog fails startup and requires
+operator restoration of a valid backup. Do not delete the marker to bypass this
+check.
+
+For backups, stop all writers before copying the SQLite database, its
+initialization marker and any journal sidecars, or use SQLite's online backup API
+and retain the marker alongside the backup. Restoring the old plist alone does
+not restore the catalog. Rollback to an older module requires restoring the
+pre-upgrade backup with all writers stopped and removing the newer catalog and
+its initialization marker; post-upgrade changes will be lost. Web Push
+subscriptions keep their separate existing persistence path and format.
+
+A cross-process lock protects reload/merge/commit transactions; SQLite commits
+are atomic with full synchronous durability. UUID entries preserve independent
+appends, and inbox read markers and preference removals apply to authoritative
+state. Transport and realtime network calls run outside those locks. Corrupt,
+removed, replaced or unwritable catalogs fail closed rather than returning stale
+notification state. Use a local filesystem with working SQLite and process locks;
+this is not a distributed persistence protocol for shared network filesystems.
+Durability requires the filesystem and device to honor synchronization barriers
+(POSIX file/directory `fsync`, or Windows write-through handles and
+`FlushFileBuffers`).
+
+Only changed rows are serialized and written. Trimming old entries deletes their
+rows without renumbering retained entries; SQLite reuses freed pages rather than
+shrinking the file on every mutation. A cached immutable snapshot avoids rereading
+all rows when no other connection has committed. A peer commit triggers a fresh
+snapshot. Runtime merging and diffing still inspect retained records in memory,
+so CPU and memory cost are not constant as the number of recipients grows. Caps
+bound the global outbox and each inbox, not the total number of recipients or
+preference records; applications must manage recipient lifecycle retention.
 
 ## Inbox pagination
 
@@ -358,7 +470,7 @@ The notifications API is included in module OpenAPI output.
   - `admin` role
   - AAL2 step-up
 
-That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, preferences, and the `push/*` routes require AAL1; outbox, preview, and test-send require `admin` plus AAL2. Push subscription routes act only on the signed-in user's own subscriptions, and their `POST` requests go through the app's CSRF policy.
+That same split applies to the JSON routes: definitions, inbox, inbox read-state mutations, queueing, preferences, and the `push/*` routes require AAL1; outbox, preview, and test-send require `admin` plus AAL2. Queueing at AAL1 is limited to the signed-in user's own notifications; queueing for anyone else requires `admin` plus AAL2 (see [Queueing over HTTP](#queueing-over-http)). Push subscription routes act only on the signed-in user's own subscriptions, and their `POST` requests go through the app's CSRF policy.
 
 ## Admin UI Integration
 

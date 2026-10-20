@@ -134,6 +134,23 @@
   XCTAssertTrue([output containsString:@"healthy top_calls=0 events=0"], @"%@", output);
   XCTAssertTrue([output containsString:@"warn top_calls=1 events=1"], @"%@", output);
   XCTAssertTrue([output containsString:@"targets ok"], @"%@", output);
+  XCTAssertTrue([output containsString:@"unavailable limits sample preserved manager loop"], @"%@", output);
+}
+
+- (void)testPropaneLsofProbeFailurePreservesStartupPolicyAndValidCounts {
+#if defined(_WIN32)
+  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  NSString *repoRoot = ALNTestRepoRoot();
+  NSString *command = [NSString stringWithFormat:
+      @"bash %@ %@ 2>&1",
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"tests/fixtures/propane/fd_probe_lsof_check.sh"]),
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/propane"])];
+  int exitCode = -1;
+  NSString *output = ALNTestRunShellCapture(command, &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:@"unavailable sample preserved startup limit and backoff"], @"%@", output);
+  XCTAssertTrue([output containsString:@"valid sample preserved count, limit and retirement event"], @"%@", output);
 }
 
 - (void)testArlenBuildJSONCapturesLargeChildOutputWithoutPipeDeadlock_ARLEN_BUG_027 {
@@ -514,12 +531,22 @@
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *doctor = [self readFile:[repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"]];
   XCTAssertTrue([doctor containsString:@"if aln_platform_is_msys; then"]);
-  XCTAssertTrue([doctor containsString:@"probe_flags=\"-DHAVE_MODE_T=1 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1\""]);
+  XCTAssertTrue([doctor containsString:@"probe_flags=\"-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1\""]);
   XCTAssertTrue([doctor containsString:@"clang \\$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only -"]);
   XCTAssertTrue([doctor containsString:@"\"$framework_root/build/dll/libpq.dll\""]);
   XCTAssertTrue([doctor containsString:@"/clang64/bin/libpq.dll"]);
   XCTAssertTrue([doctor containsString:@"add_check \"libcurl\""]);
   XCTAssertTrue([doctor containsString:@"toolchain_state=\"/state/cli-state.json\""]);
+}
+
+// Apps compare vendored modules with the framework's copy at startup, which
+// needs ARLEN_FRAMEWORK_ROOT in the app process under every launcher.
+- (void)testLaunchersExportTheFrameworkRootToTheApp {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  for (NSString *launcher in @[ @"bin/boomhauer", @"bin/propane", @"bin/jobs-worker" ]) {
+    NSString *script = [self readFile:[repoRoot stringByAppendingPathComponent:launcher]];
+    XCTAssertTrue([script containsString:@"export ARLEN_FRAMEWORK_ROOT=\"$framework_root\""], @"%@", launcher);
+  }
 }
 
 - (void)testDoctorAndCLIUseResolvedGNUstepContract {
@@ -547,6 +574,23 @@
   NSString *resolverScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
   XCTAssertTrue([resolverScript containsString:@"clang64_gnustep_sh"]);
   XCTAssertTrue([resolverScript containsString:@"/clang64/share/GNUstep/Makefiles/GNUstep.sh"]);
+#if defined(__linux__)
+  // GNUstep flags include -MMD. A diagnostic probe must not try to write -.d
+  // into the user's cwd (here /), or report present headers as missing.
+  int doctorCode = 0;
+  NSString *output = ALNTestRunShellCapture(
+      [NSString stringWithFormat:@"cd / && ARLEN_FRAMEWORK_ROOT=%@ bash %@ --json 2>/dev/null",
+       ALNTestShellQuote(repoRoot),
+       ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"])], &doctorCode);
+  NSData *jsonData = [output dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *report = jsonData ? [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL] : nil;
+  XCTAssertNotNil(report, @"%@", output);
+  NSString *dispatchStatus = nil;
+  for (NSDictionary *check in report[@"checks"]) {
+    if ([check[@"id"] isEqual:@"dispatch_headers"]) dispatchStatus = check[@"status"];
+  }
+  XCTAssertEqualObjects(@"pass", dispatchStatus, @"%@", output);
+#endif
 }
 
 - (void)testPhase20FocusedRunnerScriptExecutesRepoNativeLaneTargets {
@@ -1191,6 +1235,9 @@
                                   "  if [[ \" $* \" == *\" boomhauer \"* ]]; then\n"
                                   "    : >\"$repo_root/build/boomhauer\"\n"
                                   "  fi\n"
+                                  "  if [[ \" $* \" == *\" runtime-concurrency-fixture \"* ]]; then\n"
+                                  "    : >\"$repo_root/build/runtime-concurrency-fixture\"\n"
+                                  "  fi\n"
                                   "  if [[ \" $* \" == *\" arlen \"* ]]; then\n"
                                   "    : >\"$repo_root/build/arlen\"\n"
                                   "    chmod 755 \"$repo_root/build/arlen\"\n"
@@ -1249,7 +1296,7 @@
 
     NSString *tsanLog = [self readFile:[artifactRoot stringByAppendingPathComponent:@"tsan.log"]];
     XCTAssertTrue([tsanLog containsString:@"ci: tsan bootstrap eocc "], @"%@", tsanLog);
-    XCTAssertTrue([tsanLog containsString:@"probe ok ./build/boomhauer 1"], @"%@", tsanLog);
+    XCTAssertTrue([tsanLog containsString:@"probe ok ./build/runtime-concurrency-fixture 1"], @"%@", tsanLog);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:fakeBin error:nil];
@@ -1589,7 +1636,7 @@
   // list, or the nightly lane wipes build/ under itself.
   int exitCode = -1;
   NSString *output = [self runShellCapture:[NSString stringWithFormat:
-                                                  @"cd %@ && python3 -I tools/ci/classify_sanitizer_integration_skips.py --check 2>&1",
+                                                  @"cd %@ && python3 -I tools/ci/classify_sanitizer_integration_skips.py --check && python3 -I tools/ci/test_sanitizer_skip_classifier.py 2>&1",
                                                   repoRoot]
                                   exitCode:&exitCode];
   XCTAssertEqual(0, exitCode, @"%@", output);

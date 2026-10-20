@@ -6,6 +6,7 @@ print_usage() {
 Usage: propane [options] [-- worker-args]
 
 Runs Arlen in production manager mode with prefork workers.
+Windows production hosting is unsupported; use boomhauer for Windows development.
 All production manager settings are called "propane accessories".
 
 Options:
@@ -310,6 +311,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+case "$(uname -s)" in
+  MSYS*|MINGW*|CYGWIN*)
+    echo "propane: Windows production hosting is not supported; use boomhauer for development" >&2
+    exit 2
+    ;;
+esac
+
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
 
@@ -421,6 +429,11 @@ print(f"config_worker_fd_critical_percent={as_int(accessories.get('workerFDCriti
 print(f"config_worker_fd_retire_percent={as_int(accessories.get('workerFDRetirePercent', 0), 0, 0)}")
 print(f"config_worker_fd_retire_count={as_int(accessories.get('workerFDRetireCount', 0), 0, 0)}")
 print(f"config_worker_fd_check_seconds={as_int(accessories.get('workerFDCheckSeconds', 15), 15, 1)}")
+storage_persistence = (cfg.get("storageModule") or {}).get("persistence") or {}
+storage_unshared = "enabled" in storage_persistence and not as_bool(storage_persistence.get("enabled"), True)
+print(f"config_storage_unshared={1 if storage_unshared else 0}")
+print(f"config_startup_failure_limit={as_int(accessories.get('startupFailureLimit', 5), 5, 0)}")
+print(f"config_respawn_backoff_max_ms={as_int(accessories.get('respawnBackoffMaxMs', 30000), 30000, 0)}")
 PY
 }
 
@@ -449,6 +462,9 @@ while IFS='=' read -r key value; do
     config_worker_fd_retire_percent) config_worker_fd_retire_percent="$value" ;;
     config_worker_fd_retire_count) config_worker_fd_retire_count="$value" ;;
     config_worker_fd_check_seconds) config_worker_fd_check_seconds="$value" ;;
+    config_storage_unshared) config_storage_unshared="$value" ;;
+    config_startup_failure_limit) config_startup_failure_limit="$value" ;;
+    config_respawn_backoff_max_ms) config_respawn_backoff_max_ms="$value" ;;
   esac
 done < <(emit_config_values "$config_json")
 
@@ -457,6 +473,8 @@ host="${host_override:-${config_host:-127.0.0.1}}"
 port="${port_override:-${config_port:-3000}}"
 graceful_shutdown_seconds="${graceful_override:-${config_graceful_shutdown_seconds:-10}}"
 respawn_delay_ms="${respawn_delay_override:-${config_respawn_delay_ms:-250}}"
+startup_failure_limit="${config_startup_failure_limit:-5}"
+respawn_backoff_max_ms="${config_respawn_backoff_max_ms:-30000}"
 reload_overlap_seconds="${reload_overlap_override:-${config_reload_overlap_seconds:-1}}"
 listen_backlog="${listen_backlog_override:-${config_listen_backlog:-128}}"
 connection_timeout_seconds="${connection_timeout_override:-${config_connection_timeout_seconds:-30}}"
@@ -695,7 +713,10 @@ describe_wait_status() {
   fi
 }
 
-echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds"
+if [[ "${config_storage_unshared:-0}" == "1" && "$worker_count" -gt 1 ]]; then
+  echo "propane: warning: storageModule.persistence.enabled = NO with workerCount=$worker_count; each worker keeps its own storage catalog, so most downloads and variant jobs will not find their objects. Enable storage persistence or run one worker." >&2
+fi
+echo "propane: starting with propane accessories workerCount=$worker_count gracefulShutdownSeconds=$graceful_shutdown_seconds respawnDelayMs=$respawn_delay_ms reloadOverlapSeconds=$reload_overlap_seconds startupFailureLimit=$startup_failure_limit respawnBackoffMaxMs=$respawn_backoff_max_ms"
 echo "propane: runtime host=$host port=$port listenBacklog=$listen_backlog connectionTimeoutSeconds=$connection_timeout_seconds enableReusePort=$enable_reuse_port"
 echo "propane: cluster enabled=$cluster_enabled name=$cluster_name nodeID=$cluster_node_id expectedNodes=$cluster_expected_nodes"
 if (( job_worker_count > 0 )); then
@@ -721,6 +742,128 @@ sleep_ms() {
   local duration
   printf -v duration '%d.%03d' "$whole" "$frac"
   sleep "$duration"
+}
+
+# Sleeps in short slices so a TERM/INT during a long respawn backoff still
+# stops propane promptly.
+sleep_ms_interruptible() {
+  local remaining="$1"
+  while (( remaining > 0 && shutting_down == 0 )); do
+    local slice=200
+    if (( remaining < slice )); then
+      slice="$remaining"
+    fi
+    sleep_ms "$slice"
+    remaining=$((remaining - slice))
+  done
+}
+
+# Startup failures. Each worker gets ARLEN_STARTUP_FAILURE_FILE; a worker that
+# cannot start (a module that fails to load, invalid security config) writes
+# its error there and exits, instead of printing it. propane prints each
+# distinct error once, backs off exponentially from the respawn delay up to
+# respawnBackoffMaxMs, and exits non-zero after startupFailureLimit
+# consecutive startup failures (of any error) so the service manager sees a
+# failed unit. A worker exit that is not a startup failure resets the streak.
+startup_failure_dir="$(mktemp -d "${TMPDIR:-/tmp}/propane-startup.XXXXXX")"
+startup_failure_seq=0
+startup_failure_pids=()
+startup_failure_files=()
+http_startup_streak=0
+http_startup_same=0
+http_startup_last=""
+async_startup_streak=0
+async_startup_same=0
+async_startup_last=""
+startup_failure_give_up=0
+next_respawn_delay_ms=0
+
+# Sets new_failure_file. Runs in the calling shell (never in $(...)), so the
+# sequence number advances and every worker gets its own file.
+new_startup_failure_file() {
+  startup_failure_seq=$((startup_failure_seq + 1))
+  new_failure_file="$startup_failure_dir/worker-$startup_failure_seq"
+  : > "$new_failure_file"
+}
+
+remember_startup_failure_file() {
+  startup_failure_pids+=("$1")
+  startup_failure_files+=("$2")
+}
+
+# Sets taken_startup_failure to the recorded startup error for a pid (empty
+# when the worker started) and forgets its file.
+take_startup_failure() {
+  local pid="$1"
+  local idx
+  local keep_pids=()
+  local keep_files=()
+  taken_startup_failure=""
+  for idx in ${!startup_failure_pids[@]}; do
+    if [[ "${startup_failure_pids[$idx]}" == "$pid" ]]; then
+      local file="${startup_failure_files[$idx]}"
+      if [[ -s "$file" ]]; then
+        taken_startup_failure="$(head -c 2000 "$file" | tr '\r\n' '  ')"
+      fi
+      rm -f "$file"
+    else
+      keep_pids+=("${startup_failure_pids[$idx]}")
+      keep_files+=("${startup_failure_files[$idx]}")
+    fi
+  done
+  startup_failure_pids=(${keep_pids[@]+"${keep_pids[@]}"})
+  startup_failure_files=(${keep_files[@]+"${keep_files[@]}"})
+}
+
+# role: http or async. Sets next_respawn_delay_ms and startup_failure_give_up.
+note_worker_exit() {
+  local role="$1"
+  local text="$2"
+  local base_delay="$3"
+  local label="worker"
+  if [[ "$role" == "async" ]]; then
+    label="async worker"
+  fi
+  local streak_var="${role}_startup_streak"
+  local same_var="${role}_startup_same"
+  local last_var="${role}_startup_last"
+  if [[ -z "$text" ]]; then
+    printf -v "$streak_var" '%d' 0
+    printf -v "$same_var" '%d' 0
+    printf -v "$last_var" '%s' ""
+    next_respawn_delay_ms="$base_delay"
+    return
+  fi
+  local streak=$(( ${!streak_var} + 1 ))
+  local same=1
+  if [[ "$text" == "${!last_var}" ]]; then
+    same=$(( ${!same_var} + 1 ))
+  fi
+  printf -v "$streak_var" '%d' "$streak"
+  printf -v "$same_var" '%d' "$same"
+  printf -v "$last_var" '%s' "$text"
+  if (( same == 1 )); then
+    echo "propane: $label startup failed: $text"
+  else
+    echo "propane: $label startup failed (same error) x$same"
+  fi
+  local delay="$base_delay"
+  if (( delay < 100 )); then
+    delay=100
+  fi
+  local step
+  for ((step = 1; step < streak; step++)); do
+    delay=$((delay * 2))
+    if (( respawn_backoff_max_ms > 0 && delay >= respawn_backoff_max_ms )); then
+      delay="$respawn_backoff_max_ms"
+      break
+    fi
+  done
+  next_respawn_delay_ms="$delay"
+  emit_lifecycle_event "${role}_worker_startup_failed" "role=$role" "consecutive_failures=$streak" "same_error_count=$same" "next_respawn_delay_ms=$delay"
+  if (( startup_failure_limit > 0 && streak >= startup_failure_limit )); then
+    startup_failure_give_up=1
+  fi
 }
 
 # FD pressure: Linux reads /proc. Elsewhere (macOS) lsof lists the worker's
@@ -750,7 +893,15 @@ worker_fd_count() {
       fi
       ;;
     lsof)
-      lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null | awk '/^f/ {n++} END {print n + 0}'
+      # A worker can exit after kill -0 and before lsof runs. Treat that as
+      # unavailable so pipefail/errexit cannot abort the manager before it
+      # reaps the worker and applies startup-failure backoff.
+      local listing
+      if ! listing="$(lsof -nP -a -p "$pid" -d 0-999999 -F f 2>/dev/null)"; then
+        echo "-1"
+        return
+      fi
+      printf '%s\n' "$listing" | awk '/^f/ {n++} END {print n + 0}'
       ;;
     *)
       echo "-1"
@@ -774,7 +925,14 @@ worker_fd_soft_limit() {
     echo "0"
     return
   fi
-  awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null
+  # The worker can exit between the readability check and awk opening limits.
+  # An unavailable sample must not trigger errexit before worker reaping.
+  local sampled_limit
+  if ! sampled_limit="$(awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null)"; then
+    echo "0"
+    return
+  fi
+  printf '%s\n' "$sampled_limit"
 }
 
 worker_fd_targets() {
@@ -912,8 +1070,11 @@ check_worker_fd_pressure() {
 
 spawn_worker() {
   local start_reason="${1:-boot}"
-  "$app_binary" ${worker_args[@]+"${worker_args[@]}"} &
+  new_startup_failure_file
+  local failure_file="$new_failure_file"
+  ARLEN_STARTUP_FAILURE_FILE="$failure_file" "$app_binary" ${worker_args[@]+"${worker_args[@]}"} &
   local pid=$!
+  remember_startup_failure_file "$pid" "$failure_file"
   workers+=("$pid")
   echo "propane: worker started pid=$pid"
   emit_lifecycle_event "worker_started" "role=http" "pid=$pid" "reason=$start_reason"
@@ -924,8 +1085,11 @@ spawn_job_worker() {
   if (( job_worker_count < 1 )) || [[ -z "$job_worker_command" ]]; then
     return
   fi
-  bash -lc "$job_worker_command" &
+  new_startup_failure_file
+  local failure_file="$new_failure_file"
+  ARLEN_STARTUP_FAILURE_FILE="$failure_file" bash -lc "$job_worker_command" &
   local pid=$!
+  remember_startup_failure_file "$pid" "$failure_file"
   job_workers+=("$pid")
   echo "propane: async worker started pid=$pid"
   emit_lifecycle_event "async_worker_started" "role=async" "pid=$pid" "reason=$start_reason"
@@ -1027,6 +1191,7 @@ cleanup_and_exit() {
   terminate_pid_list "http_worker" "$shutdown_reason" ${workers[@]+"${workers[@]}"}
   terminate_pid_list "async_worker" "$shutdown_reason" ${job_workers[@]+"${job_workers[@]}"}
   rm -f "$pid_file"
+  rm -rf "$startup_failure_dir"
   emit_lifecycle_event "manager_stopped" "reason=$shutdown_reason" "exit_code=$code"
   exit "$code"
 }
@@ -1106,10 +1271,14 @@ while (( shutting_down == 0 )); do
     done
     workers=(${survivors[@]+"${survivors[@]}"})
 
+    dead_delays=()
     for pair in ${dead[@]+"${dead[@]}"}; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: worker exited pid=$dead_pid status=$dead_status"
+      take_startup_failure "$dead_pid"
+      note_worker_exit "http" "$taken_startup_failure" "$respawn_delay_ms"
+      dead_delays+=("$next_respawn_delay_ms")
       dead_exit_reason="$(describe_wait_status "$dead_status")"
       restart_action="none"
       if (( no_respawn == 0 && once_mode == 0 && shutting_down == 0 )); then
@@ -1126,9 +1295,21 @@ while (( shutting_down == 0 )); do
       continue
     fi
 
+    if (( startup_failure_give_up == 1 )); then
+      manager_exit=3
+      shutdown_reason="worker_startup_failed"
+      echo "propane: giving up after $http_startup_streak consecutive worker startup failures; last: $http_startup_last" >&2
+      emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
+      shutting_down=1
+      continue
+    fi
+
     if (( no_respawn == 0 )); then
-      for _ in ${dead[@]+"${dead[@]}"}; do
-        sleep_ms "$respawn_delay_ms"
+      for delay in ${dead_delays[@]+"${dead_delays[@]}"}; do
+        sleep_ms_interruptible "$delay"
+        if (( shutting_down == 1 )); then
+          break
+        fi
         spawn_worker "respawn_after_exit"
       done
     elif (( ${#workers[@]} == 0 )); then
@@ -1168,10 +1349,14 @@ while (( shutting_down == 0 )); do
     done
     job_workers=(${job_survivors[@]+"${job_survivors[@]}"})
 
+    job_dead_delays=()
     for pair in ${job_dead[@]+"${job_dead[@]}"}; do
       dead_pid="${pair%%:*}"
       dead_status="${pair##*:}"
       echo "propane: async worker exited pid=$dead_pid status=$dead_status"
+      take_startup_failure "$dead_pid"
+      note_worker_exit "async" "$taken_startup_failure" "$job_worker_respawn_delay_ms"
+      job_dead_delays+=("$next_respawn_delay_ms")
       dead_exit_reason="$(describe_wait_status "$dead_status")"
       restart_action="none"
       if (( no_respawn == 0 && shutting_down == 0 )); then
@@ -1180,9 +1365,21 @@ while (( shutting_down == 0 )); do
       emit_lifecycle_event "async_worker_exited" "role=async" "pid=$dead_pid" "status=$dead_status" "exit_reason=$dead_exit_reason" "restart_action=$restart_action"
     done
 
+    if (( startup_failure_give_up == 1 )); then
+      manager_exit=3
+      shutdown_reason="async_worker_startup_failed"
+      echo "propane: giving up after $async_startup_streak consecutive async worker startup failures; last: $async_startup_last" >&2
+      emit_lifecycle_event "manager_shutdown_requested" "signal=internal" "reason=$shutdown_reason" "exit_status=$manager_exit"
+      shutting_down=1
+      continue
+    fi
+
     if (( no_respawn == 0 )); then
-      for _ in ${job_dead[@]+"${job_dead[@]}"}; do
-        sleep_ms "$job_worker_respawn_delay_ms"
+      for delay in ${job_dead_delays[@]+"${job_dead_delays[@]}"}; do
+        sleep_ms_interruptible "$delay"
+        if (( shutting_down == 1 )); then
+          break
+        fi
         spawn_job_worker "respawn_after_exit"
       done
     fi

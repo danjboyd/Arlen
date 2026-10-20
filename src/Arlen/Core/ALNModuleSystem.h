@@ -89,8 +89,23 @@ extern NSString *const ALNModuleSystemFrameworkVersion;
 + (nullable NSArray<NSDictionary *> *)doctorDiagnosticsAtAppRoot:(NSString *)appRoot
                                                           config:(NSDictionary *)config
                                                            error:(NSError *_Nullable *_Nullable)error;
+// Compares each vendored module with the framework checkout's copy under
+// frameworkRoot/modules. A newer framework version is a `module_outdated`
+// warning; with compareContent, a same-version copy whose files differ is
+// `module_framework_copy_differs`. Returns an empty array when frameworkRoot
+// is empty or the app vendors no modules.
++ (NSArray<NSDictionary *> *)frameworkCopyDiagnosticsAtAppRoot:(NSString *)appRoot
+                                                 frameworkRoot:(nullable NSString *)frameworkRoot
+                                                compareContent:(BOOL)compareContent;
 + (nullable NSArray<id<ALNModule>> *)loadModulesForApplication:(ALNApplication *)application
                                                          error:(NSError *_Nullable *_Nullable)error;
+// Loads modules in dependency order into `loadedModules`, stopping at the
+// first module that fails; on failure the error names that module (`module`,
+// `key_path` when the module reported one, `not_loaded`) and the modules loaded
+// before it stay in `loadedModules`.
++ (BOOL)loadModulesForApplication:(ALNApplication *)application
+                    loadedModules:(NSMutableArray<id<ALNModule>> *)loadedModules
+                            error:(NSError *_Nullable *_Nullable)error;
 + (nullable NSArray<NSDictionary *> *)migrationPlansAtAppRoot:(NSString *)appRoot
                                                        config:(nullable NSDictionary *)config
                                                         error:(NSError *_Nullable *_Nullable)error;

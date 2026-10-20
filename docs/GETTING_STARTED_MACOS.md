@@ -4,23 +4,34 @@ This guide is the closed Apple-runtime baseline for Arlen on macOS.
 
 ## Install a Release
 
-On Apple Silicon, the release installer unpacks prebuilt framework tools
-(`arlen`, `boomhauer`, `eocc`, and `libArlenFramework.a`), so nothing in the
-framework is compiled at install time. Your apps are still compiled on your
-Mac, so you need:
+On Apple Silicon with macOS 14 or newer, the release installer unpacks prebuilt
+framework tools (`arlen`, `boomhauer`, `eocc`, and `libArlenFramework.a`). Your
+apps are still compiled on your Mac, so you need:
 
-- Xcode Command Line Tools (`xcode-select --install`). Full Xcode is needed
-  only for `arlen test`, which runs Apple XCTest.
-- Homebrew `openssl@3` and `libpq` (`brew install openssl@3 libpq`), at the
-  default `/opt/homebrew` prefix. The prebuilt tools link against that
-  OpenSSL.
-- macOS 14 or later.
+- [Xcode Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools/)
+  (`xcode-select --install`) or full Xcode. The
+  installer stops with this instruction if Apple clang or the macOS SDK is
+  missing. Finish the system installation dialog before retrying. Full Xcode
+  is needed for `arlen test`, which runs Apple XCTest.
+- Homebrew at its standard Apple Silicon prefix, `/opt/homebrew`. When
+  `openssl@3` is missing, the installer asks before installing it through
+  Homebrew; `--yes` allows this setup in a noninteractive run. The prebuilt
+  binaries link directly to
+  `/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib`. If Homebrew itself is
+  missing, install it from [brew.sh](https://brew.sh/) and rerun the installer.
+  Install `libpq` separately (`brew install libpq`) if your app uses PostgreSQL.
 
 ```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash' && export PATH="$HOME/.local/bin:$PATH"
 arlen doctor
 arlen new MyApp && cd MyApp && arlen boomhauer --port 3000
 ```
+
+The first line installs Arlen and makes its launcher available in this
+terminal. A piped installer runs in a child shell, so it cannot update the
+terminal's `PATH` by itself. The installer also adds `~/.local/bin` to zsh's
+startup files for future terminals. From another directory, `command -v arlen`
+should print `~/.local/bin/arlen` (with `~` expanded to your home directory).
 
 The installer verifies the download against the release's `SHA256SUMS`,
 unpacks it to `~/.local/share/arlen/<version>`, points
@@ -30,12 +41,18 @@ apps can live anywhere. Run `install.sh --help` for the prefix and version
 options. If you downloaded the archive with a browser, pass it with
 `--archive`; the installer clears the quarantine flag.
 
-`~/.local/bin` is not on the `PATH` of a new Mac. If `arlen` is not found,
-add it in the startup file of the default shell, zsh, and open a new terminal:
+For an install that leaves your shell startup files alone, pass
+`--no-modify-path` to the installer and add the launcher directory yourself:
 
 ```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile
+export PATH="$HOME/.local/bin:$PATH"
 ```
+
+The prebuilt tools are ad-hoc signed, without a Developer ID signature or
+notarization. The installer clears the quarantine attribute from the
+extracted framework; install only an archive you trust. A downloaded release
+archive is checked against its release `SHA256SUMS`. A local `--archive` is a
+trusted-input path; keep its companion `SHA256SUMS` beside it when available.
 
 The prebuilt tools stay in use while the installed framework sources and the
 OpenSSL location match the release. If you edit the installed sources, or

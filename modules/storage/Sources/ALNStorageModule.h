@@ -20,6 +20,9 @@ typedef NS_ENUM(NSInteger, ALNStorageModuleErrorCode) {
   ALNStorageModuleErrorNotFound = 3,
   ALNStorageModuleErrorTokenRejected = 4,
   ALNStorageModuleErrorPersistenceFailed = 5,
+  // Another process held the state lock past persistence.lockTimeoutSeconds.
+  // The change was not made; retrying later can succeed (HTTP 503).
+  ALNStorageModuleErrorStateBusy = 6,
 };
 
 @protocol ALNStorageCollectionDefinition <NSObject>
@@ -94,6 +97,11 @@ typedef NS_ENUM(NSInteger, ALNStorageModuleErrorCode) {
                                                error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)payloadForDownloadToken:(NSString *)token
                                              error:(NSError *_Nullable *_Nullable)error;
+/// Returns a checksum-verified pinned file when the attachment adapter supports
+/// streaming. Nil with no error means the adapter only supports NSData.
+- (nullable NSFileHandle *)openDownloadFileForToken:(NSString *)token
+                                            metadata:(NSDictionary *_Nullable *_Nullable)metadata
+                                               error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSData *)downloadDataForToken:(NSString *)token
                                  metadata:(NSDictionary *_Nullable *_Nullable)metadata
                                     error:(NSError *_Nullable *_Nullable)error;

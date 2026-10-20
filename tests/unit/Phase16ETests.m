@@ -7,6 +7,7 @@
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
 
 @interface Phase16EOpsJob : NSObject <ALNJobsJobDefinition>
 @end
@@ -192,6 +193,106 @@
   XCTAssertNotNil(drilldown);
   XCTAssertEqualObjects(@"jobs", drilldown[@"identifier"]);
   XCTAssertTrue([(NSArray *)(drilldown[@"history"] ?: @[]) count] > 0);
+}
+
+- (void)testIndependentOpsRuntimesPreserveEachOthersSnapshots {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"ops-shared-state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:statePath includeJobs:NO];
+  ALNOpsModuleRuntime *first = [[ALNOpsModuleRuntime alloc] init];
+  ALNOpsModuleRuntime *second = [[ALNOpsModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([first configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  XCTAssertTrue([second configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+
+  XCTAssertEqual((NSUInteger)1, [(NSArray *)[first dashboardSummary][@"history"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)[second dashboardSummary][@"history"] count]);
+  XCTAssertEqual((NSUInteger)3, [(NSArray *)[first dashboardSummary][@"history"] count]);
+
+  ALNOpsModuleRuntime *restarted = [[ALNOpsModuleRuntime alloc] init];
+  XCTAssertTrue([restarted configureWithApplication:app error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)4, [(NSArray *)[restarted dashboardSummary][@"history"] count]);
+}
+
+- (void)testOpsStateTransactionsAcrossProcesses {
+  NSString *sharedPath = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_OPS_SHARED_STATE_PATH"];
+  if ([sharedPath length] > 0) {
+    ALNOpsModuleRuntime *runtime = [[ALNOpsModuleRuntime alloc] init];
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureWithApplication:[self applicationWithStatePath:sharedPath includeJobs:NO]
+                                              error:&error]);
+    XCTAssertNil(error);
+    NSString *readyPrefix = [[sharedPath lastPathComponent] stringByAppendingString:@".ready."];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    __block NSUInteger readyCount = 0;
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.05, ^BOOL {
+      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
+                                                                           error:NULL];
+      readyCount = 0;
+      for (NSString *name in names) {
+        if ([name hasPrefix:readyPrefix]) readyCount++;
+      }
+      return readyCount >= 2U;
+    }));
+    XCTAssertEqual((NSUInteger)2, readyCount);
+    XCTAssertNotNil([runtime dashboardSummary]);
+    return;
+  }
+
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"ops-process-state.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  XCTAssertTrue([runner length] > 0);
+  XCTAssertTrue([bundlePath length] > 0);
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 2U; index++) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+#if defined(__APPLE__)
+    child.arguments = @[ @"-XCTest", @"Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+#else
+    child.arguments = @[ @"-output-format", @"apple",
+                         @"-only-testing:ArlenUnitTests/Phase16ETests/testOpsStateTransactionsAcrossProcesses", bundlePath ];
+#endif
+    NSString *outputPath = [statePath stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
+    child.standardOutput = output;
+    child.standardError = output;
+    NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
+    environment[@"ARLEN_OPS_SHARED_STATE_PATH"] = statePath;
+    child.environment = environment;
+    [child launch];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
+  }
+  for (NSDictionary *entry in children) {
+    NSTask *child = entry[@"task"];
+    BOOL exited = ALNTestWaitForTaskExit(child, 30.0);
+    if (!exited) {
+      [child terminate];
+      [child waitUntilExit];
+    }
+    NSData *data = [NSData dataWithContentsOfFile:entry[@"outputPath"]];
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    XCTAssertTrue(exited, @"child timed out: %@", output);
+    XCTAssertEqual(0, child.terminationStatus, @"%@", output);
+    XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
+    [entry[@"outputHandle"] closeFile];
+  }
+  NSData *stateData = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil(stateData);
+  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
+  NSError *readError = nil;
+  NSDictionary *state = [NSPropertyListSerialization propertyListWithData:stateData
+                                                                  options:NSPropertyListImmutable
+                                                                   format:&format error:&readError];
+  XCTAssertNil(readError);
+  XCTAssertTrue([state isKindOfClass:[NSDictionary class]]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"historySnapshots"] count]);
 }
 
 - (void)testOpsRemainsUsefulWhenOnlyOpsModuleIsInstalled {

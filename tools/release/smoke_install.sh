@@ -14,6 +14,10 @@ archive="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/arlen-smoke.XXXXXX")"
 server_pid=""
+install_home="$work/home"
+mkdir -p "$install_home"
+# Preserve a deliberately supplied toolchain, otherwise allow the installer to
+# bootstrap into this isolated HOME. Never edit the caller's startup files.
 cleanup() {
   if [[ -n "$server_pid" ]]; then
     # boomhauer runs in its own process group; stop the whole group.
@@ -27,22 +31,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
-bash "$repo_root/tools/install.sh" --archive "$archive" --prefix "$work/arlen" --bin-dir "$work/bin"
-arlen="$work/bin/arlen"
-
-"$arlen" doctor
+env HOME="$install_home" SHELL=/bin/bash bash "$repo_root/tools/install.sh" --yes --archive "$archive" --prefix "$work/arlen" --bin-dir "$work/bin"
+# Exercise persisted shell setup with PATH initially excluding the new bin dir.
+env HOME="$install_home" bash --noprofile --norc -c '. "$HOME/.profile"; cd /; command -v arlen; arlen doctor'
+env HOME="$install_home" bash -ic 'cd /; command -v arlen; arlen doctor'
+# Match the explicit export printed for the current shell; invoke only bare arlen.
+export PATH="$work/bin:$PATH"
+export GNUSTEP_SH="$(env HOME="$install_home" bash "$work/arlen/current/tools/resolve_gnustep.sh" 2>/dev/null || true)"
+arlen doctor
 
 cd "$work"
-"$arlen" new SmokeApp
+arlen new SmokeApp
 cd SmokeApp
+arlen build
 
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 if command -v setsid >/dev/null 2>&1; then
-  setsid "$arlen" boomhauer --port "$port" >"$work/boomhauer.log" 2>&1 </dev/null &
+  setsid arlen boomhauer --port "$port" >"$work/boomhauer.log" 2>&1 </dev/null &
 else
   # macOS has no setsid; bash job control gives the job its own process group.
   set -m
-  "$arlen" boomhauer --port "$port" >"$work/boomhauer.log" 2>&1 </dev/null &
+  arlen boomhauer --port "$port" >"$work/boomhauer.log" 2>&1 </dev/null &
   set +m
 fi
 server_pid=$!

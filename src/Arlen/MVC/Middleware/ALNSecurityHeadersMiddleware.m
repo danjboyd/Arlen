@@ -2,12 +2,14 @@
 
 #import "ALNContext.h"
 #import "ALNResponse.h"
+#import "ALNResponseHeaderInternal.h"
 #import <dispatch/dispatch.h>
 
 @interface ALNSecurityHeadersMiddleware ()
 
 @property(nonatomic, copy) NSString *contentSecurityPolicy;
 @property(nonatomic, copy) NSDictionary<NSString *, NSString *> *resolvedResponseHeaders;
+@property(nonatomic, strong) ALNPreparedResponseHeaders *preparedResponseHeaders;
 
 @end
 
@@ -39,6 +41,7 @@ static NSDictionary<NSString *, NSString *> *ALNSecurityHeadersDefaults(void) {
       headers[@"Content-Security-Policy"] = _contentSecurityPolicy;
     }
     _resolvedResponseHeaders = [headers copy];
+    _preparedResponseHeaders = [[ALNPreparedResponseHeaders alloc] initWithHeaders:_resolvedResponseHeaders];
   }
   return self;
 }
@@ -49,7 +52,12 @@ static NSDictionary<NSString *, NSString *> *ALNSecurityHeadersDefaults(void) {
 
 - (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
   (void)error;
-  [context.response setHeadersIfMissing:[self responseHeaders]];
+  if ([self class] == [ALNSecurityHeadersMiddleware class]) {
+    [context.response aln_setPreparedHeadersIfMissing:self.preparedResponseHeaders];
+  } else {
+    // Preserve subclasses that calculate responseHeaders dynamically.
+    [context.response setHeadersIfMissing:[self responseHeaders]];
+  }
   return YES;
 }
 

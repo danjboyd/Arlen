@@ -85,7 +85,7 @@ static NSUInteger gPhase13FProviderMappingCalls = 0;
   gPhase13FRegistrationCalls = 0;
   gPhase13FProviderMappingCalls = 0;
   NSError *error = nil;
-  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} error:&error]);
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] configureHooksWithModuleConfig:@{} environment:@"test" error:&error]);
   XCTAssertNil(error);
 }
 

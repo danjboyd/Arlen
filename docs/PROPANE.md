@@ -78,8 +78,32 @@ propaneAccessories = {
   jobWorkerCount = 0;
   jobWorkerCommand = "";
   jobWorkerRespawnDelayMs = 250;
+  startupFailureLimit = 5;
+  respawnBackoffMaxMs = 30000;
 };
 ```
+
+Worker startup failures. A worker that cannot start (for example a module
+that fails to load, or invalid security configuration) exits before serving.
+propane tells each worker where to report that error
+(`ARLEN_STARTUP_FAILURE_FILE`), so it can tell a startup failure from a crash:
+
+- It prints each distinct startup error once, then
+  `worker startup failed (same error) xN` for repeats, and emits a
+  `http_worker_startup_failed` (or `async_worker_startup_failed`) lifecycle
+  event with the consecutive count and the next delay.
+- It backs off exponentially: the respawn delay (`respawnDelayMs`, or
+  `jobWorkerRespawnDelayMs` for async workers, at least 100 ms) doubles per
+  consecutive startup failure, up to `respawnBackoffMaxMs`. This gives a
+  transient startup error (a lock held by another process, a database that is
+  still starting) room to clear.
+- After `startupFailureLimit` consecutive startup failures (any error),
+  propane stops its workers and exits with status `3`, so systemd or launchd
+  reports a failed unit. `0` disables the limit. A worker disappearing during
+  descriptor sampling is treated as an unavailable sample; it does not abort
+  the manager or bypass startup-failure handling.
+- A worker exit that is not a startup failure (a worker that started and later
+  crashed) resets the count and respawns after the plain respawn delay.
 
 Runtime socket controls:
 
@@ -236,7 +260,9 @@ Stable FD-pressure fields include:
 before descriptor exhaustion breaks request handling. On Linux it reads
 `/proc/$pid/fd` and `/proc/$pid/limits`. On macOS it lists the worker's numeric
 descriptors with `lsof` and uses propane's own `ulimit -n` as the soft limit,
-which workers inherit.
+which workers inherit. If a worker exits between the manager's process check
+and `lsof`, the sample is skipped so worker reaping and startup-failure backoff
+can continue.
 The checks are disabled only by setting thresholds to `0`; warning diagnostics
 default on.
 
@@ -326,3 +352,10 @@ Apps that launch subprocesses with `NSTask`, `NSPipe`,
 Long-lived Arlen workers make small per-request leaks production-significant,
 so subprocess helpers should use explicit close/release ownership and should be
 validated with FD-count regression checks.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.

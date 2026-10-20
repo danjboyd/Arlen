@@ -47,26 +47,53 @@ class SourceArchiveTests(unittest.TestCase):
 
 
 class InstallPathHintTests(unittest.TestCase):
-    def test_path_hint_names_the_login_shell_startup_file(self):
-        bash_rc = "~/.bash_profile" if os.uname().sysname == "Darwin" else "~/.bashrc"
-        expected = {"/bin/zsh": "~/.zprofile", "/bin/bash": bash_rc,
-                    "/bin/sh": "~/.profile"}
+    def test_installer_persists_path_for_fresh_shells_without_duplicate_entries(self):
+        cases = [
+            ("/bin/zsh", None, (".zprofile", ".zshrc")),
+            ("/bin/bash", None, (".profile", ".bashrc")),
+            ("/bin/bash", ".bash_profile", (".bash_profile", ".bashrc")),
+            ("/bin/bash", ".bash_login", (".bash_login", ".bashrc")),
+            ("/bin/sh", None, (".profile",)),
+        ]
         with tempfile.TemporaryDirectory() as out:
             subprocess.run(
                 ["bash", str(REPO_ROOT / "tools/release/package_framework.sh"),
                  "--version", "9.8.7", "--kind", "source", "--out", out],
                 check=True, cwd=REPO_ROOT, stdout=subprocess.DEVNULL)
-            for shell, rc in expected.items():
-                with self.subTest(shell=shell):
-                    result = subprocess.run(
-                        ["bash", str(REPO_ROOT / "tools/install.sh"),
-                         "--archive", str(Path(out) / "arlen-9.8.7.tar.gz"), "--no-build",
-                         "--prefix", str(Path(out) / "prefix"),
-                         "--bin-dir", str(Path(out) / "bin")],
-                        env={"PATH": "/usr/bin:/bin", "HOME": out, "SHELL": shell,
-                             "TMPDIR": out},
-                        check=True, capture_output=True, text=True)
-                    self.assertIn(f">> {rc}\n", result.stdout + result.stderr)
+            # Exercise the portable profile contract with a source archive on
+            # either host OS; no build or prerequisite installation is needed.
+            stubs = Path(out) / "stubs"
+            stubs.mkdir()
+            uname = stubs / "uname"
+            uname.write_text("#!/bin/sh\ncase \"$1\" in -s) echo Linux;; -m) echo x86_64;; esac\n")
+            uname.chmod(0o755)
+            for shell, existing, profiles in cases:
+                with self.subTest(shell=shell, existing=existing), tempfile.TemporaryDirectory(dir=out) as home:
+                    if existing:
+                        (Path(home) / existing).write_text("# existing user configuration\n")
+                    bin_dir = Path(home) / "bin with ' quote"
+                    command = [
+                        "bash", str(REPO_ROOT / "tools/install.sh"),
+                        "--archive", str(Path(out) / "arlen-9.8.7.tar.gz"), "--no-build",
+                        "--prefix", str(Path(home) / "prefix"), "--bin-dir", str(bin_dir),
+                    ]
+                    env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": home,
+                           "SHELL": shell, "TMPDIR": home}
+                    for _ in range(2):
+                        subprocess.run(command, env=env, check=True,
+                                       capture_output=True, text=True)
+                    for profile in profiles:
+                        path = Path(home) / profile
+                        self.assertEqual(path.read_text().count("# Arlen launcher\n"), 1)
+                        result = subprocess.run(
+                            ["bash", "--noprofile", "--norc", "-c",
+                             '. "$1"; cd /; command -v arlen', "test", str(path)],
+                            env=env, check=True, capture_output=True, text=True)
+                        self.assertEqual(Path(result.stdout.strip()).resolve(),
+                                         (bin_dir / "arlen").resolve())
+                    if existing:
+                        self.assertTrue((Path(home) / existing).read_text().startswith(
+                            "# existing user configuration\n"))
 
 
 class ManagedToolchainEnvTests(unittest.TestCase):
@@ -101,6 +128,32 @@ class ManagedToolchainEnvTests(unittest.TestCase):
             root = self._fake_root(base, managed=False)
             ld = self._ld_path_after_source(root / "System/Library/Makefiles/GNUstep.sh")
             self.assertEqual(ld, "/existing")
+
+
+@unittest.skipUnless(
+    os.uname().sysname == "Darwin"
+    and Path("/opt/homebrew/opt/openssl@3/include/openssl").is_dir(),
+    "requires macOS with Homebrew openssl@3",
+)
+class AppleBrewPrefixTests(unittest.TestCase):
+    def test_installed_opt_link_works_with_uncached_home_and_offline_brew(self):
+        with tempfile.TemporaryDirectory() as home:
+            stub_dir = Path(home) / "stub"
+            stub_dir.mkdir()
+            marker = Path(home) / "brew-called"
+            brew = stub_dir / "brew"
+            brew.write_text("#!/bin/sh\nprintf called > \"$BREW_MARKER\"\nexit 42\n")
+            brew.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-c", 'source "$1"; aln_platform_first_brew_prefix openssl@3',
+                 "test", str(REPO_ROOT / "tools/platform.sh")],
+                env={"PATH": f"{stub_dir}:/usr/bin:/bin", "HOME": home,
+                     "BREW_MARKER": str(marker)},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "/opt/homebrew/opt/openssl@3")
+            self.assertFalse(marker.exists(), "installed formula must not query Brew API")
 
 
 class WindowsBundledDllListTests(unittest.TestCase):

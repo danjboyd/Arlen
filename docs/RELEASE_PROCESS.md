@@ -141,6 +141,14 @@ tools/release/package_framework.sh --version X.Y.Z --kind source --out build/rel
 tools/release/smoke_install.sh build/release-assets/arlen-X.Y.Z.tar.gz
 ```
 
+The Unix smoke uses an isolated home directory, tests persisted PATH setup and
+bare `arlen` outside the checkout, and checks a generated app over HTTP. It
+allows prerequisite setup (`--yes`); run clean-host checks in disposable
+containers with sudo available. A local archive test does not verify published
+asset URLs. After publication, separately test the downloaded installer and
+release checksums, including a fresh shell. Never label a local candidate
+archive as the live `latest` release.
+
 On Windows, inside the gnustep-cli `CLANG64` shell (`scripts\run_clang64.ps1`):
 
 ```bash

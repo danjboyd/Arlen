@@ -28,6 +28,19 @@ until 0.4.0; see the support statement below.
 
 ## 1. Host Entry Path
 
+Windows framework, application and test builds set `_FILE_OFFSET_BITS=64`.
+This is required for file sizes and Range offsets above 2 GiB on CLANG64;
+64-bit Windows alone does not make the CRT's default `off_t` 64-bit. Custom
+build integrations must use the same flag and rebuild their objects.
+File responses use wide-character path operations for valid Unicode filenames.
+Native descriptor cloning retains the pinned file object with independent
+positions, so concurrent responses cannot overwrite each other's seek offset.
+
+Private file-backed service storage uses a protected current-user NTFS DACL;
+POSIX permission bits do not secure Windows files. Static mounts resolve native
+final handle paths before containment/extension checks, and listen sockets use
+exclusive binding. The Windows preview job exercises these transport rules.
+
 Use PowerShell as the outer launcher and MSYS2 `CLANG64` as the inner GNUstep
 shell:
 
@@ -132,6 +145,10 @@ Packaged release confidence lane:
 make windows-confidence
 ```
 
+This production packaging lane is not a Windows v0.3 acceptance gate and cannot
+complete while Windows `propane` is explicitly unsupported. Use the preview
+development lane; production validation is deferred to the shared-listener work.
+
 Convenience preview runner:
 
 ```sh
@@ -144,7 +161,13 @@ Those lanes are intended to verify:
 - MSSQL / ODBC
 - `boomhauer` watch-mode recovery
 - `jobs-worker` queued-job execution
-- `propane` request serving and reload handling
+- explicit rejection of unsupported `propane` production startup (`--help` works)
+
+Windows `propane` exits with status 2 before starting workers. The old preview
+test depended on multiple independently bound sockets sharing a port through
+Windows `SO_REUSEADDR`, which permitted local port interception. Exclusive
+binding remains required. A shared inherited Winsock listener is future Windows
+production work; this lane does not certify Windows production hosting.
 
 The preview lanes run through the vendored `tools-xctest` fork, the same
 runner the Linux and macOS lanes use (GitHub issue #116), so Windows runs get
@@ -230,3 +253,29 @@ Not planned:
 - The `windows-preview` CI lane runs `make phase24-windows-confidence` and
   `make test-unit`. `make windows-confidence` (packaged release and deploy
   parity) is a manual lane until Windows production support lands in 0.4.0.
+
+## Installer Regression Checks
+
+From Windows PowerShell 5.1, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
+```
+
+This focused fixture suite mocks network/bootstrap execution and restores user
+PATH after checking setup pins, opt-outs, current/persistent PATH, interrupted
+downloads, checksum rejection and safe same-version retries. Fault injection
+also exercises launcher write/publish and junction create/switch rollback,
+verifying that the previous bare `arlen` command still runs. Concurrent prefix
+and shared-launcher-directory activation is rejected. The suite runs in the
+Windows preview and release certification workflows. It does not establish
+clean-host provisioning success.
+
+The installed-release smoke also verifies bare `arlen doctor` outside the
+checkout in the current PowerShell and a fresh process reading saved user PATH,
+then scaffolds, builds and serves a generated app. Use
+`tools\ci\run_windows_release_certification.ps1 -Archive <zip> -WorkDir <path>`;
+`-KeepWorkDir` preserves app/build/server evidence. Tests restore user PATH on
+exit. See [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for setup,
+offline options, and the distinction between an in-process installer and a
+child PowerShell process.

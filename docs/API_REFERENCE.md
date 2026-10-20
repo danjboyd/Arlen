@@ -11,8 +11,8 @@ python3 tools/docs/generate_api_reference.py
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `94`
 - Symbols: `166`
-- Public methods: `1112`
-- Public properties: `520`
+- Public methods: `1131`
+- Public properties: `525`
 
 ## API Surface Boundary
 
@@ -170,7 +170,7 @@ python3 tools/docs/generate_api_reference.py
 - [ALNEventStreamRequestContext](api/ALNEventStreamRequestContext.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamService](api/ALNEventStreamService.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNEventStreamStore](api/ALNEventStreamStore.md): Protocol contract exported as part of the `ALNEventStreamStore` API surface.
-- [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue for one adapter instance; no cross-process coordination or crashed-worker lease recovery.
+- [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue with cross-process locking; no crashed-worker lease recovery.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
 - [ALNHTTPClient](api/ALNHTTPClient.md): Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).

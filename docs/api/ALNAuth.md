@@ -17,3 +17,4 @@ Authentication and authorization helpers for bearer token extraction, JWT verifi
 | `rolesFromClaims:` | `+ (NSArray *)rolesFromClaims:(NSDictionary *)claims;` | Extract role list from claims payload. | Call on the class type, not on an instance. |
 | `context:hasRequiredScopes:` | `+ (BOOL)context:(ALNContext *)context hasRequiredScopes:(NSArray *)scopes;` | Return whether context claims satisfy required scope set. | Call on the class type, not on an instance. |
 | `context:hasRequiredRoles:` | `+ (BOOL)context:(ALNContext *)context hasRequiredRoles:(NSArray *)roles;` | Return whether context claims satisfy required role set. | Call on the class type, not on an instance. |
+| `context:hasAnyRole:` | `+ (BOOL)context:(ALNContext *)context hasAnyRole:(NSArray *)roles;` | Perform `context` for `ALNAuth`. | Call on the class type, not on an instance. |

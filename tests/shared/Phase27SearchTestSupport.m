@@ -490,6 +490,34 @@ NSString *Phase27SearchFixturesPath(NSString *filename) {
 
 @end
 
+@interface Phase27SearchRoleGatedProductsResource : Phase27SearchProductsResource
+@end
+
+@implementation Phase27SearchRoleGatedProductsResource
+
+- (NSDictionary *)searchModuleResourceMetadata {
+  NSMutableDictionary *metadata = [[super searchModuleResourceMetadata] mutableCopy];
+  metadata[@"queryPolicy"] = @"role_gated";
+  metadata[@"queryRoles"] = @[ @"auditor" ];
+  return metadata;
+}
+
+@end
+
+@implementation Phase27SearchRoleGatedProvider
+
+- (NSArray<id<ALNSearchResourceDefinition>> *)searchModuleResourcesForRuntime:(ALNSearchModuleRuntime *)runtime
+                                                                        error:(NSError **)error {
+  (void)runtime;
+  (void)error;
+  return @[
+    [[Phase27SearchRoleGatedProductsResource alloc] init],
+    [[Phase27SearchFinanceResource alloc] init],
+  ];
+}
+
+@end
+
 @interface Phase27SearchContextMiddleware () <ALNMiddleware>
 @end
 
@@ -502,6 +530,8 @@ NSString *Phase27SearchFixturesPath(NSString *filename) {
   NSString *rolesHeader = Phase27SearchHeaderValue(headers, @"x-search-roles");
   NSString *predicate = Phase27SearchHeaderValue(headers, @"x-search-predicate");
   NSString *tenant = Phase27SearchHeaderValue(headers, @"x-search-tenant");
+  NSString *aalHeader = Phase27SearchHeaderValue(headers, @"x-search-aal");
+  NSInteger aal = ([aalHeader length] > 0) ? [aalHeader integerValue] : 2;
   NSArray *roles = ([rolesHeader length] > 0) ? [[rolesHeader lowercaseString] componentsSeparatedByString:@","] : @[];
   NSMutableArray *normalizedRoles = [NSMutableArray array];
   for (NSString *entry in roles) {
@@ -522,7 +552,7 @@ NSString *Phase27SearchFixturesPath(NSString *filename) {
       @"sub" : subject,
       @"roles" : normalizedRoles ?: @[],
       @"tenant" : tenant ?: @"",
-      @"aal" : @2,
+      @"aal" : @(aal),
       @"amr" : @[ @"pwd" ],
       @"iat" : @((NSInteger)now),
       @"auth_time" : @((NSInteger)now),

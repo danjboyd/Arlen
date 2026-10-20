@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNAuthModuleOIDC.h"
 #import "ALNPlatform.h"
 #import "ALNOIDCClient.h"
@@ -93,6 +94,10 @@ static NSDictionary *OAdmissionPolicy(id admission, NSError **error) {
   if (!validVerified || !validHosted || !OAppendLowered(emails, admission[@"allowedEmails"], NO) ||
       !OAppendLowered(domains, admission[@"allowedDomains"], YES)) {
     OFail(error, @"OIDC admission values must be booleans, email addresses, and domains"); return nil;
+  }
+  if ((admission[@"allowedEmails"] != nil && !emails.count) ||
+      (admission[@"allowedDomains"] != nil && !domains.count)) {
+    OFail(error, @"OIDC admission allowlists must not be empty"); return nil;
   }
   id envKey = admission[@"allowedEmailsEnvironmentKey"];
   if (envKey) {
@@ -219,7 +224,7 @@ static BOOL OStrings(id values) {
 
 @interface ALNAuthModuleOIDC ()
 @property(nonatomic, copy, readwrite) NSDictionary *configuration;
-@property(nonatomic, strong) id<ALNAuthProviderSessionResolver> resolver;
+@property(nonatomic, strong, readwrite) id<ALNAuthProviderSessionResolver> resolver;
 @property(nonatomic, strong) id<ALNAuthModuleOIDCTransport> transport;
 @end
 @implementation ALNAuthModuleOIDC
@@ -309,7 +314,7 @@ static BOOL OStrings(id values) {
 - (NSDictionary *)documentForRequest:(NSURLRequest *)request error:(NSError **)error {
   NSData *data = self.transport ? [self.transport performOIDCRequest:request error:NULL] :
                                  ALNBoundedJSONRequest(request, 262144, NULL);
-  id json = data && data.length <= 262144 ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+  id json = data && data.length <= 262144 ? [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
   if (![json isKindOfClass:[NSDictionary class]]) {
     OFail(error, @"OIDC provider response unavailable or invalid"); return nil;
   }
@@ -397,7 +402,7 @@ static BOOL OStrings(id values) {
   if (!token) return OFailWithCode(error, failure, nil, @"provider_unavailable");
   NSArray *parts = [OS(token[@"id_token"]) componentsSeparatedByString:@"."];
   NSData *headerData = parts.count == 3 ? ALNDataFromBase64URLString(parts[0]) : nil;
-  id header = headerData ? [NSJSONSerialization JSONObjectWithData:headerData options:0 error:NULL] : nil;
+  id header = headerData ? [ALNJSONSerialization JSONObjectWithData:headerData options:0 error:NULL] : nil;
   if (token[@"error"] || ![header isKindOfClass:[NSDictionary class]] || ![header[@"alg"] isEqual:@"RS256"]) {
     return OFailWithCode(error, nil, @"OIDC requires a successful token response with an RS256 ID token",
                          @"verification_failed");
@@ -469,6 +474,11 @@ static BOOL OStrings(id values) {
     descriptor = withLevel;
   }
   return descriptor;
+}
+- (BOOL)providerSessionEstablishedForDescriptor:(NSDictionary *)descriptor context:(ALNContext *)context
+                                          error:(NSError **)error {
+  if (![self.resolver respondsToSelector:_cmd]) return YES;
+  return [self.resolver providerSessionEstablishedForDescriptor:descriptor context:context error:error];
 }
 - (NSDictionary *)accountLinkingDescriptorForNormalizedIdentity:(NSDictionary *)identity
                                          providerConfiguration:(NSDictionary *)config error:(NSError **)error {

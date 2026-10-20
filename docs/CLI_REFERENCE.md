@@ -2,10 +2,30 @@
 
 This document describes currently implemented command-line interfaces.
 
+On Windows, the CLI's application build path sets `_FILE_OFFSET_BITS=64`,
+matching the framework and test build. Keep this flag in custom CLANG64 builds
+and rebuild after upgrading; file-response size and Range metadata must remain
+64-bit. Unicode file paths are handled through native wide-character APIs.
+
+On Windows, `propane` production startup exits with status 2 and directs you to
+`boomhauer` for development. `propane --help` remains available. Windows
+multiworker hosting and rolling reloads are unsupported.
+
+The `queue-jobs` plugin preset stores its file queue at
+`<app-root>/var/jobs/state.plist` unless `ARLEN_JOB_STORAGE_PATH` overrides it.
+Storage initialization failure aborts registration. Independent workers
+coordinate through a sibling `.lock` file; crashed leases still require the
+PostgreSQL adapter for recovery.
+
+The default diagnostic mail adapter retains the last 100 deliveries. The default
+process-local cache holds at most 1024 entries with LRU eviction and sweeps
+expired keys on writes. Configure durable mail delivery and a shared cache for
+production apps that need those guarantees.
+
 ## Installer (`tools/install.sh`)
 
 ```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
 The installer downloads a release archive, checks it against the release's
@@ -16,10 +36,13 @@ dir.
 How it gets the framework tools depends on the platform:
 
 - Apple Silicon: uses the prebuilt `arlen-X.Y.Z-macos-arm64.tar.gz`.
-- Linux: builds `arlen-X.Y.Z.tar.gz` once with `make all`, against the
+- Linux: builds `arlen-X.Y.Z.tar.gz` with `make all`, against the
   GNUstep that `tools/source_gnustep_env.sh` resolves.
 - Intel Macs: not supported. The installer exits with an error because the
   Apple build targets arm64 only.
+
+The first Linux app command may rebuild framework artifacts after installation
+moves them from staging to their final path.
 
 The launcher exports `ARLEN_FRAMEWORK_ROOT` (unless already set) so apps
 outside the install find the framework. On Linux it also sources
@@ -31,13 +54,46 @@ Options:
 - `--prefix DIR`: install root (default `~/.local/share/arlen`)
 - `--bin-dir DIR`: launcher directory (default `~/.local/bin`)
 - `--archive FILE`: install a local release archive instead of downloading
-- `--no-build`: unpack only
+- `--no-build`: unpack only; skip prerequisites and framework build
+- `--no-setup`: never install prerequisites; use an existing toolchain (also for offline use)
+- `--no-modify-path`: do not edit shell startup files
+- `--yes`: consent to prerequisite installation without an interactive prompt
 
-If no clang-built GNUstep is found on Linux, the installer exits non-zero and
-prints the gnustep-cli managed-toolchain command.
+On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), missing Linux
+prerequisites trigger a consent prompt. With consent, the installer uses apt
+for build packages and the SQLite runtime (`libsqlite3-0`; sudo may prompt),
+and the checksum-verified gnustep-cli
+`v0.1.0` bootstrap for a managed clang/libobjc2 toolchain in your home. Other
+Linux distributions require manual prerequisites and `--no-setup`. Framework
+builds use at most four jobs. `--no-setup` also prevents network prerequisite
+setup for local archives; downloading an Arlen release still requires network.
+
+The installer adds its bin directory idempotently to bash's `.bashrc` and
+active login profile, or zsh's `.zprofile` and `.zshrc` (respecting `ZDOTDIR`).
+Other shells receive a `.profile` entry; configure non-POSIX shells manually.
+A child installer cannot modify the current shell: run its printed PATH export
+or open a new terminal before using bare `arlen`. Custom `--bin-dir` paths need
+the matching export.
+
+Downloads and builds complete in a staging directory before replacing an
+existing release. Failed downloads, checksums, prerequisite setup, and builds
+preserve the working release and launcher. Archive kind and required executable
+files are checked before activation; handled termination signals during
+replacement restore the previous release. Rerun the same command after fixing
+the cause. A failed build log is retained at `<prefix>/last-build-failure.log`.
+Concurrent installs into one prefix are refused. After forcibly terminating an
+installer, remove `<prefix>/.install-lock` only after confirming it has stopped.
+Local `--archive` inputs verify a sibling `SHA256SUMS` when present. Without
+that file they are explicitly treated as trusted local inputs; use only
+archives you built or independently verified.
+The `latest` URL selects the published release, which may precede an unreleased
+candidate being tested.
 
 Release archives are produced by `tools/release/package_framework.sh` (see
 `docs/RELEASE_PROCESS.md`).
+
+`arlen doctor` probes do not write compiler dependency files into the current
+directory, so toolchain checks also work outside a writable app checkout.
 
 ## Windows installer (`tools/install.ps1`)
 
@@ -51,20 +107,32 @@ release's `SHA256SUMS`. It unpacks the zip to `<Prefix>\<version>`, points the
 `<Prefix>\current` junction at it, and writes an `arlen.cmd` launcher to the
 bin dir. Nothing in the framework is compiled at install time.
 
-Before installing, it checks the gnustep-cli managed MSYS2 `CLANG64` toolchain.
-It looks for the toolchain in `-MsysRoot`, then `ARLEN_MSYS_ROOT`, then the root
-that `GNUSTEP_MAKEFILES` points into, then `%LOCALAPPDATA%\gnustep-cli`, then
-`%ProgramFiles%\gnustep-cli`. It exits with an error when:
+After checking and unpacking the release archive, the installer validates the
+gnustep-cli managed MSYS2 `CLANG64` toolchain against the archive's exact version
+and artifact digest. An explicit `-MsysRoot` is authoritative; otherwise it
+searches `ARLEN_MSYS_ROOT`, the root containing `GNUSTEP_MAKEFILES`,
+`%LOCALAPPDATA%\gnustep-cli`, then `%ProgramFiles%\gnustep-cli`.
 
-- no toolchain root is found (the message gives the gnustep-cli bootstrap
-  command);
-- libcurl is missing from the toolchain, which means the toolchain is older
-  than gnustep-cli `v0.1.1` (the message gives the bootstrap command);
-- the toolchain's `toolchain_version` in `state\cli-state.json` differs from
-  the `toolchain=` the zip was built against.
+Missing, incomplete or mismatched prerequisites trigger automatic per-user
+setup using the pinned upstream gnustep-cli release manifest and a SHA256-pinned
+PowerShell bootstrap (0.1.1 for Arlen 0.3.0; about 1.1 GB). Unknown toolchain
+pins fail with manual setup guidance. `-NoSetup` requires an already matching
+toolchain; combined with `-Archive`, it supports offline installation. A local
+archive is trusted; verify its checksum yourself before using `-Archive`.
 
-It warns, without failing, when the toolchain's artifact checksum differs from
-the zip's `toolchain_sha256=`, or when the root has no gnustep-cli state file.
+It prepends the launcher directory to current-process and persistent user PATH
+without duplicates. `irm | iex` or `& .\install.ps1` enables bare `arlen`
+immediately. A child `powershell -File` cannot update the parent's PATH; open
+a new terminal afterwards. `-NoPathUpdate` suppresses only persistent changes.
+
+Failed downloads, checksum checks and prerequisite setup preserve the active
+Arlen install. Same-version retries use a new `-install-` directory and retain
+the old tree. Only a junction may occupy `<Prefix>\current`.
+Activation stages both launcher files and the junction, then renames them with
+rollback backups. Activation errors restore the previous launcher content and
+junction; an incomplete rollback reports the retained backups. Exclusive
+filesystem locks reject concurrent installs sharing a prefix or launcher
+directory. Empty `.install.lock` files are retained; locks release on exit.
 
 `arlen.cmd` works from cmd.exe and PowerShell under any execution policy. It
 runs `bin\arlen-clang64.ps1`, which enters `CLANG64` the same way
@@ -82,6 +150,8 @@ Options:
 - `-BinDir DIR`: launcher directory (default `<Prefix>\bin`)
 - `-Archive FILE`: install a local `arlen-X.Y.Z-windows-x64.zip` instead of downloading
 - `-MsysRoot DIR`: toolchain root, overriding the search
+- `-NoSetup`: require matching prerequisites without downloading or running setup
+- `-NoPathUpdate`: skip persistent user PATH registration
 
 Under `irm | iex` the installer takes no options. To pass them, use
 `& ([scriptblock]::Create((irm <url>))) -Version 0.3.0`, or download the script
@@ -133,6 +203,13 @@ Run bootstrap environment diagnostics without requiring a framework build.
  set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
  requests when `observability.operabilityAnonymous` /
  `ARLEN_OPERABILITY_ANONYMOUS` is set
+- in an app root, warns (`module_outdated`) for each vendored
+ `modules/<id>` whose `version` is lower than the framework checkout's
+ `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
+ `arlen module migrate`, then rebuild (a numeric `MAJOR.MINOR[.PATCH]`
+ comparison only; a copy whose version has a suffix such as `-rc1`, which
+ module manifests don't allow, is skipped; `arlen module doctor` also compares
+ file contents)
 - `--env <name>`: include the target environment name in output (default `development`)
 - `--json`: emit structured JSON diagnostics
 
@@ -321,6 +398,9 @@ Named targets:
 - local release build capture uses file-backed stdout/stderr capture, so noisy
  compiler output cannot fill an `NSPipe` and hang before JSON error emission
  (`ARLEN-BUG-027`)
+- in `--json` mode, deploy parses the packaging command's stdout separately;
+ compiler warnings on stderr do not turn a successful build into
+ `deploy_push_failed`
 - writes `metadata/manifest.json` with release/runtime/health contract metadata
 - writes manifest paths release-relative so the packaged release stays valid
  after ship/move (`ARLEN-BUG-017`)
@@ -553,13 +633,29 @@ Manage first-class vendored modules installed in `config/modules.plist` and `mod
 `arlen module doctor [--env <name>] [--json]`
 
 - validates manifests, dependency ordering, compatibility, required config keys, and app-vs-module public mount precedence
+- reports `module_csrf_disabled` (an error; a warning with
+  `authModule.allowWithoutCSRF = YES`) when a module that expects CSRF, such as
+  `auth`, is installed while `session.enabled = YES` and `csrf.enabled = NO`
 - warns (without failing) about vendored module content:
+ - `module_outdated`: the framework checkout's copy of the module has a newer
+   `version` than the app's vendored copy; the hint is
+   `arlen module upgrade <id>`, then `arlen module migrate`, then rebuild.
+   `arlen doctor` runs the same version check, and apps log it at startup
+   (outside `test`) when `ARLEN_FRAMEWORK_ROOT` is set, as `boomhauer`,
+   `propane` and `jobs-worker` do for the app process
  - `module_locally_modified`: files differ from the recorded `contentDigest`
  - `module_content_untracked`: the lock entry predates `contentDigest`
  - `module_framework_copy_differs`: the vendored copy differs from
    `modules/<id>` in the framework checkout (`ARLEN_FRAMEWORK_ROOT`, a parent
-   framework checkout, or the running `arlen` binary's checkout), typically
+   framework checkout, or the running `arlen` binary's checkout) at the same or
+   an older framework version, typically
    after moving the framework pin without re-running `module upgrade`
+ - `module_sessions_disabled`: an installed module's defaults enable sessions,
+   but `config/app.plist` sets `session.enabled = NO` (the `arlen new`
+   app.plist does), so the module's sessions never turn on
+- does not run module code: a module that fails to configure when the app
+  starts stops startup outside `development` and `test` (see
+  [Modules](MODULES.md#3-list-and-validate))
 
 `arlen module migrate [--env <name>] [--database <target>] [--dsn <connection_string>] [--dry-run] [--json]`
 
@@ -628,16 +724,34 @@ Example first-party bootstrap:
 Run `arlen module migrate --env <env>` before the first local `auth`
 registration or login attempt. If the auth module tables are missing, Arlen
 surfaces that setup guidance directly instead of a generic database error.
+Run it again after `arlen module upgrade auth` (recommended): signed-in
+requests read the user's current roles from `auth_users` either way, and the
+newer `002_auth_session_stamp.sql` migration enables ending a user's sessions
+by stamp, and `003_auth_revoked_sessions.sql` lets signing out refuse other
+copies of the session cookie. Until each is applied, the module logs one
+warning naming it (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
 First-party module surfaces after install:
 
-- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support.
-- `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`
+- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support. SMS send and verification limits use PostgreSQL account counters; locked requests return 429 with `Retry-After`, and unavailable attempt-limit storage returns 503.
+- `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`; built-in users list `q` and `roles` filters match literal text, including `%` and `_`.
+- Generated OpenAPI routes, including `/openapi.json`, are closed in production unless `openapi.publicInProduction = YES` is set explicitly.
+- Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
+- `POST /auth/api/register` defaults to a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in and duplicate-email response, with an enumeration tradeoff.
+- Production auth mail uses the PostgreSQL jobs adapter and jobs worker. Install the jobs schema, configure `authModule.publicBaseURL`, and register the jobs module before auth. `authModule.mailDispatch.mode = "synchronous"` explicitly preserves legacy request-time delivery; see [Auth Module](AUTH_MODULE.md).
 - `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+  Shared operator-state reads refresh and changes transact across processes; this is separate
+  from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
+  Persisted notification writes coordinate across processes sharing one state path;
+  inbox, outbox, and preference reads refresh from the shared state file.
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
+  Shared reads refresh and state changes transact across processes. Concurrent
+  stale results return `state_conflict`; retry against fresh state. External
+  engines still need one reindex worker per resource unless they fence publication.
+  See [Search Module](SEARCH_MODULE.md) for replay claims and backend limits.
 
 ### `arlen schema-codegen [--env <name>] [--database <target>] [--dsn <connection_string>] [--output-dir <path>] [--manifest <path>] [--prefix <ClassPrefix>] [--typed-contracts] [--force]`
 
@@ -1136,6 +1250,7 @@ Behavior:
  `change-me`, `changeme`, `change_me` or `0123456789ab`, or a secret committed
  in the Arlen repository); generate one with `openssl rand -hex 32`
  - `csrf.enabled=YES` without session middleware
+ - the `auth` module with `session.enabled=YES` and `csrf.enabled=NO` (unless `authModule.allowWithoutCSRF=YES`); an unset `csrf.enabled` follows `session.enabled`
  - query-string CSRF fallback is disabled by default; opt in with `ARLEN_CSRF_ALLOW_QUERY_FALLBACK=1`
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
@@ -1155,6 +1270,7 @@ Behavior:
  - `ALNAuthProviderSessionBridge`
 - `make phase12-confidence` runs the auth confidence gate and writes artifacts under `build/release_confidence/phase12`
 - forwarded proxy headers are honored only when the peer IP matches `trustedProxyCIDRs`
+ - the effective client address (used by the rate limiter) is the right-most `X-Forwarded-For` hop that is not in `trustedProxyCIDRs`; hops to its left are client-supplied and ignored, and an unreadable chain leaves the proxy's own address
  - specifying `trustedProxyCIDRs` alone enables forwarded-header handling
  - `trustedProxy=YES` remains as a compatibility toggle and seeds a loopback CIDR allowlist when no explicit CIDRs are configured
  - `edge` profile defaults `trustedProxyCIDRs` to `127.0.0.1/32`
@@ -1212,8 +1328,12 @@ Environment:
 - `ARLEN_FRAMEWORK_ROOT`
 - `ARLEN_SECURITY_PROFILE` (`balanced`, `strict`, or `edge`; legacy `MOJOOBJC_SECURITY_PROFILE` also accepted)
 - `ARLEN_TRUSTED_PROXY` (legacy compatibility toggle for forwarded-header handling; when set to `1` with no explicit CIDRs, Arlen falls back to `127.0.0.1/32`; legacy `MOJOOBJC_TRUSTED_PROXY` also accepted)
-- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
+- `ARLEN_TRUSTED_PROXY_CIDRS` (comma-separated IPv4 or IPv6 CIDR allowlist for trusted reverse proxies; setting this list alone enables forwarded-header handling; legacy `MOJOOBJC_TRUSTED_PROXY_CIDRS` also accepted)
 - `ARLEN_MAX_HTTP_SESSIONS` (runtime HTTP session limit; legacy `MOJOOBJC_MAX_HTTP_SESSIONS` also accepted)
+- `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS` (default `15`; total seconds to finish sending a request head, counted from accept for a connection's first request and from the first byte afterwards, else `408`; `0` disables; overrides `requestLimits.requestHeadTimeoutSeconds`)
+- `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS` (default `300`; total seconds to send a request body after its head, else `408`; `0` disables; overrides `requestLimits.requestBodyTimeoutSeconds`)
+- `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND` (default `1024`; minimum average body rate after the grace period, else `408`; `0` disables; overrides `requestLimits.requestBodyMinBytesPerSecond`)
+- `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS` (default `10`; seconds before the minimum body rate applies; overrides `requestLimits.requestBodyMinRateGraceSeconds`)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
@@ -1275,6 +1395,9 @@ Environment:
 
 ## `propane` Script (`bin/propane`)
 
+Descriptor samples that disappear as workers exit do not terminate the manager;
+startup failures still use the configured retry policy and exit status `3`.
+
 Usage:
 
 ```text
@@ -1285,6 +1408,15 @@ Behavior:
 
 - in app-root mode, runs `bin/boomhauer --no-watch --prepare-only` before launching workers
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
+- worker startup failures (a worker that exits before serving, e.g. a module
+  that fails to load) are printed once per distinct error, respawned with
+  exponential backoff up to the `respawnBackoffMaxMs` propane accessory, and
+  after `startupFailureLimit` consecutive startup failures (propane
+  accessory, default `5`) propane exits with status `3`; see
+  [Propane](PROPANE.md#propane-accessories)
+- on macOS, a worker exiting during an `lsof` FD-pressure sample is reaped
+  normally; the failed sample does not end the manager before startup-failure
+  backoff and the configured limit are applied
 
 Core options:
 
@@ -1406,6 +1538,7 @@ Lifecycle diagnostics:
 - `make ci-perf-smoke`: run the lighter standalone macro perf smoke lane for the checked-in `default` and `template_heavy` profiles and archive artifacts under `build/perf/ci_smoke`
  - intended for local/manual perf triage; `make ci-quality` already covers the broader multi-profile macro perf matrix in CI
 - `make ci-quality`: run unit + integration + multi-profile perf quality gate plus runtime concurrency, JSON abstraction/performance gates, and fault-injection checks
+- Linux sanitizer gates require clang’s shared sanitizer runtime for both XCTest bundles and child executables; they preserve unrelated caller preloads and verify parent/child ASan and UBSan detection before running suites.
 - `make ci-sanitizers`: run the ASan/UBSan sanitizer matrix (unit, runtime probe, backend parity, fault injection, soak, chaos restart, static analysis) and generate artifacts under `build/release_confidence/phase10m/sanitizers`
 - `make ci-soak`: run the long-run soak lane with health traffic, validated `fileBodyPath` responses, restart checks, and `/proc` FD target sampling including `/dev/null` drift
 - `make ci-fd-regression`: run the opt-in FD regression evidence lane, preserving soak artifacts plus an FD summary under `build/release_confidence/phase38/fd_regression`
@@ -1658,3 +1791,70 @@ defaults. No new CLI option or propane accessory is required; see
 `boomhauer` and `propane` need no new option or propane accessory for the
 libobjc2 first-use lock workaround; see
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized).
+
+### Response transfer limits
+
+`requestLimits.responseSendTimeoutSeconds` (default `300`) bounds the total
+header and body send time for a normal HTTP response.
+`requestLimits.responseMinBytesPerSecond` (default `1024`) requires that average
+send rate after `responseMinRateGraceSeconds` (default `10`). Set a limit to
+`0` to disable it. The deadline covers file transfers and their read/write
+fallback as well as in-memory bodies. A missed limit closes the connection,
+releases the response file, and logs `response send limit exceeded`.
+
+Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
+`ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
+`ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
+separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+For large PostgreSQL SELECT results, use
+`-[ALNPg enumerateQuery:parameters:batchSize:usingBlock:error:]`. It holds one
+pooled connection and a transaction-local cursor, fetches 1–10,000 rows per
+batch, and drains an autorelease pool between batches. Set `*stop = YES` in the
+callback for successful early termination. Errors roll back; callback
+exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
+in your callback increases memory use; `executeQuery:` still buffers its full
+result. The cursor API does not change the SQL or limit its server-side cost.
+
+Request metrics batch completed-response counters and timings under one lock
+and box their numeric values only when taking a snapshot. The metrics names
+and snapshot/Prometheus formats remain compatible. PostgreSQL ORM reads without
+raw expressions avoid a session-reset round trip; raw expressions and
+transactions retain conservative cleanup.
+
+Filesystem-backed storage downloads stream the verified open file, support HEAD
+and byte ranges, and use checksum ETags. Variant source data defaults to a 16 MiB
+limit (`storageModule.maxVariantInputBytes`). See [Storage Module](STORAGE_MODULE.md)
+for custom-adapter behavior and file immutability requirements.
+
+Storage and notifications persistence now use transactional SQLite catalogs. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](STORAGE_MODULE.md) and
+[Notifications Module](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading)
+for migration and backup rules.
+
+Normal-response allocation-error fallbacks use the configured response send
+budget and close the connection after the fallback 500 response.
+
+`make response-header-perf-bench` builds the optional focused header-construction
+benchmark. Run `./build/response-header-perf-bench 20000` (`.exe` on Windows) to
+compare middleware and dynamic-header construction; see
+[Performance Profiles](internal/PERFORMANCE_PROFILES.md) for methodology.
+
+Auth-only apps can build without the optional jobs module. Durable auth mail
+still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).

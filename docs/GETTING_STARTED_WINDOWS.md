@@ -1,5 +1,9 @@
 # Getting Started on Windows
 
+`propane` refuses production startup on Windows (exit status 2); use `boomhauer`
+for development. Its help remains available. Multiworker serving and rolling
+reloads require a future shared-listener implementation.
+
 Windows is supported for **development** from Arlen 0.3.0: install Arlen,
 create apps, build them, and run them under `boomhauer` with watch mode.
 Arlen runs on the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new)
@@ -8,83 +12,101 @@ managed MSYS2 `CLANG64` GNUstep toolchain.
 Production on Windows (`propane`, `jobs-worker`, and service deploys) is not
 supported yet; it is planned for 0.4.0. Deploy to Linux or macOS.
 
-## 1. Install the Toolchain
+## 1. Install Arlen and the Toolchain
 
-You need 64-bit Windows and Windows PowerShell 5.1, which ships with Windows.
+Use 64-bit Windows and Windows PowerShell 5.1, which ships with Windows.
 Arlen is verified on Windows Server 2022 Standard (build 20348). Windows 10
-and 11 use the same MSYS2 `CLANG64` stack and should work, but are untested.
-
-Install the gnustep-cli managed toolchain for your user. It is a full MSYS2
-tree with clang, GNUstep and libdispatch, and it installs to
-`%LOCALAPPDATA%\gnustep-cli` without administrator rights:
-
-```powershell
-iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
-powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/release-manifest.json
-```
-
-Arlen 0.3.0 needs gnustep-cli `v0.1.1`. The toolchain includes everything
-Arlen links against, libcurl among them, so there is nothing else to install.
-If you already have the `v0.1.0` toolchain, rerun the command above to move
-to `v0.1.1`; the Arlen installer refuses a toolchain version that differs
-from the one its release was built with.
-
-> **Never run `pacman -Sy` or `pacman -Syu` in the managed toolchain.**
-> Refreshing the package database causes partial upgrades that break it. A
-> newer python breaks `pyexpat` against the shipped expat, and a newer clang
-> breaks the GNUstep headers. Install nothing into the managed root yourself.
-
-You don't need to install a PostgreSQL client. The Arlen release ships libpq
-as `build\dll\libpq.dll`, and Arlen loads it from the install. Its other
-dependencies are already in the toolchain.
-
-## 2. Install Arlen
+and 11 use the same MSYS2 `CLANG64` stack and remain untested.
 
 ```powershell
 irm https://github.com/danjboyd/Arlen/releases/latest/download/install.ps1 | iex
+arlen new MyApp
+cd MyApp
+arlen boomhauer --port 3000
 ```
 
-To pin a release, pass `-Version`:
+The installer downloads the prebuilt Windows archive, verifies its SHA256SUMS
+entry, and installs the matching gnustep-cli toolchain automatically when
+needed. The toolchain download is about 1.1 GB and includes clang, GNUstep,
+libdispatch and libcurl. No administrator rights are required for the default
+user installation. Arlen ships libpq in `build\dll`; no PostgreSQL client
+installation is needed. Nothing in the framework is compiled during install;
+your applications compile locally.
+
+The installer prepends its launcher directory to both the current process PATH
+and persistent user PATH, without duplicates. `irm | iex` and `& .\install.ps1`
+make bare `arlen` available immediately in that PowerShell session. If you run
+the installer in a child process with `powershell -File`, open a new terminal
+afterwards: a child process cannot change its parent's environment. Existing
+terminal processes retain their prior environment. New terminals inherit the
+saved user PATH.
+
+To pin the Arlen release:
 
 ```powershell
 & ([scriptblock]::Create((irm https://github.com/danjboyd/Arlen/releases/latest/download/install.ps1))) -Version 0.3.0
 ```
 
-The installer downloads `arlen-X.Y.Z-windows-x64.zip` and checks it against
-the release's `SHA256SUMS`. The zip has prebuilt framework tools (`arlen.exe`,
-`boomhauer.exe`, `eocc.exe` and `libArlenFramework.a`), so nothing in the
-framework is compiled at install time. Your apps are still compiled on your
-machine.
+The `latest` URL selects the latest **published** release. An unpublished
+candidate must be tested with a local installer and `-Archive`; the example
+above does not imply that 0.3.0 assets are already published.
 
-The prebuilt tools are tied to the toolchain they were built with. If your
-toolchain's version differs from the one the release was built against, the
-installer stops and prints the gnustep-cli bootstrap `setup` command to run
-(with `--root` if your toolchain is not in the default location).
+## 2. Installation Options and Recovery
 
-The installer unpacks to `%LOCALAPPDATA%\Arlen\<version>`, points the
-`%LOCALAPPDATA%\Arlen\current` junction at it, and writes an `arlen.cmd`
-launcher to `%LOCALAPPDATA%\Arlen\bin`. The launcher works from both cmd.exe
-and PowerShell. It enters the `CLANG64` environment and sets
-`ARLEN_FRAMEWORK_ROOT` to the install, so apps can live anywhere.
+The install root defaults to `%LOCALAPPDATA%\Arlen`. Releases are kept in
+separate directories and `current` is a junction to the active one. The
+`bin\arlen.cmd` launcher enters the matching `CLANG64` environment, exports
+`ARLEN_FRAMEWORK_ROOT`, and works from PowerShell or cmd.exe outside the checkout.
+Install and app directories may contain spaces; keep them short to avoid
+Windows' default path-length limit.
 
-If `arlen` is not found, add the launcher directory to your user `PATH`, then
-open a new terminal:
+- `-Version X.Y.Z`: release to install (default: latest published release).
+- `-Prefix DIR`: install root (default `%LOCALAPPDATA%\Arlen`).
+- `-BinDir DIR`: launcher directory (default `<Prefix>\bin`).
+- `-Archive FILE`: use a local Windows zip. Verify a downloaded zip against
+  its release's SHA256SUMS yourself; this option trusts the local archive.
+- `-MsysRoot DIR`: explicitly select the managed toolchain root, including
+  where to provision it when missing.
+- `-NoSetup`: never download or execute prerequisite setup. Requires an
+  already matching toolchain. Combine with `-Archive` for offline installation.
+- `-NoPathUpdate`: skip persistent user PATH changes. The current process
+  still receives the launcher directory for immediate use.
+
+Arlen 0.3.0 requires gnustep-cli 0.1.1 and the exact toolchain artifact digest
+recorded in its archive. Automatic setup uses the pinned upstream release
+manifest and a SHA256-pinned PowerShell bootstrap. Unknown toolchain pins fail
+with manual setup guidance. A root without matching state also needs setup;
+an arbitrary GNUstep/MSYS2 installation is not enough.
+
+For manual prerequisite installation:
 
 ```powershell
-[Environment]::SetEnvironmentVariable('Path', "$env:LOCALAPPDATA\Arlen\bin;" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+iwr https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/gnustep-bootstrap.ps1 -OutFile gnustep-bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\gnustep-bootstrap.ps1 setup --user --manifest https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.1/release-manifest.json
+& .\install.ps1 -Archive .\arlen-0.3.0-windows-x64.zip -NoSetup
 ```
 
-Installer options:
+Never run `pacman -Sy` or `pacman -Syu` in the managed toolchain. Partial
+upgrades break its clang, Python and GNUstep compatibility. Use the published
+gnustep-cli bootstrap to repair or update it.
 
-- `-Version X.Y.Z`: release to install (default: the latest release)
-- `-Prefix DIR`: install root (default `%LOCALAPPDATA%\Arlen`)
-- `-BinDir DIR`: launcher directory (default `<Prefix>\bin`)
-- `-Archive FILE`: install a downloaded `arlen-X.Y.Z-windows-x64.zip` instead
-- `-MsysRoot DIR`: the toolchain root, if it is not in a default location
+A failed download, checksum check or prerequisite setup leaves the active
+Arlen installation intact. Correct the error and rerun the same command.
+Reinstalling the same version stages a new directory with an `-install-`
+suffix, retaining the old tree so running applications keep their files.
+Previous trees are retained for manual cleanup after those applications stop.
+The installer rejects a `current` path that is not a junction.
+Launcher files and the new junction are staged before activation. If activation
+fails, the previous launchers and junction are restored. Failed restoration
+reports the retained `.old` backups for recovery. Filesystem locks reject a
+simultaneous installer using the same prefix or launcher directory; rerun once
+the other installer finishes. Empty `.install.lock` files remain between runs;
+the open file handle determines whether an install is active.
 
-To run a downloaded copy of `install.ps1` instead of piping it, use
-`powershell -ExecutionPolicy Bypass -File install.ps1`, or run `Unblock-File`
-on it first. The default `RemoteSigned` policy blocks downloaded scripts.
+To run a downloaded installer, use `Unblock-File .\install.ps1` then
+`& .\install.ps1`, or use `powershell -ExecutionPolicy Bypass -File` and open
+a fresh terminal afterwards. The default `RemoteSigned` policy blocks
+downloaded scripts until unblocked.
 
 ## 3. Create and Run an App
 

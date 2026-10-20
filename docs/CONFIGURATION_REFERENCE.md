@@ -31,9 +31,11 @@ apps need first.
 - `host`: bind address for `boomhauer`
 - `port`: default app port
 - `logFormat`: `text` or `json`
-- `performanceLogging` (default: on, off in `production`): record per-stage
+- `performanceLogging` (default: on in `development` and `test`, off in every
+  other environment): record per-stage
   request timing in the access log. `ARLEN_PERFORMANCE_LOGGING` overrides it.
-- `performanceHeaders` (default: on, off in `production`): while
+- `performanceHeaders` (default: on in `development` and `test`, off
+  elsewhere): while
   `performanceLogging` is on, also send the timing as `X-Arlen-Total-Ms`,
   `X-Arlen-Parse-Ms`, `X-Arlen-Response-Write-Ms` and `X-Mojo-Total-Ms`
   response headers. They let any client time requests, so keep them off on
@@ -103,6 +105,31 @@ Generated apps start with:
 - `maxRequestLineBytes`
 - `maxHeaderBytes`
 - `maxBodyBytes`
+- `requestHeadTimeoutSeconds` (default `15`; env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`): the total time a client has to finish
+  sending a request head (request line and headers). For a connection's first
+  request it is counted from when the connection was accepted, so it also
+  covers a client that never sends a byte and the time a connection waited for
+  a free HTTP worker. For later requests on a keep-alive connection it is
+  counted from the head's first byte; idle time between requests stays bounded
+  by `connectionTimeoutSeconds`. A head that takes longer gets `408` and the
+  connection closes. `connectionTimeoutSeconds` only bounds each individual
+  read, so without this a client sending one byte every few seconds could hold
+  an HTTP worker indefinitely. `0` turns the limit off.
+- `requestBodyTimeoutSeconds` (default `300`; env
+  `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`): the total time a client has to send
+  the request body, counted from the end of the head. It covers `Content-Length`
+  and chunked bodies, and bodies that stream to the spool file. A slower body
+  gets `408`, the connection closes and any spool file is removed. `0` turns it
+  off. Raise it with `maxBodyBytes` for very large uploads over slow links.
+- `requestBodyMinBytesPerSecond` (default `1024`; env
+  `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND`) and
+  `requestBodyMinRateGraceSeconds` (default `10`; env
+  `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS`): after the grace period, the
+  body's average rate since the head must stay at or above this many bytes per
+  second, or the request gets `408`. A client trickling a body is closed long
+  before the total deadline; slow but real uploads (1 KiB/s is far below any
+  mobile link) are not. `0` turns the rate check off.
 
 Raise these only for real application needs. The defaults are intentionally
 bounded.
@@ -270,13 +297,18 @@ Session config:
 - `session.secret`
 - `session.cookieName`
 - `session.maxAgeSeconds`
-- `session.secure` (default: on in `production`, off elsewhere; generated apps
-  leave it unset so this default applies)
+- `session.secure` (default: off in `development` and `test`, on in every other
+  environment, e.g. `production`, `staging`, `qa`; generated apps leave it unset
+  so this default applies. Set it to `NO` explicitly for a non-development
+  environment served over plain HTTP)
 - `session.sameSite`
 
 CSRF config:
 
-- `csrf.enabled`
+- `csrf.enabled` (default: follows `session.enabled`, so turning sessions on
+  turns CSRF protection on. Only the `strict` security profile pins it on
+  regardless. Generated apps leave it unset; set it to `NO` only for apps
+  that never accept browser form posts on a session cookie.)
 - `csrf.headerName`
 - `csrf.queryParamName`
 - `csrf.exemptPathPrefixes`: optional array of literal absolute paths (not `/`).
@@ -290,6 +322,18 @@ The CSRF token is created the first time a request reads it
 then is a session started and a session cookie sent. Requests that never read a
 token, including cookieless `GET`/`HEAD` for static-ish routes, get no
 `Set-Cookie`, so they cannot replace a signed-in browser's session.
+
+Signing in and completing step-up start a fresh session
+(`ALNAuthSession` establish/elevate, which the auth module and
+`-[ALNController startAuthenticatedSessionForSubject:...]` /
+`completeStepUpWithMethod:...` use). Keys stored before, including
+`_csrf_token`, are dropped, and a new CSRF token is minted the next time one is
+read. The one key kept is `return_to`, for apps that remember where to send the
+user after signing in. A token fetched before login, or before step-up, is
+rejected afterwards: clients should take the new `csrf_token` from the auth
+module's login and verify responses (or from `GET /auth/api/session`), and
+pages rendered after login carry the new token. Store other app data in the
+session after login, or keep it elsewhere if it must survive step-up.
 
 For browser-authenticated apps, enabling sessions usually comes before enabling
 CSRF. In stricter environments, Arlen expects a real session secret rather than
@@ -334,6 +378,42 @@ Other clients get the plain-text `csrf verification failed` body. SPA clients
 can match on `error.code == "csrf_invalid"` to refresh their token and retry.
 Tokens are compared in constant time.
 
+Auth module sign-in limits (`authModule.attemptLimits`, auth 1.6.0 with
+migration `004_auth_totp_limits`) are separate from the `rateLimit`
+middleware below:
+
+- `attemptLimits.mfa.maxFailures` (default `5`), `lockoutSeconds` (`30`),
+  `maxLockoutSeconds` (`900`): per-account lock for failed TOTP and
+  recovery-code checks.
+- `attemptLimits.password.maxFailures` (default `5`), `delaySeconds` (`30`),
+  `maxDelaySeconds` (`900`): failed password sign-ins per pair of submitted
+  email and client address (`ALNRequest.effectiveRemoteAddress`). After
+  `maxFailures`, that pair waits, doubling per further failure.
+- `attemptLimits.password.accountMaxFailures` (default `50`),
+  `accountWindowSeconds` (`3600`), `accountDelaySeconds` (`30`): an
+  account-wide ceiling against distributed guessing across all addresses.
+- `attemptLimits.password.trustedPairDays` (default `30`, `0` = off): an
+  email/address pair that signed in within this many days skips the
+  account-wide ceiling (its own pair delay still applies).
+- `attemptLimits.password.maxTrackedEntries` (default `100000`) and
+  `pruneBatchSize` (`1000`): cap on stored counter rows, and the most rows one
+  background prune deletes.
+- `attemptLimits.mail.maxPerEmail` (default `5`), `maxPerAddress` (`20`),
+  `windowSeconds` (`3600`): forgot-password mail per hashed email and per
+  client address. Beyond them the reply is unchanged but no mail is sent.
+  `0` turns a mail limit off.
+- `maxFailures = 0` turns a limit off (for `password`, both the per-address
+  delay and the ceiling); `accountMaxFailures = 0` turns off only the ceiling.
+
+The auth module's own connection pool is set with
+`authModule.database.maxConnections` (default `8`) and
+`authModule.database.acquireTimeoutSeconds` (default `2`). A request that gets
+no connection in time, or finds the database unreachable, answers `503` with
+`Retry-After` and keeps the session.
+
+See [Auth Module](AUTH_MODULE.md#totp-replay-protection-and-attempt-limits)
+for the full behaviour.
+
 ## 6. Rate Limits and Security Headers
 
 Rate limiting:
@@ -341,6 +421,16 @@ Rate limiting:
 - `rateLimit.enabled`
 - `rateLimit.requests`
 - `rateLimit.windowSeconds`
+- `rateLimit.ipv6PrefixLength` (default `64`, 1-128): IPv6 clients are counted
+  per network of this size, since one IPv6 client usually holds a whole `/64`
+  and could otherwise use a new address for every request. `128` counts each
+  address. IPv4 clients (including IPv4-mapped `::ffff:a.b.c.d`) are counted
+  per address.
+
+The limiter keys on the request's `effectiveRemoteAddress`: the direct peer,
+or behind a trusted proxy the forwarded client (see
+`security.forwardedClientIPHeader` below). It tracks at most 65,536 clients;
+past that, a new client evicts the oldest.
 
 Security headers:
 
@@ -420,10 +510,19 @@ Policy keys:
   headers, but only when the direct peer matches `security.trustedProxies`
 
 Proxy behavior is fail-closed for protected routes. Without trusted proxies,
-Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen only
-uses `Forwarded` or `X-Forwarded-For` when the immediate peer is trusted; public
-clients cannot opt into those headers themselves. If Arlen cannot resolve a
-client IP for a protected allowlist check, the request is denied.
+Arlen uses the direct socket peer IP. With trusted proxies configured, Arlen
+reads the forwarded client only when the immediate peer is trusted, and then
+takes the right-most `X-Forwarded-For` hop that is not itself a trusted proxy.
+Hops to its left were sent by the client and are ignored. If Arlen cannot
+resolve a client IP for a protected allowlist check, the request is denied.
+
+- `security.forwardedClientIPHeader` (default `"X-Forwarded-For"`): the one
+  header the forwarded client is read from, by route policies and by the
+  server's `effectiveRemoteAddress` (which the rate limiter keys on) alike. Set
+  `"Forwarded"` only when your proxy writes RFC 7239 `Forwarded`. The header
+  that is not selected is ignored, since a proxy passes through whichever one it
+  does not set. Repeated lines of either header are combined in order, as RFC
+  9110 requires, so a client's own line can't hide the one the proxy appended.
 
 Denied route-policy requests return `403`, set
 `X-Arlen-Policy-Denial-Reason`, and log `route_policy.denied` with distinct
@@ -593,8 +692,10 @@ openapi = {
 Useful keys:
 
 - `openapi.enabled`
-- `openapi.docsUIEnabled` (default: on, off in `production`; generated apps leave
-  it unset so `/openapi` is not served in production)
+- `openapi.publicInProduction` (default: off; explicitly expose the route catalog
+  and docs routes outside development and test, including staging and QA)
+- `openapi.docsUIEnabled` (default: on in `development` and `test`, off in every
+  other environment; generated apps leave it unset)
 - `openapi.docsUIStyle`
 - `openapi.title`
 - `openapi.version`
@@ -616,6 +717,10 @@ Other scaffolded sections:
 - `propaneAccessories.workerCount`
 - `propaneAccessories.gracefulShutdownSeconds`
 - `propaneAccessories.respawnDelayMs`
+- `propaneAccessories.startupFailureLimit` (default `5`; propane exits after
+  this many consecutive worker startup failures, `0` disables)
+- `propaneAccessories.respawnBackoffMaxMs` (default `30000`; cap for the
+  exponential respawn backoff after worker startup failures)
 - `propaneAccessories.reloadOverlapSeconds`
 
 `plugins.classes` is where `arlen generate plugin` and plugin/manual wiring land.
@@ -673,6 +778,58 @@ framework tests require no tenant or public deployment.
 
 Multipart `requestLimits` keys are `maxMultipartParts` (128), `maxMultipartFieldBytes` (65536), `maxMultipartFileBytes` (1048576), and `maxMultipartHeaderBytes` (16384). Request bodies and multipart file parts larger than `spoolThresholdBytes` (1048576) are spooled to private temporary files under `spoolDirectory` (an absolute path; default the system temp directory) instead of memory. All values must be positive whole numbers. Bare or quoted decimal plist values are normalized to numbers; invalid values fail configuration loading with an error naming the key. See [Multipart Uploads](MULTIPART_UPLOADS.md) for buffering behavior and a 110 MiB request configuration.
 
+## Auth Module Email Links
+
+`authModule.publicBaseURL` is the absolute `http(s)` URL that links in
+password-reset and email-verification mail start with, for example
+`"https://app.example.com"` (a path prefix such as
+`"https://example.com/app"` is allowed; a trailing slash is dropped and the
+scheme and host are lowercased; a query, fragment, user info, `.`/`..` path
+segments or a port outside 1-65535 is rejected as invalid auth module
+configuration). Outside
+`development` and `test`, an `http://` value logs a warning at startup; use
+`https`. The module never builds these links from the request's `Host` header
+when it is set, and it also takes precedence over the `baseURL` an app passes
+to `claimTrustedEmail:`.
+
+When it is not set, the `development` and `test` environments fall back to the
+request's scheme and `Host` header so local sign-up keeps working. In other
+environments, durable auth mail configuration fails startup without this value.
+Explicit synchronous compatibility mode sends no link, logs a warning, and
+keeps the generic response. `claimTrustedEmail:` keeps taking its `baseURL`
+from the caller.
+
+`authModule.mailDispatch.mode` accepts `durable` or `synchronous`. When a
+PostgreSQL `ALNDurableJobAdapter` and the jobs module are registered, durable
+dispatch is selected automatically. Production-like environments with local
+passwords and a mail adapter fail startup without that setup unless they
+explicitly select `synchronous`. Durable dispatch enqueues generic
+`auth.mail.dispatch` jobs on `auth_mail`: registration commits user and job
+together, and password reset enqueues for both known and unknown addresses.
+Run a jobs worker for delivery. A queue failure returns 503 without reporting
+whether an account exists. The synchronous mode can expose account membership
+through mail provider latency; reserve it for compatibility.
+
+## Auth Module Registration Privacy
+
+`authModule.registration.autoLogin` defaults to `NO`. New and existing email
+addresses receive the same accepted registration response without an
+authenticated session. A new address receives one verification message when
+email links are configured; an existing account is unchanged. Set `YES` only
+for compatibility with the previous immediate sign-in flow, which reports
+duplicate addresses and can reveal account membership. See
+[Auth Module](AUTH_MODULE.md).
+
+## Auth Module Sessions
+
+`authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days) is
+how long a sign-in through the auth module (or one of its OIDC providers)
+lasts, measured from sign-in. The session cookie's `session.maxAgeSeconds`
+renews on every response that writes the session; this limit does not, so a
+session in daily use still ends this long after sign-in and the user signs in
+again. Must be a positive whole number. See
+[Auth Module](AUTH_MODULE.md#sessions-and-roles).
+
 ## Auth Module OIDC Providers
 
 Configure `authModule.providers.<identifier>` with `enabled = YES` and
@@ -702,13 +859,38 @@ Its class implements `ALNAuthProviderSessionResolver` and decides whether a
 verified principal maps to an application user. There is no automatic email
 linking or user creation on this path.
 
-`authModule.localPassword.enabled` and `authModule.providers.stub.enabled`
-default to false when a real provider is enabled, true otherwise. Explicit
-values override those defaults. Older copied manifests may explicitly enable
-stub; turn it off in application configuration. The same choices apply to
-HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
+`authModule.localPassword.enabled` defaults to false when a real provider is
+enabled, true otherwise; an explicit value overrides that default.
+`authModule.providers.stub.enabled` follows the same default in the
+`development` and `test` environments only. In any other environment the stub
+provider defaults off, and an explicit `YES` is refused (the auth module's
+configuration is rejected). Older copied
+manifests may explicitly enable stub; turn it off in application configuration.
+The same choices apply to HTML and API routes. `hooks.oidcTransportClass` is an optional trusted transport
 injection, primarily for deterministic tests.
 
 See [Auth Module](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra)
 for the complete Entra example, callback/session semantics, transport limits,
 resolver implementation, and upgrade instructions.
+
+### Response transfer limits
+
+`requestLimits.responseSendTimeoutSeconds` (default `300`) bounds the total
+header and body send time for a normal HTTP response.
+`requestLimits.responseMinBytesPerSecond` (default `1024`) requires that average
+send rate after `responseMinRateGraceSeconds` (default `10`). Set a limit to
+`0` to disable it. The deadline covers file transfers and their read/write
+fallback as well as in-memory bodies. A missed limit closes the connection,
+releases the response file, and logs `response send limit exceeded`.
+
+Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
+`ARLEN_RESPONSE_MIN_BYTES_PER_SECOND`, and
+`ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
+separate streaming lifecycle and are exempt from these bulk-transfer limits.
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.

@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#import "ALNAuth.h"
+#import "ALNAuthSession.h"
 #import "ALNController.h"
 #import "ALNContext.h"
 #import "ALNEOCRuntime.h"
@@ -43,6 +45,19 @@ static NSString *RenderControllerAlternateLayout(id ctx, NSError **error) {
 @end
 
 @implementation ControllerTests
+
+- (void)testSSERejectsInjectedEventFields {
+  ControllerTestHarness *controller = [self freshController];
+  [controller renderSSEEvents:@[
+    @{@"id": @"1\ndata: forged", @"data": @"bad"},
+    @{@"event": @"chat\r\ndata: forged", @"data": @"bad"},
+    @{@"event": @"chat", @"id": @"2", @"data": @"good"}
+  ]];
+  NSString *body = [[NSString alloc] initWithData:controller.context.response.bodyData encoding:NSUTF8StringEncoding];
+  XCTAssertFalse([body containsString:@"forged"]);
+  XCTAssertTrue([body containsString:@"event: chat\n"]);
+  XCTAssertTrue([body containsString:@"id: 2\n"]);
+}
 
 - (void)setUp {
   [super setUp];
@@ -94,6 +109,34 @@ static NSString *RenderControllerAlternateLayout(id ctx, NSError **error) {
   ALNEOCRegisterTemplate(@"layouts/application.html.eoc", &RenderControllerDefaultLayout);
   ALNEOCRegisterTemplate(@"layouts/alternate.html.eoc", &RenderControllerAlternateLayout);
   ALNEOCRegisterTemplateLayout(@"pages/show.html.eoc", @"layouts/application");
+}
+
+// Module role checks go through +[ALNAuth context:hasAnyRole:], which reads the
+// request's resolved roles in preference to the ones stored in the session.
+- (void)testAuthHasAnyRoleUsesTheContextsCurrentRoles {
+  ALNContext *context = [self freshContext];
+  NSError *error = nil;
+  XCTAssertTrue([ALNAuthSession establishAuthenticatedSessionForSubject:@"user:any-role"
+                                                               provider:@"local"
+                                                                methods:@[ @"pwd" ]
+                                                                 scopes:nil
+                                                                  roles:@[ @"admin" ]
+                                                         assuranceLevel:1
+                                                        authenticatedAt:nil
+                                                                context:context
+                                                                  error:&error],
+                @"%@", error);
+  NSArray *operatorOrAdmin = @[ @"operator", @"admin" ];
+  NSArray *operatorOnly = @[ @"operator" ];
+  NSArray *none = @[];
+  NSArray *paddedUser = @[ @" user " ];
+  XCTAssertTrue([ALNAuth context:context hasAnyRole:operatorOrAdmin]);
+  XCTAssertFalse([ALNAuth context:context hasAnyRole:operatorOnly]);
+  XCTAssertFalse([ALNAuth context:context hasAnyRole:none]);
+
+  context.stash[ALNContextAuthRolesStashKey] = @[ @"user" ];
+  XCTAssertFalse([ALNAuth context:context hasAnyRole:operatorOrAdmin]);
+  XCTAssertTrue([ALNAuth context:context hasAnyRole:paddedUser]);
 }
 
 - (void)testRenderTemplateUsesRegisteredLayoutFromTemplateMetadata {

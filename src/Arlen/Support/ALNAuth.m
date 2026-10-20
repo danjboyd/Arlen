@@ -407,4 +407,18 @@ static BOOL ALNHasAllValues(NSArray *available, NSArray *required) {
   return ALNHasAllValues(available, required);
 }
 
++ (BOOL)context:(ALNContext *)context hasAnyRole:(NSArray *)roles {
+  NSArray *candidates = ALNNormalizedUniqueStringsFromArray(roles);
+  if ([candidates count] == 0) {
+    return NO;
+  }
+  NSSet *available = [NSSet setWithArray:[context authRoles] ?: @[]];
+  for (NSString *role in candidates) {
+    if ([available containsObject:role]) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 @end

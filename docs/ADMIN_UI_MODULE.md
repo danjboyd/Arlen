@@ -85,6 +85,9 @@ HTML and JSON prefixes when it is available:
 - `GET /admin/api/users/export/:format`
 - `GET /admin/api/users/autocomplete/:field`
 
+The built-in users list treats `q` and `roles` filter values as literal text.
+SQL wildcard characters such as `%` and `_` do not expand a search.
+
 Provider-defined resources may also set `legacyPath` in their metadata. When
 present, `admin-ui` now keeps full parity between the generic
 `/admin/resources/:resource...` routes and the legacy aliases for list, detail,
@@ -149,8 +152,20 @@ The module protects both HTML and JSON surfaces with the same defaults:
 - admin role required
 - AAL2 / step-up required
 
+The admin role is checked against the user's current roles on every request,
+not the roles stored in the session at sign-in (see
+[Auth Module](AUTH_MODULE.md#sessions-and-roles)). Revoking admin through the
+users resource also ends that user's existing sessions once the auth module's
+`002_auth_session_stamp.sql` migration is applied.
+
 Apps can add per-resource policy checks through the optional
 `adminUIResourceAllowsOperation:identifier:context:error:` hook.
+
+`ALNAdminUIModuleRuntime` reports these defaults as `accessRoles` (`admin`) and
+`minimumAuthAssuranceLevel` (`2`). When the `search` module auto-indexes admin
+resources, it applies the same requirements, plus the resource's `list`
+operation check, to search queries over them. See
+[Search Module](SEARCH_MODULE.md#admin-ui-auto-resources).
 
 ## SPA Notes
 

@@ -54,6 +54,14 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 `arlen jobs worker` and other CLI delegates therefore share one state file.
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
+Operator-state changes (paused queues, schedule timestamps, replay markers, and
+run history) reload the current file, apply the change, and atomically replace
+it while holding a sibling `.lock` file. Reads refresh from the shared state;
+workers do not need to restart to observe a pause or resume. Lock acquisition
+waits at most ten seconds. Unreadable or malformed state fails closed: mutations
+return an error and queue checks treat the queue as paused. Adapter calls and
+job execution run outside these short state transactions. This diagnostic state
+file is separate from the adapter's pending jobs, leases, and results.
 
 Path overrides live under `jobsModule.paths.*`. Keep `apiPrefix` relative, such as
 `"api"`, when you want the module API under `/jobs/api`. Setting `apiPrefix` to an
@@ -141,6 +149,9 @@ The operator surfaces are protected by the shared auth/admin contracts:
 - `admin` role required
 - AAL2 step-up required
 
+With the auth module installed, the role is checked against the user's current
+roles on every request (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
+
 That keeps the jobs dashboard aligned with the first-party auth and admin model without requiring the `admin-ui` module to render it.
 
 ## Defaults
@@ -180,9 +191,11 @@ errors. The new status and drain routes retain admin/AAL2 protection.
 - The dashboard is module-owned HTML, not yet embedded into `admin-ui` navigation.
 
 - Multiple consumers are supported by the PostgreSQL adapter; run only one
-  scheduler because trigger bookkeeping remains local/plist-backed.
-- Plist operator run history is diagnostic, not a shared job/result store. Use
-  `jobsModule.persistence.enabled = NO` or a distinct diagnostic path per process
-  for separate workers. PostgreSQL retains authoritative job status and results.
-- The file adapter cannot coordinate independent processes or recover crashed
+  scheduler. Enqueue and the subsequent trigger-bookkeeping transaction are not
+  one atomic operation, so concurrent schedulers or a crash between those steps
+  can enqueue duplicate scheduled work.
+- Workers may share the operator-state path, including its bounded run history.
+  PostgreSQL retains authoritative job status, fenced leases, and results;
+  sharing diagnostic state does not give other adapters crash-safe claims.
+- The file adapter coordinates independent processes with a sibling lock file but cannot recover crashed
   leases. Its private-directory initialization fix does not change those limits.

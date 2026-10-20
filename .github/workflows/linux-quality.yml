@@ -71,6 +71,12 @@ jobs:
         run: |
           bash ./tools/ci/run_linux_quality_gate.sh
 
+      - name: Verify persistent HTTP throughput and server CPU
+        run: |
+          source tools/source_gnustep_env.sh
+          make -j4 boomhauer
+          python3 tests/performance/persistent_http.py
+
       - name: Verify OAuth socket transport, maintenance, synthetic discovery and MCP HTTP examples
         run: |
           source tools/source_gnustep_env.sh

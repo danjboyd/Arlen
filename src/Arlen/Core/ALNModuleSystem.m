@@ -6,7 +6,7 @@
 #import "ALNSecurityPrimitives.h"
 
 NSString *const ALNModuleSystemErrorDomain = @"Arlen.ModuleSystem.Error";
-NSString *const ALNModuleSystemFrameworkVersion = @"0.2.1";
+NSString *const ALNModuleSystemFrameworkVersion = @"0.3.0";
 
 static NSString *ALNModuleTrim(id value) {
   if (![value isKindOfClass:[NSString class]]) {
@@ -1069,6 +1069,98 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     }
   }
 
+  // A module that asks for CSRF protection (auth does) is open to cross-site
+  // posts when the app turns sessions on but pins csrf.enabled = NO.
+  NSDictionary *mergedSession = [merged[@"session"] isKindOfClass:[NSDictionary class]] ? merged[@"session"] : @{};
+  NSDictionary *mergedCSRF = [merged[@"csrf"] isKindOfClass:[NSDictionary class]] ? merged[@"csrf"] : @{};
+  BOOL sessionEnabled = [mergedSession[@"enabled"] respondsToSelector:@selector(boolValue)] &&
+                        [mergedSession[@"enabled"] boolValue];
+  BOOL csrfEnabled = [mergedCSRF[@"enabled"] respondsToSelector:@selector(boolValue)]
+                         ? [mergedCSRF[@"enabled"] boolValue]
+                         : sessionEnabled;
+  if (sessionEnabled && !csrfEnabled) {
+    NSDictionary *authModuleConfig =
+        [merged[@"authModule"] isKindOfClass:[NSDictionary class]] ? merged[@"authModule"] : @{};
+    for (ALNModuleDefinition *definition in [self sortedModuleDefinitionsAtAppRoot:appRoot error:NULL] ?: @[]) {
+      NSDictionary *moduleCSRF = [definition.configDefaults[@"csrf"] isKindOfClass:[NSDictionary class]]
+                                     ? definition.configDefaults[@"csrf"]
+                                     : @{};
+      if (![moduleCSRF[@"enabled"] respondsToSelector:@selector(boolValue)] || ![moduleCSRF[@"enabled"] boolValue]) {
+        continue;
+      }
+      BOOL optedOut = [definition.identifier isEqualToString:@"auth"] &&
+                      [authModuleConfig[@"allowWithoutCSRF"] respondsToSelector:@selector(boolValue)] &&
+                      [authModuleConfig[@"allowWithoutCSRF"] boolValue];
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          optedOut ? @"warning" : @"error",
+          @"module_csrf_disabled",
+          definition.identifier,
+          [NSString stringWithFormat:@"module %@ expects CSRF protection, but csrf.enabled = NO while session.enabled = YES",
+                                     definition.identifier],
+          @"Remove csrf.enabled = NO from config/app.plist; an unset csrf.enabled follows session.enabled.",
+          @"csrf.enabled");
+    }
+  }
+
+  // Without persistence the storage catalog lives in each process, so with
+  // several propane workers most downloads (and jobs-worker variants) miss.
+  if ([installed containsObject:@"storage"]) {
+    NSDictionary *storageConfig =
+        [merged[@"storageModule"] isKindOfClass:[NSDictionary class]] ? merged[@"storageModule"] : @{};
+    NSDictionary *storagePersistence =
+        [storageConfig[@"persistence"] isKindOfClass:[NSDictionary class]] ? storageConfig[@"persistence"] : @{};
+    BOOL storagePersistent = ![storagePersistence[@"enabled"] respondsToSelector:@selector(boolValue)] ||
+                             [storagePersistence[@"enabled"] boolValue];
+    NSDictionary *propane =
+        [merged[@"propaneAccessories"] isKindOfClass:[NSDictionary class]] ? merged[@"propaneAccessories"] : @{};
+    NSInteger workerCount = [propane[@"workerCount"] respondsToSelector:@selector(integerValue)]
+                                ? [propane[@"workerCount"] integerValue]
+                                : 1;
+    if (!storagePersistent && workerCount > 1) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"storage_unshared_state",
+          @"storage",
+          [NSString stringWithFormat:@"storage persistence is off but propaneAccessories.workerCount = %ld; each worker "
+                                     @"keeps its own catalog, so most downloads and variant jobs will not find their objects",
+                                     (long)workerCount],
+          @"Enable storageModule.persistence (the default) or run a single worker.",
+          @"storageModule.persistence.enabled");
+    }
+  }
+
+  // A module default of session.enabled = YES does not apply when the app
+  // config pins sessions off (the `arlen new` app.plist writes enabled = NO).
+  NSDictionary *appSession = [config[@"session"] isKindOfClass:[NSDictionary class]] ? config[@"session"] : @{};
+  id appSessionEnabled = appSession[@"enabled"];
+  BOOL appPinsSessionsOff = [appSessionEnabled respondsToSelector:@selector(boolValue)] &&
+                            ![appSessionEnabled boolValue];
+  if (appPinsSessionsOff) {
+    for (ALNModuleDefinition *definition in [self sortedModuleDefinitionsAtAppRoot:appRoot error:NULL] ?: @[]) {
+      NSDictionary *defaults = [definition.configDefaults isKindOfClass:[NSDictionary class]]
+                                   ? definition.configDefaults
+                                   : @{};
+      NSDictionary *moduleSession =
+          [defaults[@"session"] isKindOfClass:[NSDictionary class]] ? defaults[@"session"] : @{};
+      id wantsSessions = moduleSession[@"enabled"];
+      if (![wantsSessions respondsToSelector:@selector(boolValue)] || ![wantsSessions boolValue]) {
+        continue;
+      }
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"module_sessions_disabled",
+          definition.identifier,
+          [NSString stringWithFormat:@"module %@ needs sessions, but the app config sets session.enabled = NO",
+                                     definition.identifier],
+          @"Remove `enabled = NO` from the `session` block in config/app.plist (or set it to YES) and set "
+          "session.secret (or ARLEN_SESSION_SECRET).",
+          @"");
+    }
+  }
+
   ALNModuleAppendDiagnostic(diagnostics,
                             @"pass",
                             @"modules_loaded",
@@ -1080,20 +1172,167 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
   return diagnostics;
 }
 
++ (NSArray<NSDictionary *> *)frameworkCopyDiagnosticsAtAppRoot:(NSString *)appRoot
+                                                 frameworkRoot:(NSString *)frameworkRoot
+                                                compareContent:(BOOL)compareContent {
+  NSString *root = ALNModuleTrim(frameworkRoot);
+  if ([root length] == 0 || [ALNModuleTrim(appRoot) length] == 0) {
+    return @[];
+  }
+  NSMutableArray<NSDictionary *> *diagnostics = [NSMutableArray array];
+  NSArray<NSDictionary *> *records = [self installedModuleRecordsAtAppRoot:appRoot error:NULL] ?: @[];
+  for (NSDictionary *record in records) {
+    NSString *identifier = record[@"identifier"];
+    NSString *frameworkCopy =
+        [[[root stringByAppendingPathComponent:@"modules"] stringByAppendingPathComponent:identifier ?: @""]
+            stringByStandardizingPath];
+    NSString *installPath = [[appRoot stringByAppendingPathComponent:record[@"path"] ?: @""] stringByStandardizingPath];
+    if ([frameworkCopy isEqualToString:installPath]) {
+      continue;
+    }
+    ALNModuleDefinition *frameworkDefinition = [self moduleDefinitionAtPath:frameworkCopy error:NULL];
+    if (frameworkDefinition == nil) {
+      continue;
+    }
+    ALNModuleDefinition *installedDefinition = [self moduleDefinitionAtPath:installPath error:NULL];
+    NSString *installedVersion = installedDefinition.version ?: (record[@"version"] ?: @"");
+    NSString *availableVersion = frameworkDefinition.version ?: @"";
+    if (ALNModuleCompareVersions(installedVersion, availableVersion) == NSOrderedAscending) {
+      ALNModuleAppendDiagnostic(
+          diagnostics,
+          @"warning",
+          @"module_outdated",
+          identifier,
+          [NSString stringWithFormat:@"module %@ is %@ in this app; the framework has %@",
+                                     identifier,
+                                     installedVersion,
+                                     availableVersion],
+          [NSString stringWithFormat:@"run `arlen module upgrade %@`, then `arlen module migrate`, then rebuild "
+                                     @"(framework copy: %@)",
+                                     identifier,
+                                     frameworkCopy],
+          @"");
+      continue;
+    }
+    if (!compareContent) {
+      continue;
+    }
+    NSString *frameworkDigest = [self contentDigestForModuleAtPath:frameworkCopy error:NULL];
+    NSString *installedDigest = [self contentDigestForModuleAtPath:installPath error:NULL];
+    if (frameworkDigest == nil || installedDigest == nil || [frameworkDigest isEqualToString:installedDigest]) {
+      continue;
+    }
+    NSString *message =
+        [installedVersion isEqualToString:availableVersion]
+            ? [NSString stringWithFormat:@"module %@ differs from the framework copy at the same version %@",
+                                         identifier,
+                                         installedVersion]
+            : [NSString stringWithFormat:@"module %@ %@ differs from the framework copy (%@)",
+                                         identifier,
+                                         installedVersion,
+                                         availableVersion];
+    ALNModuleAppendDiagnostic(diagnostics,
+                              @"warning",
+                              @"module_framework_copy_differs",
+                              identifier,
+                              message,
+                              [NSString stringWithFormat:@"framework copy: %@; run `arlen module upgrade %@ --source %@`",
+                                                         frameworkCopy,
+                                                         identifier,
+                                                         frameworkCopy],
+                              @"");
+  }
+  return diagnostics;
+}
+
 + (NSArray<id<ALNModule>> *)loadModulesForApplication:(ALNApplication *)application
                                                 error:(NSError **)error {
+  NSMutableArray<id<ALNModule>> *loaded = [NSMutableArray array];
+  if (![self loadModulesForApplication:application loadedModules:loaded error:error]) {
+    return nil;
+  }
+  return loaded;
+}
+
+// The config key a module error refers to. Modules spell it key_path,
+// config_key or keyPath (and some only on an underlying error), so accept any
+// of those, then any userInfo key that reads as one of them.
+static NSString *ALNModuleErrorConfigKey(NSError *error, NSUInteger depth) {
+  if (error == nil || depth > 4) {
+    return nil;
+  }
+  NSDictionary *info = error.userInfo ?: @{};
+  for (NSString *name in @[ @"key_path", @"config_key", @"keyPath", @"configKey" ]) {
+    id value = info[name];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+      return value;
+    }
+  }
+  for (id name in [[info allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+    if (![name isKindOfClass:[NSString class]]) {
+      continue;
+    }
+    NSString *folded = [[name lowercaseString] stringByReplacingOccurrencesOfString:@"_" withString:@""];
+    folded = [folded stringByReplacingOccurrencesOfString:@"-" withString:@""];
+    if (![folded isEqualToString:@"keypath"] && ![folded isEqualToString:@"configkey"] &&
+        ![folded isEqualToString:@"configkeypath"] && ![folded isEqualToString:@"configpath"]) {
+      continue;
+    }
+    id value = info[name];
+    if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+      return value;
+    }
+  }
+  id underlying = info[NSUnderlyingErrorKey];
+  return [underlying isKindOfClass:[NSError class]] ? ALNModuleErrorConfigKey(underlying, depth + 1) : nil;
+}
+
+// Names the module that failed, keeps the module's own error (and its config
+// key) as the underlying error, and lists the modules that were not loaded
+// because loading stopped there.
+static NSError *ALNModuleLoadFailure(ALNModuleDefinition *definition,
+                                     NSError *underlying,
+                                     NSArray<ALNModuleDefinition *> *definitions,
+                                     NSUInteger failedIndex) {
+  NSMutableArray<NSString *> *notLoaded = [NSMutableArray array];
+  for (NSUInteger idx = failedIndex; idx < [definitions count]; idx++) {
+    [notLoaded addObject:definitions[idx].identifier ?: @""];
+  }
+  NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+  NSString *reason = underlying.localizedDescription ?: @"unknown error";
+  NSString *keyPath = ALNModuleErrorConfigKey(underlying, 0);
+  NSString *keyNote = ([keyPath length] > 0 && ![reason containsString:keyPath])
+                          ? [NSString stringWithFormat:@" (config key %@)", keyPath]
+                          : @"";
+  userInfo[NSLocalizedDescriptionKey] =
+      [NSString stringWithFormat:@"module %@ failed to load: %@%@", definition.identifier ?: @"", reason, keyNote];
+  userInfo[@"module"] = definition.identifier ?: @"";
+  userInfo[@"reason"] = reason;
+  userInfo[@"not_loaded"] = notLoaded;
+  if ([keyPath length] > 0) {
+    userInfo[@"key_path"] = keyPath;
+  }
+  if (underlying != nil) {
+    userInfo[NSUnderlyingErrorKey] = underlying;
+  }
+  return [NSError errorWithDomain:ALNModuleSystemErrorDomain code:24 userInfo:userInfo];
+}
+
++ (BOOL)loadModulesForApplication:(ALNApplication *)application
+                    loadedModules:(NSMutableArray<id<ALNModule>> *)loaded
+                            error:(NSError **)error {
   NSString *appRoot = ALNModuleTrim(application.config[@"appRoot"]);
   if ([appRoot length] == 0) {
-    return @[];
+    return YES;
   }
 
   NSArray<ALNModuleDefinition *> *definitions = [self sortedModuleDefinitionsAtAppRoot:appRoot error:error];
   if (definitions == nil) {
-    return nil;
+    return NO;
   }
 
-  NSMutableArray<id<ALNModule>> *loaded = [NSMutableArray array];
-  for (ALNModuleDefinition *definition in definitions) {
+  for (NSUInteger definitionIndex = 0; definitionIndex < [definitions count]; definitionIndex++) {
+    ALNModuleDefinition *definition = definitions[definitionIndex];
     Class klass = NSClassFromString(definition.principalClassName);
     if (klass == Nil) {
       if (error != NULL) {
@@ -1102,7 +1341,7 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
                                 definition.identifier,
                                 nil);
       }
-      return nil;
+      return NO;
     }
     id instance = [[klass alloc] init];
     if (![instance conformsToProtocol:@protocol(ALNModule)]) {
@@ -1112,7 +1351,7 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
                                 definition.identifier,
                                 nil);
       }
-      return nil;
+      return NO;
     }
     id<ALNModule> module = (id<ALNModule>)instance;
     if (![[module moduleIdentifier] isEqualToString:definition.identifier]) {
@@ -1125,7 +1364,7 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
                                 nil,
                                 nil);
       }
-      return nil;
+      return NO;
     }
 
     for (NSDictionary *mount in definition.publicMounts) {
@@ -1134,14 +1373,22 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
                         allowExtensions:mount[@"allowExtensions"]];
     }
 
-    if (![module registerWithApplication:application error:error]) {
-      return nil;
+    NSError *registerError = nil;
+    if (![module registerWithApplication:application error:&registerError]) {
+      if (error != NULL) {
+        *error = ALNModuleLoadFailure(definition, registerError, definitions, definitionIndex);
+      }
+      return NO;
     }
     if ([module respondsToSelector:@selector(pluginsForApplication:)]) {
       NSArray<id<ALNPlugin>> *plugins = [module pluginsForApplication:application];
       for (id plugin in plugins ?: @[]) {
-        if (![application registerPlugin:plugin error:error]) {
-          return nil;
+        NSError *pluginError = nil;
+        if (![application registerPlugin:plugin error:&pluginError]) {
+          if (error != NULL) {
+            *error = ALNModuleLoadFailure(definition, pluginError, definitions, definitionIndex);
+          }
+          return NO;
         }
       }
     }
@@ -1151,7 +1398,7 @@ static NSDictionary *ALNModuleNormalizedDependency(id rawDependency,
     [loaded addObject:module];
   }
 
-  return loaded;
+  return YES;
 }
 
 + (NSArray<NSDictionary *> *)migrationPlansAtAppRoot:(NSString *)appRoot

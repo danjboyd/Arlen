@@ -15,6 +15,9 @@ extern NSString *const ALNResponseErrorDomain;
 @property(nonatomic, strong, readonly) NSMutableData *bodyData;
 @property(nonatomic, assign) BOOL committed;
 @property(nonatomic, copy, nullable) NSString *fileBodyPath;
+/// Pins an already-open regular file through transmission. Do not close or
+/// mutate it while the response is in flight; path replacement cannot redirect it.
+@property(nonatomic, strong, nullable) NSFileHandle *fileBodyHandle;
 @property(nonatomic, assign) unsigned long long fileBodyLength;
 // Selected transfer offset; full file size for identity checks (zero uses fileBodyLength).
 @property(nonatomic, assign) unsigned long long fileBodyOffset;

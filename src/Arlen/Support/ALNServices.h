@@ -132,6 +132,8 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// File-backed queue with a sibling .lock file coordinating independent processes.
+/// Does not recover leases abandoned by crashed consumers; use PostgreSQL for recovery.
 @interface ALNFileJobAdapter : NSObject <ALNJobAdapter>
 
 - (nullable instancetype)initWithStoragePath:(NSString *)storagePath
@@ -156,6 +158,8 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// Process-local cache capped at 1024 entries, evicting least recently used keys.
+/// Writes sweep expired entries; values themselves have no byte-size limit.
 @interface ALNInMemoryCacheAdapter : NSObject <ALNCacheAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
@@ -227,6 +231,7 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 
 @end
 
+/// Diagnostic mail adapter retaining only the last 100 deliveries; does not send mail.
 @interface ALNInMemoryMailAdapter : NSObject <ALNMailAdapter>
 
 - (instancetype)initWithAdapterName:(nullable NSString *)adapterName;
@@ -284,6 +289,11 @@ typedef NS_ENUM(NSUInteger, ALNJobWorkerDisposition) {
 - (NSArray *)listAttachmentMetadata;
 - (void)reset;
 @optional
+/// Opens an immutable regular attachment for bounded-memory streaming. The
+/// caller owns the returned handle; adapters without this capability return nil.
+- (nullable NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                          metadata:(NSDictionary *_Nullable *_Nullable)metadata
+                                             error:(NSError *_Nullable *_Nullable)error;
 - (NSDictionary *)attachmentAdapterCapabilities;
 
 @end

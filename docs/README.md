@@ -1,5 +1,9 @@
 # Arlen Documentation
 
+For upgrades, review [Getting Started](GETTING_STARTED.md), the
+[plugin service guide](PLUGIN_SERVICE_GUIDE.md), and [Live UI](LIVE_UI.md) for
+module re-vendoring, bounded default adapters, and receive-only channels.
+
 This is the curated documentation index for Arlen. It is organized by reader
 intent: getting started, building apps, modules, data layer, operations,
 reference, and examples.
@@ -24,11 +28,11 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 ## Start Here
 
 - [First App Guide](FIRST_APP_GUIDE.md): shortest path to scaffold, run, and extend your first app.
-- [Getting Started](GETTING_STARTED.md): install the toolchain and Arlen (release installer or checkout), create an app, add a route, and choose the next guide.
+- [Getting Started](GETTING_STARTED.md): install Arlen and supported prerequisites with one pasted command (or use a checkout), create an app, add a route, and choose the next guide.
 - [Getting Started Quickstart](GETTING_STARTED_QUICKSTART.md): the minimum-friction first-app path.
 - [Getting Started Tracks](GETTING_STARTED_TRACKS.md): quickstart, API-first, HTML-first, and data-layer entry paths.
 - [Getting Started on macOS](GETTING_STARTED_MACOS.md): Apple-runtime bootstrap path for macOS without GNUstep.
-- [Getting Started on Windows](GETTING_STARTED_WINDOWS.md): install the gnustep-cli `CLANG64` toolchain and Arlen with `install.ps1`, then build and run apps (development only until 0.4.0).
+- [Getting Started on Windows](GETTING_STARTED_WINDOWS.md): install Arlen and its matching gnustep-cli `CLANG64` toolchain with `install.ps1`, then build and run apps (development only until 0.4.0).
 - [Toolchain Matrix](TOOLCHAIN_MATRIX.md): known-good onboarding/runtime baseline.
 
 ## Building Apps
@@ -57,12 +61,12 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 
 - [Modules](MODULES.md): install, doctor, migrate, assets, upgrade, eject, remove, and override guidance.
 - [Plugin + Service Guide](PLUGIN_SERVICE_GUIDE.md): generate app-local plugins and service adapters.
-- [Auth Module](AUTH_MODULE.md): first-party auth product routes, fragments, helpers, and `/auth/api` surface.
+- [Auth Module](AUTH_MODULE.md): first-party auth routes and `/auth/api`, including durable production mail setup.
 - [Auth UI Integration Modes](AUTH_UI_INTEGRATION_MODES.md): `headless`, `module-ui`, and `generated-app-ui`.
 - [Admin UI Module](ADMIN_UI_MODULE.md): admin resources, filters, exports, and `/admin/api`.
 - [Durable Jobs](DURABLE_JOBS.md): PostgreSQL queues, transactional enqueue, renewable leases, crash recovery, and durable results.
 - [Jobs Module](JOBS_MODULE.md): `/jobs` HTML plus `/jobs/api` JSON/OpenAPI surface.
-- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences, email, webhook and Web Push delivery, plus admin preview/outbox/test-send flows.
+- [Notifications Module](NOTIFICATIONS_MODULE.md): inbox/preferences, email, webhook and Web Push delivery, admin preview/outbox/test-send flows, and SQLite migration/backup guidance.
 - [Storage Module](STORAGE_MODULE.md): collections, direct uploads, signed downloads, and `/storage/api`.
 - [Ops Module](OPS_MODULE.md): operational dashboard plus `/ops/api`.
 - [Search Module](SEARCH_MODULE.md): shaped public query contracts, PostgreSQL/Meilisearch/OpenSearch engines, reindex/incremental sync, and admin/ops integration.
@@ -169,3 +173,7 @@ concurrent security defaults and explicit header overrides.
 [Toolchain Matrix](TOOLCHAIN_MATRIX.md#known-libobjc2-defect-instance-synchronized)
 describes the libobjc2 `@synchronized` defect and the locking pattern to use
 in application code.
+
+Contributor performance check: after building `boomhauer`, run
+`python3 tests/performance/persistent_http.py` to check persistent-connection
+HTTP and static-file throughput. See [CONTRIBUTING.md](../CONTRIBUTING.md).

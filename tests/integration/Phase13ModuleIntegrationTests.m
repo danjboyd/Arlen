@@ -522,6 +522,129 @@
   }
 }
 
+// GitHub issue 294: a module that fails to configure stops a production app
+// (and its jobs worker) from starting, naming the module and key.
+- (void)testModuleConfigurationFailureStopsProductionStartup {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-load-failure-app"];
+  NSString *modulesRoot = [self createTempDirectoryWithPrefix:@"phase13-module-load-failure-src"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(modulesRoot);
+  if (appRoot == nil || modulesRoot == nil) {
+    return;
+  }
+
+  @try {
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ArlenServer.h\"\n"
+                                  "#import \"ALNContext.h\"\n"
+                                  "#import \"ALNController.h\"\n\n"
+                                  "@interface Phase13LoadFailureController : ALNController\n"
+                                  "@end\n\n"
+                                  "@implementation Phase13LoadFailureController\n"
+                                  "- (id)index:(ALNContext *)ctx { (void)ctx; [self renderText:@\"ok\\n\"]; return nil; }\n"
+                                  "@end\n\n"
+                                  "static void RegisterRoutes(ALNApplication *app) {\n"
+                                  "  [app registerRouteMethod:@\"GET\" path:@\"/\" name:@\"home\" controllerClass:[Phase13LoadFailureController class] action:@\"index\"];\n"
+                                  "}\n\n"
+                                  "int main(int argc, const char *argv[]) {\n"
+                                  "  @autoreleasepool { return ALNRunAppMain(argc, argv, &RegisterRoutes); }\n"
+                                  "}\n"]);
+
+    NSString *brokenSource = [modulesRoot stringByAppendingPathComponent:@"broken-v1"];
+    XCTAssertTrue([self writeFile:[brokenSource stringByAppendingPathComponent:@"module.plist"]
+                          content:@"{\n  identifier = \"broken\";\n  version = \"1.0.0\";\n  principalClass = \"BrokenModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[brokenSource stringByAppendingPathComponent:@"Sources/BrokenModule.m"]
+                          content:@"#import <Foundation/Foundation.h>\n"
+                                  "#import \"ALNApplication.h\"\n"
+                                  "#import \"ALNModuleSystem.h\"\n\n"
+                                  "@interface BrokenModule : NSObject <ALNModule>\n"
+                                  "@end\n\n"
+                                  "@implementation BrokenModule\n"
+                                  "- (NSString *)moduleIdentifier { return @\"broken\"; }\n"
+                                  "- (BOOL)registerWithApplication:(ALNApplication *)application error:(NSError **)error {\n"
+                                  "  (void)application;\n"
+                                  "  if (error != NULL) {\n"
+                                  "    *error = [NSError errorWithDomain:@\"BrokenModule\" code:1 userInfo:@{\n"
+                                  "      NSLocalizedDescriptionKey : @\"brokenModule.token is required\",\n"
+                                  "      @\"key_path\" : @\"brokenModule.token\",\n"
+                                  "    }];\n"
+                                  "  }\n"
+                                  "  return NO;\n"
+                                  "}\n"
+                                  "@end\n"]);
+
+    int code = 0;
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot]
+                                         exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+
+    NSString *addBroken = [self runJSONCommand:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@/build/arlen module add broken --source %@ --json",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), ALNTestShellQuote(repoRoot),
+        ALNTestShellQuote(brokenSource)]
+                                       exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", addBroken);
+
+    // Guards a regression that would leave the server running.
+    NSString *timeoutPrefix = @"$(command -v timeout >/dev/null 2>&1 && printf 'timeout 300 ')";
+    NSString *serverOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/boomhauer --no-watch --env production 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix, ALNTestShellQuote(repoRoot)]
+                                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", serverOutput);
+    XCTAssertNotEqual(124, code, @"server kept running: %@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"startup failed: module broken failed to load"], @"%@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"brokenModule.token is required"], @"%@", serverOutput);
+    XCTAssertTrue([serverOutput containsString:@"module load failed"], @"%@", serverOutput);
+
+    NSString *workerOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/jobs-worker --env production --once 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix,
+        ALNTestShellQuote(repoRoot)]
+                                          exitCode:&code];
+    XCTAssertNotEqual(0, code, @"%@", workerOutput);
+    XCTAssertTrue([workerOutput containsString:@"jobs worker: startup failed: module broken failed to load"],
+                  @"%@", workerOutput);
+
+    // propane prints the startup error once, backs off, and gives up with
+    // status 3 after startupFailureLimit consecutive startup failures, with
+    // the default worker count and an async worker.
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  propaneAccessories = {\n    respawnDelayMs = 50;\n"
+                                  "    startupFailureLimit = 3;\n    respawnBackoffMaxMs = 200;\n  };\n}\n"]);
+    NSString *pidFile = [appRoot stringByAppendingPathComponent:@"tmp/propane.pid"];
+    NSString *propaneOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@%@/bin/propane --env production --workers 4 "
+         "--job-worker-count 1 --job-worker-cmd %@ --pid-file %@ 2>&1",
+        ALNTestShellQuote(appRoot), ALNTestShellQuote(appRoot), ALNTestShellQuote(repoRoot), timeoutPrefix,
+        ALNTestShellQuote(repoRoot),
+        ALNTestShellQuote([NSString stringWithFormat:@"%@/bin/jobs-worker --env production", repoRoot]),
+        ALNTestShellQuote(pidFile)]
+                                           exitCode:&code];
+    XCTAssertEqual(3, code, @"%@", propaneOutput);
+    NSString *firstLine = @"propane: worker startup failed: boomhauer: startup failed: module broken failed to load";
+    XCTAssertEqual((NSUInteger)2, [[propaneOutput componentsSeparatedByString:firstLine] count], @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"worker startup failed (same error) x3"], @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"consecutive_failures=3"], @"%@", propaneOutput);
+    // All four boot workers can be reaped in one pass, so propane may give up
+    // at a count above the limit.
+    XCTAssertTrue([propaneOutput containsString:@"consecutive worker startup failures; last: boomhauer: startup failed"],
+                  @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"next_respawn_delay_ms=200"], @"%@", propaneOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:modulesRoot error:nil];
+  }
+}
+
 - (void)testBoomhauerIgnoresStaleGeneratedModuleSourcesOutsideCurrentTemplateInventory {
   NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
   NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-stale-generated-module-app"];
@@ -710,6 +833,87 @@
     XCTAssertEqualObjects(@"worker-ok\n", markerContents);
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
+- (void)testDoctorsReportVendoredModulesOlderThanTheFrameworkCopy {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"phase13-module-outdated-app"];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"phase13-module-outdated-fw"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(workRoot);
+  if (appRoot == nil || workRoot == nil) {
+    return;
+  }
+
+  @try {
+    // A minimal framework checkout as bin/arlen-doctor recognises one, with a newer alpha.
+    NSString *frameworkRoot = [workRoot stringByAppendingPathComponent:@"framework"];
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"GNUmakefile"] content:@"\n"]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"src/Arlen/.keep"] content:@""]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.2.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"2.0.0\";\n  principalClass = \"BetaModule\";\n}\n"]);
+    // A pre-release suffix isn't a valid module version; the doctor skips it rather than guess.
+    XCTAssertTrue([self writeFile:[frameworkRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.1.0-rc1\";\n  principalClass = \"GammaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/gamma/module.plist"]
+                          content:@"{\n  identifier = \"gamma\";\n  version = \"1.0.0\";\n  principalClass = \"GammaModule\";\n}\n"]);
+
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  host = \"127.0.0.1\";\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/environments/development.plist"]
+                          content:@"{}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/modules.plist"]
+                          content:@"{ modules = (\n"
+                                  "  { identifier = \"alpha\"; path = \"modules/alpha\"; enabled = YES; },\n"
+                                  "  { identifier = \"beta\"; path = \"modules/beta\"; enabled = YES; }\n"
+                                  "); }\n"]);
+    // alpha is behind the framework; beta matches it (its dependency constraint must not be read as its version).
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/alpha/module.plist"]
+                          content:@"{\n  identifier = \"alpha\";\n  version = \"1.0.0\";\n  principalClass = \"AlphaModule\";\n}\n"]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"modules/beta/module.plist"]
+                          content:@"{\n  identifier = \"beta\";\n  version = \"2.0.0\";\n  principalClass = \"BetaModule\";\n"
+                                  "  dependencies = ( { identifier = \"alpha\"; version = \">= 1.0.0\"; } );\n}\n"]);
+
+    int code = 0;
+    NSString *doctorCommand =
+        [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ bash %@ --json",
+                                   ALNTestShellQuote(appRoot),
+                                   ALNTestShellQuote(frameworkRoot),
+                                   ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"])];
+    NSString *output = [self runJSONCommand:doctorCommand exitCode:&code];
+    NSDictionary *payload = [self parseJSONDictionary:output];
+    NSMutableArray<NSDictionary *> *outdated = [NSMutableArray array];
+    for (NSDictionary *check in [payload[@"checks"] isKindOfClass:[NSArray class]] ? payload[@"checks"] : @[]) {
+      if ([check[@"id"] isEqualToString:@"module_outdated"]) {
+        [outdated addObject:check];
+      }
+    }
+    XCTAssertEqual((NSUInteger)1, [outdated count], @"%@", output);
+    NSDictionary *check = [outdated firstObject];
+    XCTAssertEqualObjects(@"warn", check[@"status"], @"%@", output);
+    XCTAssertEqualObjects(@"module alpha is 1.0.0 in this app; the framework has 1.2.0", check[@"message"], @"%@", output);
+    XCTAssertTrue([check[@"hint"] containsString:@"arlen module upgrade alpha"], @"%@", output);
+    XCTAssertTrue([check[@"hint"] containsString:@"arlen module migrate"], @"%@", output);
+
+    NSString *buildOutput = [self runShellCapture:[self buildToolsCommandForRepoRoot:repoRoot] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+    output = [self runJSONCommand:[self arlenModuleCommand:@"doctor --json"
+                                                   appRoot:appRoot
+                                                  repoRoot:repoRoot
+                                             frameworkRoot:frameworkRoot]
+                          exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    payload = [self parseJSONDictionary:output];
+    XCTAssertTrue([[self diagnosticCodesInDoctorPayload:payload module:@"alpha"] containsObject:@"module_outdated"],
+                  @"%@", output);
+    XCTAssertFalse([[self diagnosticCodesInDoctorPayload:payload module:@"beta"] containsObject:@"module_outdated"],
+                   @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }
 

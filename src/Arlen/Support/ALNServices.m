@@ -1,3 +1,4 @@
+#import "ALNPrivateStorage.h"
 #import "ALNServices.h"
 #import "ALNDataCompat.h"
 #import "ALNJSONSerialization.h"
@@ -11,6 +12,9 @@
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+
 #else
 #include <netdb.h>
 #include <poll.h>
@@ -46,6 +50,8 @@ static NSString *ALNNonEmptyString(NSString *value, NSString *defaultValue) {
 static NSDictionary *ALNPermissionsAttributes(NSUInteger mode) {
   return @{ NSFilePosixPermissions : @(mode) };
 }
+
+
 
 static NSError *ALNPOSIXErrorForPath(NSString *path, NSString *message) {
   int errorCode = errno;
@@ -108,7 +114,7 @@ static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path
   NSError *directoryError = nil;
   if (![fileManager createDirectoryAtPath:path
               withIntermediateDirectories:YES
-                               attributes:ALNPermissionsAttributes(0700)
+                               attributes:nil
                                     error:&directoryError]) {
     if (error != NULL) {
       *error = directoryError;
@@ -116,15 +122,7 @@ static BOOL ALNEnsurePrivateDirectory(NSFileManager *fileManager, NSString *path
     return NO;
   }
 
-  NSError *permissionsError = nil;
-  if (![fileManager setAttributes:ALNPermissionsAttributes(0700)
-                     ofItemAtPath:path
-                            error:&permissionsError]) {
-    if (error != NULL) {
-      *error = permissionsError;
-    }
-    return NO;
-  }
+  if (!ALNWindowsSecurePrivatePath(path, YES, error)) return NO;
 #endif
   return YES;
 }
@@ -146,6 +144,9 @@ static BOOL ALNEnsurePrivateRegularFile(NSFileManager *fileManager, NSString *pa
     return NO;
   }
 
+#if defined(_WIN32)
+  return ALNWindowsSecurePrivatePath(path, NO, error);
+#else
   NSError *permissionsError = nil;
   if (![fileManager setAttributes:ALNPermissionsAttributes(0600)
                      ofItemAtPath:path
@@ -156,6 +157,7 @@ static BOOL ALNEnsurePrivateRegularFile(NSFileManager *fileManager, NSString *pa
     return NO;
   }
   return YES;
+#endif
 }
 
 static BOOL ALNHardenRegularFilesInDirectory(NSFileManager *fileManager,
@@ -360,16 +362,7 @@ static BOOL ALNWriteDataAtomicallyWithMode(NSData *data,
     }
     return NO;
   }
-  NSError *permissionsError = nil;
-  if (![[NSFileManager defaultManager] setAttributes:ALNPermissionsAttributes(mode)
-                                        ofItemAtPath:path
-                                               error:&permissionsError]) {
-    if (error != NULL) {
-      *error = permissionsError;
-    }
-    return NO;
-  }
-  return YES;
+  return ALNWindowsSecurePrivatePath(path, NO, error);
 #else
   NSString *templatePath = [directory stringByAppendingPathComponent:@".arlen-write-XXXXXX"];
   char *templateBuffer = strdup([templatePath fileSystemRepresentation]);
@@ -1204,10 +1197,31 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 @property(nonatomic, copy) NSString *storagePath;
 @property(nonatomic, strong) NSFileManager *fileManager;
 @property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, assign) int stateLockDescriptor;
+- (BOOL)lockState:(NSError **)error;
+- (void)unlockState;
 
 @end
 
 @implementation ALNFileJobAdapter
+
+- (BOOL)lockState:(NSError **)error {
+  [self.lock lock];
+  int descriptor = ALNPlatformOpenExclusiveLock([self.storagePath stringByAppendingString:@".lock"]);
+  if (descriptor < 0) {
+    [self.lock unlock];
+    if (error) *error = ALNServiceError(132, @"job storage lock could not be acquired", nil);
+    return NO;
+  }
+  self.stateLockDescriptor = descriptor;
+  return YES;
+}
+
+- (void)unlockState {
+  ALNPlatformReleaseExclusiveLock(self.stateLockDescriptor);
+  self.stateLockDescriptor = -1;
+  [self.lock unlock];
+}
 
 - (instancetype)initWithStoragePath:(NSString *)storagePath
                          adapterName:(NSString *)adapterName
@@ -1240,6 +1254,8 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     return nil;
   }
 
+  if (![self lockState:error]) return nil;
+  @try {
   if (![_fileManager fileExistsAtPath:_storagePath]) {
     NSError *writeError = nil;
     if (![self writeState:@{
@@ -1263,6 +1279,9 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       }
       return nil;
     }
+  }
+  } @finally {
+    [self unlockState];
   }
   return self;
 }
@@ -1518,11 +1537,11 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   }
   NSString *idempotencyKey = ALNNonEmptyString(normalizedOptions[@"idempotencyKey"], @"");
 
-  [self.lock lock];
+  if (![self lockState:error]) return nil;
   NSError *stateError = nil;
   NSDictionary *state = [self readState:&stateError];
   if (state == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = stateError;
     }
@@ -1540,7 +1559,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                   : @"";
     if ([existingJobID length] > 0) {
       if ([self isJobID:existingJobID activeInPending:pending leased:leased]) {
-        [self.lock unlock];
+        [self unlockState];
         return existingJobID;
       }
       [idempotencyMap removeObjectForKey:idempotencyKey];
@@ -1585,7 +1604,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
-  [self.lock unlock];
+  [self unlockState];
   if (!persisted) {
     if (error != NULL) {
       *error = writeError;
@@ -1597,11 +1616,11 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
 - (ALNJobEnvelope *)dequeueDueJobAt:(NSDate *)timestamp error:(NSError **)error {
   NSDate *now = timestamp ?: [NSDate date];
-  [self.lock lock];
+  if (![self lockState:error]) return nil;
   NSError *stateError = nil;
   NSDictionary *state = [self readState:&stateError];
   if (state == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = stateError;
     }
@@ -1628,7 +1647,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   }
 
   if (selected == nil || foundIndex == NSNotFound) {
-    [self.lock unlock];
+    [self unlockState];
     return nil;
   }
 
@@ -1650,7 +1669,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
-  [self.lock unlock];
+  [self unlockState];
   if (!persisted) {
     if (error != NULL) {
       *error = writeError;
@@ -1669,11 +1688,11 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     return NO;
   }
 
-  [self.lock lock];
+  if (![self lockState:error]) return NO;
   NSError *stateError = nil;
   NSDictionary *state = [self readState:&stateError];
   if (state == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = stateError;
     }
@@ -1683,7 +1702,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSMutableDictionary *leased = [self mutableLeasedMapFromState:state];
   NSMutableDictionary *idempotencyMap = [self mutableIdempotencyMapFromState:state];
   if (leased[normalizedID] == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = ALNServiceError(128, @"job is not currently leased", nil);
     }
@@ -1699,7 +1718,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           deadLetters:[self deadLettersFromState:state]];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
-  [self.lock unlock];
+  [self unlockState];
   if (!persisted) {
     if (error != NULL) {
       *error = writeError;
@@ -1727,11 +1746,11 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
     return NO;
   }
 
-  [self.lock lock];
+  if (![self lockState:error]) return NO;
   NSError *stateError = nil;
   NSDictionary *state = [self readState:&stateError];
   if (state == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = stateError;
     }
@@ -1744,7 +1763,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSMutableArray *deadLetters = [NSMutableArray arrayWithArray:[self deadLettersFromState:state]];
   ALNJobEnvelope *leasedEnvelope = [leased[jobID] isKindOfClass:[ALNJobEnvelope class]] ? leased[jobID] : nil;
   if (leasedEnvelope == nil) {
-    [self.lock unlock];
+    [self unlockState];
     if (error != NULL) {
       *error = ALNServiceError(131, @"job is not currently leased", nil);
     }
@@ -1788,7 +1807,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
                                                           deadLetters:deadLetters];
   NSError *writeError = nil;
   BOOL persisted = [self writeState:nextState error:&writeError];
-  [self.lock unlock];
+  [self unlockState];
   if (!persisted) {
     if (error != NULL) {
       *error = writeError;
@@ -1799,15 +1818,15 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 }
 
 - (NSArray *)pendingJobsSnapshot {
-  [self.lock lock];
+  if (![self lockState:NULL]) return @[];
   NSDictionary *state = [self readState:NULL];
   NSArray *snapshot = [self sortedPendingFromState:state ?: @{}];
-  [self.lock unlock];
+  [self unlockState];
   return snapshot ?: @[];
 }
 
 - (NSArray *)leasedJobsSnapshot {
-  [self.lock lock];
+  if (![self lockState:NULL]) return @[];
   NSDictionary *state = [self readState:NULL];
   NSMutableDictionary *leased = [self mutableLeasedMapFromState:state ?: @{}];
   NSArray *keys = [[leased allKeys] sortedArrayUsingSelector:@selector(compare:)];
@@ -1818,22 +1837,22 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
       [snapshot addObject:[envelope copy]];
     }
   }
-  [self.lock unlock];
+  [self unlockState];
   return snapshot;
 }
 
 - (NSArray *)deadLetterJobsSnapshot {
-  [self.lock lock];
+  if (![self lockState:NULL]) return @[];
   NSDictionary *state = [self readState:NULL];
   NSArray *snapshot = [self deadLettersFromState:state ?: @{}];
-  [self.lock unlock];
+  [self unlockState];
   return snapshot ?: @[];
 }
 
 - (void)reset {
-  [self.lock lock];
+  if (![self lockState:NULL]) return;
   (void)[self writeState:[self defaultState] error:NULL];
-  [self.lock unlock];
+  [self unlockState];
 }
 
 @end
@@ -1842,6 +1861,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
 @property(nonatomic, copy) NSString *adapterNameValue;
 @property(nonatomic, strong) NSMutableDictionary *entriesByKey;
+@property(nonatomic, strong) NSMutableArray *keyOrder;
 @property(nonatomic, strong) NSLock *lock;
 
 @end
@@ -1857,6 +1877,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   if (self) {
     _adapterNameValue = [ALNNonEmptyString(adapterName, @"in_memory_cache") copy];
     _entriesByKey = [NSMutableDictionary dictionary];
+    _keyOrder = [NSMutableArray array];
     _lock = [[NSLock alloc] init];
   }
   return self;
@@ -1881,10 +1902,25 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   [self.lock lock];
   if (object == nil || object == [NSNull null]) {
     [self.entriesByKey removeObjectForKey:normalizedKey];
+    [self.keyOrder removeObject:normalizedKey];
     [self.lock unlock];
     return YES;
   }
 
+  NSDate *now = [NSDate date];
+  for (NSString *existingKey in [self.keyOrder copy]) {
+    id expiry = self.entriesByKey[existingKey][@"expiresAt"];
+    if ([expiry isKindOfClass:[NSDate class]] && [expiry compare:now] != NSOrderedDescending) {
+      [self.entriesByKey removeObjectForKey:existingKey];
+      [self.keyOrder removeObject:existingKey];
+    }
+  }
+  [self.keyOrder removeObject:normalizedKey];
+  while (self.keyOrder.count >= 1024) {
+    [self.entriesByKey removeObjectForKey:self.keyOrder[0]];
+    [self.keyOrder removeObjectAtIndex:0];
+  }
+  [self.keyOrder addObject:normalizedKey];
   NSDate *expiresAt = nil;
   if (ttlSeconds > 0.0) {
     expiresAt = [NSDate dateWithTimeIntervalSinceNow:ttlSeconds];
@@ -1919,11 +1955,14 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSDate *expiresAt = [entry[@"expiresAt"] isKindOfClass:[NSDate class]] ? entry[@"expiresAt"] : nil;
   if (expiresAt != nil && [expiresAt compare:now] != NSOrderedDescending) {
     [self.entriesByKey removeObjectForKey:normalizedKey];
+    [self.keyOrder removeObject:normalizedKey];
     [self.lock unlock];
     return nil;
   }
 
   id value = entry[@"value"];
+  [self.keyOrder removeObject:normalizedKey];
+  [self.keyOrder addObject:normalizedKey];
   [self.lock unlock];
   return value;
 }
@@ -1939,6 +1978,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 
   [self.lock lock];
   [self.entriesByKey removeObjectForKey:normalizedKey];
+  [self.keyOrder removeObject:normalizedKey];
   [self.lock unlock];
   return YES;
 }
@@ -1947,6 +1987,7 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   (void)error;
   [self.lock lock];
   [self.entriesByKey removeAllObjects];
+  [self.keyOrder removeAllObjects];
   [self.lock unlock];
   return YES;
 }
@@ -3243,6 +3284,7 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
     @"message" : [message dictionaryRepresentation],
   }];
+  if (self.deliveries.count > 100) [self.deliveries removeObjectAtIndex:0];
   [self.lock unlock];
   return deliveryID;
 }
@@ -3643,6 +3685,9 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
     @"readOnly" : @NO,
     @"scoped" : @NO,
     @"mirroring" : @NO,
+    // Attachments live in this process's memory, so other processes
+    // (propane workers, the jobs worker) cannot read them.
+    @"processLocal" : @YES,
   };
 }
 
@@ -3847,6 +3892,15 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
       userInfo[NSUnderlyingErrorKey] = lastError;
     }
     *error = [NSError errorWithDomain:ALNServiceErrorDomain code:564 userInfo:userInfo];
+  }
+  return nil;
+}
+
+- (NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                  metadata:(NSDictionary **)metadata
+                                     error:(NSError **)error {
+  if ([self.baseAdapter respondsToSelector:_cmd]) {
+    return [self.baseAdapter openAttachmentFileForID:attachmentID metadata:metadata error:error];
   }
   return nil;
 }
@@ -4150,6 +4204,48 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
   }
   [self.lock unlock];
   return attachmentID;
+}
+
+- (NSFileHandle *)openAttachmentFileForID:(NSString *)attachmentID
+                                  metadata:(NSDictionary **)metadata
+                                     error:(NSError **)error {
+  NSString *normalizedID = [self validatedAttachmentID:attachmentID errorCode:568 error:error];
+  if (normalizedID.length == 0) return nil;
+  [self.lock lock];
+  @try {
+    NSDictionary *entry = [self metadataEntryForAttachmentID:normalizedID error:error];
+    if (entry == nil) return nil;
+    NSString *path = [self validatedExistingAttachmentPathForID:normalizedID extension:@"bin" errorCode:568 error:error];
+    if (path.length == 0) return nil;
+    int fd = -1;
+#if defined(_WIN32)
+    NSMutableData *widePath = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+    const unichar terminator = 0;
+    [widePath appendBytes:&terminator length:sizeof(terminator)];
+    HANDLE handle = CreateFileW((const wchar_t *)widePath.bytes, GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                               FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (handle != INVALID_HANDLE_VALUE) {
+      BY_HANDLE_FILE_INFORMATION info;
+      if (GetFileInformationByHandle(handle, &info) &&
+          !(info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) {
+        fd = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+      }
+      if (fd < 0) CloseHandle(handle);
+    }
+#else
+    do { fd = open([path fileSystemRepresentation], O_RDONLY | O_CLOEXEC | O_NOFOLLOW); }
+    while (fd < 0 && errno == EINTR);
+#endif
+    struct stat info;
+    if (fd < 0 || fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+      if (fd >= 0) close(fd);
+      if (error != NULL) *error = ALNServiceError(560, @"attachment is not a readable regular file", nil);
+      return nil;
+    }
+    if (metadata != NULL) *metadata = [self normalizedMetadataEntry:entry];
+    return [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
+  } @finally { [self.lock unlock]; }
 }
 
 - (NSData *)attachmentDataForID:(NSString *)attachmentID

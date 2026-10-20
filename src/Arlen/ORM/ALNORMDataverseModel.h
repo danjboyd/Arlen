@@ -53,6 +53,10 @@ NS_ASSUME_NONNULL_BEGIN
                      value:(nullable id)value
                      error:(NSError *_Nullable *_Nullable)error;
 - (nullable id)primaryIDValue;
+// The primary ID as last loaded or saved (the current value for a record that
+// was never persisted). PATCH and DELETE target it; nil for a persisted record
+// loaded without its ID.
+- (nullable id)persistedPrimaryIDValue;
 - (NSDictionary<NSString *, id> *)dictionaryRepresentation;
 
 @end

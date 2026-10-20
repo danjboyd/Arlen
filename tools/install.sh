@@ -9,11 +9,14 @@
 #   --prefix DIR      where releases are unpacked (default: ~/.local/share/arlen)
 #   --bin-dir DIR     where the `arlen` launcher goes (default: ~/.local/bin)
 #   --archive FILE    install from a downloaded release archive instead
-#   --no-build        unpack only; skip the one-time framework build
+#   --no-build        unpack only; skip setup and the one-time framework build
+#   --no-setup        never install prerequisites (offline/manual toolchains)
+#   --no-modify-path  leave shell startup files unchanged
+#   --yes             allow prerequisite installation without prompting
 #
-# Linux:  the archive is built once against your clang-built GNUstep
-#         toolchain (about a minute). See docs/GETTING_STARTED.md for getting
-#         that toolchain.
+# Linux:  builds once against clang GNUstep. Supported Debian/Ubuntu hosts can
+#         provision missing prerequisites with consent; use --no-setup for
+#         an existing/manual toolchain. See docs/GETTING_STARTED.md.
 # macOS:  Apple Silicon only; gets prebuilt framework tools. Needs the Xcode
 #         Command Line Tools and Homebrew openssl@3 and libpq; see
 #         docs/GETTING_STARTED_MACOS.md. Intel Macs are not supported yet.
@@ -27,26 +30,63 @@ prefix="${HOME}/.local/share/arlen"
 bin_dir="${HOME}/.local/bin"
 archive=""
 do_build=1
+do_setup=1
+modify_path=1
+yes=0
 
 say() { printf 'arlen-install: %s\n' "$*"; }
 die() { printf 'arlen-install: error: %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,21p' "${BASH_SOURCE[0]:-$0}" 2>/dev/null | sed 's/^# \{0,1\}//'
+  cat <<'EOF'
+Usage: install.sh [--version X.Y.Z] [--archive FILE] [--prefix DIR] [--bin-dir DIR]
+                  [--no-build] [--no-setup] [--no-modify-path] [--yes]
+Installs a release; Linux builds with clang GNUstep. Missing prerequisites can
+be installed with consent (--yes for unattended use). --no-setup prevents it.
+Adds the launcher directory to future shells unless --no-modify-path is used.
+The current shell still needs the printed PATH export after installation.
+EOF
 }
 
 while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version|--prefix|--bin-dir|--archive)
+      [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "$1 requires a value" ;;
+  esac
   case "$1" in
     --version) version="${2:-}"; shift 2 ;;
     --prefix) prefix="${2:-}"; shift 2 ;;
     --bin-dir) bin_dir="${2:-}"; shift 2 ;;
     --archive) archive="${2:-}"; shift 2 ;;
     --no-build) do_build=0; shift ;;
+    --no-setup) do_setup=0; shift ;;
+    --no-modify-path) modify_path=0; shift ;;
+    --yes) yes=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1 (try --help)" ;;
   esac
 done
 version="${version#v}"
+valid_version() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.-]+)?$ ]]; }
+[[ -z "$version" ]] || valid_version "$version" || die "invalid release version: $version"
+# Absolute, canonical directories also make the launcher independent of cwd.
+mkdir -p "$prefix" "$bin_dir"
+prefix="$(cd "$prefix" && pwd -P)"
+bin_dir="$(cd "$bin_dir" && pwd -P)"
+quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+consent() {
+  [[ $yes -eq 1 ]] && return 0
+  local answer=""
+  if { exec 3<> /dev/tty; } 2>/dev/null; then
+    printf 'arlen-install: %s [y/N] ' "$*" >&3
+    read -r answer <&3 || true
+    exec 3>&-
+  fi
+  [[ "$answer" == y || "$answer" == Y ]] || die "prerequisite setup needs consent; rerun with --yes, or provision manually with --no-setup"
+}
+root_command() {
+  if [[ "$(id -u)" == 0 ]]; then "$@"; else need sudo; sudo "$@"; fi
+}
 
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but was not found"; }
 need tar
@@ -84,7 +124,37 @@ sha256_of() {
 }
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/arlen-install.XXXXXX")"
-trap 'rm -rf "$work_dir"' EXIT
+stage=""
+backup=""
+dest=""
+final_dest=""
+activating=0
+had_previous=0
+old_current=""
+launcher_stage=""
+lock_dir="$prefix/.install-lock"
+mkdir "$lock_dir" 2>/dev/null || die "another install is active (lock: $lock_dir); remove the lock only if that installer has stopped"
+cleanup() {
+  local status=$?
+  if [[ $activating -eq 1 ]]; then
+    if [[ -n "$backup" && ( -e "$backup" || -L "$backup" ) ]]; then
+      rm -rf "$final_dest"
+      mv "$backup" "$final_dest"
+    elif [[ $had_previous -eq 0 && ! -d "$stage/release" ]]; then
+      rm -rf "$final_dest"
+    fi
+    if [[ -n "$old_current" ]]; then ln -sfn "$old_current" "$prefix/current"
+    else rm -f "$prefix/current"; fi
+  fi
+  [[ -z "$launcher_stage" ]] || rm -f "$launcher_stage"
+  [[ -z "$stage" ]] || rm -rf "$stage"
+  rm -rf "$work_dir"
+  rmdir "$lock_dir" 2>/dev/null || true
+  return "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ -z "$archive" ]]; then
   need curl
@@ -93,10 +163,7 @@ if [[ -z "$archive" ]]; then
       die "could not look up the latest release"
     version="${latest_url##*/}"
     version="${version#v}"
-    case "$version" in
-      [0-9]*.[0-9]*.[0-9]*) ;;
-      *) die "could not determine the latest release version (got '$version')" ;;
-    esac
+    valid_version "$version" || die "could not determine the latest release version (got '$version')"
   fi
   asset="arlen-$version$asset_suffix.tar.gz"
   base_url="https://github.com/$repo_slug/releases/download/v$version"
@@ -113,6 +180,15 @@ if [[ -z "$archive" ]]; then
   archive="$work_dir/$asset"
 else
   [[ -f "$archive" ]] || die "archive not found: $archive"
+  sums="$(dirname "$archive")/SHA256SUMS"
+  if [[ -f "$sums" ]]; then
+    expected="$(awk -v name="$(basename "$archive")" '$2 == name {print $1}' "$sums")"
+    [[ -n "$expected" ]] || die "SHA256SUMS has no entry for $(basename "$archive")"
+    [[ "$expected" == "$(sha256_of "$archive")" ]] || die "checksum mismatch for $archive"
+    say "local archive checksum verified"
+  else
+    say "using trusted local archive (no sibling SHA256SUMS)"
+  fi
 fi
 
 say "unpacking"
@@ -121,16 +197,73 @@ tar -xzf "$archive" -C "$work_dir/unpack"
 top="$(cd "$work_dir/unpack" && ls)"
 [[ -f "$work_dir/unpack/$top/.arlen-dist" ]] || die "$archive is not an Arlen release archive"
 archive_version="$(awk -F= '$1 == "version" {print $2}' "$work_dir/unpack/$top/.arlen-dist")"
-[[ -n "$archive_version" ]] || die "$archive has no version in .arlen-dist"
+valid_version "$archive_version" || die "$archive has an invalid version in .arlen-dist"
+[[ -z "$version" || "$version" == "$archive_version" ]] || die "requested version $version does not match archive $archive_version"
 version="$archive_version"
-
-mkdir -p "$prefix"
-dest="$prefix/$version"
-if [[ -e "$dest" ]]; then
-  say "replacing existing $dest"
-  rm -rf "$dest"
+# Build in a sibling staging directory. Failed downloads, setup, or builds never
+# remove an existing release or change current/the launcher.
+stage="$(mktemp -d "$prefix/.install-$version.XXXXXX")"
+mv "$work_dir/unpack/$top" "$stage/release"
+dest="$stage/release"
+archive_kind="$(awk -F= '$1 == "kind" {print $2}' "$dest/.arlen-dist")"
+case "$platform:$archive_kind" in
+  linux:source|macos:macos-arm64) ;;
+  *) die "archive kind '$archive_kind' is not supported on $platform" ;;
+esac
+for required in bin/arlen bin/arlen-doctor bin/boomhauer; do
+  [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
+done
+for required in tools/source_gnustep_env.sh tools/resolve_gnustep.sh; do
+  [[ -r "$dest/$required" ]] || die "archive is incomplete: missing readable $required"
+done
+if [[ "$platform" == macos ]]; then
+  for required in build/apple/arlen build/apple/boomhauer build/apple/eocc; do
+    [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
+  done
+  [[ -f "$dest/build/apple/.release-prebuilt" ]] || die "archive is incomplete: missing Apple prebuilt manifest"
+  [[ -s "$dest/build/apple/lib/libArlenFramework.a" ]] || die "archive is incomplete: missing Apple framework library"
+else
+  [[ -f "$dest/GNUmakefile" && -f "$dest/tools/arlen.m" && -d "$dest/src/Arlen" ]] ||
+    die "archive is incomplete: missing framework source/build inputs"
 fi
-mv "$work_dir/unpack/$top" "$dest"
+
+linux_toolchain_ready() {
+  ( source "$dest/tools/source_gnustep_env.sh" >/dev/null 2>&1 &&
+    gnustep-config --objc-flags 2>/dev/null | grep -q -- '-fobjc-runtime=gnustep-2.2' )
+}
+setup_linux() {
+  local missing=0 package os_id os_version
+  for package in make python3 clang; do command -v "$package" >/dev/null 2>&1 || missing=1; done
+  if [[ $missing -eq 0 ]]; then
+    printf '#include <openssl/ssl.h>\nint main(void) { return OPENSSL_init_ssl(0, 0) == 0; }\n' |
+      clang -x c - -lssl -lcrypto -o "$work_dir/openssl-check" >/dev/null 2>&1 || missing=1
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import ctypes; ctypes.CDLL("libsqlite3.so.0")' >/dev/null 2>&1 || missing=1
+  fi
+  if linux_toolchain_ready && [[ $missing -eq 0 ]]; then return; fi
+  [[ $do_setup -eq 1 ]] || die "missing clang GNUstep or build prerequisites; --no-setup leaves the host unchanged. See docs/GETTING_STARTED.md (make, python3, clang, libssl-dev, libsqlite3-0 and GNUstep libobjc2)."
+  os_id="$(. /etc/os-release; printf '%s' "$ID")"
+  os_version="$(. /etc/os-release; printf '%s' "$VERSION_ID")"
+  case "$os_id:$os_version:$arch" in
+    debian:13:x86_64|debian:13:aarch64|ubuntu:26.04:x86_64) ;;
+    *) die "automatic setup supports Debian 13 (x86_64/aarch64) and Ubuntu 26.04 (x86_64); provision a clang GNUstep toolchain manually and use --no-setup" ;;
+  esac
+  consent "Install Linux build prerequisites with apt and, if missing, GNUstep 0.1.0 in your home directory?"
+  need curl
+  if [[ $missing -eq 1 ]]; then
+    root_command apt-get update
+    root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates clang make python3 libssl-dev libsqlite3-0
+  fi
+  if ! linux_toolchain_ready; then
+    local bootstrap_url="https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh"
+    curl -fsSL "$bootstrap_url" -o "$work_dir/gnustep-bootstrap.sh" || die "GNUstep bootstrap download failed"
+    curl -fsSL "$bootstrap_url.sha256" -o "$work_dir/bootstrap.sha256" || die "GNUstep bootstrap checksum download failed"
+    [[ "$(sha256_of "$work_dir/gnustep-bootstrap.sh")" == "$(awk 'NR==1 {print $1}' "$work_dir/bootstrap.sha256")" ]] || die "GNUstep bootstrap checksum mismatch"
+    sh "$work_dir/gnustep-bootstrap.sh" --yes setup --user || die "GNUstep setup failed; existing Arlen installation preserved"
+  fi
+  linux_toolchain_ready || die "GNUstep setup completed but a clang GNUstep 2.2 toolchain is still unavailable"
+}
 
 if [[ "$platform" == "macos" ]]; then
   # Browser downloads carry the quarantine flag; curl and tar do not.
@@ -138,45 +271,44 @@ if [[ "$platform" == "macos" ]]; then
 fi
 
 if [[ $do_build -eq 1 ]]; then
-  if [[ "$platform" == "linux" ]]; then
-    # shellcheck disable=SC1091
-    if ! ( source "$dest/tools/source_gnustep_env.sh" >/dev/null 2>&1 &&
-           gnustep-config --objc-flags 2>/dev/null | grep -q -- '-fobjc-runtime=gnustep-2.2' ); then
-      cat >&2 <<EOF
-arlen-install: error: no clang-built GNUstep toolchain was found.
-
-Arlen needs clang + libobjc2 + gnustep-base. The quickest way to get them on
-Debian 13 or Ubuntu 26.04 LTS is the managed toolchain from gnustep-cli
-(no root needed), plus the OpenSSL headers:
-
-  curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh | sh -s -- --yes setup --user
-  sudo apt-get install -y libssl-dev
-
-Then rerun this installer. Arlen $version is unpacked at $dest; to finish by
-hand, run: $dest/bin/arlen doctor
-EOF
-      exit 1
+  if [[ "$platform" == "macos" ]]; then
+    if [[ -f "$dest/tools/release/install_macos_prereqs.sh" ]]; then
+      source "$dest/tools/release/install_macos_prereqs.sh"
+      setup_mode=auto
+      [[ $do_setup -eq 1 ]] || setup_mode=off
+      aln_install_macos_prereqs "$setup_mode" "$yes"
+    else
+      # Older archives predate automatic setup. Keep --version usable with an
+      # already provisioned host without downloading an unversioned helper.
+      xcrun --find clang >/dev/null 2>&1 && xcrun --show-sdk-path >/dev/null 2>&1 ||
+        die "install Xcode Command Line Tools with xcode-select --install, then retry"
+      [[ -d /opt/homebrew/opt/openssl@3/include/openssl && -f /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib ]] ||
+        die "this older archive needs preinstalled Homebrew openssl@3; run /opt/homebrew/bin/brew install openssl@3, then retry"
     fi
+  fi
+  if [[ "$platform" == "linux" ]]; then
+    setup_linux
     jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+    [[ "$jobs" -le 4 ]] || jobs=4
     say "building the framework once against your GNUstep toolchain (make -j$jobs all)"
     # shellcheck disable=SC1091
     ( source "$dest/tools/source_gnustep_env.sh" >/dev/null && make -C "$dest" -j"$jobs" all >"$dest/build-install.log" 2>&1 ) ||
-      die "framework build failed; see $dest/build-install.log"
+      { cp "$dest/build-install.log" "$prefix/last-build-failure.log"; die "framework build failed; see $prefix/last-build-failure.log (existing install preserved)"; }
   elif [[ $prebuilt -eq 0 ]]; then
     say "building the framework once with Apple clang (bin/build-apple)"
     "$dest/bin/build-apple" >"$dest/build-install.log" 2>&1 ||
-      die "framework build failed; see $dest/build-install.log"
+      { cp "$dest/build-install.log" "$prefix/last-build-failure.log"; die "framework build failed; see $prefix/last-build-failure.log (existing install preserved)"; }
   fi
 fi
 
-ln -sfn "$version" "$prefix/current"
-
-mkdir -p "$bin_dir"
+# Prepare the launcher before changing the active release.
 launcher="$bin_dir/arlen"
-cat >"$launcher" <<EOF
+launcher_stage="$(mktemp "$bin_dir/.arlen-launcher.XXXXXX")"
+cat >"$launcher_stage" <<EOF
 #!/usr/bin/env bash
 # Installed by Arlen's tools/install.sh. Set ARLEN_HOME to use another install.
-arlen_home="\${ARLEN_HOME:-$prefix/current}"
+default_arlen_home=$(quote "$prefix/current")
+arlen_home="\${ARLEN_HOME:-\$default_arlen_home}"
 # Apps live outside the install, so arlen cannot find the framework by walking
 # up from the app directory.
 export ARLEN_FRAMEWORK_ROOT="\${ARLEN_FRAMEWORK_ROOT:-\$arlen_home}"
@@ -186,24 +318,52 @@ if [[ "\$(uname -s)" != "Darwin" ]]; then
 fi
 exec "\$arlen_home/bin/arlen" "\$@"
 EOF
-chmod 755 "$launcher"
+chmod 755 "$launcher_stage"
+final_dest="$prefix/$version"
+[[ ! -e "$prefix/current" || -L "$prefix/current" ]] || die "$prefix/current must be a symlink"
+[[ ! -d "$launcher" ]] || die "$launcher is a directory"
+old_current="$(readlink "$prefix/current" 2>/dev/null || true)"
+if [[ -e "$final_dest" || -L "$final_dest" ]]; then had_previous=1; fi
+backup="$stage/previous"
+# Arm rollback before the first rename. Cleanup checks whether the backup
+# actually exists, so interruption/failure before mv cannot remove the old tree.
+activating=1
+if [[ $had_previous -eq 1 ]]; then mv "$final_dest" "$backup"; fi
+mv "$dest" "$final_dest"
+dest="$final_dest"
+ln -sfn "$version" "$prefix/current"
+mv -f "$launcher_stage" "$launcher"
+# Activation succeeded; the EXIT trap can now remove the previous copy.
+activating=0
 
 say "installed Arlen $version at $dest"
 say "launcher: $launcher"
-# Name the startup file the user's login shell actually reads: zsh (the macOS
-# default) ignores ~/.profile, and macOS Terminal starts bash as a login shell.
-case "$(basename "${SHELL:-}")" in
-  zsh) shell_rc="~/.zprofile" ;;
-  bash) if [[ "$platform" == "macos" ]]; then shell_rc="~/.bash_profile"; else shell_rc="~/.bashrc"; fi ;;
-  *) shell_rc="~/.profile" ;;
-esac
-case ":$PATH:" in
-  *":$bin_dir:"*) ;;
-  *) say "add $bin_dir to your PATH, for example: echo 'export PATH=\"$bin_dir:\$PATH\"' >> $shell_rc" ;;
-esac
+# A child shell cannot change its parent's PATH. Persist it for future shells,
+# and always give a separate command for this shell, including with --no-build.
+path_line="export PATH=$(quote "$bin_dir"):\"\$PATH\""
+if [[ $modify_path -eq 1 ]]; then
+  case "$(basename "${SHELL:-sh}")" in
+    zsh) profiles=("${ZDOTDIR:-$HOME}/.zprofile" "${ZDOTDIR:-$HOME}/.zshrc") ;;
+    bash)
+      profiles=("$HOME/.bashrc")
+      if [[ -f "$HOME/.bash_profile" ]]; then profiles+=("$HOME/.bash_profile")
+      elif [[ -f "$HOME/.bash_login" ]]; then profiles+=("$HOME/.bash_login")
+      else profiles+=("$HOME/.profile"); fi ;;
+    *) profiles=("$HOME/.profile") ;;
+  esac
+  for profile in "${profiles[@]}"; do
+    mkdir -p "$(dirname "$profile")"
+    if ! grep -Fqx "$path_line" "$profile" 2>/dev/null; then
+      printf '\n# Arlen launcher\n%s\n' "$path_line" >> "$profile"
+    fi
+    say "PATH configured in $profile"
+  done
+fi
 cat <<EOF
 
-Next:
+Run in your current shell (or open a new terminal):
+  $path_line
+Then:
   arlen doctor
   arlen new MyApp && cd MyApp && arlen boomhauer --port 3000
 EOF

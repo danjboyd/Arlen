@@ -1,6 +1,12 @@
 #import "ALNFileResponseInternal.h"
 
 #import <errno.h>
+#import <fcntl.h>
+#import <unistd.h>
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#endif
 #import <limits.h>
 #import <math.h>
 #import <stdio.h>
@@ -515,6 +521,70 @@ BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
   return NO;
 }
 
+const char *ALNFileResponseFilesystemPathCString(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NULL;
+  }
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
+    return NULL;
+  }
+  return [path UTF8String];
+}
+
+int ALNFileResponseStatPath(NSString *path, struct stat *info) {
+  const char *bytes = ALNFileResponseFilesystemPathCString(path);
+  if (bytes == NULL || info == NULL) { errno = EINVAL; return -1; }
+#if defined(_WIN32)
+  NSMutableData *wide = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  struct _stat64 native;
+  int result = _wstat64((const wchar_t *)wide.bytes, &native);
+  if (result != 0) return result;
+  memset(info, 0, sizeof(*info));
+  info->st_dev = native.st_dev;
+  info->st_ino = native.st_ino;
+  info->st_mode = native.st_mode;
+  info->st_nlink = native.st_nlink;
+  info->st_uid = native.st_uid;
+  info->st_gid = native.st_gid;
+  info->st_rdev = native.st_rdev;
+  info->st_size = native.st_size;
+  info->st_atime = native.st_atime;
+  info->st_mtime = native.st_mtime;
+  info->st_ctime = native.st_ctime;
+  return 0;
+#else
+  return stat(bytes, info);
+#endif
+}
+
+int ALNFileResponseOpenPath(NSString *path, int flags) {
+  const char *bytes = ALNFileResponseFilesystemPathCString(path);
+  if (bytes == NULL) { errno = EINVAL; return -1; }
+#if defined(_WIN32)
+  NSMutableData *wide = [[path dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  return _wopen((const wchar_t *)wide.bytes, flags);
+#else
+  return open(bytes, flags);
+#endif
+}
+
+int ALNFileResponseDuplicateReadDescriptor(int descriptor) {
+#if defined(_WIN32)
+  if (descriptor < 0) { errno = EBADF; return -1; }
+  HANDLE source = (HANDLE)_get_osfhandle(descriptor);
+  HANDLE handle = ReOpenFile(source, GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+  if (handle == INVALID_HANDLE_VALUE) { errno = EIO; return -1; }
+  int copy = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+  if (copy < 0) CloseHandle(handle);
+  return copy;
+#else
+  return dup(descriptor);
+#endif
+}
+
 @implementation ALNFileResponse
 
 + (BOOL)prepareResponse:(ALNResponse *)response
@@ -525,14 +595,12 @@ BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
   if (response == nil) {
     return NO;
   }
-  const char *fsPath = ([filePath isKindOfClass:[NSString class]] && [filePath length] > 0)
-                           ? [filePath UTF8String]
-                           : NULL;
+  const char *fsPath = ALNFileResponseFilesystemPathCString(filePath);
   struct stat fileStat;
   int rc = -1;
   if (fsPath != NULL) {
     do {
-      rc = stat(fsPath, &fileStat);
+      rc = ALNFileResponseStatPath(filePath, &fileStat);
     } while (rc != 0 && errno == EINTR);
   }
   if (rc != 0 || !S_ISREG(fileStat.st_mode)) {
@@ -540,6 +608,22 @@ BOOL ALNStaticRelativePathIsHidden(NSString *relativePath) {
     return NO;
   }
   ALNFileResponseApplyStat(response, request, filePath, &fileStat, contentType, options);
+  return YES;
+}
+
++ (BOOL)prepareResponse:(ALNResponse *)response
+             forRequest:(ALNRequest *)request
+             fileHandle:(NSFileHandle *)fileHandle
+            contentType:(NSString *)contentType
+                options:(NSDictionary *)options {
+  struct stat fileStat;
+  if (response == nil || fileHandle == nil || fstat(fileHandle.fileDescriptor, &fileStat) != 0 ||
+      !S_ISREG(fileStat.st_mode)) {
+    if (response != nil) ALNFileResponseCommitNotFound(response);
+    return NO;
+  }
+  ALNFileResponseApplyStat(response, request, @"<open-file>", &fileStat, contentType, options);
+  if (response.statusCode == 200 || response.statusCode == 206) response.fileBodyHandle = fileHandle;
   return YES;
 }
 

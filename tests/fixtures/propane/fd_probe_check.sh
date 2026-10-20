@@ -28,3 +28,14 @@ worker_fd_retire_count=100000; worker_fd_warn_percent=1
 check_worker_fd_pressure
 echo "warn top_calls=$(wc -l < "$counter" | tr -d ' ') events=${#events[@]}"
 case "${events[0]}" in *"top_fd_targets="*"_/dev/null"*) echo "targets ok";; *) echo "targets bad: ${events[0]}";; esac
+
+# Simulate a worker exiting after the readability check but before awk opens
+# /proc/<pid>/limits. Capture assignment exactly as the manager does under -e.
+awk() { return 2; }
+limit="$(worker_fd_soft_limit "$holder")"
+[[ "$limit" == 0 ]]
+events=()
+check_worker_fd_pressure
+[[ ${#events[@]} == 0 ]]
+echo "unavailable limits sample preserved manager loop"
+unset -f awk

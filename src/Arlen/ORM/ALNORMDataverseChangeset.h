@@ -28,6 +28,12 @@ NS_ASSUME_NONNULL_BEGIN
                  error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
                    error:(NSError *_Nullable *_Nullable)error;
+// Casts only the listed fields (logical names) and drops every other input
+// key. Prefer this for request payloads so clients can't set lookups, owners,
+// or the primary ID.
+- (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
+         permittedFields:(NSArray<NSString *> *)permittedFields
+                   error:(NSError *_Nullable *_Nullable)error;
 - (void)addError:(NSString *)message forFieldName:(NSString *)fieldName;
 - (BOOL)validateRequiredFields;
 - (BOOL)applyToModel:(NSError *_Nullable *_Nullable)error;

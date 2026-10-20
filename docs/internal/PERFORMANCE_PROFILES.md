@@ -2,6 +2,28 @@
 
 Arlen extends perf coverage from a single gate into profile-based trend tracking.
 
+## Response header construction
+
+After initializing the GNUstep environment, run `make response-header-perf-bench`
+and `./build/response-header-perf-bench 20000` (`.exe` on Windows). The optional
+iteration argument defaults to 100000. Two thousand warmup responses precede
+each measurement. The middleware case constructs and serializes default security
+headers; dynamic32 inserts 32 headers in reverse order, including a Unicode
+value. Output includes microseconds per response and serialized byte totals.
+
+The security middleware and baseline static/error responses use private immutable
+header snapshots validated once at configuration time. Public response setters
+still validate every input; wire ordering, repeated headers and application
+overrides retain their existing behavior. Dynamic middleware subclasses continue
+to use their `responseHeaders` override per request.
+
+On Windows CLANG64 toolchain 0.1.1, three 20000-response trials measured median
+middleware construction at 37.950 before / 25.780 microseconds after (32.1% less
+time), and dynamic32 at 101.950 / 94.566 (7.2% less time). Serialized totals were
+identical: 7920000 and 22360000 bytes respectively. These local microbenchmarks
+include response/context creation and serialization, not network latency, and
+are evidence rather than a CI timing threshold.
+
 ## 1. Profile Pack
 
 Profiles live in `tests/performance/profiles/`:

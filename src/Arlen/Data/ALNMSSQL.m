@@ -372,6 +372,24 @@ static NSString *ALNMSSQLValidatedSavepointName(NSString *name, NSError **error)
 
 @end
 
+BOOL ALNMSSQLTestBindLengthsForValue(id value,
+                                     long long *indicatorOut,
+                                     unsigned long long *columnSizeOut,
+                                     NSData **boundBytesOut,
+                                     NSError **error);
+BOOL ALNMSSQLTestBindLengthsForValue(id value,
+                                     long long *indicatorOut,
+                                     unsigned long long *columnSizeOut,
+                                     NSData **boundBytesOut,
+                                     NSError **error) {
+  (void)value;
+  (void)indicatorOut;
+  (void)columnSizeOut;
+  (void)boundBytesOut;
+  (void)error;
+  return NO;
+}
+
 #else
 
 typedef struct {
@@ -1080,8 +1098,13 @@ static BOOL ALNMSSQLBindSpecificationForValue(id value,
     return YES;
   }
 
-  NSMutableData *mutableData =
-      [NSMutableData dataWithData:[text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data]];
+  NSData *utf8 = [text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+  if (columnSizeOut != NULL && (SQLULEN)[utf8 length] > *columnSizeOut) {
+    // The buffer holds UTF-8 bytes; declare at least that many so a multi-byte
+    // value is not cut short at its UTF-16 length.
+    *columnSizeOut = (SQLULEN)[utf8 length];
+  }
+  NSMutableData *mutableData = [NSMutableData dataWithData:utf8];
   const char terminator = '\0';
   [mutableData appendBytes:&terminator length:1];
   [buffers addObject:mutableData];
@@ -1092,7 +1115,48 @@ static BOOL ALNMSSQLBindSpecificationForValue(id value,
     *bufferLengthOut = (SQLLEN)[mutableData length];
   }
   if (indicatorOut != NULL) {
-    *indicatorOut = SQL_NTS;
+    // The explicit byte length, not SQL_NTS: SQL_NTS makes the driver find the
+    // length with strlen(), which stops at an embedded U+0000. SQL Server
+    // stores NUL inside (n)varchar, so the whole value is sent.
+    *indicatorOut = (SQLLEN)[utf8 length];
+  }
+  return YES;
+}
+
+// Bind lengths for one parameter, in plain C types. Not static so unit tests
+// can check the text bind without an ODBC driver or server; not public API.
+BOOL ALNMSSQLTestBindLengthsForValue(id value,
+                                     long long *indicatorOut,
+                                     unsigned long long *columnSizeOut,
+                                     NSData **boundBytesOut,
+                                     NSError **error);
+BOOL ALNMSSQLTestBindLengthsForValue(id value,
+                                     long long *indicatorOut,
+                                     unsigned long long *columnSizeOut,
+                                     NSData **boundBytesOut,
+                                     NSError **error) {
+  NSMutableArray *buffers = [NSMutableArray array];
+  SQLSMALLINT cType = SQL_C_CHAR;
+  SQLSMALLINT sqlType = SQL_VARCHAR;
+  SQLULEN columnSize = 1;
+  SQLSMALLINT decimalDigits = 0;
+  SQLPOINTER valuePointer = NULL;
+  SQLLEN bufferLength = 0;
+  SQLLEN indicator = SQL_NULL_DATA;
+  if (!ALNMSSQLBindSpecificationForValue(value, buffers, &cType, &sqlType, &columnSize, &decimalDigits,
+                                         &valuePointer, &bufferLength, &indicator, error)) {
+    return NO;
+  }
+  if (indicatorOut != NULL) {
+    *indicatorOut = (long long)indicator;
+  }
+  if (columnSizeOut != NULL) {
+    *columnSizeOut = (unsigned long long)columnSize;
+  }
+  if (boundBytesOut != NULL) {
+    *boundBytesOut = (valuePointer != NULL && indicator >= 0)
+                         ? [NSData dataWithBytes:valuePointer length:(NSUInteger)indicator]
+                         : nil;
   }
   return YES;
 }
@@ -1106,6 +1170,18 @@ static BOOL ALNMSSQLPrepareStatement(SQLHDBC connection,
                                      NSError **error) {
   if (statementOut != NULL) {
     *statementOut = SQL_NULL_HSTMT;
+  }
+  // The statement text goes to the driver as a C string with SQL_NTS, so a
+  // U+0000 inside it would silently end the statement early.
+  if ([sql rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
+      NSNotFound) {
+    if (error != NULL) {
+      *error = ALNMSSQLMakeError(ALNMSSQLErrorInvalidArgument,
+                                 @"sql contains a NUL character (U+0000)",
+                                 nil,
+                                 nil);
+    }
+    return NO;
   }
 
   SQLHSTMT statement = SQL_NULL_HSTMT;

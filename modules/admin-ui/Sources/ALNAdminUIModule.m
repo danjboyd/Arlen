@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNAdminUIModule.h"
 
 #import <dispatch/dispatch.h>
@@ -25,6 +26,13 @@ static NSString *AUTrimmedString(id value) {
 
 static NSString *AULowerTrimmedString(id value) {
   return [[AUTrimmedString(value) lowercaseString] copy];
+}
+
+static NSString *AUEscapedLikePattern(NSString *value) {
+  NSString *escaped = value ?: @"";
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+  escaped = [escaped stringByReplacingOccurrencesOfString:@"%" withString:@"\\%"];
+  return [escaped stringByReplacingOccurrencesOfString:@"_" withString:@"\\_"];
 }
 
 static NSDictionary *AUNormalizeDictionary(id value) {
@@ -57,7 +65,7 @@ static NSArray *AUJSONArrayFromJSONString(id value) {
     return @[];
   }
   NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
-  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
   if (![object isKindOfClass:[NSArray class]]) {
     return @[];
   }
@@ -734,7 +742,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     return nil;
   }
   NSString *search = AULowerTrimmedString(parameters[@"q"]);
-  NSString *like = ([search length] > 0) ? [NSString stringWithFormat:@"%%%@%%", search] : @"";
+  NSString *like = ([search length] > 0) ? [NSString stringWithFormat:@"%%%@%%", AUEscapedLikePattern(search)] : @"";
   NSString *role = AULowerTrimmedString(parameters[@"roles"]);
   NSString *verified = AULowerTrimmedString(parameters[@"email_verified"]);
   NSString *mfaEnabled = AULowerTrimmedString(parameters[@"mfa_enabled"]);
@@ -770,7 +778,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   NSMutableArray *sqlParameters = [NSMutableArray array];
   NSUInteger parameterIndex = 1U;
   if ([search length] > 0) {
-    [sql appendFormat:@"AND ($%lu = '' OR lower(u.email) LIKE $%lu OR lower(COALESCE(u.display_name, '')) LIKE $%lu OR lower(u.subject) LIKE $%lu) ",
+    [sql appendFormat:@"AND ($%lu = '' OR lower(u.email) LIKE $%lu ESCAPE '\\' OR lower(COALESCE(u.display_name, '')) LIKE $%lu ESCAPE '\\' OR lower(u.subject) LIKE $%lu ESCAPE '\\') ",
                       (unsigned long)parameterIndex,
                       (unsigned long)(parameterIndex + 1U),
                       (unsigned long)(parameterIndex + 1U),
@@ -780,8 +788,8 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     parameterIndex += 2U;
   }
   if ([role length] > 0) {
-    [sql appendFormat:@"AND lower(COALESCE(u.roles_json, '[]')) LIKE $%lu ", (unsigned long)parameterIndex];
-    [sqlParameters addObject:[NSString stringWithFormat:@"%%\"%@\"%%", role]];
+    [sql appendFormat:@"AND lower(COALESCE(u.roles_json, '[]')) LIKE $%lu ESCAPE '\\' ", (unsigned long)parameterIndex];
+    [sqlParameters addObject:[NSString stringWithFormat:@"%%\"%@\"%%", AUEscapedLikePattern(role)]];
     parameterIndex += 1U;
   }
   if ([verified isEqualToString:@"true"] || [verified isEqualToString:@"false"]) {
@@ -1024,6 +1032,12 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   if (updated == nil && error != NULL && *error == NULL) {
     *error = AUError(ALNAdminUIModuleErrorNotFound, @"user not found", nil);
   }
+  // Sessions already resolve roles from the user record on every request; a
+  // revocation also ends the user's existing sessions so they sign in again.
+  if (updated != nil && [normalizedAction isEqualToString:@"revoke_admin"] &&
+      ![[ALNAuthModuleRuntime sharedRuntime] bumpSessionStampForSubject:updated[@"subject"] error:error]) {
+    return nil;
+  }
   return (updated != nil) ? @{ @"record" : updated, @"message" : message ?: @"" } : nil;
 }
 
@@ -1075,6 +1089,14 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
 @end
 
 @implementation ALNAdminUIModuleRuntime
+
+- (NSArray<NSString *> *)accessRoles {
+  return @[ @"admin" ];
+}
+
+- (NSUInteger)minimumAuthAssuranceLevel {
+  return 2;
+}
 
 + (instancetype)sharedRuntime {
   static ALNAdminUIModuleRuntime *runtime = nil;
@@ -1884,7 +1906,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
   NSString *contentType = [[[self headerValueForName:@"content-type"] lowercaseString] componentsSeparatedByString:@";"][0];
   NSDictionary *bodyParameters = @{};
   if ([contentType containsString:@"application/json"]) {
-    id object = [NSJSONSerialization JSONObjectWithData:self.context.request.body options:0 error:NULL];
+    id object = [ALNJSONSerialization JSONObjectWithData:self.context.request.body options:0 error:NULL];
     bodyParameters = [object isKindOfClass:[NSDictionary class]] ? object : @{};
   } else if ([contentType containsString:@"application/x-www-form-urlencoded"]) {
     bodyParameters = AUQueryParametersFromBody(self.context.request.body);
@@ -1978,7 +2000,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
                    error:NULL];
     return NO;
   }
-  if ([ctx authAssuranceLevel] < 2) {
+  if ([ctx authAssuranceLevel] < self.runtime.minimumAuthAssuranceLevel) {
     NSString *location = AUStepUpLocation(self.authRuntime, AUPercentEncodedQueryComponent(returnTo));
     [self redirectTo:location status:302];
     return NO;
@@ -3323,7 +3345,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
                         operationID:routeName
                                tags:@[ @"admin-ui" ]
                       requiredScopes:nil
-                       requiredRoles:@[ @"admin" ]
+                       requiredRoles:[ALNAdminUIModuleRuntime sharedRuntime].accessRoles
                      includeInOpenAPI:YES
                                error:&routeError]) {
       if (error != NULL) {
@@ -3332,7 +3354,7 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
       return NO;
     }
     if (![child configureAuthAssuranceForRouteNamed:routeName
-                         minimumAuthAssuranceLevel:2
+                         minimumAuthAssuranceLevel:[ALNAdminUIModuleRuntime sharedRuntime].minimumAuthAssuranceLevel
                    maximumAuthenticationAgeSeconds:0
                                         stepUpPath:AUStepUpPath([ALNAuthModuleRuntime sharedRuntime])
                                              error:&routeError]) {

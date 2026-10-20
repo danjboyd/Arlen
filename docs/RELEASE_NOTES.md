@@ -2,6 +2,241 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-19
+
+This release combines the public audit fixes and security hardening work. It
+changes several authentication, persistence, and deployment defaults; review
+the upgrade notes below before replacing an existing installation.
+
+Known limitations remain documented in the [Known Risk Register](KNOWN_RISK_REGISTER.md),
+including unresolved, non-blocking ThreadSanitizer findings.
+
+- Concurrent requests now synchronize access to the cached largest per-route
+  request-body limit. Mounted applications are inspected outside the cache lock,
+  so parent and child application locks are not nested.
+
+- Auth 1.6.1 moves registration verification and password-reset mail to durable
+  `auth_mail` jobs when the durable adapter is configured. Production-like apps
+  with local passwords and mail must install/configure the PostgreSQL jobs
+  adapter, set `authModule.publicBaseURL`, and run the jobs worker. New-user
+  creation and its mail enqueue commit together; auth and jobs must use the
+  same PostgreSQL database and search path. Apply
+  `tools/migrations/jobs/001_postgres_jobs.sql` before starting workers. Enqueue
+  failures roll back new registrations and return a generic 503. Explicit
+  `authModule.mailDispatch.mode = "synchronous"` preserves legacy delivery with
+  its account-enumeration timing risk. Review [Auth Module](AUTH_MODULE.md) and
+  [Durable Jobs](DURABLE_JOBS.md) before upgrading. Custom registration hooks
+  still need their own timing review.
+
+- Jobs operator-state reads now refresh shared state, and mutations use short
+  cross-process transactions. Run one scheduler: scheduler bookkeeping and job
+  enqueue are still separate operations.
+- Ops 1.1.0 and Search 1.2.0 mark the changed module sources for
+  `arlen module upgrade`. Ops dashboard history updates use cross-process
+  transactions.
+- Search 1.2.0 state transactions reject stale rebuild and incremental results with
+  `state_conflict`. Replay claims expire after five minutes and require
+  idempotent operations. External search engines still need one reindex writer
+  per resource unless the backend provides publication fencing. See
+  [Search Module](SEARCH_MODULE.md) for the full contract.
+- Notifications 1.3 persists individual inbox/outbox/fanout entries and recipient
+  preferences in SQLite, with one-time legacy plist import. Inbox and preference
+  mutations refresh authoritative shared state; corrupt or unreadable persistence
+  fails closed. Stop all older workers and back up before upgrading. Linux needs
+  `libsqlite3-0`; see [Notifications Module](NOTIFICATIONS_MODULE.md) for migration,
+  backup, retention and remaining in-memory merge costs. Preserve the catalog
+  initialization marker with backups; it prevents stale plist reimport after
+  catalog loss.
+
+
+- Windows file responses accept valid Unicode filenames using wide-character
+  filesystem calls. Framework/app/test builds now use 64-bit file offsets,
+  preventing metadata and Range truncation above 2 GiB; rebuild custom CLANG64
+  integrations with `_FILE_OFFSET_BITS=64`. Pinned file responses clone the same
+  file object with independent positions, avoiding shared-offset read races.
+
+- Storage 1.4 streams verified filesystem downloads, supports ranges/HEAD and
+  checksum ETags, and bounds variant source materialization to 16 MiB by default.
+- Storage persistence now uses per-record SQLite transactions and one-time legacy
+  plist import. Stop old workers before upgrading; Linux requires `libsqlite3-0`.
+  See `docs/STORAGE_MODULE.md` for migration, backup, and custom-adapter limits.
+- `arlen deploy push|release|dryrun --json` now parses the packaging command's
+  stdout independently of compiler warnings on stderr. Successful builds no
+  longer report a false `deploy_push_failed` when those warnings appear.
+
+- Request metrics now store primitive numeric values and batch completion
+  counters/timings under one lock, reducing lock and allocation overhead (#249).
+- PostgreSQL ORM-generated reads skip release-time session reset; raw/trusted
+  expressions and transactions continue to reset (#306).
+
+- PostgreSQL supports bounded cursor enumeration through
+  `enumerateQuery:parameters:batchSize:usingBlock:error:`. It processes a batch
+  at a time, supports early stopping, and cleans up on errors or exceptions.
+- Apps configured with multiple propane workers and request rate limiting now
+  warn that the request budget is per worker. Use an ingress limiter for a
+  deployment-wide budget (#252).
+
+- Normal HTTP responses now have a total send deadline (300 seconds) and
+  minimum average rate (1024 bytes/second after 10 seconds). The limits cover
+  headers and file or in-memory bodies; a miss closes the connection and frees
+  its worker. Configure them under `requestLimits.responseSendTimeoutSeconds`,
+  `responseMinBytesPerSecond`, and `responseMinRateGraceSeconds`. SSE and
+  WebSocket sessions retain their separate policies. A failed partial `writev`
+  is no longer retried by replaying already-sent response bytes (#304).
+
+- Dataverse: `ALNDataverseCurlTransport` passes request headers, including the
+  bearer token, to curl as a config file on stdin (`--config -`). They are no
+  longer on curl's command line, which any local user can read through `ps` or
+  `/proc/<pid>/cmdline`. The request-body file, which holds the client secret
+  for token requests, is created owner-only (0600). The new
+  `curlExecutablePath` property picks the curl to run (default: `curl` from
+  PATH).
+- Dataverse: the request method must be an HTTP token. A method with
+  whitespace or control characters fails with
+  `ALNDataverseErrorInvalidArgument` in `performRequestWithMethod:` before a
+  token is requested or anything is sent, and `ALNDataverseCurlTransport`
+  rejects it too.
+- Route policies: `pathPrefixes` and `sourceIPAllowlist` given as one string
+  now mean a one-element list. Before, a string turned into an empty list, and
+  that silently switched the policy's check off. A list that is present but
+  empty fails startup with `empty_list`, and any other type fails with
+  `invalid_type`. The middleware denies a request (`invalid_policy_config`)
+  rather than skip the source-IP check for such a policy.
+- Dataverse: header names must be tokens, and header values must not contain
+  control characters other than a tab. That covers caller headers, `ifMatch:`,
+  and `$batch` part headers. In a `$batch` part, the method must be a token,
+  the path must not contain whitespace or control characters, and the
+  Content-ID must not contain control characters. Requests that break these
+  rules fail with `ALNDataverseErrorInvalidArgument` before anything is sent.
+  `ALNDataverseCurlTransport` checks the headers it is handed too.
+- Dataverse: `invokeFunctionNamed:` percent-encodes parameter values inside
+  their OData literal, the same way as alternate keys. Function and action
+  names must be identifiers (optionally namespace-qualified, such as
+  `Microsoft.Dynamics.CRM.WhoAmI`), and so must parameter names. `boundPath:`
+  segments must be identifiers or `entitySet(<GUID>)`. Anything else fails
+  with `ALNDataverseErrorInvalidArgument` before a request is sent.
+- Dataverse: `recordID:` accepts only a GUID (a canonical GUID string or an
+  `NSUUID`). Any other value, including the `(key=value)` and `key=value`
+  forms, now fails with `ALNDataverseErrorInvalidArgument` before a request is
+  sent; use the `alternateKeyValues:` methods for alternate keys. Alternate-key
+  values are percent-encoded inside their OData literal. The curl transport
+  passes `--path-as-is`.
+- Forwarded client IPs: behind a trusted proxy, the client is now the
+  right-most `X-Forwarded-For` hop that is not itself a trusted proxy. Proxies
+  append the peer they saw, so the left-most value is whatever the client sent.
+  It used to be the left-most value. This applies to both the request's
+  `effectiveRemoteAddress` (and so the rate limiter) and route-policy
+  `sourceIPAllowlist` checks, which now share one parser.
+  - Hops must be IP addresses. An unreadable chain leaves the proxy's address
+    on the request, and denies a protected allowlist check.
+  - Route policies no longer read a `Forwarded` header unless
+    `security.forwardedClientIPHeader = "Forwarded"` is set. They used to
+    prefer it over `X-Forwarded-For`. The setting also picks the header the
+    server's `effectiveRemoteAddress` comes from, so every reader uses one
+    header.
+  - Repeated `X-Forwarded-For` or `Forwarded` field lines are combined in order
+    with ", " (RFC 9110), in both HTTP parsers. Before, only one of the lines was
+    kept.
+  - `trustedProxyCIDRs` and `ARLEN_TRUSTED_PROXY_CIDRS` accept IPv6 ranges.
+    IPv4-mapped addresses (`::ffff:10.1.1.1`, which a dual-stack listener
+    reports for IPv4 peers) count as the IPv4 address, for proxy matching,
+    allowlists and the rate limiter's key.
+  - The rate limiter tracks at most 65,536 clients at once. It evicts the
+    oldest window first, in constant time per request. It counts IPv6 clients
+    per `/64` by default (`rateLimit.ipv6PrefixLength`).
+  - **Upgrade:** with more than one proxy in front of Arlen (for example a load
+    balancer and then nginx), list every proxy in `security.trustedProxies` and
+    `trustedProxyCIDRs`.
+- CSRF protection now follows sessions. When `csrf.enabled` is unset, it is on
+  whenever `session.enabled = YES`, in every security profile. Before, the
+  `balanced` and `edge` profiles filled in `NO`, and `arlen new` wrote
+  `csrf.enabled = NO` into `config/app.plist`, so an app that turned sessions
+  on (as the `auth` module needs) accepted cross-site form posts. New apps no
+  longer pin it.
+  - **Action for existing apps:** delete `enabled = NO;` from the `csrf` block in
+    `config/app.plist` if the app uses sessions. Browser forms then need the
+    token: `-[ALNContext csrfToken]` in a hidden `csrf_token` field or the
+    `x-csrf-token` header.
+  - The `auth` module refuses to start when sessions are on and CSRF is pinned
+    off, naming `csrf.enabled` in the error; `authModule.allowWithoutCSRF = YES`
+    opts out. `arlen module doctor` reports the same case as
+    `module_csrf_disabled`.
+- ORM: a persisted model's primary key can no longer change. A changeset or
+  `setObject:forFieldName:error:` that writes a different key fails with
+  `ALNORMErrorReadOnlyMutation`; an unchanged key is still accepted. `UPDATE`
+  and `DELETE` target the key as it was loaded or last saved. Before, a request
+  payload with another row's `id` passed through
+  `applyInputValues:error:` and `saveModel:changeset:` updated that row. The
+  Dataverse ORM applies the same rule to a persisted record's primary ID.
+  - New `-[ALNORMChangeset applyInputValues:permittedFields:error:]` casts only
+    the listed fields and drops other input keys. Use it for request payloads
+    so clients can't mass-assign foreign keys or role fields;
+    `docs/ARLEN_ORM.md` now shows it.
+  - `persistedPrimaryKeyValues` and `hasPersistedSnapshot` are now reserved
+    generated-property names.
+  - A model loaded without its primary key (a `selectFields:` that leaves it
+    out) can't be given one: the setter and changesets refuse, and
+    `saveModel:` and `deleteModel:` fail with `ALNORMErrorMissingField`
+    instead of targeting whatever key the model holds. Select the key when
+    you mean to write the row back.
+  - Dataverse: `saveModel:`, `deleteModel:` and `saveModelsInBatch:` PATCH and
+    DELETE the new `persistedPrimaryIDValue` (the ID as loaded). A persisted
+    record loaded without its ID refuses those writes with
+    `ALNORMErrorMissingField`; before, a save created a duplicate record. New
+    `-[ALNORMDataverseChangeset applyInputValues:permittedFields:error:]`
+    matches the SQL changeset. An update the server answers with `204` (no
+    representation) keeps the model's fields and ID, so later saves still
+    target the same record.
+- The `storage` module (`1.4.0`) keeps one consistent catalog across
+  processes sharing a local persistence path, such as propane workers and the
+  jobs worker:
+  - Changes refresh shared state under an exclusive application lock and commit
+    changed catalog records in SQLite. Reads detect other processes' commits.
+  - Object and upload-session IDs are random (`obj-<32 hex>`,
+    `upload-<32 hex>`) instead of per-process counters.
+  - Download tokens are bound to the object they were issued for.
+  - Download tokens issued before the upgrade are rejected; they expire within
+    `downloadTokenTTLSeconds` anyway. Existing objects keep their IDs.
+  - Attachment data is shared too. With persistence on and no attachment
+    adapter configured, the module uses a filesystem adapter at
+    `<state file without extension>-attachments/` instead of the in-memory
+    default, and it refuses to start with an explicitly configured in-memory
+    adapter.
+  - Downloads and variant jobs verify the attachment's size and SHA-256
+    against the object record and answer 404 on a mismatch.
+  - A change waits at most `storageModule.persistence.lockTimeoutSeconds`
+    (default 10) for the state lock, blocking on it rather than polling, and
+    then fails with the new `ALNStorageModuleErrorStateBusy` (HTTP 503). Only
+    the catalog update runs under the lock: attachment data is written and
+    hashed first, and deleted again if the catalog update fails.
+  - Startup waits up to `persistence.startupLockTimeoutSeconds` (default 60)
+    for its cleanup pass, and starts anyway, with a warning, if the lock is
+    still busy.
+  - Deletes remove an attachment only when its size and SHA-256 match the
+    record.
+  - Catalog files are owner-only (`0600` on POSIX; a protected current-user
+    DACL on Windows). SQLite journals provide transaction recovery.
+  - Legacy XML and binary plists are imported once. SQLite is the default;
+    there is no silent fallback to whole-plist writes. See the migration and
+    rollback instructions in [Storage Module](STORAGE_MODULE.md).
+  - Downloads and other reads no longer take the state lock: they reload a
+    changed file without it, and serve the in-memory catalog while a writer
+    is busy.
+  - The 503 for a busy state lock carries `Retry-After: 1`.
+  - With persistence off and `propaneAccessories.workerCount > 1`, startup
+    (outside `test` and `development`), `propane` and `arlen module doctor`
+    warn that each worker keeps its own catalog.
+- `ALNApplication.usesDefaultAttachmentAdapter` reports whether the
+  attachment adapter is still the in-memory default, and the in-memory
+  attachment adapter reports `processLocal = YES` in its capabilities.
+  `ALNPlatformOpenExclusiveLockWithTimeout()` waits for a lock for at most a
+  given time (a blocking wait on a helper thread, started only when the lock
+  is contended), and both lock functions retry interrupted waits.
+- Windows: `propane` now fails immediately with an unsupported-production
+  diagnostic and status 2; `--help` still works. Windows remains a development
+  platform. Previous multiworker preview behavior depended on unsafe port sharing;
+  exclusive socket binding is now enforced. Use `boomhauer` for development.
+
 - **Breaking (production):** `/metrics` and `/clusterz` answer `404` in the
   `production` environment until access is configured with
   `observability.operabilityToken` / `ARLEN_OPERABILITY_TOKEN` or
@@ -52,6 +287,264 @@
   `title` could add markup to the layout. Slot content filled with
   `slot`/`endslot` and the plain `<%@ yield %>` page body are still emitted
   as-is.
+- **Breaking (non-development environments other than `production`):**
+  environments other than `development` and `test` (`staging`, `qa`,
+  `preview`, ...) now get the same defaults as `production`: a `Secure` session
+  cookie, no `/openapi` docs UI, no performance timing logs or `X-Arlen-*-Ms`
+  headers, and `/readyz` failing while migrations are pending. Before, only an
+  environment named exactly `production` got them. An explicit setting still
+  wins, e.g. `session.secure = NO` for a staging site served over plain HTTP.
+- **Breaking (production):** an app whose configured module fails to load or
+  configure now refuses to start outside the `development` and `test`
+  environments. The server and `jobs-worker` exit non-zero with
+  `startup failed: module <id> failed to load: <reason>`. Before, the app logged
+  one `module load skipped` warning, loaded no modules at all, and kept serving
+  its own routes. In `development` and `test` the app keeps serving and logs
+  `module load failed` at error level, naming the module, its config key and
+  the modules not loaded; modules loaded before the failing one stay loaded.
+  `arlen module doctor` adds a `module_sessions_disabled` warning for a module
+  that needs sessions while `config/app.plist` sets `session.enabled = NO`
+  (#294).
+- `propane` no longer respawns a worker that fails at startup in a tight loop.
+  It prints each distinct startup error once (`worker startup failed (same
+  error) xN` for repeats), backs off exponentially from `respawnDelayMs` up to
+  the new `respawnBackoffMaxMs` propane accessory (default 30 s), and after
+  `startupFailureLimit` consecutive startup failures (propane accessory,
+  default 5) exits with status `3` so the service manager reports a failed
+  unit. Workers report startup errors through `ARLEN_STARTUP_FAILURE_FILE`,
+  which propane sets (#294).
+- On macOS, `propane` no longer exits early if a worker disappears while `lsof`
+  samples its file descriptors. It continues reaping the worker and applies the
+  configured startup-failure limit and backoff.
+- A module load error names the config key whether the module reports it as
+  `key_path`, `config_key` or `keyPath`, including on an underlying error.
+- Environment names are classified once, ignoring case and surrounding
+  whitespace: `ALNEnvironmentKindForName()` and
+  `ALNEnvironmentIsDevelopmentLike()` in `ALNConfig.h`. Core uses them for the
+  module-load startup check and the detailed error page, and the `auth`
+  (OIDC loopback redirects), `jobs`, `notifications`, `search` and `storage`
+  modules use them for their development/test checks (`auth` 1.5.4, `jobs`
+  1.1.2, `notifications` 1.1.4, `search` 1.0.5, `storage` 1.1.3).
+- Config loading normalizes the environment name (trimmed, lowercased) before
+  choosing `config/environments/<name>.plist`. Before, `--env PRODUCTION`
+  counted as production but skipped `production.plist`, so its overrides
+  silently did not apply. `application.environment` and
+  `config[@"environment"]` hold the normalized name
+  (`ALNNormalizedEnvironmentName()` in `ALNConfig.h`).
+- Vendored modules that are older than the framework's copy are now reported.
+  `arlen doctor` and `arlen module doctor` warn with `module_outdated`
+  (vendored → available version, and the fix: `arlen module upgrade <id>`,
+  then `arlen module migrate`, then rebuild), and apps log
+  `vendored module is older than the framework copy` at startup outside
+  `test` when `ARLEN_FRAMEWORK_ROOT` is set. `boomhauer` now exports
+  `ARLEN_FRAMEWORK_ROOT` to the app process, as `propane` and `jobs-worker`
+  already did, so the warning also appears in development. Upgrading Arlen alone does not
+  update modules an app has vendored with `arlen module add`; see
+  [Modules](MODULES.md#6-upgrade-a-module).
+- Request bodies now have bounds too, on both parsers and on the spool path
+  for large bodies. `requestLimits.requestBodyTimeoutSeconds` (default `300`,
+  env `ARLEN_REQUEST_BODY_TIMEOUT_SECONDS`) caps the total time to send a body
+  after its head, and after `requestBodyMinRateGraceSeconds` (default `10`)
+  the body must average at least `requestBodyMinBytesPerSecond` (default
+  `1024`). A body that misses either gets `408`, and its spool file is removed.
+  Before, a client trickling a body could hold an HTTP worker indefinitely.
+  **Behavior change:** uploads slower than 1 KiB/s on average, or taking more
+  than 5 minutes, now fail with `408`; raise or set `0` for the limits if your
+  clients need that.
+- New `requestLimits.requestHeadTimeoutSeconds` (default `15`, env
+  `ARLEN_REQUEST_HEAD_TIMEOUT_SECONDS`) bounds the total time to receive a
+  request head; a slower head gets `408`. For a connection's first request it
+  counts from accept, so connections that send nothing, or that waited for a
+  worker, are covered and can't stack; later keep-alive requests count from
+  their first byte. Before, only each read was bounded by
+  `connectionTimeoutSeconds`, so a few clients trickling one byte at a time
+  (or sending nothing) could hold every HTTP worker. Both parsers apply it.
+- File responses (`renderFileAtPath:`, `ALNFileResponse`) and static mounts
+  answer 404 for a path that contains a control character (U+0000-U+001F or
+  DEL) instead of passing it to the filesystem. A C path ends at U+0000, which
+  JSON and multipart strings can carry, so a name checked as
+  `report\u0000.pdf` reached `report`. Format characters such as U+200D,
+  which emoji file names use, are still allowed. The same check now covers
+  writes: `-[ALNUpload writeToFile:error:]` fails with an error, and
+  `ALNPlatformOpenFile` / `ALNPlatformOpenExclusiveLock` fail with `EINVAL`,
+  for such a path (new `ALNPlatformPathHasNoControlCharacters()`).
+- An exception raised in middleware, or in the request or auth contract
+  stages before the controller, now answers that request with a 500 (the
+  normal error page or JSON; no exception details outside development and
+  test) and is logged as `middleware exception`, `request_contract exception`
+  or `auth_contract exception`. Before, only controller exceptions were
+  caught, and one raised earlier ended the server process. As a last resort,
+  an exception that escapes request handling now closes only that connection.
+- Pipelined HTTP/1.1 requests on one connection each keep their own headers.
+  On the llhttp parser, headers outside the small set copied at parse time
+  (Host, Authorization, Origin, Content-Type, User-Agent and others) were read
+  lazily from the connection buffer, which by then held the next pipelined
+  request, so they came back truncated, empty or from that next request. A
+  request now keeps its own copy of the header bytes, which also ends its
+  dependence on the connection buffer's lifetime.
+- `ALNPg` resets a connection's session state when it goes back to the pool
+  after the borrower ran its own SQL (any `executeQuery`/`executeCommand`/
+  script/prepare with caller SQL, a transaction, or a builder statement with a
+  trusted expression): `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`,
+  `CLOSE ALL`, `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *`,
+  `pg_advisory_unlock_all()`. Settings such as `search_path`, `SET ROLE` or a
+  `set_config` tenant ID, temporary tables, `currval`/`lastval`, `LISTEN`s
+  and session advisory locks no longer carry over to the next borrower, and
+  notifications still queued for the old `LISTEN`s are dropped. The pool's
+  cached prepared statements are checked against `pg_prepared_statements` in
+  the same round trip and all deallocated if one was replaced, so a borrower
+  cannot change what a cached statement name runs for later borrowers. A
+  connection released inside a transaction (including one opened by sending
+  `BEGIN` by hand) is now closed instead of reused. A connection that only ran
+  generated builder statements is reused without a reset. The new
+  `sessionResetPolicy` chooses `Session` (default), `DiscardAll` or `None`.
+  The reset costs one round trip (about 95 µs on a local socket).
+  `poolDiagnostics` adds `released_in_transaction_count`,
+  `session_reset_count` and `session_reset_failure_count`.
+- `ALNPg` and `ALNMSSQL` refuse SQL text (and `ALNPg` statement names) that
+  contain U+0000 with an invalid-argument error instead of letting the driver
+  end the statement at the NUL.
+- `ALNMSSQL` binds text parameters with their byte length instead of
+  `SQL_NTS`, so a value with an embedded U+0000 reaches SQL Server whole
+  instead of being cut short, and multi-byte text declares its UTF-8 length.
+- `ALNPg` refuses a string parameter containing U+0000 with
+  `ALNPgErrorInvalidArgument`. Before, libpq cut the value short at the NUL,
+  so the database matched a different value than the app had checked. Send
+  binary data as `NSData` (bound as `bytea`).
+- `auth` 1.6.0 refuses a TOTP code whose time step was already accepted for the
+  enrollment, even in another session, and limits failed verification
+  attempts. Five consecutive failed TOTP or recovery-code checks lock MFA for
+  that account for 30 seconds, doubling with each further failure up to 15
+  minutes; a success resets the count. Failed password sign-ins are counted per
+  submitted email and client address: after five, that pair waits 30 seconds,
+  doubling up to 15 minutes, and a success clears only that pair. An
+  account-wide ceiling against distributed guessing adds a wait for an email
+  after 50 failures in an hour from all addresses. Password counters are keyed
+  by the submitted email, so known and unknown emails behave the same. A pair
+  that signed in successfully in the last 30 days skips the account-wide
+  ceiling (`trustedPairDays`), and a successful sign-in never re-arms the
+  account-wide wait. Waiting requests answer `429` with
+  `Retry-After`. Forgot-password is never held back by these delays; it has
+  its own send limit (5 per email and 20 per address per hour by default,
+  under `authModule.attemptLimits.mail`), beyond which it replies as usual but
+  sends nothing. Limits are set under `authModule.attemptLimits`. A verified
+  enrollment now also accepts one of its recovery codes at the TOTP
+  challenge, once each; they were issued but could not be used before. Run
+  `arlen module migrate` to apply the new auth migration
+  `004_auth_totp_limits`; until it is applied, verification works as before and
+  the module logs one warning.
+- `ALNPg` recovers from connections the server closed while they were idle
+  (restart, failover, idle timeout, `pg_terminate_backend`). Such a failure is
+  reported as `ALNPgErrorConnectionFailed` with the new
+  `ALNPgErrorConnectionLostKey`, whatever SQLSTATE (or none) the result
+  carried, and the connection is closed and never reused. On a connection
+  from the idle list, the pool retries a plain read once on a new
+  connection; a write only when the statement had not been sent
+  (`ALNPgErrorStatementNotSentKey`: the connection was found closed before
+  sending); nothing while a transaction is open. `withTransaction:` restarts
+  only when `BEGIN` itself failed; the new
+  `withTransactionReplayingOnConnectionLoss:` also replays the whole block
+  once for blocks that are safe to run twice. `poolDiagnostics` adds
+  `connection_retry_count`. The auth module
+  treats these failures, and any database failure without a SQLSTATE, as the
+  database being unavailable (`503` with `Retry-After`), never as a failed
+  sign-in, and no longer passes driver messages to clients.
+- The auth module's connection pool size is now configurable
+  (`authModule.database.maxConnections`, default 8, was a fixed 4), and a busy
+  pool waits up to `authModule.database.acquireTimeoutSeconds` (default 2) for
+  a connection. When the database is busy or unreachable, auth routes answer
+  `503` with `Retry-After` instead of `401`, and the session is kept; password
+  sign-in answers `503` instead of `Invalid email or password`.
+- `notifications` 1.2.0: `POST /notifications/api/queue` queues only for the
+  signed-in user. It sets the payload's `recipient` to the caller's subject and
+  `email` to their own address, and answers `403` when the payload names
+  another `recipient`, `recipientSubject`, `recipients` entry or `email`.
+  Queueing for others over HTTP needs the `admin` role at AAL2, like
+  test-send. Below that, after the definition runs the module replaces every
+  channel's target with the caller's own (email to their account address,
+  in-app and web push to their subject), so no payload key can choose who or
+  where a notification goes; the `webhook` channel is left out unless the
+  definition implements `notificationsModuleAllowsWebhookForSelfQueuedNotifications`.
+  `ALNNotificationsModuleRuntime` calls from app code are unchanged.
+- Signing in and completing step-up (`ALNAuthSession`
+  establish/elevate, used by the auth module and the `ALNController` helpers)
+  now start a fresh session. Keys stored before, including `_csrf_token`, are
+  dropped, so a CSRF token issued before login no longer works after it; a new
+  token is minted when next read and is returned by the auth module's login,
+  registration and verify responses. Only `return_to` is kept. Apps that keep
+  data in the session across login or step-up need to store it again
+  afterwards.
+- `ALNTOTP` adds `matchedTimeStepForCode:...`, which returns the time step a
+  code matched (or `NSNotFound`), so callers can refuse reused codes.
+- Auth module (`auth` 1.6.0): the stub OIDC provider is now available only in
+  the `development` and `test` environments. Elsewhere it defaults off, its
+  routes are not registered, and setting `authModule.providers.stub.enabled =
+  YES` is refused (the auth module's configuration is rejected). Apps that relied on the stub outside
+  development or test must configure a real provider or local passwords.
+- Auth module: an explicitly empty OIDC `admission.allowedEmails` or
+  `admission.allowedDomains` list now fails configuration instead of admitting
+  every verified identity. Omit an unused list key.
+- Auth module: password-reset and email-verification links are single-use
+  even under concurrent requests; only one request can consume a given link.
+  A successful password change (by reset link or the change-password route)
+  now retires every other outstanding reset link for that user.
+- Auth module: new reset and verification links store only SHA-256 token
+  digests in PostgreSQL. Links issued before this upgrade with plaintext token
+  rows no longer work; users can request a new link.
+- Auth module: new `authModule.publicBaseURL` key. Password-reset and
+  email-verification links are built from it instead of the request's `Host`
+  header. When it is unset, `development` and `test` still fall back to the
+  request host; other environments send no link and log an error, so set
+  `authModule.publicBaseURL` before upgrading a production app that uses local
+  passwords.
+- `search` (`1.2.0`): an unscoped query (`GET /search`, `GET /search/api/query`)
+  from a caller who may not query any registered resource now returns no
+  results, autocomplete, suggestions or facets, with `total = 0`. It used to
+  search every resource.
+- `search` (`1.2.0`) and `admin-ui` (`1.1.0`): resources the search module
+  auto-registers from `admin-ui` (`searchModule.adminUI.autoResources`,
+  including the built-in `users` resource) now use `queryPolicy = role_gated`
+  with `admin-ui`'s roles (`admin`), AAL2 and the resource's `list` operation
+  check, instead of `public`. Anonymous and non-admin callers can no longer
+  query them, and `GET /search/api/resources` no longer lists them for those
+  callers. Only fields `admin-ui` displays (`list` or `detail`) are indexed and
+  returned. Search resources can set the new `queryMinimumAuthAssuranceLevel`
+  metadata, and `ALNAdminUIModuleRuntime` reports `accessRoles` and
+  `minimumAuthAssuranceLevel`.
+- Auth module (`1.6.0`): authorization now uses each user's current roles.
+  The module resolves the session's user against `auth_users` on every request
+  (one indexed query, nothing cached), so route contracts and the admin-ui,
+  jobs and ops APIs see a role grant or revocation on the user's next request.
+  Before, they used the roles stored in the session cookie at sign-in until the
+  cookie expired, while only the HTML admin pages read the current roles. A
+  session whose user was deleted is signed out. Running `arlen module migrate`
+  after upgrading is recommended: the new `002_auth_session_stamp.sql` adds a
+  per-user session stamp, and `bumpSessionStampForSubject:error:` ends every
+  existing session for a user. Without it, roles are still read live and
+  nothing fails; the stamp is skipped and one warning names the migration. OIDC resolvers can implement the optional
+  `refreshSessionDescriptorForSubject:provider:error:` to keep provider
+  sessions' roles current the same way. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- Auth module (`1.6.0`): signing out now ends the session on the server. The
+  session is recorded in a new `auth_revoked_sessions` table (migration
+  `003_auth_revoked_sessions.sql`; running `arlen module migrate` is
+  recommended), so another copy of the signed-out cookie no longer works, while
+  the user's other devices stay signed in. Changing the password ends the
+  user's other sessions and keeps the current one; a password reset by link
+  and removing the SMS factor end other sessions too. New sign out everywhere
+  routes (`POST /auth/logout/all`, `POST /auth/api/logout/all`) end every
+  session of the user. New `authModule.session.absoluteLifetimeSeconds`
+  (default 14 days) signs a session out that long after sign-in even when it
+  is renewed by use. Without migration 003, signing out still clears the
+  cookie and one warning names the migration. See
+  [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+- `search` (`1.2.0`): the operator/admin guard on drilldown and reindex routes
+  and `role_gated` resources check roles through the new
+  `+[ALNAuth context:hasAnyRole:]`, so they use the user's current roles like
+  the other modules.
+- admin-ui (`1.1.0`, requires auth `1.6.0`): revoking the admin role through
+  the users resource also ends that user's existing sessions (once the auth
+  stamp migration is applied).
 - `arlen test --app` (`boomhauer --build-tests`) works on Windows. It used to
   stop with "--build-tests currently supports GNUstep on Linux only"; the app
   test bundle is now `AppTests.dll`, built against the framework's vendored
@@ -112,8 +605,8 @@
 - JSON log lines are written from the serializer's UTF-8 bytes with the
   newline appended once. Before, each line was decoded to an `NSString`,
   appended to, and encoded again (two encodes and three copies). An access-log
-  line costs about 10-15% less (#248, partial: JSON encoding itself still
-  dominates).
+  line costs about 10-15% less (#248). JSON serialization and synchronous
+  sink coordination remain; this change removes the redundant encoding work.
 
 - Busy keep-alive clients no longer lock out new connections (#187,
   PERF-07). #193 stopped idle keep-alive connections from holding HTTP
@@ -129,7 +622,11 @@
   `NSMutableString`. GNUstep paid for a temporary `NSData` and an encoding
   check on each of about 80 appends per response. Serializing a typical
   19-header response is about 1.6-2x faster, and the bytes are unchanged
-  (#245, partial).
+  (#245). Constant security headers are also validated and prepared once per
+  middleware/application instance; public setters retain validation and ordered
+  insertion avoids a redundant linear scan. Native Windows measurements of the
+  construction followup reduced middleware benchmark time by about 32% and
+  dynamic 32-header time by about 7%, with identical output byte totals.
 
 - The vendored yyjson is updated from 0.12.0 to 0.13.0 (#269). That fixes
   upstream GHSA-f4vc-345x-4mvm: a number token with 2^32 or more significant
@@ -472,8 +969,9 @@
   `-inboxSummaryForRecipient:limit:offset:`) accepts `limit` and `offset` and
   returns a `pagination` object; without `limit` it still returns the whole
   (now bounded) inbox. Preference updates for an unregistered notification or
-  an unknown channel are rejected with `422` instead of being stored. How and
-  when state is written is unchanged (#227). `notifications` moves to `1.1.2`.
+  an unknown channel are rejected with `422` instead of being stored. In
+  notifications 1.3, these retention and validation changes are paired with
+  incremental SQLite persistence (#227); see the upgrade instructions above.
 
 - Module hardening (#228):
   - `/metrics` and `/clusterz` can be restricted with
@@ -673,6 +1171,16 @@ notifications module gains a Web Push channel.
   every run. A no-op `bin/build-apple` now takes under a second instead of
   ~20s, so each `arlen` command on macOS no longer pays for a full rebuild
   (GitHub issue 142).
+- Named route parameters (`:id`) are percent-decoded. Arlen's generated
+  TypeScript client and the OpenAPI explorer send parameters through
+  `encodeURIComponent`, so an identifier such as `user:abc` arrived as
+  `user%3Aabc` and its lookup failed with a 404. Values are decoded once after
+  the path is split, so `%2F` stays inside the value. Decoding is
+  all-or-nothing and the same on Apple and GNUstep: a segment with a malformed
+  escape, an encoded NUL (`%00`), or bytes that are not strict UTF-8 is kept
+  exactly as sent. Wildcard (`*name`) values are unchanged.
+  **Upgrade note:** apps that decoded route parameters themselves should stop,
+  or values containing `%25` decode twice (GitHub issue 154).
 
 - Boolean `NSNumber`s are now detected the same way everywhere, using the new
   `ALNNumberIsBoolean()` in `ALNPlatform.h`, and correctly on Apple arm64. The

@@ -19,6 +19,22 @@ The module ships three explicit reuse paths:
 Optional SMS MFA through Twilio Verify is available as a disabled-by-default
 secondary factor without changing the core TOTP-first auth/session contract.
 
+Auth-only applications can link without installing the optional jobs module.
+Durable mail mode still requires that module and a configured durable adapter;
+production mail requirements are enforced at startup.
+
+## Sessions and CSRF
+
+The module runs on the session cookie, so it requires CSRF protection. With
+`session.enabled = YES`, leave `csrf.enabled` unset (it then follows
+`session.enabled`) or set it to `YES`. If `csrf.enabled = NO` is pinned while
+sessions are on, the module refuses to start with an error naming
+`csrf.enabled`, and `arlen module doctor` reports `module_csrf_disabled`.
+Older `arlen new` scaffolds wrote `csrf.enabled = NO` into
+`config/app.plist`; delete that line. An app that really must run without CSRF
+(for example, every unsafe request is bearer-authenticated) can opt out with
+`authModule.allowWithoutCSRF = YES`; doctor then reports a warning instead.
+
 ## Route Contract
 
 Interactive HTML routes:
@@ -26,6 +42,7 @@ Interactive HTML routes:
 - `GET /auth/login`
 - `POST /auth/login`
 - `POST /auth/logout`
+- `POST /auth/logout/all`
 - `GET /auth/register`
 - `POST /auth/register`
 - `GET /auth/session`
@@ -49,6 +66,7 @@ Stable API-first aliases:
 - `GET /auth/api/session`
 - `POST /auth/api/login`
 - `POST /auth/api/logout`
+- `POST /auth/api/logout/all`
 - `POST /auth/api/register`
 - `GET /auth/api/verify`
 - `POST /auth/api/password/forgot`
@@ -74,14 +92,64 @@ Mode behavior:
 - `generated-app-ui` keeps the same backend routes but resolves HTML from
   app-owned templates under `templates/auth/...` by default.
 
+Login (password, provider, or trusted email claim) and MFA step-up start a
+fresh session: other keys stored before, including the CSRF token, are dropped,
+and only `return_to` is kept. The JSON login and verify responses return the
+new `csrf_token` (also at `GET /auth/api/session`); use it for the next unsafe
+request. Registration returns one only with the explicit legacy auto-login
+setting. See [Session and CSRF](CONFIGURATION_REFERENCE.md#5-session-and-csrf).
+For module-owned sessions, MFA step-up also records the prior session ID as
+revoked before rotating it, so a copied pre-MFA cookie cannot be replayed.
+
 Local-password login answers `Invalid email or password` for both an unknown
 email and a wrong password. For an unknown email it still runs one Argon2id
 verification against a throwaway hash, so response time does not reveal whether
-the account exists. (Registration still reports an already-registered email.)
+the account exists. Registration now returns the same generic success response
+for a new or existing address. It does not start an authenticated session;
+the user follows the verification link and signs in. An existing address is
+left unchanged and receives no repeated verification message.
+With a configured PostgreSQL jobs adapter, registration and password-reset
+requests enqueue mail work. The jobs worker creates links and sends mail after
+the response. New-user registration and its mail job commit in one transaction;
+an existing address enqueues a no-op job. A registration hook can still affect
+request latency, so applications using custom hooks should review their timing.
+Production-like environments with local passwords and mail configured require
+the durable jobs adapter and `authModule.publicBaseURL` at startup. Explicit
+`authModule.mailDispatch.mode = "synchronous"` keeps the old delivery path;
+its provider and database latency can reveal whether an address exists.
+Use the same PostgreSQL database and search path for auth and jobs so the new
+account and its mail job commit together. A failed enqueue rolls back a new
+registration and returns a generic 503 for registration or password reset.
+
+The previous registration behavior can be enabled explicitly with
+`authModule.registration.autoLogin = YES`. This compatibility setting starts
+a session and returns user details for new accounts, and reports an existing
+address as an error. It exposes whether an email is registered; use it only
+when that disclosure is acceptable. Existing apps that relied on automatic
+sign-in after registration must update their client flow or opt in.
+
+Password-reset and email-verification emails link to
+`authModule.publicBaseURL` (for example `publicBaseURL =
+"https://app.example.com";`). Set it in production: durable mail configuration
+fails startup without it. Explicit synchronous compatibility mode sends no link
+when it is absent and never trusts the request's `Host` header. In `development`
+and `test` an unset value falls back to the request's
+scheme and `Host`. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
+
+Password-reset links expire after 30 minutes and email-verification links after
+one day. Each link works once, even when several requests present it at the same
+time. Any successful password change, through a reset link or the authenticated
+change-password route, retires all of that user's other outstanding reset links.
+The token tables store only SHA-256 digests of newly issued random tokens, so a
+database read cannot recover a usable link. Links issued by older versions
+with plaintext token rows stop working after this upgrade; request a new link.
 
 Provider CTAs and provider API routes are driven by the enabled provider set in
 `authModule.providers`. If `authModule.providers.stub.enabled = NO`, the
-provider CTA disappears and the stub provider routes are not registered.
+provider CTA disappears and the stub provider routes are not registered. The
+stub provider is only available in the `development` and `test` environments;
+see [Defaults and Upgrade Behavior](#defaults-and-upgrade-behavior).
 
 TOTP route behavior:
 
@@ -101,6 +169,152 @@ Current MFA factor scope:
   factor
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
+- when SMS is enabled, send and verification attempt budgets are recorded per
+  account in PostgreSQL. Replaying an older session cookie cannot restore the
+  budget. A locked account receives HTTP 429 with `Retry-After`; missing attempt
+  limit storage makes SMS requests fail with HTTP 503. The configured
+  `mfa.sms.maxSendAttemptsPerSession` and `maxVerifyAttemptsPerSession` values
+  also bound these account counters within a rolling 24-hour failure window.
+
+### Database pool and unavailability
+
+The auth module keeps its own PostgreSQL connection pool:
+
+```plist
+authModule = {
+  database = {
+    maxConnections = 8;          /* default */
+    acquireTimeoutSeconds = 2;   /* default; how long a request waits for a free connection */
+  };
+};
+```
+
+When no connection becomes free within `acquireTimeoutSeconds`, or the
+database cannot be reached, auth routes answer `503` with `Retry-After: 2` and
+the message `The sign-in service is temporarily unavailable. Try again
+shortly.` They never answer `401` for that reason and never clear the session,
+so clients should keep the session and retry. A password sign-in that cannot
+reach the database also answers `503`, not `Invalid email or password`.
+Connections the server closed while idle (restart, failover, idle timeout) are
+replaced and the statement retried once (see
+[Arlen Data](ARLEN_DATA.md#connection-pool-liveness-checks)); only if that
+fails too does the route answer `503`. Database driver messages never reach
+the client: responses carry a generic message and the detail is logged.
+Size `maxConnections` for the number of auth requests you expect at once,
+within the database's own connection limit.
+
+### TOTP replay protection and attempt limits
+
+These need auth module migration `004_auth_totp_limits` (run
+`./bin/arlen module migrate --env <env>` after upgrading to auth 1.6.0):
+
+- each TOTP enrollment remembers the last time step it accepted
+  (`auth_mfa_enrollments.last_used_step`). A code for that step or an earlier
+  one is refused with `That authenticator code was already used`, even from a
+  different session, so one code cannot complete step-up twice.
+- a verified enrollment also accepts one of its recovery codes in the `code`
+  field of `POST /auth/mfa/totp/verify` and `POST /auth/api/mfa/totp/verify`.
+  Each recovery code works once, and two different codes used at the same
+  time both succeed. The session records the method as `recovery_code`
+  instead of `totp`.
+- TOTP and recovery-code checks share one failure counter per account
+  (`auth_attempt_limits`, scope `mfa`). When an account reaches
+  `mfa.maxFailures` consecutive failures it is locked for `lockoutSeconds`.
+  Each further failure after a lock ends doubles the lock, up to
+  `maxLockoutSeconds`. A successful check resets the counter, and failures
+  older than 24 hours start over.
+- local password sign-in (and the current-password check when a signed-in user
+  changes their password) is slowed down rather than locked:
+  - failures are counted per pair of submitted email and client address. After
+    `password.maxFailures` failures from one address, that pair waits
+    `delaySeconds` before its next attempt, and each further failure doubles
+    the wait, up to `maxDelaySeconds`. Other addresses are not affected, and a
+    successful sign-in clears only its own pair.
+  - an account-wide ceiling against distributed guessing counts failures for
+    the email across all addresses. Beyond `accountMaxFailures` failures within
+    `accountWindowSeconds`, every further failure adds a wait for that email
+    (`accountDelaySeconds`, doubling, up to `maxDelaySeconds`). The wait ends
+    on its own; nothing needs to be unlocked. Only failures arm it: a
+    successful sign-in never adds to, extends or re-arms the account-wide
+    wait, so after it expires the owner's correct passwords keep working.
+  - known devices: an (email, address) pair that signed in successfully within
+    the last `trustedPairDays` days (default 30; `0` turns this off) is not
+    subject to the account-wide ceiling, and its failures do not count toward
+    it. Its own pair delay still applies. The time of the last successful
+    sign-in is stored on the pair row only. An email with no account never
+    has a successful sign-in, so it never gets the exemption.
+  - the client address is the server's proxy-aware address
+    (`ALNRequest.effectiveRemoteAddress`), never a raw `X-Forwarded-For` or
+    `Forwarded` header.
+  - counters are keyed by a SHA-256 of the normalized submitted email
+    (`auth_password_attempts`), not by the account, and are checked before the
+    account is looked up. Known and unknown emails get the same counters,
+    delays, response bodies and one Argon2 verification each, so the limiter
+    does not reveal whether an account exists.
+  - the tables stay bounded: at most once a minute a sign-in starts a prune
+    on a background queue, so the request does not wait for it. Each prune
+    deletes at most `pruneBatchSize` rows (default 1000). First it removes
+    expired rows with no active wait: account-wide rows untouched for a whole
+    `accountWindowSeconds` (their count would restart anyway), pair rows
+    untouched for 24 hours unless they signed in within `trustedPairDays`, and
+    mail rows past their window. Then, above `maxTrackedEntries` rows, it
+    removes pair rows still under `maxFailures` failures with no active wait,
+    oldest first, known devices last. Account-wide rows and rows with an
+    active wait are never removed to meet the cap: if only those are left,
+    the table stays over the cap until they expire and a warning is logged.
+    Every statement is limited and walks the `updated_at` index; the only
+    count reads at most `maxTrackedEntries + pruneBatchSize` rows.
+- forgot-password is not subject to the password delays or the account-wide
+  ceiling, so the owner can always ask for a reset. It has its own limit
+  against sending lots of mail (`auth_mail_sends`): per hashed submitted email
+  (`mail.maxPerEmail`, default 5) and per hashed client address
+  (`mail.maxPerAddress`, default 20) within `mail.windowSeconds` (3600).
+  Requests are counted alike for known and unknown emails. Beyond a limit the
+  route still answers exactly as usual (the same `200` and generic reply), but
+  sends nothing and logs a warning. The module has no separate route for
+  resending the verification email; registration sends it once.
+- while a lock or wait is active, the route answers `429` with a `Retry-After`
+  header (seconds) and the error `Too many failed attempts. Try again in N
+  seconds.`, without checking the submitted code or password. HTML routes
+  render the same error on the form.
+- an attempt is counted before the code or password is checked, so parallel
+  requests cannot run more checks than the limit allows.
+
+Defaults (`maxFailures = 0` turns a counter off; for `password` it turns off
+both the per-address delay and the account-wide ceiling, and
+`accountMaxFailures = 0` turns off only the ceiling):
+
+```plist
+authModule = {
+  attemptLimits = {
+    mfa = { maxFailures = 5; lockoutSeconds = 30; maxLockoutSeconds = 900; };
+    password = {
+      maxFailures = 5;
+      delaySeconds = 30;
+      maxDelaySeconds = 900;
+      accountMaxFailures = 50;
+      accountWindowSeconds = 3600;
+      accountDelaySeconds = 30;
+      maxTrackedEntries = 100000;
+      pruneBatchSize = 1000;
+      trustedPairDays = 30;
+    };
+    mail = {
+      maxPerEmail = 5;
+      maxPerAddress = 20;
+      windowSeconds = 3600;
+    };
+  };
+};
+```
+
+While the account-wide ceiling is in effect, sign-in for that email waits from
+every address that has not signed in successfully within `trustedPairDays`. Provider (OIDC) sign-in is not counted.
+
+If migration 004 has not been applied, TOTP and password verification keep
+working without replay protection, counters or delays. The module logs one warning
+naming `arlen module migrate` and never fails the request because of the
+missing schema.
 
 ## UI Configuration
 
@@ -201,6 +415,109 @@ The intended reuse target is app-owned account/security pages and other
 server-rendered auth surfaces that want to embed framework-provided MFA/auth UI
 without forking the full-page templates.
 
+## Sessions and Roles
+
+Sessions are signed cookies. The roles written into the session at sign-in are
+not what authorization uses on later requests. On every request that carries a
+session identity, the module's middleware resolves that identity again and
+replaces the session's roles for the request with the current ones, so
+`[ctx authRoles]`, route contracts (`requiredRoles`, minimum assurance level),
+and the admin-ui, jobs, ops and other module API guards all see the user's
+current roles:
+
+- Module sign-ins (local password, email link, the stub provider) are looked up
+  in `auth_users` by subject: one indexed query per request, with no cache
+  between requests. Roles come from `roles_json`, passed through the session
+  policy hook's `authModuleSessionDescriptorForUser:defaultDescriptor:` when one
+  is configured, exactly as at sign-in. A role granted or revoked in the
+  database takes effect on the user's next request, with no new sign-in.
+- If the user row no longer exists, the session is signed out.
+- Each user has a session stamp (`auth_users.session_stamp`, added by migration
+  `002_auth_session_stamp.sql`). Sign-in records the current stamp in the
+  session; a session whose stamp no longer matches is signed out.
+  `-[ALNAuthModuleRuntime bumpSessionStampForSubject:error:]` increments the
+  stamp, which ends every existing session for that user. Revoking the admin
+  role through the admin-ui users resource does this. Sessions issued before
+  the stamp existed count as stamp `0`.
+- Sessions from a configured OIDC provider belong to the application resolver.
+  When the resolver implements `refreshSessionDescriptorForSubject:provider:error:`
+  (see [Application Identity Resolver](#application-identity-resolver)), its
+  `roles` apply on every request and a nil result signs the session out.
+  Without it, the roles the resolver returned at sign-in stay in force until the
+  session ends.
+- Sessions that application code establishes itself, for providers the module
+  does not own, are left as they are. To have the module manage one for an
+  `auth_users` subject, call `recordSessionStampForContext:error:` after
+  establishing it.
+
+Ending sessions:
+
+- Signing out (`POST /auth/logout`, `POST /auth/api/logout`) clears the session
+  and records it in `auth_revoked_sessions` (migration
+  `003_auth_revoked_sessions.sql`). Any other copy of that session cookie is
+  then signed out on its next request, including copies taken before an MFA
+  step-up. The user's sessions on other devices stay signed in. The check is
+  part of the same per-request `auth_users` query. A record is kept only until
+  the cookie would have expired anyway (`session.maxAgeSeconds`, or the
+  absolute lifetime below if that ends sooner); expired records are deleted
+  when someone signs out.
+  `-[ALNAuthModuleRuntime revokeCurrentSessionForContext:error:]` does the same
+  from application code.
+- Sign out everywhere (`POST /auth/logout/all`, `POST /auth/api/logout/all`, or
+  `signOutAllSessionsForContext:error:`) bumps the user's session stamp and
+  signs out the current session, ending every session the user has. The JSON
+  reply is `{"status":"ok","scope":"all_sessions"}`. Until migration
+  `002_auth_session_stamp.sql` is applied it can end only the current session
+  and replies `{"status":"partial","scope":"current_session",...}`;
+  `-[ALNAuthModuleRuntime canEndOtherSessions]` reports which applies.
+- Changing the password (`/auth/password/change`) bumps the stamp in the same
+  transaction as the new password, so every other session ends; the session
+  that made the change records the new stamp and stays signed in. A reset by
+  emailed link ends every existing session too, and the resetting browser is
+  signed in with a new session as before. Removing the SMS factor ends the
+  user's other sessions and keeps the current one.
+  `signOutOtherSessionsForContext:error:` does this from application code.
+- Deleting the `auth_users` row signs out every session of that user (see
+  above).
+- `authModule.session.absoluteLifetimeSeconds` (default `1209600`, 14 days,
+  the same as the default `session.maxAgeSeconds`) limits how long a module or
+  OIDC sign-in lasts. The session cookie renews on use, but once this much time
+  has passed since sign-in (`auth_time`, which step-up does not change) the
+  session is signed out and the user signs in again. A session with no
+  recorded sign-in time is treated as expired.
+
+These apply to module sign-ins (local password, email link, stub). Sessions
+from a configured OIDC provider are subject to the absolute lifetime; whether
+they stay valid otherwise is decided by the application resolver (see above),
+so signing out clears them without a server-side record. Sessions application
+code establishes for identities the module does not own are not affected.
+
+Whether `auth_users.session_stamp` and `auth_revoked_sessions` exist is checked
+once per process (per database adapter) and cached, so a database without
+those migrations does not see a failing query on every request. Restart the
+application after running `arlen module migrate` for newly added objects to be
+used.
+
+Running `arlen module migrate` after upgrading is recommended: it applies
+`002_auth_session_stamp.sql`, which enables ending sessions by stamp, and
+`003_auth_revoked_sessions.sql`, which lets a sign-out refuse other copies of
+the session cookie. Until 002 runs, roles are still read live and deleted users
+are still signed out; only the stamp is skipped. The stamp comparison is not
+made, sign-ins do not record a stamp, `bumpSessionStampForSubject:error:` (and
+so password changes, sign out everywhere and admin-ui revocation) succeeds
+without changing it, and the revoked role is still denied. Until 003 runs,
+signing out still clears the session cookie and succeeds, but other copies of
+that cookie are not refused. For each missing migration the module logs one
+warning per process naming it.
+
+Any other lookup failure (for example the database is unreachable, or the
+`auth_users` table is missing) fails the request instead of continuing with the
+stored roles.
+
+The auth module always requires `database.connectionString`. Applications that
+do not install it and establish sessions with `ALNAuthSession` directly keep the
+roles they store in the session.
+
 ## Customization Hooks
 
 Use `authModule.hooks` for auth behavior and policy seams:
@@ -287,6 +604,11 @@ sendPasswordSetupEmail:YES
               context:ctx
                 error:&error];
 ```
+
+`baseURL` is used for the password setup link only when
+`authModule.publicBaseURL` is unset; a configured `publicBaseURL` always wins.
+Pass a fixed, configured value here, never one built from the request's `Host`
+or forwarding headers, because the link carries a password setup token.
 
 This flow is intended for app-owned invite-claim or verified email-link pages.
 It will:
@@ -416,7 +738,9 @@ google = {
   on its own, without lists.
 - Unknown keys and malformed values fail at startup. Entries must be plain
   `name@domain.tld` addresses and dotted domain names, not patterns. A missing
-  or empty `allowedEmailsEnvironmentKey` variable also fails startup.
+  or empty `allowedEmailsEnvironmentKey` variable also fails startup. An
+  explicitly empty `allowedEmails` or `allowedDomains` list fails startup;
+  omit the key when that list is not used.
 
 Rejected logins never reach the resolver or create a session. JSON callbacks
 return `403` with `{"status":"error","code":"admission_denied","message":...}`.
@@ -529,6 +853,23 @@ under `identity["claims"]`. Normal OIDC `sub` validation still applies when usin
 explicit account-linking decision; nil rejects login. Arlen does not infer MFA
 assurance from the fact that a provider was used.
 
+To keep roles current for the life of a session, also implement the optional
+`refreshSessionDescriptorForSubject:provider:error:`. The module calls it on
+every request for a session from that provider, with the local subject the
+resolver returned at sign-in. Return a descriptor whose `roles` apply to the
+request, nil to sign the session out (for example a suspended person), or nil
+with an error to fail the request. Keep it to one indexed lookup; results are
+not cached. See [Sessions and Roles](#sessions-and-roles).
+
+```objc
+- (NSDictionary *)refreshSessionDescriptorForSubject:(NSString *)subject
+                                            provider:(NSString *)provider
+                                               error:(NSError **)error {
+  NSDictionary *person = [CompanyPeople activePersonForIdentifier:subject error:error];
+  return person ? @{ @"subject": subject, @"roles": person[@"roles"] ?: @[] } : nil;
+}
+```
+
 ### Provider assurance from amr and acr
 
 Module surfaces such as the admin UI need assurance level 2. A provider sign-in
@@ -594,9 +935,27 @@ re-authenticate; Arlen does not verify that it did.
 ### Defaults and Upgrade Behavior
 
 When any real OIDC provider is enabled, local password login and the stub
-provider default off. Explicit `localPassword.enabled` or
-`providers.stub.enabled` overrides are honored. Without real OIDC providers,
-the existing local-password and stub defaults remain enabled for compatibility.
+provider default off. Explicit `localPassword.enabled` overrides are honored.
+Without real OIDC providers, local-password login stays enabled for
+compatibility.
+
+The stub provider signs a visitor in without any credentials, so it is a
+development and test convenience only:
+
+- In the `development` and `test` environments it defaults on when no real
+  OIDC provider is enabled, and `providers.stub.enabled` is honored either way.
+- In every other environment (`production`, `staging`, or any custom name) it
+  defaults off. Setting `providers.stub.enabled = YES` there is refused: the
+  auth module's configuration is rejected. There is no override.
+- Even if a stub route is reached outside `development`/`test`, it answers 404
+  and the stub identity never creates or signs in a user.
+
+Production apps that use local passwords and mail must set
+`authModule.publicBaseURL` and install the PostgreSQL jobs adapter and worker
+when upgrading to auth 1.6.1. See [Durable Jobs](DURABLE_JOBS.md). Explicit
+`authModule.mailDispatch.mode = "synchronous"` preserves legacy request-time
+delivery with its timing disclosure risk.
+
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login
 page remains available and shows provider buttons without a password form.

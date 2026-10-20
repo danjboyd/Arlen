@@ -8,7 +8,8 @@ This gate validates request/session lifecycle invariants that have historically 
 bash ./tools/ci/run_runtime_concurrency_gate.sh
 ```
 
-The gate builds `boomhauer` and runs `tools/ci/runtime_concurrency_probe.py` against:
+The gate builds the CI-only `runtime-concurrency-fixture` executable using the
+`boomhauer` application entry point and runs `tools/ci/runtime_concurrency_probe.py` against:
 
 1. `concurrent` dispatch mode
 2. `serialized` dispatch mode
@@ -86,3 +87,8 @@ make ci-fault-injection
 ```
 
 This command exercises parser/dispatcher, websocket lifecycle, and runtime stop/start boundaries and writes triage artifacts to `build/release_confidence/phase9i`.
+
+Channel checks reject network-client rebroadcasts and require open connections.
+A trusted inherited pipe triggers server-originated publishing, proving delivery
+to two concurrent subscribers or one serialized subscriber. The ordinary server
+binary has no pipe hook or publishing route. Probe failures retain server logs.

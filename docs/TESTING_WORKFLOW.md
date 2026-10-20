@@ -752,7 +752,8 @@ scripts after the unit suite and uploads those logs on failure.
 Run `bash tools/ci/run_postgres_regressions.sh` with the supported clang GNUstep
 toolchain and PostgreSQL server tools, including `pg_trgm`, installed. It creates
 an isolated cluster, sets `ARLEN_PG_TEST_DSN`, and exercises generated-code
-consumers, module migrations, PostgreSQL search, and auth server lifecycle tests.
+consumers, module migrations, PostgreSQL search, auth server lifecycle tests, and
+in-process auth session role refresh (`AuthSessionRoleRefreshIntegrationTests`).
 Auth tests run twice; remaining database sessions fail the gate before `dropdb`
 without force verifies cleanup. Logs are under
 `build/release_confidence/postgres_regressions/`.

@@ -6,6 +6,13 @@
 #import "ALNRealtime.h"
 #import "../shared/ALNTestSupport.h"
 
+// Internal transport seam: an invalid socket proves publishing only enqueues.
+@interface ALNWebSocketClientSession : NSObject <ALNRealtimeSubscriber>
+- (instancetype)initWithClientFd:(intptr_t)fd;
+- (BOOL)isClosedSnapshot;
+- (BOOL)drainRealtimeMessages;
+@end
+
 // GitHub issue 48: cross-process fanout for ALNRealtimeHub.
 @interface RealtimeFanoutRecorder : NSObject <ALNRealtimeSubscriber>
 @property(nonatomic, strong) NSMutableArray<NSString *> *messages;
@@ -73,6 +80,27 @@
 @end
 
 @implementation RealtimeFanoutTests
+
+- (void)testNonReadingSessionDoesNotBlockHealthySubscriberAndQueueIsBounded {
+  ALNRealtimeHub *hub = [ALNRealtimeHub new];
+  ALNWebSocketClientSession *stalled = [[ALNWebSocketClientSession alloc] initWithClientFd:-1];
+  RealtimeFanoutRecorder *healthy = [RealtimeFanoutRecorder new];
+  ALNRealtimeSubscription *first = [hub subscribeChannel:@"bounded" subscriber:stalled];
+  ALNRealtimeSubscription *second = [hub subscribeChannel:@"bounded" subscriber:healthy];
+  XCTAssertNotNil(first);
+  XCTAssertNotNil(second);
+  NSDate *started = [NSDate date];
+  NSString *message = [@"x" stringByPaddingToLength:65536 withString:@"x" startingAtIndex:0];
+  for (NSUInteger i = 0; i < 40; i++) [hub publishMessage:message onChannel:@"bounded"];
+  XCTAssertLessThan(-[started timeIntervalSinceNow], 2.0);
+  XCTAssertEqual((NSUInteger)40, [healthy snapshot].count);
+  XCTAssertFalse([stalled isClosedSnapshot]); // No attempt to write invalid fd.
+  XCTAssertTrue([[stalled valueForKey:@"outboundOverflowed"] boolValue]);
+  XCTAssertEqual((NSUInteger)0, [[stalled valueForKey:@"outboundMessages"] count]);
+  XCTAssertFalse([stalled drainRealtimeMessages]);
+  [hub unsubscribe:first];
+  [hub unsubscribe:second];
+}
 
 - (void)testPublishDeliversLocallyAndHandsOffWhileRemoteDeliveryDoesNot {
   ALNRealtimeHub *hub = [[ALNRealtimeHub alloc] init];

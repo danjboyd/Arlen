@@ -9,6 +9,12 @@ opening a pull request, and the conventions reviewers will check for.
 
 ## Before you start
 
+Windows CLANG64 builds require `_FILE_OFFSET_BITS=64` before system headers.
+The make targets, CLI app builder, doctor probe and test helpers provide it.
+After changing this contract, clean-rebuild the framework, apps and vendored
+XCTest runner; do not mix cached objects built with 32-bit `off_t`. The build-flags
+sentinel also invalidates runner artifacts. See [Windows CLANG64](docs/WINDOWS_CLANG64.md).
+
 - File or comment on an issue first if the change is non-trivial. This lets us
   surface design considerations before you invest implementation time.
 - For security-sensitive issues, do **not** open a public issue. Follow
@@ -181,3 +187,22 @@ Open a bug report from the GitHub Issues tab. Useful reports include:
   problem before writing code.
 
 Thanks for helping make Arlen better.
+
+The required `linux-quality / quality-gate` also runs
+`python3 tests/performance/persistent_http.py` after building `boomhauer` with
+the supported clang/GNUstep toolchain. Two retained connections exercise both
+health and static-file responses; reconnects and incorrect responses fail.
+The policy in `tests/performance/policies/persistent_http.json` gates throughput,
+p95 latency, and Linux server CPU per request. Reports and server logs are in
+`build/perf/persistent_http.*`, included in existing CI artifacts. This extends
+the existing required check; branch-protection check names are unchanged.
+
+The integration sanitizer skip classifier ignores C comments while preserving
+command string literals. Direct `build/boomhauer` slow-reader and request-deadline
+tests remain eligible for the existing nightly instrumentation lane; required
+checks and branch-protection names are unchanged.
+
+Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](docs/STORAGE_MODULE.md) for migration and backup rules.

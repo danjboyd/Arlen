@@ -1,3 +1,6 @@
+#import "ALNNotificationsCatalog.h"
+#import "ALNConfig.h"
+#import "ALNJSONSerialization.h"
 #import "ALNNotificationsModule.h"
 
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
@@ -20,6 +23,7 @@ static NSString *const ALNNotificationsDispatchJobIdentifier = @"notifications.d
 static NSUInteger const ALNNotificationsDefaultMaxOutboxEntries = 1000;
 static NSUInteger const ALNNotificationsDefaultMaxInboxEntriesPerRecipient = 200;
 static NSUInteger const ALNNotificationsMaxInboxPageLimit = 200;
+static NSError *NMError(ALNNotificationsModuleErrorCode code, NSString *message, NSDictionary *details);
 
 static NSString *NMTrimmedString(id value) {
   if (![value isKindOfClass:[NSString class]]) {
@@ -88,52 +92,12 @@ static NSString *NMResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = NMLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:
                    [NSString stringWithFormat:@"var/module_state/notifications-%@.plist",
                                               ([environment length] > 0) ? environment : @"development"]];
-}
-
-static NSDictionary *NMReadPropertyListAtPath(NSString *path, NSError **error) {
-  NSString *statePath = NMTrimmedString(path);
-  if ([statePath length] == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:statePath]) {
-    return nil;
-  }
-  NSData *data = ALNDataReadFromFile(statePath, 0, error);
-  if (data == nil) {
-    return nil;
-  }
-  NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
-  id object = [NSPropertyListSerialization propertyListWithData:data
-                                                        options:NSPropertyListMutableContainersAndLeaves
-                                                         format:&format
-                                                          error:error];
-  return [object isKindOfClass:[NSDictionary class]] ? object : nil;
-}
-
-static BOOL NMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
-  NSString *statePath = NMTrimmedString(path);
-  if ([statePath length] == 0) {
-    return YES;
-  }
-  NSString *parent = [statePath stringByDeletingLastPathComponent];
-  if ([parent length] > 0 &&
-      ![[NSFileManager defaultManager] createDirectoryAtPath:parent
-                                 withIntermediateDirectories:YES
-                                                  attributes:nil
-                                                       error:error]) {
-    return NO;
-  }
-  NSData *data = [NSPropertyListSerialization dataWithPropertyList:NMPropertyListValue(payload)
-                                                            format:NSPropertyListBinaryFormat_v1_0
-                                                           options:0
-                                                             error:error];
-  if (data == nil) {
-    return NO;
-  }
-  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
 }
 
 static NSString *NMFanoutChannelForRecipient(NSString *recipient) {
@@ -247,6 +211,38 @@ static void NMTrimOldestEntries(NSMutableArray *entries, NSUInteger limit) {
   }
 }
 
+// Overlay only entries changed since this runtime last read the file. A second
+// worker may have committed other recipients while this worker delivered mail.
+static NSMutableArray *NMMergeChangedEntries(NSArray *authoritative, NSArray *baseline,
+                                             NSArray *local, NSUInteger limit) {
+  NSMutableDictionary *baselineByID = [NSMutableDictionary dictionary];
+  for (NSDictionary *entry in baseline) {
+    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+    NSString *entryID = NMTrimmedString(entry[@"entryID"]);
+    if ([entryID length] > 0) baselineByID[entryID] = entry;
+  }
+  NSMutableArray *merged = [NSMutableArray arrayWithArray:authoritative ?: @[]];
+  NSMutableDictionary *positions = [NSMutableDictionary dictionary];
+  for (NSUInteger index = 0; index < [merged count]; index++) {
+    NSString *entryID = NMTrimmedString([merged[index] isKindOfClass:[NSDictionary class]] ? merged[index][@"entryID"] : nil);
+    if ([entryID length] > 0) positions[entryID] = @(index);
+  }
+  for (NSDictionary *entry in local) {
+    if (![entry isKindOfClass:[NSDictionary class]]) continue;
+    NSString *entryID = NMTrimmedString(entry[@"entryID"]);
+    if ([entryID length] > 0 && [baselineByID[entryID] isEqual:entry]) continue;
+    NSNumber *position = positions[entryID];
+    if (position != nil) {
+      merged[[position unsignedIntegerValue]] = entry;
+    } else {
+      if ([entryID length] > 0) positions[entryID] = @([merged count]);
+      [merged addObject:entry];
+    }
+  }
+  NMTrimOldestEntries(merged, limit);
+  return merged;
+}
+
 static NSError *NMError(ALNNotificationsModuleErrorCode code, NSString *message, NSDictionary *details) {
   NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:details ?: @{}];
   userInfo[NSLocalizedDescriptionKey] = message ?: @"notifications module error";
@@ -300,7 +296,7 @@ static NSDictionary *NMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -768,6 +764,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 @property(nonatomic, strong) ALNRealtimeHub *realtimeHub;
 @property(nonatomic, assign) BOOL persistenceEnabled;
 @property(nonatomic, copy) NSString *statePath;
+@property(nonatomic, strong) ALNNotificationsCatalog *catalog;
+@property(nonatomic, copy) NSDictionary *lastPersistedState;
 @property(nonatomic, assign) BOOL webPushEnabled;
 @property(nonatomic, strong) ALNWebPushVAPIDKey *webPushVAPIDKey;
 @property(nonatomic, copy) NSString *webPushSubject;
@@ -787,12 +785,24 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                                       payload:(NSDictionary *)payload
                                                      channels:(NSArray<NSString *> *)channels
                                                         error:(NSError **)error;
+// `deliveryScope` (@{ recipient, email }) marks a notification a user queued
+// for themselves over HTTP: every channel's target is replaced with those
+// values after the definition runs, whatever the payload or definition chose.
+- (nullable NSDictionary *)artifactsForNotificationIdentifier:(NSString *)identifier
+                                                      payload:(NSDictionary *)payload
+                                                     channels:(NSArray<NSString *> *)channels
+                                                deliveryScope:(nullable NSDictionary *)deliveryScope
+                                                        error:(NSError **)error;
 - (BOOL)channel:(NSString *)channel
     enabledForRecipient:(NSString *)recipient
  notificationIdentifier:(NSString *)identifier
           defaultEnabled:(BOOL)defaultEnabled;
 - (BOOL)loadPersistedStateWithError:(NSError *_Nullable *_Nullable)error;
 - (BOOL)persistStateWithError:(NSError *_Nullable *_Nullable)error;
+- (void)replaceStateLockedFromDocument:(NSDictionary *)state;
+- (NSDictionary *)stateDocumentLocked;
+- (nullable NSDictionary *)mutateStateWithError:(NSError **)error
+                                           block:(NSDictionary *(^)(void))block;
 - (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
                                            channel:(NSString *)channel
                                          recipient:(NSString *)recipient
@@ -808,6 +818,11 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 - (nullable NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
                                                          payload:(NSDictionary *)payload
                                                         channels:(NSArray<NSString *> *)channels
+                                                           error:(NSError **)error;
+- (nullable NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                         payload:(NSDictionary *)payload
+                                                        channels:(NSArray<NSString *> *)channels
+                                                   deliveryScope:(nullable NSDictionary *)deliveryScope
                                                            error:(NSError **)error;
 - (NSDictionary *)inboxSummaryLockedForRecipient:(NSString *)recipient;
 - (nullable NSDictionary *)deliverWebPushMessage:(NSDictionary *)message
@@ -849,6 +864,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     _realtimeHub = [ALNRealtimeHub sharedHub];
     _persistenceEnabled = NO;
     _statePath = @"";
+    _lastPersistedState = @{};
     _webPushEnabled = NO;
     _webPushSubject = @"";
     _webPushDefaultTTL = 86400.0;
@@ -1018,6 +1034,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.recentFanoutEvents removeAllObjects];
   self.preferenceHook = nil;
   self.nextEntrySequence = 0;
+  self.lastPersistedState = @{};
   self.maxOutboxEntries = NMConfiguredLimit(NMNormalizeDictionary(moduleConfig[@"outbox"])[@"maxEntries"],
                                             ALNNotificationsDefaultMaxOutboxEntries);
   self.maxInboxEntriesPerRecipient =
@@ -1025,8 +1042,14 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                         ALNNotificationsDefaultMaxInboxEntriesPerRecipient);
   self.statePath = NMResolvedPersistencePath(application, moduleConfig);
   self.persistenceEnabled = ([self.statePath length] > 0);
+  self.catalog = nil;
   [self.lock unlock];
 
+  if (self.persistenceEnabled) {
+    self.catalog = [[ALNNotificationsCatalog alloc] initWithPath:[self.statePath stringByAppendingString:@".sqlite3"]
+                                                    legacyPath:self.statePath error:error];
+    if (self.catalog == nil) return NO;
+  }
   if (![self loadPersistedStateWithError:error]) {
     return NO;
   }
@@ -1100,13 +1123,10 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     return YES;
   }
   NSError *readError = nil;
-  NSDictionary *state = NMReadPropertyListAtPath(self.statePath, &readError);
+  NSDictionary *state = [self.catalog readStateWithError:&readError];
   if (state == nil) {
-    if (readError != nil && error != NULL) {
-      *error = readError;
-      return NO;
-    }
-    return YES;
+    if (error != NULL) *error = readError;
+    return NO;
   }
   [self.lock lock];
   NSArray *outbox = [state[@"outboxEntries"] isKindOfClass:[NSArray class]] ? state[@"outboxEntries"] : @[];
@@ -1133,30 +1153,154 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   self.nextEntrySequence = [state[@"nextEntrySequence"] respondsToSelector:@selector(unsignedIntegerValue)]
                                ? [state[@"nextEntrySequence"] unsignedIntegerValue]
                                : self.nextEntrySequence;
+  self.lastPersistedState = [state copy];
   [self.lock unlock];
   return YES;
+}
+
+- (void)replaceStateLockedFromDocument:(NSDictionary *)state {
+  [self.outboxEntries removeAllObjects];
+  [self.outboxEntries addObjectsFromArray:NMNormalizeArray(state[@"outboxEntries"])];
+  NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
+  [self.inboxByRecipient removeAllObjects];
+  for (NSString *recipient in NMNormalizeDictionary(state[@"inboxByRecipient"])) {
+    NSMutableArray *entries = [NSMutableArray array];
+    for (id rawEntry in NMNormalizeArray(state[@"inboxByRecipient"][recipient])) {
+      [entries addObject:NMNormalizedInboxEntry(rawEntry)];
+    }
+    NMTrimOldestEntries(entries, self.maxInboxEntriesPerRecipient);
+    self.inboxByRecipient[recipient] = entries;
+  }
+  [self.preferencesByRecipient removeAllObjects];
+  [self.preferencesByRecipient addEntriesFromDictionary:NMNormalizeDictionary(state[@"preferencesByRecipient"])];
+  [self.recentFanoutEvents removeAllObjects];
+  [self.recentFanoutEvents addObjectsFromArray:NMNormalizeArray(state[@"recentFanoutEvents"])];
+  self.nextEntrySequence = [state[@"nextEntrySequence"] unsignedIntegerValue];
+  self.lastPersistedState = state ?: @{};
+}
+
+- (NSDictionary *)stateDocumentLocked {
+  NSMutableDictionary *inbox = [NSMutableDictionary dictionary];
+  for (NSString *recipient in self.inboxByRecipient) {
+    inbox[recipient] = [[NSArray alloc] initWithArray:self.inboxByRecipient[recipient] ?: @[] copyItems:YES] ?: @[];
+  }
+  return @{ @"version" : @1, @"nextEntrySequence" : @(self.nextEntrySequence),
+            @"outboxEntries" : [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES] ?: @[],
+            @"inboxByRecipient" : inbox,
+            @"preferencesByRecipient" : [NSDictionary dictionaryWithDictionary:self.preferencesByRecipient ?: @{}],
+            @"recentFanoutEvents" : [[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[] };
+}
+
+- (NSDictionary *)mutateStateWithError:(NSError **)error block:(NSDictionary *(^)(void))block {
+  if (self.persistenceEnabled && ![self persistStateWithError:error]) return nil;
+  [self.lock lock];
+  int stateLock = -1;
+  NSDictionary *authoritative = @{};
+  if (self.persistenceEnabled) {
+    stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+    if (stateLock < 0) {
+      if (error != NULL) *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"could not lock notification state", nil);
+      [self.lock unlock];
+      return nil;
+    }
+    NSError *readError = nil;
+    authoritative = [self.catalog readStateWithError:&readError] ?: @{};
+    if (readError != nil) {
+      if (error != NULL) *error = readError;
+      ALNPlatformReleaseExclusiveLock(stateLock);
+      [self.lock unlock];
+      return nil;
+    }
+    [self replaceStateLockedFromDocument:authoritative ?: @{}];
+  }
+  NSDictionary *result = block();
+  if (result != nil && self.persistenceEnabled) {
+    NSDictionary *payload = [self stateDocumentLocked];
+    if (![self.catalog writeState:NMPropertyListValue(payload) error:error]) {
+      result = nil;
+      [self replaceStateLockedFromDocument:authoritative];
+    } else {
+      self.lastPersistedState = [self.catalog readStateWithError:NULL] ?: @{};
+    }
+  }
+  if (stateLock >= 0) ALNPlatformReleaseExclusiveLock(stateLock);
+  [self.lock unlock];
+  return result;
 }
 
 - (BOOL)persistStateWithError:(NSError **)error {
   if (!self.persistenceEnabled || [self.statePath length] == 0) {
     return YES;
   }
-  NSDictionary *payload = nil;
   [self.lock lock];
-  NSMutableDictionary *inbox = [NSMutableDictionary dictionary];
-  for (NSString *recipient in self.inboxByRecipient) {
-    inbox[recipient] = [[NSArray alloc] initWithArray:self.inboxByRecipient[recipient] ?: @[] copyItems:YES] ?: @[];
+  NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+  if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                 withIntermediateDirectories:YES attributes:nil error:error]) {
+    [self.lock unlock];
+    return NO;
   }
-  payload = @{
-    @"version" : @1,
-    @"nextEntrySequence" : @(self.nextEntrySequence),
-    @"outboxEntries" : [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES] ?: @[],
-    @"inboxByRecipient" : inbox,
-    @"preferencesByRecipient" : [NSDictionary dictionaryWithDictionary:self.preferencesByRecipient ?: @{}],
-    @"recentFanoutEvents" : [[NSArray alloc] initWithArray:self.recentFanoutEvents copyItems:YES] ?: @[],
-  };
+  int stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+  if (stateLock < 0) {
+    if (error != NULL) *error = NMError(ALNNotificationsModuleErrorDeliveryFailed, @"could not lock notification state", nil);
+    [self.lock unlock];
+    return NO;
+  }
+  NSError *readError = nil;
+  NSDictionary *authoritative = [self.catalog readStateWithError:&readError] ?: @{};
+  if (readError != nil) {
+    if (error != NULL) *error = readError;
+    ALNPlatformReleaseExclusiveLock(stateLock);
+    [self.lock unlock];
+    return NO;
+  }
+  NSDictionary *baseline = self.lastPersistedState ?: @{};
+  if ([[self stateDocumentLocked] isEqualToDictionary:baseline]) {
+    [self replaceStateLockedFromDocument:authoritative];
+    ALNPlatformReleaseExclusiveLock(stateLock);
+    [self.lock unlock];
+    return YES;
+  }
+  NSMutableArray *outbox = NMMergeChangedEntries(NMNormalizeArray(authoritative[@"outboxEntries"]),
+                                                NMNormalizeArray(baseline[@"outboxEntries"]),
+                                                self.outboxEntries, self.maxOutboxEntries);
+  NSDictionary *authoritativeInbox = NMNormalizeDictionary(authoritative[@"inboxByRecipient"]);
+  NSDictionary *baselineInbox = NMNormalizeDictionary(baseline[@"inboxByRecipient"]);
+  NSMutableDictionary *inbox = [NSMutableDictionary dictionaryWithDictionary:authoritativeInbox];
+  for (NSString *recipient in self.inboxByRecipient) {
+    inbox[recipient] = NMMergeChangedEntries(NMNormalizeArray(authoritativeInbox[recipient]),
+                                             NMNormalizeArray(baselineInbox[recipient]),
+                                             self.inboxByRecipient[recipient], self.maxInboxEntriesPerRecipient);
+  }
+  NSDictionary *authoritativePreferences = NMNormalizeDictionary(authoritative[@"preferencesByRecipient"]);
+  NSDictionary *baselinePreferences = NMNormalizeDictionary(baseline[@"preferencesByRecipient"]);
+  NSMutableDictionary *preferences = [NSMutableDictionary dictionaryWithDictionary:authoritativePreferences];
+  for (NSString *recipient in self.preferencesByRecipient) {
+    NSDictionary *local = self.preferencesByRecipient[recipient];
+    if (![local isEqual:baselinePreferences[recipient]]) preferences[recipient] = local;
+  }
+  NSMutableArray *fanout = NMMergeChangedEntries(NMNormalizeArray(authoritative[@"recentFanoutEvents"]),
+                                                NMNormalizeArray(baseline[@"recentFanoutEvents"]),
+                                                self.recentFanoutEvents, 20);
+  NSUInteger sequence = MAX(self.nextEntrySequence, [authoritative[@"nextEntrySequence"] unsignedIntegerValue]);
+  NSDictionary *payload = @{ @"version" : @1, @"nextEntrySequence" : @(sequence),
+                             @"outboxEntries" : outbox, @"inboxByRecipient" : inbox,
+                             @"preferencesByRecipient" : preferences, @"recentFanoutEvents" : fanout };
+  BOOL saved = [self.catalog writeState:NMPropertyListValue(payload) error:error];
+  if (saved) {
+    self.outboxEntries = outbox;
+    self.inboxByRecipient = inbox;
+    self.preferencesByRecipient = preferences;
+    self.recentFanoutEvents = fanout;
+    self.nextEntrySequence = sequence;
+    // The runtime mutates these containers later; retain an immutable on-disk
+    // baseline so the next write can distinguish local edits from peer edits.
+    self.lastPersistedState = [self.catalog readStateWithError:NULL] ?: @{};
+  } else {
+    [self replaceStateLockedFromDocument:authoritative];
+  }
+  ALNPlatformReleaseExclusiveLock(stateLock);
   [self.lock unlock];
-  return NMWritePropertyListAtPath(self.statePath, payload, error);
+  return saved;
 }
 
 - (NSDictionary *)appendOutboxEntryForNotification:(NSString *)identifier
@@ -1171,7 +1315,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   [self.lock lock];
   self.nextEntrySequence += 1;
   NSDictionary *entry = @{
-    @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
+    @"entryID" : [NSString stringWithFormat:@"notification-%@", [[NSUUID UUID] UUIDString].lowercaseString],
     @"notification" : NMTrimmedString(identifier),
     @"channel" : NMLowerTrimmedString(channel),
     @"recipient" : NMTrimmedString(recipient),
@@ -1218,6 +1362,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 }
 
 - (NSDictionary *)resolvedConfigSummary {
+  (void)[self persistStateWithError:NULL];
   NSDictionary *webPushSubscriptions = [self.webPushStore summary] ?: @{};
   [self.lock lock];
   NSDictionary *summary = @{
@@ -1235,6 +1380,8 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"fanoutEventCount" : @([self.recentFanoutEvents count]),
     @"persistenceEnabled" : @(self.persistenceEnabled),
     @"statePath" : self.statePath ?: @"",
+    @"persistenceBackend" : self.persistenceEnabled ? @"sqlite" : @"memory",
+    @"catalogPath" : self.catalog.path ?: @"",
     @"webPush" : @{
       @"enabled" : @(self.webPushEnabled),
       @"vapidPublicKey" : self.webPushVAPIDKey.publicKey ?: @"",
@@ -1325,6 +1472,22 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                               payload:(NSDictionary *)payload
                                              channels:(NSArray<NSString *> *)channels
                                                 error:(NSError **)error {
+  return [self artifactsForNotificationIdentifier:identifier
+                                          payload:payload
+                                         channels:channels
+                                    deliveryScope:nil
+                                            error:error];
+}
+
+- (NSDictionary *)artifactsForNotificationIdentifier:(NSString *)identifier
+                                              payload:(NSDictionary *)payload
+                                             channels:(NSArray<NSString *> *)channels
+                                        deliveryScope:(NSDictionary *)deliveryScope
+                                                error:(NSError **)error {
+  NSDictionary *scope = NMNormalizeDictionary(deliveryScope);
+  BOOL scoped = ([NMTrimmedString(scope[@"recipient"]) length] > 0);
+  NSString *scopeRecipient = NMTrimmedString(scope[@"recipient"]);
+  NSString *scopeEmail = NMTrimmedString(scope[@"email"]);
   NSString *notificationID = NMTrimmedString(identifier);
   if ([notificationID length] == 0) {
     if (error != NULL) {
@@ -1349,6 +1512,20 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   }
 
   NSDictionary *normalizedPayload = NMNormalizeDictionary(payload);
+  if (scoped) {
+    NSMutableDictionary *forced = [NSMutableDictionary dictionaryWithDictionary:normalizedPayload];
+    forced[@"recipient"] = scopeRecipient;
+    if ([forced[@"recipientSubject"] isKindOfClass:[NSString class]]) {
+      forced[@"recipientSubject"] = scopeRecipient;
+    }
+    [forced removeObjectForKey:@"recipients"];
+    if ([scopeEmail length] > 0) {
+      forced[@"email"] = scopeEmail;
+    } else {
+      [forced removeObjectForKey:@"email"];
+    }
+    normalizedPayload = forced;
+  }
   NSError *validationError = nil;
   if (![definition notificationsModuleValidatePayload:normalizedPayload error:&validationError]) {
     if (error != NULL) {
@@ -1376,6 +1553,34 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
       *error = NMError(ALNNotificationsModuleErrorValidationFailed,
                        @"requested notification channel is not supported",
                        @{ @"identifier" : notificationID, @"channels" : normalizedChannels });
+    }
+    return nil;
+  }
+  if (scoped && [normalizedChannels containsObject:@"webhook"]) {
+    // A webhook target is chosen by the definition, so the module cannot
+    // point it at the caller. It is left out unless the definition says its
+    // webhook target does not depend on the payload.
+    BOOL allowed = [definition respondsToSelector:@selector(notificationsModuleAllowsWebhookForSelfQueuedNotifications)] &&
+                   [definition notificationsModuleAllowsWebhookForSelfQueuedNotifications];
+    if (!allowed) {
+      NSMutableArray *withoutWebhook = [NSMutableArray arrayWithArray:normalizedChannels];
+      [withoutWebhook removeObject:@"webhook"];
+      if ([withoutWebhook count] == 0) {
+        if (error != NULL) {
+          *error = NMError(ALNNotificationsModuleErrorPolicyRejected,
+                           @"the webhook channel is not available for notifications users queue for themselves",
+                           @{ @"identifier" : notificationID });
+        }
+        return nil;
+      }
+      normalizedChannels = withoutWebhook;
+    }
+  }
+  if (scoped && [normalizedChannels containsObject:@"email"] && [scopeEmail length] == 0) {
+    if (error != NULL) {
+      *error = NMError(ALNNotificationsModuleErrorValidationFailed,
+                       @"the email channel needs an email address on the signed-in account",
+                       @{ @"identifier" : notificationID });
     }
     return nil;
   }
@@ -1462,6 +1667,40 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     }
   }
 
+  if (scoped) {
+    // Replace every target the definition produced with the caller's own.
+    if (message != nil) {
+      NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+      for (id key in message.headers ?: @{}) {
+        NSString *lower = [[key description] lowercaseString];
+        if (![@[ @"to", @"cc", @"bcc" ] containsObject:lower]) {
+          headers[key] = message.headers[key];
+        }
+      }
+      message = [[ALNMailMessage alloc] initWithFrom:message.from
+                                                  to:@[ scopeEmail ]
+                                                  cc:nil
+                                                 bcc:nil
+                                             subject:message.subject
+                                            textBody:message.textBody
+                                            htmlBody:message.htmlBody
+                                             headers:headers
+                                            metadata:message.metadata];
+    }
+    if (inAppEntry != nil) {
+      NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:inAppEntry];
+      [entry removeObjectForKey:@"recipients"];
+      [entry removeObjectForKey:@"recipientSubject"];
+      entry[@"recipient"] = scopeRecipient;
+      inAppEntry = entry;
+    }
+    if (webPushMessage != nil) {
+      NSMutableDictionary *push = [NSMutableDictionary dictionaryWithDictionary:webPushMessage];
+      push[@"recipients"] = @[ scopeRecipient ];
+      webPushMessage = push;
+    }
+  }
+
   return @{
     @"identifier" : notificationID,
     @"metadata" : metadata ?: @{},
@@ -1478,7 +1717,23 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                                  payload:(NSDictionary *)payload
                                                 channels:(NSArray<NSString *> *)channels
                                                    error:(NSError **)error {
-  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier payload:payload channels:channels error:error];
+  return [self queueNotificationSummaryForIdentifier:identifier
+                                             payload:payload
+                                            channels:channels
+                                       deliveryScope:nil
+                                               error:error];
+}
+
+- (NSDictionary *)queueNotificationSummaryForIdentifier:(NSString *)identifier
+                                                 payload:(NSDictionary *)payload
+                                                channels:(NSArray<NSString *> *)channels
+                                           deliveryScope:(NSDictionary *)deliveryScope
+                                                   error:(NSError **)error {
+  NSDictionary *artifacts = [self artifactsForNotificationIdentifier:identifier
+                                                             payload:payload
+                                                            channels:channels
+                                                       deliveryScope:deliveryScope
+                                                               error:error];
   if (artifacts == nil) {
     return nil;
   }
@@ -1501,11 +1756,14 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     NSUInteger maxAttempts = [policy[@"maxAttempts"] respondsToSelector:@selector(unsignedIntegerValue)]
                                  ? [policy[@"maxAttempts"] unsignedIntegerValue]
                                  : 0;
-    NSDictionary *jobPayload = @{
+    NSMutableDictionary *jobPayload = [@{
       @"identifier" : artifacts[@"identifier"] ?: @"",
       @"payload" : normalizedPayload,
       @"channels" : @[ channel ],
-    };
+    } mutableCopy];
+    if ([NMTrimmedString(NMNormalizeDictionary(deliveryScope)[@"recipient"]) length] > 0) {
+      jobPayload[@"deliveryScope"] = NMNormalizeDictionary(deliveryScope);
+    }
     NSMutableDictionary *options = [@{
       @"queue" : queue,
       @"source" : @"notification",
@@ -1625,6 +1883,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
 enabledForRecipient:(NSString *)recipient
 notificationIdentifier:(NSString *)identifier
   defaultEnabled:(BOOL)defaultEnabled {
+  if (![self persistStateWithError:NULL]) return NO;
   NSString *normalizedRecipient = NMTrimmedString(recipient);
   if ([normalizedRecipient length] == 0) {
     return defaultEnabled;
@@ -1685,6 +1944,7 @@ notificationIdentifier:(NSString *)identifier
       [self artifactsForNotificationIdentifier:jobPayload[@"identifier"]
                                        payload:NMNormalizeDictionary(jobPayload[@"payload"])
                                       channels:NMNormalizedChannelArray(jobPayload[@"channels"])
+                                 deliveryScope:NMNormalizeDictionary(jobPayload[@"deliveryScope"])
                                          error:error];
   if (artifacts == nil) {
     return nil;
@@ -1774,7 +2034,7 @@ notificationIdentifier:(NSString *)identifier
                                   : [NSMutableArray array];
       self.nextEntrySequence += 1;
       NSDictionary *record = @{
-        @"entryID" : [NSString stringWithFormat:@"notification-%lu", (unsigned long)self.nextEntrySequence],
+        @"entryID" : [NSString stringWithFormat:@"notification-%@", [[NSUUID UUID] UUIDString].lowercaseString],
         @"notification" : identifier,
         @"recipient" : recipient,
         @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
@@ -2345,6 +2605,7 @@ notificationIdentifier:(NSString *)identifier
 }
 
 - (NSArray<NSDictionary *> *)outboxSnapshot {
+  if (![self persistStateWithError:NULL]) return @[];
   [self.lock lock];
   NSArray *snapshot = [[NSArray alloc] initWithArray:self.outboxEntries copyItems:YES];
   [self.lock unlock];
@@ -2353,6 +2614,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSDictionary *)outboxEntryForIdentifier:(NSString *)entryID {
   NSString *targetID = NMTrimmedString(entryID);
+  if (![self persistStateWithError:NULL]) return nil;
   [self.lock lock];
   NSDictionary *match = nil;
   for (NSDictionary *entry in self.outboxEntries) {
@@ -2367,6 +2629,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSArray<NSDictionary *> *)inboxSnapshotForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  if (![self persistStateWithError:NULL]) return @[];
   [self.lock lock];
   NSArray *storedInbox = self.inboxByRecipient[normalizedRecipient];
   NSMutableArray *snapshot = [NSMutableArray array];
@@ -2388,6 +2651,7 @@ notificationIdentifier:(NSString *)identifier
 
 - (NSDictionary *)inboxSummaryForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  if (![self persistStateWithError:NULL]) return NMInboxSummary(normalizedRecipient, @[]);
   [self.lock lock];
   NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
   [self.lock unlock];
@@ -2431,51 +2695,38 @@ notificationIdentifier:(NSString *)identifier
     return nil;
   }
 
-  NSDictionary *result = nil;
-  [self.lock lock];
-  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
-                                    ? self.inboxByRecipient[normalizedRecipient]
-                                    : nil;
-  NSUInteger matchIndex = NSNotFound;
-  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
-    NSDictionary *entry = NMNormalizedInboxEntry(storedInbox[idx]);
-    if ([entry[@"entryID"] isEqualToString:normalizedEntryID]) {
-      matchIndex = idx;
-      break;
+  __block NSError *missingEntryError = nil;
+  NSDictionary *result = [self mutateStateWithError:error block:^NSDictionary *{
+    NSMutableArray *storedInbox = self.inboxByRecipient[normalizedRecipient];
+    NSUInteger matchIndex = NSNotFound;
+    for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+      NSDictionary *entry = NMNormalizedInboxEntry(storedInbox[idx]);
+      if ([entry[@"entryID"] isEqualToString:normalizedEntryID]) {
+        matchIndex = idx;
+        break;
+      }
     }
-  }
-  if (matchIndex == NSNotFound) {
-    [self.lock unlock];
-    if (error != NULL) {
-      *error = NMError(ALNNotificationsModuleErrorNotFound,
-                       @"inbox entry not found",
-                       @{ @"recipient" : normalizedRecipient, @"entryID" : normalizedEntryID });
+    if (matchIndex == NSNotFound) {
+      missingEntryError = NMError(ALNNotificationsModuleErrorNotFound, @"inbox entry not found",
+                                  @{ @"recipient" : normalizedRecipient, @"entryID" : normalizedEntryID });
+      return nil;
     }
-    return nil;
-  }
-
-  NSMutableDictionary *updatedEntry =
-      [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[matchIndex])];
-  updatedEntry[@"read"] = @(read);
-  if (read) {
-    updatedEntry[@"readAt"] = @([[NSDate date] timeIntervalSince1970]);
-  } else {
-    [updatedEntry removeObjectForKey:@"readAt"];
-  }
-  storedInbox[matchIndex] = updatedEntry;
-  self.inboxByRecipient[normalizedRecipient] = storedInbox;
-  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
-  result = @{
-    @"recipient" : normalizedRecipient,
-    @"entry" : [updatedEntry copy],
-    @"totalCount" : summary[@"totalCount"] ?: @0,
-    @"unreadCount" : summary[@"unreadCount"] ?: @0,
-  };
-  [self.lock unlock];
-
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
+    NSMutableDictionary *updatedEntry =
+        [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[matchIndex])];
+    updatedEntry[@"read"] = @(read);
+    if (read) {
+      updatedEntry[@"readAt"] = @([[NSDate date] timeIntervalSince1970]);
+    } else {
+      [updatedEntry removeObjectForKey:@"readAt"];
+    }
+    storedInbox[matchIndex] = updatedEntry;
+    self.inboxByRecipient[normalizedRecipient] = storedInbox;
+    NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+    return @{ @"recipient" : normalizedRecipient, @"entry" : [updatedEntry copy],
+              @"totalCount" : summary[@"totalCount"] ?: @0,
+              @"unreadCount" : summary[@"unreadCount"] ?: @0 };
+  }];
+  if (result == nil && missingEntryError != nil && error != NULL) *error = missingEntryError;
   return result;
 }
 
@@ -2491,41 +2742,30 @@ notificationIdentifier:(NSString *)identifier
     return nil;
   }
 
-  NSDictionary *result = nil;
-  [self.lock lock];
-  NSMutableArray *storedInbox = [self.inboxByRecipient[normalizedRecipient] isKindOfClass:[NSMutableArray class]]
-                                    ? self.inboxByRecipient[normalizedRecipient]
-                                    : [NSMutableArray array];
-  NSUInteger updatedCount = 0;
-  NSNumber *readAt = @([[NSDate date] timeIntervalSince1970]);
-  for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
-    NSMutableDictionary *entry =
-        [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[idx])];
-    if (![entry[@"read"] boolValue]) {
-      entry[@"read"] = @YES;
-      entry[@"readAt"] = readAt;
-      updatedCount += 1;
+  return [self mutateStateWithError:error block:^NSDictionary *{
+    NSMutableArray *storedInbox = self.inboxByRecipient[normalizedRecipient] ?: [NSMutableArray array];
+    NSUInteger updatedCount = 0;
+    NSNumber *readAt = @([[NSDate date] timeIntervalSince1970]);
+    for (NSUInteger idx = 0; idx < [storedInbox count]; idx++) {
+      NSMutableDictionary *entry = [NSMutableDictionary dictionaryWithDictionary:NMNormalizedInboxEntry(storedInbox[idx])];
+      if (![entry[@"read"] boolValue]) {
+        entry[@"read"] = @YES;
+        entry[@"readAt"] = readAt;
+        updatedCount += 1;
+      }
+      storedInbox[idx] = entry;
     }
-    storedInbox[idx] = entry;
-  }
-  self.inboxByRecipient[normalizedRecipient] = storedInbox;
-  NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
-  result = @{
-    @"recipient" : normalizedRecipient,
-    @"updatedCount" : @(updatedCount),
-    @"totalCount" : summary[@"totalCount"] ?: @0,
-    @"unreadCount" : summary[@"unreadCount"] ?: @0,
-  };
-  [self.lock unlock];
-
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
-  return result;
+    self.inboxByRecipient[normalizedRecipient] = storedInbox;
+    NSDictionary *summary = [self inboxSummaryLockedForRecipient:normalizedRecipient];
+    return @{ @"recipient" : normalizedRecipient, @"updatedCount" : @(updatedCount),
+              @"totalCount" : summary[@"totalCount"] ?: @0,
+              @"unreadCount" : summary[@"unreadCount"] ?: @0 };
+  }];
 }
 
 - (NSDictionary *)notificationPreferencesForRecipient:(NSString *)recipient {
   NSString *normalizedRecipient = NMTrimmedString(recipient);
+  if (![self persistStateWithError:NULL]) return @{};
   [self.lock lock];
   NSDictionary *preferences = [self.preferencesByRecipient[normalizedRecipient] copy];
   [self.lock unlock];
@@ -2587,18 +2827,11 @@ notificationIdentifier:(NSString *)identifier
       normalized[identifier] = [NSDictionary dictionaryWithDictionary:normalizedChannels];
     }
   }
-  [self.lock lock];
-  self.preferencesByRecipient[normalizedRecipient] = [NSDictionary dictionaryWithDictionary:normalized];
-  NSDictionary *stored = [self.preferencesByRecipient[normalizedRecipient] copy];
-  [self.lock unlock];
-  NSDictionary *result = @{
-    @"recipient" : normalizedRecipient,
-    @"preferences" : stored ?: @{},
-  };
-  if (![self persistStateWithError:error]) {
-    return nil;
-  }
-  return result;
+  return [self mutateStateWithError:error block:^NSDictionary *{
+    self.preferencesByRecipient[normalizedRecipient] = [NSDictionary dictionaryWithDictionary:normalized];
+    return @{ @"recipient" : normalizedRecipient,
+              @"preferences" : [self.preferencesByRecipient[normalizedRecipient] copy] ?: @{} };
+  }];
 }
 
 - (NSDictionary *)dashboardSummary {
@@ -3080,17 +3313,96 @@ notificationIdentifier:(NSString *)identifier
   return nil;
 }
 
+// Payload keys that choose who a notification goes to.
+static BOOL NMPayloadTargetsOnlySubject(NSDictionary *payload, NSString *subject) {
+  for (NSString *key in @[ @"recipient", @"recipientSubject" ]) {
+    NSString *value = NMTrimmedString(payload[key]);
+    if ([value length] > 0 && ![value isEqualToString:subject]) {
+      return NO;
+    }
+  }
+  id recipients = payload[@"recipients"];
+  if (recipients != nil && ![recipients isKindOfClass:[NSArray class]] && ![recipients isKindOfClass:[NSNull class]]) {
+    return NO;
+  }
+  for (id value in [recipients isKindOfClass:[NSArray class]] ? recipients : @[]) {
+    if (![NMTrimmedString(value) isEqualToString:subject]) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
+// The HTTP queue route lets a signed-in user queue notifications only for
+// themselves. Below the admin role at AAL2 the payload may not name anyone else
+// (`recipient`, `recipientSubject`, `recipients` or `email`; 403), and the
+// notification is queued with a delivery scope of the caller's subject and own
+// email address: after the definition runs, every channel's target is replaced
+// with those values, so no other payload key can choose who or where it goes.
+// Returns nil after rendering an error response. *deliveryScope is nil for
+// admins at AAL2.
+- (NSDictionary *)queuePayloadForContext:(ALNContext *)ctx
+                                 payload:(NSDictionary *)rawPayload
+                           deliveryScope:(NSDictionary **)deliveryScope {
+  if (deliveryScope != NULL) {
+    *deliveryScope = nil;
+  }
+  NSMutableDictionary *payload = [NSMutableDictionary dictionaryWithDictionary:rawPayload ?: @{}];
+  if ([[ctx authRoles] containsObject:@"admin"] && [ctx authAssuranceLevel] >= 2) {
+    return payload;
+  }
+  NSString *subject = NMTrimmedString([ctx authSubject]);
+  if ([subject length] == 0) {
+    [self setStatus:401];
+    [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : @"authentication required" } error:NULL];
+    return nil;
+  }
+  NSDictionary *user = [self.authRuntime currentUserForContext:ctx error:NULL];
+  NSString *ownEmail = NMTrimmedString(user[@"email"]);
+  if ([ownEmail length] == 0) {
+    // Apps that sign users in with bearer tokens: a verified email claim.
+    NSDictionary *claims = NMNormalizeDictionary(ctx.stash[ALNContextAuthClaimsStashKey]);
+    if ([claims[@"email_verified"] respondsToSelector:@selector(boolValue)] && [claims[@"email_verified"] boolValue]) {
+      ownEmail = NMTrimmedString(claims[@"email"]);
+    }
+  }
+  NSString *requestedEmail = NMTrimmedString(payload[@"email"]);
+  BOOL emailIsOwn = ([requestedEmail length] == 0) ||
+                    ([ownEmail length] > 0 && [requestedEmail caseInsensitiveCompare:ownEmail] == NSOrderedSame);
+  if (!NMPayloadTargetsOnlySubject(payload, subject) || !emailIsOwn) {
+    [self setStatus:403];
+    [self renderJSONEnvelopeWithData:nil
+                                meta:@{
+                                  @"error" : @"queueing a notification for another recipient or email address "
+                                             "requires the admin role and AAL2",
+                                }
+                               error:NULL];
+    return nil;
+  }
+  if (deliveryScope != NULL) {
+    *deliveryScope = @{ @"recipient" : subject, @"email" : ownEmail ?: @"" };
+  }
+  return payload;
+}
+
 - (id)apiQueue:(ALNContext *)ctx {
-  (void)ctx;
   NSDictionary *parameters = [self requestParameters];
+  NSDictionary *deliveryScope = nil;
+  NSDictionary *payload = [self queuePayloadForContext:ctx
+                                               payload:NMNormalizeDictionary(parameters[@"payload"])
+                                         deliveryScope:&deliveryScope];
+  if (payload == nil) {
+    return nil;
+  }
   NSError *error = nil;
   NSDictionary *summary =
       [self.runtime queueNotificationSummaryForIdentifier:NMTrimmedString(parameters[@"notification"])
-                                                  payload:NMNormalizeDictionary(parameters[@"payload"])
+                                                  payload:payload
                                                  channels:NMNormalizeArray(parameters[@"channels"])
+                                            deliveryScope:deliveryScope
                                                     error:&error];
   if (summary == nil) {
-    [self setStatus:422];
+    [self setStatus:(error.code == ALNNotificationsModuleErrorPolicyRejected) ? 403 : 422];
     [self renderJSONEnvelopeWithData:nil meta:@{ @"error" : error.localizedDescription ?: @"queue failed" } error:NULL];
     return nil;
   }

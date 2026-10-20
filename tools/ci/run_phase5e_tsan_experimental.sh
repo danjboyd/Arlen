@@ -123,10 +123,10 @@ set +e
   echo "ci: tsan unit test repetition ${unit_repeat_args[*]:-none}"
   make clean || exit $?
   make EXTRA_OBJC_FLAGS= EOC_TOOL="$bootstrap_eocc" eocc transpile module-transpile || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" boomhauer arlen || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" boomhauer runtime-concurrency-fixture arlen || exit $?
   make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" ${unit_repeat_args[@]+"${unit_repeat_args[@]}"} test-unit || exit $?
   python3 ./tools/ci/runtime_concurrency_probe.py \
-    --binary ./build/boomhauer \
+    --binary ./build/runtime-concurrency-fixture \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}" || exit $?
   echo "ci: tsan runtime probe complete"
 } 2>&1 | tee -a "$staged_log_path"

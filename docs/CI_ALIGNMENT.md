@@ -20,6 +20,36 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+Windows framework, generated-app and vendored-runner builds use
+`_FILE_OFFSET_BITS=64`. The existing unit job verifies a sparse file above
+2 GiB with stat, Range and HEAD checks without allocating or hashing its full
+length. Native pinned-file tests perform pathname substitution using delete
+sharing; they retain the old-byte and checksum-mismatch assertions.
+The build-flags sentinel invalidates the vendored runner as well as framework,
+generated-source and test objects; changing the Windows offset ABI cannot reuse
+an older runner build.
+The existing Windows transport step also runs the static HTTP probe against a
+sparse file above 2 GiB, checking actual tail bytes and HEAD length over HTTP.
+
+The runtime parity suite tests watch recovery, jobs CLI smoke, and explicit
+rejection of unsupported Windows `propane` startup. It no longer attempts
+multiworker reloads on independently bound Windows sockets; that depended on
+unsafe port sharing. The supported-development scope and existing required
+check names remain unchanged. Native exclusive-binding coverage stays enabled.
+
+The ordinary unit suite builds `build/file-job-probe` and runs a four-process
+file-queue regression without PostgreSQL. This is part of existing unit lanes,
+including `windows-preview`; required check names and branch protection stay
+unchanged. Focused execution: `make test-unit-filter TEST=Phase7DTests`.
+The same Windows job also runs
+`make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths`
+for native junction/stream/short-name containment, exclusive binding, Origin
+validation, and receive-only channels. This adds a step to an existing required
+check; branch-protection check names do not change.
+`test-unit` also runs `llhttp-framing-tests` against the actual vendored C
+parser, even where Windows defaults to the legacy HTTP backend. It checks empty
+Transfer-Encoding rejection and a valid Content-Length control request.
+
 The Windows preview lanes (`make phase24-windows-db-smoke` and
 `make phase24-windows-runtime-tests`) build and run the vendored tools-xctest
 fork, the same runner as Linux and macOS (issue #116), so they get filters,
@@ -27,7 +57,7 @@ per-test time limits, JUnit reports, skips and attachments. The make wiring
 for Windows:
 
 - the vendored runner is `obj/xctest.exe` and is built with
-  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1` (the gnustep-cli Windows toolchain's
+  `ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64` (the gnustep-cli Windows toolchain's
   libdispatch header otherwise clashes with MinGW's `mode_t`);
 - `xctest_runtime_env` puts the vendored `XCTest-0.dll` directory on `PATH`
   instead of `LD_LIBRARY_PATH`;
@@ -167,7 +197,15 @@ never merge gates:
  runner and certifies the user install path with
  `tools/ci/run_windows_release_certification.ps1` (`install.ps1`, `arlen
  new`, `arlen boomhauer --prepare-only`, and a `boomhauer` `/healthz` and `/`
- smoke through the installed `arlen.cmd`).
+ smoke through the installed `arlen.cmd`). The installer regression script
+ `tools/ci/test_windows_installer.ps1` runs in both `windows-preview` and this
+ release lane. It covers pinned prerequisite dispatch with mocked network/setup,
+ opt-outs, PATH registration, checksum/download failure, same-version retry,
+ launcher/junction activation rollback and concurrent activation rejection.
+ The installed-release smoke resolves bare `arlen` outside the checkout in the
+ current shell and a fresh PowerShell process using saved user PATH; the test
+ restores the runner user PATH afterwards. These are installation checks on a
+ provisioned runner, not evidence of a clean Windows host setup.
 - `release-assets / *`: the source, macOS arm64 and Windows x64 archives, the
  installers and `SHA256SUMS`.
 
@@ -265,10 +303,15 @@ user's machine instead.
 `linux-public-toolchain` runs the README's Linux install path in clean
 containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
 (`ubuntu-24.04-arm`), and `ubuntu:26.04` on amd64. Each job
-creates an unprivileged user and installs the gnustep-cli managed toolchain
-with its `v0.1.0` release bootstrap. It then packages a source archive and runs
-`tools/release/smoke_install.sh`. The container has no `/usr/GNUstep`, so the
-job also checks that Arlen finds the managed toolchain on its own.
+creates an unprivileged user with sudo, packages a source archive, and runs
+`tools/release/smoke_install.sh`. Only download/checkout prerequisites are
+preinstalled; the installer itself provisions build dependencies and the
+pinned gnustep-cli `v0.1.0` managed toolchain with `--yes`. The container has
+no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
+interactive bash and the persisted login profile, then generate and serve an
+app. This verifies the setup path instead of bypassing it with preprovisioning.
+`ReleasePrebuiltTests` also exercises installer failure, retry, and PATH
+behavior using deterministic fixtures in the normal unit lane.
 
 It runs on pull requests that touch the installer, packaging, GNUstep env
 helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
@@ -608,7 +651,10 @@ inventory) and `tools/ci/run_durable_jobs.sh` (the Apple durable-jobs bundle).
 Its bootstrap installs Homebrew `postgresql@17` and `libpq` in addition to
 `openssl@3`; the script selects their paths explicitly and uses a private Unix
 socket PostgreSQL cluster. Apple builds link system libcurl for the new HTTP
-result API. The existing NSURLSession helper remains covered too.
+result API. The existing NSURLSession helper remains covered too. Before the
+runtime gate, the same Apple job checks the macOS installer prerequisite
+helper's SDK, minimum OS, and setup-consent behavior, plus offline discovery
+of an installed Homebrew formula from an uncached home directory.
 
 The Apple job retains logs under its existing artifact directory. No lane or
 required check is renamed or promoted: branch protection continues to require
@@ -625,7 +671,8 @@ there, and update that section and the repository settings in the same change.
 The existing `linux-quality / quality-gate` runs
 `tools/ci/run_postgres_regressions.sh` before the general quality suite. This
 mandatory isolated-cluster step covers PostgreSQL generated clients, module
-migration JSON stdout, word-based fuzzy search, and repeated auth server cleanup.
+migration JSON stdout, word-based fuzzy search, repeated auth server cleanup,
+and auth session role refresh across the admin-ui, jobs, and ops APIs.
 It supplies a non-default `GNUSTEP_SH` to exercise portable bootstrap. Existing
 required check names and branch-protection contexts stay the same; a missing
 PostgreSQL server or extension is a failure, not a skipped live test.
@@ -668,3 +715,56 @@ included in the sanitizer matrix's full unit suite. It guards the
 operator sets (issue #49) by starting 32 threads on their first SQL build in
 each of many fresh processes. The companion source policy check runs with
 `BuildPolicyTests`. No required lane is added or renamed by this regression.
+
+The required `linux-quality / quality-gate` also runs
+`python3 tests/performance/persistent_http.py` after building `boomhauer` with
+the supported clang/GNUstep toolchain. Two retained connections exercise both
+health and static-file responses; reconnects and incorrect responses fail.
+The policy in `tests/performance/policies/persistent_http.json` gates throughput,
+p95 latency, and Linux server CPU per request. Reports and server logs are in
+`build/perf/persistent_http.*`, included in existing CI artifacts. This extends
+the existing required check; branch-protection check names are unchanged.
+
+The integration sanitizer skip classifier ignores C comments while preserving
+command string literals. Direct `build/boomhauer` slow-reader and request-deadline
+tests remain eligible for the existing nightly instrumentation lane; required
+checks and branch-protection names are unchanged.
+
+Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](STORAGE_MODULE.md) for migration and backup rules.
+
+Header-construction optimization regressions run in the existing unit lane
+through ResponseTests and MiddlewareTests, with static/error security-header
+checks in HTTPIntegrationTests. The optional `response-header-perf-bench` target
+provides reproducible local measurements without a timing gate or a new required
+CI lane.
+
+The Linux quality and sanitizer runtime concurrency probes assert that WebSocket
+channel clients cannot rebroadcast frames, in both concurrent and serialized
+modes. Echo coverage remains on `/ws/echo`; channel clients must stay connected
+and receive no client-originated frame. This follows the receive-only security
+contract already covered by HTTP integration tests.
+The same probe also verifies server-originated delivery to both subscribers
+(concurrent mode) and the single subscriber (serialized mode). Its separate
+`runtime-concurrency-fixture` executable accepts a command only through a pipe
+inherited from the test runner; ordinary `boomhauer` has no publishing hook or
+new network route. Failed probe runs retain their server log for diagnosis.
+
+### Linux sanitizer runtime consistency
+
+The blocking sanitizer gates source `tools/ci/source_clang_sanitizers.sh` after
+GNUstep initialization. Framework code, XCTest bundles and child executables use
+clang's shared ASan/UBSan runtime (`-shared-libsan`), with a runtime search path
+embedded in executables. The uninstrumented vendored XCTest launcher preloads
+that same runtime before loading instrumented bundles. Caller `LD_PRELOAD` and
+`XCTEST_LD_PRELOAD` entries are retained after the sanitizer runtime; do not add
+GCC sanitizer libraries to a clang-instrumented run.
+
+Each gate first runs `test_clang_sanitizer_runtime.py`: an uninstrumented parent
+loads an instrumented bundle and executes an instrumented child. A clean run
+must succeed, while ASan memory errors and UBSan overflow errors in either
+process must fail with the expected diagnostic. The check also verifies that an
+unrelated preload is retained. This corrects runtime selection without changing
+lane names, required checks, or branch-protection requirements.

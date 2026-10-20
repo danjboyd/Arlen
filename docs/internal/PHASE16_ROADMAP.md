@@ -48,7 +48,9 @@ The remaining module layer still has known maturity gaps called out in the
 current docs:
 
 - `jobs` still has limited queue controls and no dedicated operator metadata
-- `notifications` still uses runtime-managed inbox/outbox/preference state
+- `notifications` originally used runtime-managed inbox/outbox/preference state;
+  notifications 1.3 now persists individual records in SQLite, retaining the
+  in-memory merge model and per-inbox/global-outbox caps (see the module guide)
 - `storage` still uses runtime-managed catalog/session state and a minimal
   variant processor
 - `search` still uses runtime-managed indexed documents with a simple query

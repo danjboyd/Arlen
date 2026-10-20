@@ -82,6 +82,8 @@ NS_ASSUME_NONNULL_BEGIN
                                  error:(NSError *_Nullable *_Nullable)error;
 - (void)renderSSEEvents:(NSArray *)events;
 - (void)acceptWebSocketEcho;
+/// Accept a receive-only subscription. Authorize the channel in this route before
+/// calling; client text frames are discarded. Publish through server-side helpers.
 - (void)acceptWebSocketChannel:(NSString *)channel;
 - (void)redirectTo:(NSString *)location status:(NSInteger)statusCode;
 - (void)setStatus:(NSInteger)statusCode;
@@ -125,6 +127,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSDate *)authMFASatisfiedAt;
 - (nullable NSString *)authSessionIdentifier;
 - (BOOL)isMFAAuthenticated;
+// Both start a fresh session (see ALNAuthSession.h): earlier session keys other
+// than `return_to`, including the CSRF token, are dropped.
 - (BOOL)startAuthenticatedSessionForSubject:(NSString *)subject
                                    provider:(nullable NSString *)provider
                                     methods:(nullable NSArray *)methods

@@ -592,7 +592,8 @@ database.acquireTimeout = 2.0;  // seconds; 0 (default) fails immediately
   seconds) and avoid nested acquisition.
 - `poolDiagnostics` returns `max_connections`, `in_use_connections`,
   `idle_connections`, `acquire_timeout_seconds`, `acquire_wait_count`,
-  `acquire_wait_seconds_total` and `pool_exhausted_count`. A rising
+  `acquire_wait_seconds_total`, `pool_exhausted_count` and
+  `connection_retry_count` (see below). A rising
   `pool_exhausted_count` or `acquire_wait_seconds_total` means the pool is too
   small for the load.
 - `acquireTimeout` is an optional `ALNDatabaseAdapter` property; `ALNGDL2Adapter`
@@ -629,8 +630,154 @@ database.connectionLivenessChecksEnabled = NO;         // never probe
 ```
 
 Before the threshold existed, every reuse ran `SELECT 1`. Set the threshold to
-`0` to get that back. If the server ends a session that was used within the
-threshold (for example a restart in the middle of traffic), the next statement
-on that connection fails. The failure closes the connection, so the pool does
-not reuse it. The instance `capabilityMetadata` reports the setting as
+`0` to get that back.
+
+If the server ends a session that was used within the threshold (a restart,
+failover, idle timeout or `pg_terminate_backend` in the middle of traffic),
+the next statement on that connection fails. `ALNPg` reports that as
+`ALNPgErrorConnectionFailed` with `ALNPgErrorConnectionLostKey = YES` in
+`userInfo`, whatever the last result said, and closes the connection, so a
+dead connection is never handed out again.
+
+Before each statement is sent, `ALNPg` reads whatever the server has already
+sent on the connection (without waiting). A session the server ended while
+the connection sat idle shows up there as a FATAL message or a closed
+socket; the statement is then not sent at all, and the error also carries
+`ALNPgErrorStatementNotSentKey = YES`. `ALNPg` sends with libpq's
+synchronous calls, which cannot tell a failed send from a failure while
+waiting for the result, so this check before sending is what decides that a
+statement never reached the server.
+
+Retry policy for the pool's own convenience methods (a statement is retried
+at most once, only when the connection came from the idle list, and the
+other idle connections are closed first):
+
+- Reads (`executeQuery`, `executeQueryResult` and `executeBuilderQuery` whose
+  SQL is a plain read): retried when the connection was lost at any point. A
+  plain read starts with `SELECT`, `WITH`, `VALUES`, `TABLE`, `SHOW` or
+  `EXPLAIN` (without `ANALYZE`) and contains no word that writes, locks or
+  changes session state (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `INTO`,
+  `LOCK`, `FOR SHARE`, `NEXTVAL`, `pg_advisory_*`, and so on). An
+  `INSERT ... RETURNING` through `executeQuery` is a write. A `SELECT` that
+  calls a function with side effects is still classified as a read; run it
+  with `executeCommand`.
+- Writes (`executeCommand`, `executeBuilderCommand`, and every statement
+  that is not a plain read): retried only when the statement was not sent
+  (`ALNPgErrorStatementNotSentKey`). If it was sent and the connection
+  failed while waiting for the result, the server may have run it, so the
+  connection-lost error is returned and the caller decides. Running a write
+  twice is worse than one failed request.
+- Never when a transaction is open on the connection, whether started with
+  `beginTransaction:` or by sending `BEGIN` by hand: the earlier statements
+  were rolled back, so running the failed one on its own would apply only
+  part of the transaction. A connection released with a hand-opened
+  transaction still open is closed, not reused.
+- `withTransaction:` restarts the transaction once on a new connection only
+  when `BEGIN` itself failed on a connection from the idle list (nothing has
+  run). When the connection is lost inside the block or at `COMMIT`, the
+  server rolled back what had run and the connection-lost error is returned.
+- `withTransactionReplayingOnConnectionLoss:` additionally runs the whole
+  block again from `BEGIN` on a new connection, once, when the connection is
+  lost inside the block or at `COMMIT`. Use it only for blocks that are safe
+  to run twice (idempotent, or guarded by compare-and-set), since a
+  connection lost at `COMMIT` may follow a successful commit.
+
+`connection_retry_count` in `poolDiagnostics` counts retries and restarts.
+`executeCommandBatch` and statements on a connection you acquired yourself
+are not retried. The instance `capabilityMetadata` reports the setting as
 `connection_liveness_check_idle_threshold_seconds`.
+
+## Connection pool session reset
+
+`ALNPg` resets a connection's session state when it goes back to the pool, so
+one request's settings never reach the next borrower. This matters most for
+row-level security or tenancy implemented with
+`set_config('app.tenant_id', ...)`: without a reset, a request that skips the
+`set_config` would run as the previous request's tenant.
+
+- A connection still inside a transaction when it is released, whether
+  started with `beginTransaction:` or by sending `BEGIN` by hand, is closed
+  rather than reused. Closing it rolls the transaction back on the server.
+  `released_in_transaction_count` in `poolDiagnostics` counts these.
+- A connection is reset only if the borrower could have changed its session.
+  It is marked when it runs SQL the pool did not generate itself: any
+  `executeQuery`, `executeQueryResult`, `executeCommand`, batch, script or
+  `prepareStatementNamed:` with caller SQL, a transaction, and also a builder
+  statement that contains a trusted expression (`selectExpression:`,
+  `whereExpression:`, `orderByExpression:`, join `onExpression:` and the
+  other expression APIs splice app SQL text, which can call `set_config`,
+  `pg_advisory_lock` or `nextval` inside a plain `SELECT`). A connection that
+  only ran generated builder statements is reused without a reset. ORM
+  repositories run their SQL through `executeQuery`/`executeCommand`, so they
+  mark the connection too.
+- For a marked connection, `sessionResetPolicy` decides what is reset:
+  - `ALNPgSessionResetPolicySession` (default): one round trip running
+    `RESET ALL`, `SET SESSION AUTHORIZATION DEFAULT`, `CLOSE ALL`,
+    `DISCARD TEMP`, `DISCARD SEQUENCES`, `UNLISTEN *` and
+    `pg_advisory_unlock_all()`, and reading `pg_prepared_statements`.
+    Settings (including `search_path` and `SET ROLE`), cursors, temporary
+    tables, `currval`/`lastval` state, `LISTEN`s and session advisory locks
+    are cleared. The pool's cached prepared statements are kept only if every
+    one is still the statement the pool prepared: a statement the cache does
+    not know, one made with SQL `PREPARE`, or one whose text differs (a
+    borrower can `DEALLOCATE` a cached name and `PREPARE` other SQL under it)
+    makes the pool run `DEALLOCATE ALL` and clear its cache.
+  - `ALNPgSessionResetPolicyDiscardAll`: `DISCARD ALL`, which also drops
+    every prepared statement; the pool's statement cache is cleared and
+    statements are prepared again on next use.
+  - `ALNPgSessionResetPolicyNone`: no reset, for code that manages session
+    state itself.
+- Under every policy, notifications still queued for the borrower's
+  `LISTEN`s are read and dropped, so the next borrower's
+  `waitForNotificationsWithTimeout:` cannot see them.
+- If the reset fails, the connection is closed instead of reused
+  (`session_reset_failure_count`). `session_reset_count` counts releases that
+  ran the reset.
+
+Cost, measured on a local socket over 2,000 pooled requests: a connection that
+ran only generated builder statements pays nothing extra. A marked connection
+pays one round trip, about 95 µs per request (49 µs → 142 µs for a pooled
+`executeQuery`), for the reset, the prepared-statement check and the
+notification drain.
+
+```objc
+database.sessionResetPolicy = ALNPgSessionResetPolicyDiscardAll;
+```
+
+## Text parameters and NUL
+
+PostgreSQL `text` cannot hold U+0000, and libpq reads text parameters as C
+strings. `ALNPg` therefore refuses a string parameter that contains U+0000
+with `ALNPgErrorInvalidArgument` instead of letting it be cut short at the NUL
+(which would make the database see a different value than the one the app
+validated). Send binary data as `NSData`; it is bound as `bytea`.
+
+`ALNMSSQL` binds text parameters with their full byte length, so a value with
+an embedded U+0000 reaches SQL Server unchanged (SQL Server stores NUL inside
+`(n)varchar`).
+
+Both adapters also refuse SQL text (and `ALNPg` statement names) that contain
+U+0000 with an invalid-argument error. The drivers take statement text as a C
+string, so the statement would otherwise end silently at the NUL.
+
+The PostgreSQL builder cache retains SQL shapes, keyed by SQL and parameter
+count, rather than builder snapshots or bound values. Each call compiles its
+current parameters and reuses the matching SQL shape/prepared statement.
+Changing only values therefore reports a compile-cache hit without retaining
+another request's values. Trusted expressions are checked on each compilation
+and still trigger session cleanup on release.
+
+For large PostgreSQL SELECT results, use
+`-[ALNPg enumerateQuery:parameters:batchSize:usingBlock:error:]`. It holds one
+pooled connection and a transaction-local cursor, fetches 1–10,000 rows per
+batch, and drains an autorelease pool between batches. Set `*stop = YES` in the
+callback for successful early termination. Errors roll back; callback
+exceptions clean up and propagate. Callbacks are never replayed. Retaining rows
+in your callback increases memory use; `executeQuery:` still buffers its full
+result. The cursor API does not change the SQL or limit its server-side cost.
+
+ORM-generated PostgreSQL statements that contain no raw or trusted expression
+skip session reset when released. Compiler provenance is carried internally;
+public raw-SQL APIs still mark the connection dirty. Raw predicates such as
+`set_config(..., false)` still trigger reset. Transactions and previously dirty
+connections continue to reset even if their last statement was generated.

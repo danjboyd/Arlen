@@ -45,6 +45,85 @@ application root (`-[ALNApplication appRootPath]`: config `appRoot`, then
 Production deployments should still use absolute paths under the release's
 `shared/` directory.
 
+The default `persistence.backend = sqlite` stores the catalog at
+`<persistence.path>.sqlite3`. Each object, upload session, and collection
+membership has its own row. A change serializes and writes only changed rows,
+inside a SQLite transaction with full synchronous durability. Catalog snapshots
+remain cached in memory; refreshing another worker's changed catalog reads all
+rows, so refresh memory/CPU still scale with catalog size.
+
+On first startup, a transaction imports an existing XML or binary plist at
+`persistence.path`. Concurrent starters import it only once. An interrupted or
+failed import rolls back and can be retried. The original file is retained as a
+migration backup and is no longer read after import. Stop all old workers and
+jobs processes before upgrading; do not run plist and SQLite workers together.
+Back up the SQLite database with SQLite's backup facility, or stop every writer
+before copying it and any journal. Do not restore only the obsolete plist.
+
+`persistence.backend = plist` explicitly retains the legacy whole-file XML
+format for unmigrated installations. There is no automatic fallback when SQLite
+is unavailable, and switching a migrated path back to plist is refused.
+
+Processes sharing a catalog must run on one host and use a local filesystem:
+
+- Changes take `<persistence.path>.lock` (`flock` on POSIX, `LockFileEx` on
+  Windows), refresh the catalog, then commit a SQLite transaction. This keeps
+  application-level read-modify-write operations coherent across workers.
+- Reads detect changed database files and refresh one consistent SQLite
+  snapshot. They do not take the cross-process application lock. If a writer
+  is busy, readers retain the last complete cached snapshot; SQLite reads have
+  a short 100 ms busy timeout.
+- Object and upload-session IDs are random; tokens bind to each object's nonce.
+  Attachment creation and hashing happen outside the catalog lock.
+- `persistence.lockTimeoutSeconds` defaults to 10; exhausted lock/SQLite busy
+  waits return `ALNStorageModuleErrorStateBusy` (HTTP 503, `Retry-After: 1`).
+  Startup cleanup allows `startupLockTimeoutSeconds` (default 60), then warns
+  and skips cleanup if busy. First-time SQLite setup allows 10 seconds.
+- POSIX databases are owner-only (`0600`). Windows uses the current-user
+  protected DACL. Keep the parent directory private too.
+
+The storage backend requires the OS SQLite runtime: Linux `libsqlite3.so.0`
+(Debian/Ubuntu package `libsqlite3-0`), macOS `libsqlite3.dylib`, or Windows
+`winsqlite3.dll`. It loads the stable C ABI without SQLite development headers
+or import libraries. Missing libraries cause an explicit module startup error.
+
+Attachment data has to be shared the same way, because the catalog names
+attachments by ID:
+
+- With persistence on and no attachment adapter configured, the module
+  replaces the application's in-memory default with a filesystem adapter at
+  `<state file without extension>-attachments/` (or `storageModule.attachments.path`,
+  relative to the app root).
+- With persistence on, an attachment adapter that keeps data in process memory
+  (`ALNInMemoryAttachmentAdapter`, alone or wrapped) is refused at startup.
+  Configure a filesystem or object-store adapter, or turn persistence off.
+- Downloads and variant jobs check the attachment's size and SHA-256 against
+  the object record, and answer 404 rather than serve bytes that don't match.
+  A delete removes only attachments whose bytes match the record.
+
+With persistence off, each process keeps its own catalog. That suits one
+process, but with `propaneAccessories.workerCount > 1` most downloads and
+jobs-worker variants would miss their objects, so startup logs a
+`storage_unshared_state` warning outside `test` and `development`, `propane`
+prints a warning, and `arlen module doctor` reports it.
+
+Filesystem-backed signed downloads retain an opened regular file after checking
+its size and SHA-256 in 64 KiB chunks. HTTP transmission uses that same descriptor,
+with HEAD, single byte ranges, and checksum ETags; it does not materialize the
+whole attachment. Path replacement after verification cannot substitute another
+object. Framework attachment writes use new IDs and atomic replacement; files
+must remain immutable during delivery. This does not protect against privileged
+local writers modifying an already-open file in place. Truncation causes a short
+transfer and connection closure.
+
+Custom adapters can implement `openAttachmentFileForID:metadata:error:` to opt
+into this path. NSData-only adapters retain their existing materializing download
+behavior. Variant hooks still accept NSData: `storageModule.maxVariantInputBytes`
+defaults to 16 MiB (zero restores the default), rejecting larger source records
+before reading them. File-backed reads are bounded to the limit plus one byte;
+NSData-only adapters must enforce their own read allocation bound. Trusted variant
+hooks remain responsible for the memory used to construct output data.
+
 Runtime access is available through `ALNStorageModuleRuntime`.
 
 ## Collection Metadata

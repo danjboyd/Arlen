@@ -7,6 +7,29 @@
 #import "ALNJobsModule.h"
 #import "ALNSearchModule.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestProcessCheckpoint.h"
+
+// Private test seams: inject a second runtime while an engine call is in flight.
+@interface ALNDefaultSearchEngine : NSObject <ALNSearchEngine>
+@end
+static void (^gPhase16DApplyHook)(void) = nil;
+@interface Phase16DInterleavingEngine : ALNDefaultSearchEngine
+@end
+@implementation Phase16DInterleavingEngine
+- (NSDictionary *)searchModuleApplyOperation:(NSString *)operation record:(NSDictionary *)record
+    metadata:(NSDictionary *)metadata existingSnapshot:(NSDictionary *)snapshot error:(NSError **)error {
+  void (^hook)(void) = gPhase16DApplyHook;
+  gPhase16DApplyHook = nil;
+  if (hook) hook();
+  return [super searchModuleApplyOperation:operation record:record metadata:metadata existingSnapshot:snapshot error:error];
+}
+@end
+@interface ALNSearchModuleRuntime (TransactionTestAccess)
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error;
+- (void)enqueueReplayOperation:(NSDictionary *)payload forResourceIdentifier:(NSString *)identifier metadata:(NSDictionary *)metadata;
+- (NSDictionary *)drainReplayOperationsForResourceIdentifier:(NSString *)identifier mode:(NSString *)mode error:(NSError **)error;
+- (NSDictionary *)applyIncrementalOperation:(NSString *)operation resourceIdentifier:(NSString *)identifier record:(NSDictionary *)record error:(NSError **)error;
+@end
 
 static BOOL gPhase16DSearchBuildShouldFail = NO;
 
@@ -73,6 +96,14 @@ static void Phase16DResetOrderStore(void) {
 - (NSArray<NSDictionary *> *)searchModuleDocumentsForRuntime:(ALNSearchModuleRuntime *)runtime
                                                        error:(NSError **)error {
   (void)runtime;
+  if ([[[NSProcessInfo processInfo] environment][@"ARLEN_SEARCH_PROCESS_INDEX"] isEqual:@"0"]) {
+    // Pause external/provider work while another process rebuilds the resource.
+    NSString *path = [[NSProcessInfo processInfo] environment][@"ARLEN_SEARCH_SHARED_STATE_PATH"];
+    if (!ALNTestSignalCheckpoint(path, @"building-0") || !ALNTestWaitCheckpoint(path, @"resume-0")) {
+      if (error) *error = [NSError errorWithDomain:@"Phase16D" code:12 userInfo:@{NSLocalizedDescriptionKey:@"build checkpoint timed out"}];
+      return nil;
+    }
+  }
   if (gPhase16DSearchBuildShouldFail) {
     if (error != NULL) {
       *error = [NSError errorWithDomain:@"Phase16D"
@@ -105,6 +136,19 @@ static void Phase16DResetOrderStore(void) {
 
 @end
 
+@interface Phase16DAlternateResource : Phase16DSearchResource
+@end
+@implementation Phase16DAlternateResource
+- (NSString *)searchModuleResourceIdentifier { return @"archive"; }
+@end
+@interface Phase16DAlternateProvider : NSObject <ALNSearchResourceProvider>
+@end
+@implementation Phase16DAlternateProvider
+- (NSArray *)searchModuleResourcesForRuntime:(ALNSearchModuleRuntime *)runtime error:(NSError **)error {
+  return @[[[Phase16DAlternateResource alloc] init]];
+}
+@end
+
 @interface Phase16DTests : XCTestCase
 @end
 
@@ -114,6 +158,7 @@ static void Phase16DResetOrderStore(void) {
   [super setUp];
   Phase16DResetOrderStore();
   gPhase16DSearchBuildShouldFail = NO;
+  gPhase16DApplyHook = nil;
 }
 
 - (NSString *)temporaryDirectory {
@@ -132,6 +177,7 @@ static void Phase16DResetOrderStore(void) {
       @"worker" : @{ @"retryDelaySeconds" : @0 },
     },
     @"searchModule" : @{
+      @"engineClass":@"Phase16DInterleavingEngine",
       @"providers" : @{ @"classes" : @[ @"Phase16DSearchProvider" ] },
       @"persistence" : @{
         @"enabled" : @YES,
@@ -336,6 +382,219 @@ static void Phase16DResetOrderStore(void) {
   NSArray *history = [drilldown[@"history"] isKindOfClass:[NSArray class]] ? drilldown[@"history"] : @[];
   NSPredicate *predicate = [NSPredicate predicateWithFormat:@"status == %@", @"failed"];
   XCTAssertEqual((NSUInteger)1, [[history filteredArrayUsingPredicate:predicate] count]);
+}
+
+- (void)testSearchStateTransactionsAcrossProcesses {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *sharedPath = environment[@"ARLEN_SEARCH_SHARED_STATE_PATH"];
+  if (sharedPath.length > 0) {
+    [self registerModulesForApplication:[self applicationWithStatePath:sharedPath]];
+    ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+    NSString *index = environment[@"ARLEN_SEARCH_PROCESS_INDEX"];
+    if ([environment[@"ARLEN_MODULE_PROCESS_PROBE_ABORT"] boolValue]) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, [@"ready-" stringByAppendingString:index]));
+    BOOL started = ALNTestWaitCheckpoint(sharedPath, [@"start-" stringByAppendingString:index]);
+    XCTAssertTrue(started);
+    if (!started) return;
+    BOOL first = [environment[@"ARLEN_SEARCH_PROCESS_INDEX"] isEqual:@"0"];
+    NSError *error = nil;
+    NSDictionary *result = [runtime processReindexJobPayload:@{@"resource":@"orders", @"mode":@"full"} error:&error];
+    if (first) {
+      XCTAssertNil(result);
+      XCTAssertEqualObjects(@"state_conflict", error.userInfo[@"reason"]);
+      error = nil;
+      NSDictionary *fresh = [runtime searchQuery:@"replacement" resourceIdentifier:@"orders" filters:nil sort:nil limit:10 offset:0 error:&error];
+      XCTAssertEqualObjects(@1, fresh[@"total"]);
+      XCTAssertNil(error);
+      NSDictionary *deleted = [runtime searchQuery:@"buyer-one" resourceIdentifier:@"orders" filters:nil sort:nil limit:10 offset:0 error:&error];
+      XCTAssertEqualObjects(@0, deleted[@"total"]);
+      XCTAssertEqualObjects(@2, [self ordersRowFromDashboard:[runtime dashboardSummary]][@"activeGeneration"]);
+    } else {
+      XCTAssertNotNil(result, @"%@", error);
+      XCTAssertNil(error);
+      XCTAssertEqualObjects(@2, result[@"resources"][0][@"generation"]);
+      XCTAssertNotNil(([runtime processReindexJobPayload:@{@"resource":@"orders", @"mode":@"incremental",
+          @"operation":@"delete", @"record":@{@"id":@"ord-100"}} error:&error]));
+      NSDictionary *replacement = @{@"id":@"ord-102", @"order_number":@"102", @"status":@"replacement", @"owner_email":@"new@example.test", @"total_cents":@10};
+      XCTAssertNotNil(([runtime processReindexJobPayload:@{@"resource":@"orders", @"mode":@"incremental",
+          @"operation":@"upsert", @"record":replacement} error:&error]));
+      XCTAssertNil(error);
+      XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, @"changed-1"));
+    }
+    XCTAssertTrue(ALNTestSignalCheckpoint(sharedPath, [@"complete-" stringByAppendingString:index]));
+    return;
+  }
+  NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"search-process-state.plist"];
+  NSMutableArray<NSTask *> *children = [NSMutableArray array];
+  NSMutableArray<NSFileHandle *> *logs = [NSMutableArray array];
+  @try {
+    for (NSUInteger index = 0; index < 2; index++) {
+      NSTask *child = [[NSTask alloc] init];
+      child.launchPath = [[[NSProcessInfo processInfo] arguments] firstObject];
+      NSString *bundle = [[NSBundle bundleForClass:[self class]] bundlePath];
+#if defined(__APPLE__)
+      child.arguments = @[@"-XCTest", @"Phase16DTests/testSearchStateTransactionsAcrossProcesses", bundle];
+#else
+      child.arguments = @[@"-only-testing:ArlenUnitTests/Phase16DTests/testSearchStateTransactionsAcrossProcesses", @"-output-format", @"apple", bundle];
+#endif
+      NSMutableDictionary *childEnvironment = [environment mutableCopy];
+      childEnvironment[@"ARLEN_SEARCH_SHARED_STATE_PATH"] = path;
+      childEnvironment[@"ARLEN_SEARCH_PROCESS_INDEX"] = [@(index) stringValue];
+      child.environment = childEnvironment;
+      NSString *logPath = [path stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+      [[NSFileManager defaultManager] createFileAtPath:logPath contents:nil attributes:nil];
+      NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:logPath];
+      [logs addObject:log];
+      child.standardOutput = log; child.standardError = log;
+      [child launch];
+      [children addObject:child];
+    }
+    for (NSUInteger index = 0; index < 2; index++) {
+      BOOL ready = ALNTestWaitCheckpoint(path, [NSString stringWithFormat:@"ready-%lu", (unsigned long)index]);
+      XCTAssertTrue(ready, @"child %lu did not reach its fixture", (unsigned long)index);
+      if (!ready) return;
+    }
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"start-0"));
+    BOOL firstReady = ALNTestWaitCheckpoint(path, @"building-0");
+    XCTAssertTrue(firstReady);
+    if (!firstReady) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"start-1"));
+    BOOL secondReady = ALNTestWaitCheckpoint(path, @"changed-1");
+    XCTAssertTrue(secondReady);
+    if (!secondReady) return;
+    XCTAssertTrue(ALNTestSignalCheckpoint(path, @"resume-0"));
+    for (NSUInteger index = 0; index < children.count; index++) {
+      NSTask *child = children[index];
+      BOOL exited = ALNTestWaitForTaskExit(child, 20.0);
+      XCTAssertTrue(exited, @"child %lu did not exit", (unsigned long)index);
+      if (!exited) return;
+      XCTAssertEqual(0, child.terminationStatus);
+      NSString *complete = [path stringByAppendingFormat:@".complete-%lu", (unsigned long)index];
+      XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:complete]);
+      NSString *logPath = [path stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+      NSString *output = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:NULL];
+      XCTAssertTrue([output containsString:@"Executed 1 test"], @"%@", output);
+    }
+  } @finally {
+    for (NSTask *child in children) XCTAssertTrue(ALNTestReapChild(child));
+    for (NSFileHandle *log in logs) [log closeFile];
+  }
+  [self registerModulesForApplication:[self applicationWithStatePath:path]];
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  NSDictionary *row = [self ordersRowFromDashboard:[runtime dashboardSummary]];
+  XCTAssertEqualObjects(@2, row[@"activeGeneration"]);
+  XCTAssertEqualObjects(@1, row[@"documentCount"]);
+  NSError *error = nil;
+  NSDictionary *fresh = [runtime searchQuery:@"replacement" resourceIdentifier:@"orders" filters:nil sort:nil limit:10 offset:0 error:&error];
+  XCTAssertEqualObjects(@1, fresh[@"total"]);
+  XCTAssertNil(error);
+}
+
+- (void)testIncrementalConflictDoesNotOverwriteConcurrentSameResourceChanges {
+  ALNApplication *app = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"state.plist"]];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *first = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedActiveIndexForRuntime:first];
+  ALNSearchModuleRuntime *second = [[ALNSearchModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([[ALNJobsModuleRuntime sharedRuntime] configureWithApplication:app error:&error]);
+  XCTAssertTrue([second configureWithApplication:app error:&error], @"%@", error);
+  gPhase16DApplyHook = ^{
+    NSError *nested = nil;
+    XCTAssertNotNil(([second applyIncrementalOperation:@"upsert" resourceIdentifier:@"orders"
+        record:@{@"id":@"ord-102", @"order_number":@"replacement", @"status":@"new"} error:&nested]));
+    XCTAssertNil(nested);
+  };
+  XCTAssertNil(([first applyIncrementalOperation:@"delete" resourceIdentifier:@"orders" record:@{@"id":@"ord-100"} error:&error]));
+  XCTAssertEqualObjects(@"state_conflict", error.userInfo[@"reason"]);
+  error = nil;
+  XCTAssertNotNil(([first applyIncrementalOperation:@"delete" resourceIdentifier:@"orders" record:@{@"id":@"ord-100"} error:&error]));
+  NSDictionary *query = [second searchQuery:@"replacement" resourceIdentifier:@"orders" filters:nil sort:nil limit:10 offset:0 error:&error];
+  XCTAssertEqualObjects(@1, query[@"total"]);
+  XCTAssertEqualObjects(@1, [self ordersRowFromDashboard:[second dashboardSummary]][@"documentCount"]);
+  XCTAssertNil(error);
+}
+
+- (void)testReplayClaimsPreserveConcurrentEnqueueAndFenceStaleOwners {
+  ALNApplication *app = [self applicationWithStatePath:[[self temporaryDirectory] stringByAppendingPathComponent:@"state.plist"]];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *first = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedActiveIndexForRuntime:first];
+  ALNSearchModuleRuntime *second = [[ALNSearchModuleRuntime alloc] init];
+  NSError *error = nil;
+  XCTAssertTrue([[ALNJobsModuleRuntime sharedRuntime] configureWithApplication:app error:&error]);
+  XCTAssertTrue([second configureWithApplication:app error:&error], @"%@", error);
+  NSDictionary *payload = @{@"operation":@"upsert", @"record":@{@"id":@"replay-1", @"order_number":@"replayed"}};
+  XCTAssertTrue(([first stateTransaction:^BOOL(NSError **transactionError) {
+    [first enqueueReplayOperation:payload forResourceIdentifier:@"orders" metadata:@{}]; return YES;
+  } write:YES error:&error]));
+  gPhase16DApplyHook = ^{
+    NSError *nested = nil;
+    NSDictionary *busy = [second drainReplayOperationsForResourceIdentifier:@"orders" mode:@"test" error:&nested];
+    XCTAssertEqualObjects(@0, busy[@"replayed"]);
+    XCTAssertEqualObjects(@1, busy[@"remaining"]);
+    XCTAssertTrue(([second stateTransaction:^BOOL(NSError **transactionError) {
+      [second enqueueReplayOperation:@{@"operation":@"upsert", @"record":@{@"id":@"replay-2", @"order_number":@"another"}}
+          forResourceIdentifier:@"orders" metadata:@{}]; return YES;
+    } write:YES error:&nested]));
+    XCTAssertNil(nested);
+  };
+  NSDictionary *drained = [first drainReplayOperationsForResourceIdentifier:@"orders" mode:@"test" error:&error];
+  XCTAssertEqualObjects(@2, drained[@"replayed"]);
+  XCTAssertEqualObjects(@0, drained[@"remaining"]);
+  XCTAssertNil(error);
+  XCTAssertTrue(([first stateTransaction:^BOOL(NSError **transactionError) {
+    [first enqueueReplayOperation:@{@"operation":@"delete", @"record":@{@"id":@"ord-100"}}
+        forResourceIdentifier:@"orders" metadata:@{}]; return YES;
+  } write:YES error:&error]));
+  gPhase16DApplyHook = ^{
+    XCTAssertTrue(([second stateTransaction:^BOOL(NSError **transactionError) {
+      NSMutableArray *queue = [second valueForKey:@"pendingReplayOperationsByResource"][@"orders"];
+      NSMutableDictionary *claim = [queue[0] mutableCopy];
+      claim[@"claimToken"] = @"replacement-owner";
+      queue[0] = claim;
+      return YES;
+    } write:YES error:NULL]));
+  };
+  NSDictionary *fenced = [first drainReplayOperationsForResourceIdentifier:@"orders" mode:@"test" error:&error];
+  XCTAssertEqualObjects(@0, fenced[@"replayed"]);
+  XCTAssertEqualObjects(@1, fenced[@"remaining"]);
+  XCTAssertEqualObjects(@"state_conflict", error.userInfo[@"reason"]);
+  XCTAssertEqualObjects(@4, [self ordersRowFromDashboard:[second dashboardSummary]][@"documentCount"]);
+  // Simulate a crashed claimant's expiry without a wall-clock sleep.
+  XCTAssertTrue(([second stateTransaction:^BOOL(NSError **transactionError) {
+    NSMutableArray *queue = [second valueForKey:@"pendingReplayOperationsByResource"][@"orders"];
+    NSMutableDictionary *claim = [queue[0] mutableCopy]; claim[@"claimUntil"] = @0; queue[0] = claim; return YES;
+  } write:YES error:NULL]));
+  error = nil;
+  NSDictionary *recovered = [second drainReplayOperationsForResourceIdentifier:@"orders" mode:@"test" error:&error];
+  XCTAssertEqualObjects(@1, recovered[@"replayed"]);
+  XCTAssertEqualObjects(@0, recovered[@"remaining"]);
+  XCTAssertEqualObjects(@3, [self ordersRowFromDashboard:[first dashboardSummary]][@"documentCount"]);
+  XCTAssertNil(error);
+}
+
+- (void)testWorkersWithDifferentResourcesPreserveEachOthersState {
+  NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:path];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *first = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedActiveIndexForRuntime:first];
+  NSMutableDictionary *config = [app.config mutableCopy];
+  NSMutableDictionary *search = [config[@"searchModule"] mutableCopy];
+  search[@"providers"] = @{@"classes":@[@"Phase16DAlternateProvider"]};
+  config[@"searchModule"] = search;
+  ALNApplication *otherApp = [[ALNApplication alloc] initWithConfig:config];
+  NSError *error = nil;
+  XCTAssertTrue([[ALNJobsModuleRuntime sharedRuntime] configureWithApplication:otherApp error:&error]);
+  ALNSearchModuleRuntime *second = [[ALNSearchModuleRuntime alloc] init];
+  XCTAssertTrue([second configureWithApplication:otherApp error:&error]);
+  XCTAssertEqualObjects(@0, [second resourceDrilldownForIdentifier:@"archive"][@"resource"][@"documentCount"]);
+  XCTAssertNotNil(([second processReindexJobPayload:@{@"resource":@"archive", @"mode":@"full"} error:&error]));
+  XCTAssertNotNil(([first applyIncrementalOperation:@"delete" resourceIdentifier:@"orders" record:@{@"id":@"ord-100"} error:&error]));
+  XCTAssertEqualObjects(@2, [second resourceDrilldownForIdentifier:@"archive"][@"resource"][@"documentCount"]);
+  XCTAssertEqualObjects(@1, [first resourceDrilldownForIdentifier:@"orders"][@"resource"][@"documentCount"]);
+  XCTAssertNil(error);
 }
 
 @end

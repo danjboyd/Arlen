@@ -9,6 +9,8 @@
 #import "ALNDataverseClient.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNMultipart.h"
+#import "ALNRequest.h"
+#import "ALNResponse.h"
 
 @interface ConfigTests : XCTestCase
 @end
@@ -867,6 +869,21 @@
   XCTAssertEqualObjects(@"interactive", openapi[@"docsUIStyle"]);
 }
 
+- (void)testTrustedProxyCIDRsAcceptIPv6 {
+  NSString *root = [self prepareConfigTree];
+  XCTAssertNotNil(root);
+
+  setenv("ARLEN_TRUSTED_PROXY_CIDRS",
+         "127.0.0.1/32, ::1, 2001:DB8::/32, 2001:db8::/129, junk, ::ffff:10.0.0.0/104", 1);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  unsetenv("ARLEN_TRUSTED_PROXY_CIDRS");
+
+  XCTAssertNil(error);
+  XCTAssertEqualObjects((@[ @"127.0.0.1/32", @"::1/128", @"2001:db8::/32", @"10.0.0.0/8" ]),
+                        config[@"trustedProxyCIDRs"]);
+}
+
 - (void)testSecurityProfilePresetsApplyDeterministicDefaults {
   NSString *root = [self prepareConfigTree];
   XCTAssertNotNil(root);
@@ -926,6 +943,43 @@
   XCTAssertEqualObjects(@(YES), fallbackSecurityHeaders[@"enabled"]);
 }
 
+- (void)testUnsetCSRFFollowsSessionInEveryProfile {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  NSString *appPlist = [root stringByAppendingPathComponent:@"config/app.plist"];
+  XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/development.plist"]
+                        content:@"{\n}\n"]);
+
+  // Sessions on and csrf.enabled unset: CSRF turns on, whatever the profile.
+  XCTAssertTrue([self writeFile:appPlist
+                        content:@"{\n"
+                                 "  session = { enabled = YES; secret = \"0123456789abcdef0123456789abcdef\"; };\n"
+                                 "  csrf = { headerName = \"x-csrf-token\"; };\n"
+                                 "}\n"]);
+  for (NSString *profile in @[ @"balanced", @"edge", @"strict" ]) {
+    setenv("ARLEN_SECURITY_PROFILE", [profile UTF8String], 1);
+    NSError *error = nil;
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+    unsetenv("ARLEN_SECURITY_PROFILE");
+    XCTAssertNil(error, @"%@", profile);
+    XCTAssertEqualObjects(@(YES), config[@"csrf"][@"enabled"], @"%@", profile);
+  }
+
+  // An explicit csrf.enabled = NO still wins.
+  XCTAssertTrue([self writeFile:appPlist
+                        content:@"{\n"
+                                 "  session = { enabled = YES; secret = \"0123456789abcdef0123456789abcdef\"; };\n"
+                                 "  csrf = { enabled = NO; };\n"
+                                 "}\n"]);
+  NSError *error = nil;
+  NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"development" error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@(NO), config[@"csrf"][@"enabled"]);
+}
+
 - (void)testAPIOnlyDefaultsDisableStaticAndUseJSONLogs {
   NSString *root = [self createTempAppRoot];
   XCTAssertNotNil(root);
@@ -954,6 +1008,99 @@
   XCTAssertEqualObjects(@(YES), config[@"apiOnly"]);
   XCTAssertEqualObjects(@(NO), config[@"serveStatic"]);
   XCTAssertEqualObjects(@"json", config[@"logFormat"]);
+}
+
+
+- (void)testEnvironmentNameIsNormalizedBeforeChoosingTheOverlay {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  port = 3000;\n}\n"]);
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/production.plist"]
+                          content:@"{\n  port = 4100;\n}\n"]);
+    for (NSString *spelling in @[ @"production", @"PRODUCTION", @" Production\n" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:spelling error:&error];
+      XCTAssertNil(error, @"%@", spelling);
+      XCTAssertEqual((NSInteger)4100, [config[@"port"] integerValue], @"%@", spelling);
+      XCTAssertEqualObjects(@"production", config[@"environment"], @"%@", spelling);
+      ALNApplication *application = [[ALNApplication alloc] initWithEnvironment:spelling configRoot:root error:&error];
+      XCTAssertEqualObjects(@"production", application.environment, @"%@", spelling);
+    }
+    XCTAssertEqualObjects(@"development", ALNNormalizedEnvironmentName(nil));
+    XCTAssertEqualObjects(@"development", ALNNormalizedEnvironmentName(@"  "));
+    XCTAssertEqualObjects(@"staging", ALNNormalizedEnvironmentName(@"Staging"));
+
+    ALNApplication *fromConfig = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @" Staging " }];
+    XCTAssertEqualObjects(@"staging", fromConfig.environment);
+    XCTAssertEqualObjects(@"staging", fromConfig.config[@"environment"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
+
+- (void)testEnvironmentsOtherThanDevelopmentAndTestGetProductionSecurityDefaults {
+  NSString *root = [self createTempAppRoot];
+  XCTAssertNotNil(root);
+  if (root == nil) {
+    return;
+  }
+  @try {
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{\n  port = 3000;\n}\n"]);
+    for (NSString *environment in @[ @"production", @"staging", @"qa" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:environment error:&error];
+      XCTAssertNil(error, @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"session"][@"secure"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"openapi"][@"docsUIEnabled"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"performanceLogging"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"performanceHeaders"], @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"observability"][@"readinessRequiresMigrations"], @"%@", environment);
+
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{ @"environment" : environment }];
+      XCTAssertFalse([self responseIsOpenAPIDocsPage:[application dispatchRequest:[self openAPIDocsRequest]]],
+                     @"%@", environment);
+    }
+    for (NSString *environment in @[ @"development", @"test" ]) {
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:environment error:&error];
+      XCTAssertEqualObjects(@(NO), config[@"session"][@"secure"], @"%@", environment);
+      XCTAssertEqualObjects(@(YES), config[@"openapi"][@"docsUIEnabled"], @"%@", environment);
+      XCTAssertEqualObjects(@(NO), config[@"observability"][@"readinessRequiresMigrations"], @"%@", environment);
+      ALNApplication *application = [[ALNApplication alloc] initWithConfig:@{ @"environment" : environment }];
+      XCTAssertTrue([self responseIsOpenAPIDocsPage:[application dispatchRequest:[self openAPIDocsRequest]]],
+                    @"%@", environment);
+    }
+
+    // An explicit value still wins, e.g. a staging site served over plain HTTP.
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/environments/staging.plist"]
+                          content:@"{\n  session = { secure = NO; };\n  openapi = { docsUIEnabled = YES; };\n}\n"]);
+    NSError *error = nil;
+    NSDictionary *staging = [ALNConfig loadConfigAtRoot:root environment:@"staging" error:&error];
+    XCTAssertEqualObjects(@(NO), staging[@"session"][@"secure"]);
+    XCTAssertEqualObjects(@(YES), staging[@"openapi"][@"docsUIEnabled"]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
+- (BOOL)responseIsOpenAPIDocsPage:(ALNResponse *)response {
+  NSString *contentType = [response headerForName:@"Content-Type"] ?: @"";
+  return response.statusCode == 200 && [contentType hasPrefix:@"text/html"];
+}
+
+- (ALNRequest *)openAPIDocsRequest {
+  return [[ALNRequest alloc] initWithMethod:@"GET"
+                                       path:@"/openapi"
+                                queryString:@""
+                                    headers:@{}
+                                       body:[NSData data]];
 }
 
 @end

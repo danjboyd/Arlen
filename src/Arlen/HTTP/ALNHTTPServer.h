@@ -7,6 +7,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// Reports a startup failure (before the server accepts traffic) as
+// "<prefix>: startup failed: <message>". Under propane, which sets
+// ARLEN_STARTUP_FAILURE_FILE for each worker, the message goes to that file
+// instead of stderr, so propane can print it once and back off; otherwise it
+// is printed to stderr.
+FOUNDATION_EXPORT void ALNReportStartupFailure(NSString *prefix, NSString *_Nullable message);
+
 @interface ALNHTTPServer : NSObject
 
 @property(nonatomic, strong, readonly) ALNApplication *application;

@@ -1,100 +1,71 @@
 # Getting Started
 
-This guide gets you from a clean checkout to a running Arlen app without
-pulling you through contributor-only release or CI material first.
+Install Arlen, create an app, and run it locally. This page covers Linux;
+use [Getting Started on macOS](GETTING_STARTED_MACOS.md) or
+[Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for those platforms.
 
-If you are targeting macOS with Apple APIs rather than GNUstep, use
-`docs/GETTING_STARTED_MACOS.md` first. On Windows, use
-`docs/GETTING_STARTED_WINDOWS.md` first.
+## 1. Install Arlen
 
-If you prefer a narrower path, see:
-
-- `docs/GETTING_STARTED_QUICKSTART.md`
-- `docs/GETTING_STARTED_API_FIRST.md`
-- `docs/GETTING_STARTED_HTML_FIRST.md`
-- `docs/GETTING_STARTED_DATA_LAYER.md`
-
-For SQL ORM models, see the [ORM guide](ARLEN_ORM.md#sql-property-names).
-Generated properties may use safe aliases for columns such as `State`; use the
-manifest property names or `objectForColumnName:` with the original SQL name.
-Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
-schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
-
-## 1. Install a clang-built GNUstep Toolchain
-
-Arlen needs clang, the `libobjc2` runtime, and `gnustep-base`. Distro GNUstep
-packages built with GCC will not work.
-
-If you don't already have one, install the managed toolchain from
-[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
-`~/.local/share/gnustep-cli` and needs no root except for host packages.
-
-The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
-the release's signature. Arlen is verified with it on:
-
-- Debian 13 "trixie", amd64 and arm64
-- Ubuntu 26.04 LTS "resolute", amd64
-
-Each distribution gets its own toolchain build. Debian 12, Ubuntu 24.04, and
-Ubuntu on arm64 are not covered yet.
+Paste this command into a bash or zsh terminal:
 
 ```bash
-curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
-  | sh -s -- --yes setup --user
-sudo apt-get install -y libssl-dev
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`--yes` lets setup install host prerequisites (clang, libcurl, libffi, ICU,
-and so on) with `sudo apt-get`. Leave it off to print the command and run it
-yourself. Arlen also needs the OpenSSL development package (`libssl-dev`),
-which the toolchain does not install. To use PostgreSQL, install the client
-library too (`libpq5`, or `libpq-dev` for the headers). Arlen's env helper finds this toolchain on its own when
-`/usr/GNUstep` is absent.
+On Debian 13 (amd64/arm64) and Ubuntu 26.04 LTS (amd64), the installer can
+set up missing build prerequisites and the managed clang GNUstep toolchain.
+`--yes` permits setup; installing host packages may ask for your sudo password.
+The framework is built once, with at most four parallel jobs. Leave off
+`--yes` to be asked before prerequisite setup.
 
-If you already have a clang-built GNUstep, for example under `/usr/GNUstep`,
-use it as is. On other distributions, build clang + libobjc2 + GNUstep from
-source with [gnustep/tools-scripts](https://github.com/gnustep/tools-scripts). For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+The installer verifies the release archive against `SHA256SUMS`, installs it
+under `~/.local/share/arlen`, and writes a launcher to `~/.local/bin`. It
+configures future bash/zsh shells automatically. The final `export` in the
+command above makes `arlen` available immediately in the current shell.
+The launcher loads the GNUstep environment for you.
 
-## 2. Install Arlen
-
-### From a release (recommended)
-
-```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
-```
-
-The installer:
-
-1. downloads the latest release archive and checks it against `SHA256SUMS`;
-2. unpacks it to `~/.local/share/arlen/<version>`;
-3. builds the framework once against your toolchain, which takes about a
-   minute;
-4. writes an `arlen` launcher to `~/.local/bin`.
-
-The launcher sets up the GNUstep environment by itself, so you don't need to
-source anything. Make sure `~/.local/bin` is on your `PATH`, then check your
-setup:
+Check the result:
 
 ```bash
 arlen doctor
 ```
 
-Useful installer options:
+Then continue to **Create Your First App** below. No repository checkout is
+needed to develop an app.
 
-- `--version X.Y.Z` pins a release.
-- `--prefix DIR` and `--bin-dir DIR` move the install.
-- `--archive FILE` installs an archive you already downloaded.
+### Installation options
 
-To upgrade, rerun the installer. Earlier versions stay under
-`~/.local/share/arlen/`. The launcher follows `current`, so set
-`ARLEN_HOME=~/.local/share/arlen/<version>` to run an older one.
+- `--version X.Y.Z`: select a release instead of the latest.
+- `--archive FILE`: use a downloaded archive; a sibling `SHA256SUMS` is checked
+  when present. Otherwise, only use a local archive you trust.
+- `--no-setup`: use existing prerequisites without installing anything else.
+- `--no-modify-path`: leave shell startup files unchanged; export PATH yourself.
+- `--prefix DIR` and `--bin-dir DIR`: choose custom locations. Export the chosen
+  bin directory in your current shell.
 
-With the installer, every `/path/to/Arlen/bin/arlen` in the rest of this
-guide is just `arlen`.
+Rerun the installer to upgrade. A failed setup or build preserves the existing
+working release. For the complete options, see [CLI Reference](CLI_REFERENCE.md).
+
+### Manual toolchain setup
+
+Arlen requires clang, `libobjc2`, and `gnustep-base`; GCC-built distro GNUstep
+packages are not compatible. The automatic setup uses the managed
+[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) Linux `v0.1.0`
+toolchain. Its supported distribution/architecture combinations are listed
+above; Debian 12, Ubuntu 24.04, and Ubuntu arm64 are not covered by that path.
+
+For an existing clang-built GNUstep installation, use `--no-setup`.
+Include `make`, `python3`, OpenSSL development headers (`libssl-dev` on
+Debian/Ubuntu), and the SQLite runtime (`libsqlite3-0`). For PostgreSQL,
+install `libpq5` as well, or `libpq-dev` if you need headers. Arlen discovers
+the managed toolchain when `/usr/GNUstep` is absent. See the
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the build contract.
 
 ### From a git checkout
 
-Use a checkout to work on Arlen itself or to track `main`:
+Use a checkout to work on Arlen itself or to track `main`. Provision the
+clang GNUstep toolchain above first; use `./bin/arlen` in place of the installed
+`arlen` command in this guide:
 
 ```bash
 git clone --recursive https://github.com/danjboyd/Arlen.git
@@ -113,15 +84,15 @@ This builds the main tools you will use first:
 If you want structured doctor output for automation:
 
 ```bash
-/path/to/Arlen/bin/arlen doctor --json
+arlen doctor --json
 ```
 
-## 3. Create Your First App
+## 2. Create Your First App
 
 ```bash
 mkdir -p ~/arlen-apps
 cd ~/arlen-apps
-/path/to/Arlen/bin/arlen new MyApp
+arlen new MyApp
 cd MyApp
 ```
 
@@ -138,12 +109,12 @@ The full-mode scaffold gives you:
 If you want the smallest possible app shape instead, see
 `docs/LITE_MODE_GUIDE.md`.
 
-## 4. Run the App
+## 3. Run the App
 
 From app root:
 
 ```bash
-/path/to/Arlen/bin/arlen boomhauer --port 3000
+arlen boomhauer --port 3000
 ```
 
 Then verify:
@@ -163,12 +134,16 @@ access; see
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
 
-## 5. Add One More Route
+When using `propane` for production, repeated worker startup failures exhaust
+its configured retry limit and return exit status `3`. A worker exiting during
+descriptor sampling does not interrupt that policy. See [Propane](PROPANE.md).
+
+## 4. Add One More Route
 
 Prefer the generator-driven path for your second route:
 
 ```bash
-/path/to/Arlen/bin/arlen generate endpoint Hello \
+arlen generate endpoint Hello \
   --route /hello \
   --method GET \
   --template
@@ -191,14 +166,14 @@ with the top-level `routes` array. Those entries call the same router APIs as
 Objective-C route code, so matching, policies, reverse lookup, and route
 inspection stay on one effective route table.
 
-## 6. Common Next Commands
+## 5. Common Next Commands
 
 From app root:
 
 ```bash
-/path/to/Arlen/bin/arlen routes
-/path/to/Arlen/bin/arlen config --env development --json
-/path/to/Arlen/bin/arlen check
+arlen routes
+arlen config --env development --json
+arlen check
 ```
 
 `arlen config` prints secret values (session secrets, connection-string
@@ -211,8 +186,8 @@ New apps ship a request test (`tests/HomeControllerTests.m`, or
 `tests/HomeTests.m` in lite mode). Run it, and any tests you add, with:
 
 ```bash
-/path/to/Arlen/bin/arlen test --app
-/path/to/Arlen/bin/arlen generate test Hello --request --route /hello
+arlen test --app
+arlen generate test Hello --request --route /hello
 ```
 
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
@@ -224,7 +199,7 @@ instead of `make`. `arlen check` runs the Apple verification lane there, and
 `arlen test` runs the Apple unit and integration bundles. `arlen perf` gates
 against a baseline recorded on the same Mac.
 
-## 7. Choose the Next Guide
+## 6. Choose the Next Guide
 
 For login/logout flows that issue multiple cookies, see
 [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md).
@@ -246,14 +221,14 @@ For login/logout flows that issue multiple cookies, see
   generate the client and React targets from the OpenAPI export alone.
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
-## 8. Optional Dataverse Path
+## 7. Optional Dataverse Path
 
 If your app needs Dataverse rather than the SQL migration/schema-codegen path,
 use `docs/DATAVERSE.md`. The Dataverse surface is compiled in but
 runtime-inactive by default, so apps that do not configure it do not pick up
 extra startup work.
 
-## 9. Contributor Notes
+## 8. Contributor Notes
 
 If you are working on Arlen itself rather than just building an app with it:
 
@@ -265,7 +240,9 @@ If you are working on Arlen itself rather than just building an app with it:
   `arlen deploy list|dryrun|init|push|releases|release|status|rollback|doctor|logs`
   is the preferred operator-facing wrapper, including
   `config/deploy.plist.example`, checked-in `config/deploy.plist` targets, and
-  SSH-backed target deploy flows
+  SSH-backed target deploy flows. `--json` output remains parseable when a
+  successful app build emits compiler warnings on stderr. On macOS, `propane`
+  continues startup-failure handling when a worker exits during an FD check
 - `docs/DOCUMENTATION_POLICY.md` covers docs definition-of-done and quality
   expectations
 - `docs/TESTING_WORKFLOW.md` covers the focused regression and confidence lanes
@@ -354,6 +331,32 @@ application's `ALNORMCodegen` generation step and rebuild. Current output safely
 initializes each model descriptor on concurrent first use; older generated code
 must be regenerated to receive that fix. See [ArlenORM migration notes](ARLEN_ORM_MIGRATIONS.md#generated-descriptor-initialization-update).
 
+After upgrading the `auth` module, running `arlen module migrate` is
+recommended; it enables ending a user's sessions by stamp and lets signing out
+end the session on the server. The module reads each signed-in user's current roles from the
+database on every request, so a role change takes effect without signing in
+again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
+SMS MFA also needs the auth module's attempt-limit migration. Send and code
+verification limits are stored in PostgreSQL so an old session cookie cannot
+restore them; locked requests return 429 with `Retry-After`.
+The built-in admin users search treats `%` and `_` as literal characters in
+`q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
+Production apps keep `/openapi.json` and its docs routes closed unless they set
+`openapi.publicInProduction = YES`; route metadata includes privileged API
+paths. Local development keeps the OpenAPI routes enabled.
+The ops module coordinates persisted dashboard history across processes when
+they share its configured persistence path; see [Ops Module](OPS_MODULE.md).
+New auth registrations now receive a generic accepted response and sign in
+after verification. They do not get an authenticated session from the register
+request. Existing apps that require the old flow can opt in with
+`authModule.registration.autoLogin = YES`, which reveals whether an address is
+already registered; see [Auth Module](AUTH_MODULE.md).
+For production registration and password reset, configure a PostgreSQL jobs
+adapter, apply its schema, run the jobs worker, and set
+`authModule.publicBaseURL`. Auth mail is queued; the request does not wait for
+the mail provider. See [Durable Jobs](DURABLE_JOBS.md) and
+[Auth Module](AUTH_MODULE.md).
+
 When automating `arlen module migrate --json`, capture stdout and stderr
 separately. PostgreSQL notices may appear on stderr during repeated migrations;
 parse stdout as JSON and check the exit status. Framework contributors can run
@@ -379,6 +382,13 @@ disabled disabled.
 To push notifications to phones and browsers, enable the notifications module's
 Web Push channel: `arlen webpush generate-keys` prints a VAPID key pair for the
 server environment. See [Notifications Module: Web Push](NOTIFICATIONS_MODULE.md#web-push).
+Notification workers sharing a persistence path coordinate writes across
+processes and refresh inbox, outbox, and preference reads from shared state.
+Jobs workers sharing a persistence path also refresh reads and transact operator-state changes;
+job claim durability still depends on the configured jobs adapter.
+Search workers refresh shared state and reject conflicting rebuild/update results
+instead of overwriting newer state. External engines still require one reindex
+worker per resource unless the backend fences publication; see [Search Module](SEARCH_MODULE.md).
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
@@ -400,3 +410,70 @@ Create process-wide lazy objects, such as a shared `NSRegularExpression`, with
 `dispatch_once` rather than `if (x == nil) { x = ...; }`. Concurrent first
 requests can otherwise race, and one thread can free the object another is
 using.
+
+Normal HTTP responses have a five-minute total send deadline and require an
+average of 1 KiB/s after a ten-second grace period. This prevents slow readers
+from occupying every HTTP worker. For unusually slow bulk downloads, adjust
+`requestLimits.responseSendTimeoutSeconds`, `responseMinBytesPerSecond`, and
+`responseMinRateGraceSeconds` in your app configuration. SSE and WebSocket
+sessions use separate policies. See [Configuration reference](CONFIGURATION_REFERENCE.md).
+
+For PostgreSQL queries whose values vary per request, use bound builder
+parameters. The connection cache reuses their SQL shape while keeping each
+call's parameter values separate. See [Arlen Data](ARLEN_DATA.md).
+
+The built-in `rateLimit` budget is **per worker**. With four propane workers,
+a client can receive up to four times `rateLimit.requests` in one window by
+opening connections across workers. Startup logs `rate limit is per worker`
+when rate limiting and multiple workers are configured. Use an ingress rate
+limiter for a deployment-wide quota; authentication's account attempt limits
+are separate from this request middleware.
+
+Use PostgreSQL's `enumerateQuery:parameters:batchSize:usingBlock:error:` for
+large exports instead of collecting all rows with `executeQuery:`. Process
+rows as they arrive and avoid retaining them to keep client memory bounded.
+
+Request metrics batch completed-response counters and timings under one lock
+and box their numeric values only when taking a snapshot. The metrics names
+and snapshot/Prometheus formats remain compatible. PostgreSQL ORM reads without
+raw expressions avoid a session-reset round trip; raw expressions and
+transactions retain conservative cleanup.
+
+Filesystem-backed storage downloads stream the verified open file, support HEAD
+and byte ranges, and use checksum ETags. Variant source data defaults to a 16 MiB
+limit (`storageModule.maxVariantInputBytes`). See [Storage Module](STORAGE_MODULE.md)
+for custom-adapter behavior and file immutability requirements.
+
+Storage and notifications persistence now use transactional SQLite catalogs. Linux hosts
+need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
+CI provisioning validates that runtime. Stop old workers before the one-time
+legacy import; see [Storage Module](STORAGE_MODULE.md) and
+[Notifications Module](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading)
+for migration and backup rules.
+
+Normal-response allocation-error fallbacks use the configured response send
+budget and close the connection after the fallback 500 response.
+
+Default security headers are validated once when the application is configured
+and applied without replacing response-specific values. Public header setters
+continue to reject invalid names and CR/LF/NUL injection. For local performance
+investigation, `make response-header-perf-bench` builds an optional focused
+benchmark; see [Performance Profiles](internal/PERFORMANCE_PROFILES.md).
+
+Auth-only apps can build without the optional jobs module. Durable auth mail
+still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).
+
+For Linux contributor sanitizer checks, run `make ci-sanitizers` after sourcing
+`tools/source_gnustep_env.sh`. The gate requires clang's shared sanitizer runtime
+and uses it consistently for XCTest bundles and instrumented child processes.
+
+## Upgrading existing applications
+
+Re-vendor the first-party modules you use with
+`arlen module upgrade <name> --source <framework>/modules/<name>`, then rebuild
+and redeploy. Upgrading framework binaries alone does not replace copied
+module sources. JSON input is limited to 512 nested containers on both parser
+backends. See [Live UI](LIVE_UI.md) for receive-only channels and reconnect
+behavior. Custom Windows CLANG64 build scripts must include
+`_FILE_OFFSET_BITS=64` and rebuild application objects after upgrading; standard
+CLI and make paths set it automatically.

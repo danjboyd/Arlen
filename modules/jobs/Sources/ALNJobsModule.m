@@ -1,3 +1,5 @@
+#import "ALNConfig.h"
+#import "ALNJSONSerialization.h"
 #import "ALNJobsModule.h"
 #import "ALNPostgresJobAdapter.h"
 
@@ -76,7 +78,7 @@ static NSDictionary *JMJSONParametersFromBody(NSData *body) {
   if ([body length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:body options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -262,6 +264,7 @@ static BOOL JMValidateCronExpressionSyntax(NSString *expression) {
 
 static NSDictionary *JMRecordRunSummary(NSString *kind, NSDictionary *summary) {
   return @{
+    @"runID" : [[NSUUID UUID] UUIDString].lowercaseString,
     @"kind" : JMTrimmedString(kind),
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
     @"summary" : JMNormalizeDictionary(summary),
@@ -410,7 +413,7 @@ static NSString *JMResolvedPersistencePath(ALNApplication *application, NSDictio
     return [application pathRelativeToAppRoot:configured];
   }
   NSString *environment = JMLowerTrimmedString(application.environment);
-  if ([environment isEqualToString:@"test"]) {
+  if (ALNEnvironmentKindForName(environment) == ALNEnvironmentKindTest) {
     return @"";
   }
   return [application pathRelativeToAppRoot:
@@ -429,10 +432,14 @@ static NSDictionary *JMReadPropertyListAtPath(NSString *path, NSError **error) {
   }
   NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
   id object = [NSPropertyListSerialization propertyListWithData:data
-                                                        options:NSPropertyListMutableContainersAndLeaves
+                                                        options:NSPropertyListImmutable
                                                          format:&format
                                                           error:error];
-  return [object isKindOfClass:[NSDictionary class]] ? object : nil;
+  if (![object isKindOfClass:[NSDictionary class]]) {
+    if (error && *error == nil) *error = JMError(ALNJobsModuleErrorExecutionFailed, @"jobs operator state must be a dictionary", nil);
+    return nil;
+  }
+  return object;
 }
 
 static BOOL JMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSError **error) {
@@ -519,7 +526,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 - (NSDictionary *)jobSummaryFromEnvelope:(ALNJobEnvelope *)envelope state:(NSString *)state;
 - (NSDictionary *)operatorStateDocumentLocked;
 - (void)restoreOperatorStateFromDocument:(NSDictionary *)document;
-- (BOOL)persistOperatorStateWithError:(NSError *_Nullable *_Nullable)error;
+- (BOOL)withOperatorStateMutation:(void (^ _Nullable)(void))mutation error:(NSError **)error;
 
 @end
 
@@ -624,15 +631,40 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   }
 }
 
-- (BOOL)persistOperatorStateWithError:(NSError **)error {
-  NSString *statePath = JMTrimmedString(self.persistencePath);
-  if (!self.persistenceEnabled || [statePath length] == 0) {
-    return YES;
-  }
+// Only local state work belongs in mutation. Adapter/network calls run outside
+// this short, cross-process read/modify/atomic-write transaction.
+- (BOOL)withOperatorStateMutation:(void (^)(void))mutation error:(NSError **)error {
   [self.lock lock];
-  NSDictionary *document = [self operatorStateDocumentLocked];
-  [self.lock unlock];
-  return JMWritePropertyListAtPath(statePath, document, error);
+  int descriptor = -1;
+  @try {
+    BOOL shared = self.persistenceEnabled && [self.persistencePath length] > 0;
+    if (shared) {
+      NSString *directory = [self.persistencePath stringByDeletingLastPathComponent];
+      if ([directory length] > 0 && ![[NSFileManager defaultManager] createDirectoryAtPath:directory
+          withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+      descriptor = ALNPlatformOpenExclusiveLockWithTimeout([self.persistencePath stringByAppendingString:@".lock"], 10.0);
+      if (descriptor < 0) {
+        if (error) *error = JMError(ALNJobsModuleErrorExecutionFailed, @"could not lock jobs operator state", nil);
+        return NO;
+      }
+      NSError *readError = nil;
+      NSDictionary *state = JMReadPropertyListAtPath(self.persistencePath, &readError);
+      if (readError) { if (error) *error = readError; return NO; }
+      [self restoreOperatorStateFromDocument:state ?: @{}];
+    }
+    if (mutation) {
+      NSDictionary *before = [self operatorStateDocumentLocked];
+      mutation();
+      if (shared && !JMWritePropertyListAtPath(self.persistencePath, [self operatorStateDocumentLocked], error)) {
+        [self restoreOperatorStateFromDocument:before];
+        return NO;
+      }
+    }
+    return YES;
+  } @finally {
+    if (descriptor >= 0) ALNPlatformReleaseExclusiveLock(descriptor);
+    [self.lock unlock];
+  }
 }
 
 - (BOOL)configureWithApplication:(ALNApplication *)application
@@ -680,11 +712,8 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   [self.pausedQueues removeAllObjects];
   [self.replayedDeadLetterTimestamps removeAllObjects];
   [self.runHistory removeAllObjects];
-  NSDictionary *persistedState = self.persistenceEnabled ? JMReadPropertyListAtPath(self.persistencePath, NULL) : nil;
-  if ([persistedState isKindOfClass:[NSDictionary class]]) {
-    [self restoreOperatorStateFromDocument:persistedState];
-  }
   [self.lock unlock];
+  if (![self withOperatorStateMutation:nil error:error]) return NO;
 
   NSArray *providerClasses =
       [moduleConfig[@"jobProviderClasses"] isKindOfClass:[NSArray class]]
@@ -1122,6 +1151,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
       continue;
     }
 
+    if (![self withOperatorStateMutation:nil error:error]) return nil;
     BOOL due = NO;
     NSTimeInterval intervalSeconds = [schedule[@"intervalSeconds"] doubleValue];
     NSString *cron = JMTrimmedString(schedule[@"cron"]);
@@ -1166,10 +1196,10 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
       return nil;
     }
 
-    [self.lock lock];
-    self.lastTriggeredAtByScheduleIdentifier[identifier] = @([now timeIntervalSince1970]);
-    self.lastTriggeredBucketByScheduleIdentifier[identifier] = JMScheduleMinuteBucket(now);
-    [self.lock unlock];
+    if (![self withOperatorStateMutation:^{
+      self.lastTriggeredAtByScheduleIdentifier[identifier] = @([now timeIntervalSince1970]);
+      self.lastTriggeredBucketByScheduleIdentifier[identifier] = JMScheduleMinuteBucket(now);
+    } error:error]) return nil;
     [triggered addObject:@{
       @"schedule" : identifier,
       @"job" : schedule[@"job"] ?: @"",
@@ -1183,15 +1213,12 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     @"skippedPausedCount" : @(skippedPaused),
     @"triggered" : triggered,
   };
-  [self.lock lock];
-  [self.runHistory addObject:JMRecordRunSummary(@"scheduler", summary)];
-  while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
-    [self.runHistory removeObjectAtIndex:0];
-  }
-  [self.lock unlock];
-  if (![self persistOperatorStateWithError:error]) {
-    return nil;
-  }
+  if (![self withOperatorStateMutation:^{
+    [self.runHistory addObject:JMRecordRunSummary(@"scheduler", summary)];
+    while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
+      [self.runHistory removeObjectAtIndex:0];
+    }
+  } error:error]) return nil;
   return summary;
 }
 
@@ -1207,15 +1234,12 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
       @"reachedRunLimit" : @NO,
       @"pausedDefaultQueue" : @YES,
     };
-    [self.lock lock];
-    [self.runHistory addObject:JMRecordRunSummary(@"worker", summary)];
-    while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
-      [self.runHistory removeObjectAtIndex:0];
-    }
-    [self.lock unlock];
-    if (![self persistOperatorStateWithError:error]) {
-      return nil;
-    }
+    if (![self withOperatorStateMutation:^{
+      [self.runHistory addObject:JMRecordRunSummary(@"worker", summary)];
+      while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
+        [self.runHistory removeObjectAtIndex:0];
+      }
+    } error:error]) return nil;
     return summary;
   }
 
@@ -1228,15 +1252,12 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   }
   NSMutableDictionary *summary = [NSMutableDictionary dictionaryWithDictionary:[runSummary dictionaryRepresentation]];
   summary[@"pausedDefaultQueue"] = @NO;
-  [self.lock lock];
-  [self.runHistory addObject:JMRecordRunSummary(@"worker", summary)];
-  while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
-    [self.runHistory removeObjectAtIndex:0];
-  }
-  [self.lock unlock];
-  if (![self persistOperatorStateWithError:error]) {
-    return nil;
-  }
+  if (![self withOperatorStateMutation:^{
+    [self.runHistory addObject:JMRecordRunSummary(@"worker", summary)];
+    while ([self.runHistory count] > ALNJobsRunHistoryLimit) {
+      [self.runHistory removeObjectAtIndex:0];
+    }
+  } error:error]) return nil;
   return summary;
 }
 
@@ -1356,13 +1377,14 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 }
 
 - (NSDictionary *)jobSummaryFromEnvelope:(ALNJobEnvelope *)envelope state:(NSString *)state {
+  BOOL refreshed = [self withOperatorStateMutation:nil error:NULL];
   NSDictionary *unwrapped = JMUnwrappedManagedPayload(JMNormalizeDictionary(envelope.payload));
   NSString *identifier = JMTrimmedString(envelope.name);
   NSDictionary *metadata = [self jobDefinitionMetadataForIdentifier:identifier] ?: @{};
   NSString *jobID = JMTrimmedString(envelope.jobID);
   NSNumber *replayedAt = nil;
   [self.lock lock];
-  replayedAt = self.replayedDeadLetterTimestamps[jobID];
+  replayedAt = refreshed ? self.replayedDeadLetterTimestamps[jobID] : nil;
   [self.lock unlock];
   return @{
     @"jobID" : jobID,
@@ -1471,12 +1493,9 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     return nil;
   }
 
-  [self.lock lock];
-  self.replayedDeadLetterTimestamps[targetJobID] = @([[NSDate date] timeIntervalSince1970]);
-  [self.lock unlock];
-  if (![self persistOperatorStateWithError:error]) {
-    return nil;
-  }
+  if (![self withOperatorStateMutation:^{
+    self.replayedDeadLetterTimestamps[targetJobID] = @([[NSDate date] timeIntervalSince1970]);
+  } error:error]) return nil;
   return @{
     @"deadLetterJobID" : targetJobID,
     @"replayedJobID" : newJobID,
@@ -1492,10 +1511,9 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([self.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)]) {
     return [(id<ALNDurableJobAdapter>)self.jobsAdapter setQueue:queue state:@"paused" error:error];
   }
-  [self.lock lock];
-  [self.pausedQueues addObject:queue];
-  [self.lock unlock];
-  return [self persistOperatorStateWithError:error];
+  return [self withOperatorStateMutation:^{
+    [self.pausedQueues addObject:queue];
+  } error:error];
 }
 
 - (BOOL)resumeQueueNamed:(NSString *)queueName
@@ -1507,10 +1525,9 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   if ([self.jobsAdapter respondsToSelector:@selector(setQueue:state:error:)]) {
     return [(id<ALNDurableJobAdapter>)self.jobsAdapter setQueue:queue state:@"active" error:error];
   }
-  [self.lock lock];
-  [self.pausedQueues removeObject:queue];
-  [self.lock unlock];
-  return [self persistOperatorStateWithError:error];
+  return [self withOperatorStateMutation:^{
+    [self.pausedQueues removeObject:queue];
+  } error:error];
 }
 
 - (BOOL)isQueuePaused:(NSString *)queueName {
@@ -1528,6 +1545,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     }
     return NO;
   }
+  if (![self withOperatorStateMutation:nil error:NULL]) return YES;
   [self.lock lock];
   BOOL paused = [self.pausedQueues containsObject:queue];
   [self.lock unlock];
@@ -1535,6 +1553,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
 }
 
 - (NSDictionary *)dashboardSummary {
+  if (![self withOperatorStateMutation:nil error:NULL]) return nil;
   NSArray *definitions = [self registeredJobDefinitions];
   NSArray *schedules = [self registeredSchedules];
   NSArray *pending = [self pendingJobs];
@@ -1839,7 +1858,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   NSDictionary *payload = JMNormalizeDictionary(parameters[@"payload"]);
   if ([payload count] == 0 && [parameters[@"payload_json"] isKindOfClass:[NSString class]]) {
     NSData *jsonData = [parameters[@"payload_json"] dataUsingEncoding:NSUTF8StringEncoding];
-    id object = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
+    id object = [ALNJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
     payload = [object isKindOfClass:[NSDictionary class]] ? object : @{};
   }
   NSError *error = nil;

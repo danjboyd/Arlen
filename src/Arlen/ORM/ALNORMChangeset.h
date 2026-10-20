@@ -39,6 +39,12 @@ typedef BOOL (^ALNORMFieldValidationBlock)(ALNORMFieldDescriptor *field,
                  error:(NSError *_Nullable *_Nullable)error;
 - (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
                    error:(NSError *_Nullable *_Nullable)error;
+// Casts only the listed fields (names, property names, or column names) and
+// drops every other input key. Prefer this for request payloads so clients
+// can't mass-assign keys, foreign keys, or role fields.
+- (BOOL)applyInputValues:(NSDictionary<NSString *, id> *)values
+         permittedFields:(NSArray<NSString *> *)permittedFields
+                   error:(NSError *_Nullable *_Nullable)error;
 - (nullable id)objectForFieldName:(NSString *)fieldName;
 - (void)addError:(NSString *)message forFieldName:(NSString *)fieldName;
 - (BOOL)validateRequiredFields;

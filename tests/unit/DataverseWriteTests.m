@@ -187,4 +187,329 @@
   XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
 }
 
+- (void)testRecordPathsAcceptOnlyGUIDRecordIDs {
+  NSError *error = nil;
+  XCTAssertEqualObjects([ALNDataverseClient recordPathForEntitySet:@"accounts"
+                                                          recordID:@"00000000-0000-0000-0000-000000000010"
+                                                             error:&error],
+                        @"accounts(00000000-0000-0000-0000-000000000010)");
+  XCTAssertNil(error);
+
+  NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:@"00000000-0000-0000-0000-0000000000AB"];
+  NSString *uuidPath = [ALNDataverseClient recordPathForEntitySet:@"accounts" recordID:(NSString *)uuid error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(uuidPath, @"accounts(00000000-0000-0000-0000-0000000000AB)");
+
+  NSArray<NSString *> *rejected = @[
+    @"00000000-0000-0000-0000-000000000001)/../../systemusers?$select=internalemailaddress&x=(",
+    @"(accountnumber='A-100')",
+    @"accountnumber='A-100'",
+    @"00000000-0000-0000-0000-00000000000g",
+    @"ord-100",
+    @"",
+  ];
+  for (NSString *recordID in rejected) {
+    error = nil;
+    NSString *path = [ALNDataverseClient recordPathForEntitySet:@"accounts" recordID:recordID error:&error];
+    XCTAssertNil(path, @"%@", recordID);
+    XCTAssertEqualObjects(error.domain, ALNDataverseErrorDomain, @"%@", recordID);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", recordID);
+  }
+}
+
+- (void)testNonGUIDRecordIDsFailBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *probe = @"00000000-0000-0000-0000-000000000001)/../../systemusers?$select=internalemailaddress&x=(";
+
+  XCTAssertNil([client retrieveRecordInEntitySet:@"accounts"
+                                        recordID:probe
+                                    selectFields:nil
+                                          expand:nil
+                          includeFormattedValues:NO
+                                           error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client updateRecordInEntitySet:@"accounts"
+                                      recordID:probe
+                                        values:@{ @"name" : @"x" }
+                                       ifMatch:nil
+                           returnRepresentation:NO
+                                         error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertFalse([client deleteRecordInEntitySet:@"accounts" recordID:probe ifMatch:nil error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+}
+
+- (void)testAlternateKeyValuesArePercentEncodedInsideTheirLiteral {
+  NSError *error = nil;
+  NSString *path = [ALNDataverseClient
+      recordPathForEntitySet:@"contacts"
+          alternateKeyValues:@{ @"emailaddress1" : @"x/../../systemusers(00000000-0000-0000-0000-0000000000aa)#" }
+                       error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(emailaddress1='x%2F..%2F..%2Fsystemusers%2800000000-0000-0000-0000-0000000000aa%29%23')");
+  XCTAssertFalse([path containsString:@"/"]);
+  XCTAssertFalse([path containsString:@"#"]);
+
+  path = [ALNDataverseClient recordPathForEntitySet:@"contacts"
+                                 alternateKeyValues:@{ @"name" : @"O'Brien & Co, a=b? 100% ü" }
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(name='O''Brien%20%26%20Co%2C%20a%3Db%3F%20100%25%20%C3%BC')");
+
+  path = [ALNDataverseClient recordPathForEntitySet:@"contacts"
+                                 alternateKeyValues:@{ @"externalid" : @42, @"active" : @YES }
+                                              error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(path, @"contacts(active=true,externalid=42)");
+}
+
+- (void)testFunctionParametersAreEncodedAndOperationPathsValidated {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  [transport enqueueResponse:[[ALNDataverseResponse alloc] initWithStatusCode:204 headers:@{} bodyData:nil]];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+
+  [client invokeFunctionNamed:@"new_LookupContact"
+                    boundPath:nil
+                   parameters:@{ @"Email" : @"x/../../../systemusers?$select=internalemailaddress#" }
+                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)1, [transport.capturedRequests count]);
+  XCTAssertTrue([transport.capturedRequests[0].URLString
+      hasSuffix:@"/new_LookupContact(Email='x%2F..%2F..%2F..%2Fsystemusers%3F%24select%3Dinternalemailaddress%23')"]);
+
+  [client invokeFunctionNamed:@"Microsoft.Dynamics.CRM.RetrievePrincipalAccess"
+                    boundPath:@"systemusers(00000000-0000-0000-0000-000000000010)"
+                   parameters:@{}
+                        error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([transport.capturedRequests[1].URLString
+      hasSuffix:@"/systemusers(00000000-0000-0000-0000-000000000010)/Microsoft.Dynamics.CRM.RetrievePrincipalAccess()"]);
+
+  NSArray<NSString *> *badBoundPaths = @[
+    @"accounts(00000000-0000-0000-0000-000000000010)/../../systemusers",
+    @"accounts(name='x')",
+    @"accounts?$select=name",
+    @"accounts#",
+  ];
+  for (NSString *boundPath in badBoundPaths) {
+    error = nil;
+    XCTAssertNil([client invokeFunctionNamed:@"WhoAmI" boundPath:boundPath parameters:@{} error:&error], @"%@", boundPath);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", boundPath);
+    error = nil;
+    XCTAssertNil([client invokeActionNamed:@"new_Recalculate" boundPath:boundPath parameters:@{} error:&error],
+                 @"%@", boundPath);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", boundPath);
+  }
+  error = nil;
+  XCTAssertNil([client invokeFunctionNamed:@"WhoAmI()/../systemusers" boundPath:nil parameters:@{} error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client invokeActionNamed:@"new_Recalculate?x=1" boundPath:nil parameters:@{} error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertNil([client invokeFunctionNamed:@"WhoAmI" boundPath:nil parameters:@{ @"a)/x" : @"1" } error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  XCTAssertEqual((NSUInteger)2, [transport.capturedRequests count]);
+}
+
+- (void)testHeaderValuesWithLineBreaksAreRejectedBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *injected = @"W/\"1\"\r\nMSCRM.CallerObjectId: 11111111-2222-3333-4444-555555555555";
+
+  XCTAssertNil([client updateRecordInEntitySet:@"accounts"
+                                      recordID:@"00000000-0000-0000-0000-000000000010"
+                                        values:@{ @"name" : @"x" }
+                                       ifMatch:injected
+                           returnRepresentation:NO
+                                         error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+  error = nil;
+  XCTAssertFalse([client deleteRecordInEntitySet:@"accounts"
+                                        recordID:@"00000000-0000-0000-0000-000000000010"
+                                         ifMatch:@"W/\"1\"\nIf-Match: *"
+                                           error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+
+  NSArray<NSDictionary *> *badHeaders = @[
+    @{ @"X-Note" : @"a\r\nMSCRM.BypassCustomPluginExecution: true" },
+    @{ @"X-Note" : [NSString stringWithFormat:@"nul%Cbyte", (unichar)0] },
+    @{ @"X Bad" : @"value" },
+    @{ @"X-Bad:\r\nInjected" : @"value" },
+  ];
+  for (NSDictionary *headers in badHeaders) {
+    error = nil;
+    XCTAssertNil([client performRequestWithMethod:@"GET"
+                                             path:@"accounts"
+                                            query:nil
+                                          headers:headers
+                                       bodyObject:nil
+                           includeFormattedValues:NO
+                             returnRepresentation:NO
+                                 consistencyCount:NO
+                                            error:&error],
+                 @"%@", headers);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", headers);
+  }
+
+  NSArray<ALNDataverseBatchRequest *> *badParts = @[
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:@{ @"If-Match" : injected }
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:nil
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1\r\nMSCRM.CallerObjectId: 1111"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH"
+                                   relativePath:@"contacts(1) HTTP/1.1\r\nIf-Match: *\r\nX-Pad: ("
+                                        headers:nil
+                                     bodyObject:@{ @"firstname" : @"x" }
+                                      contentID:@"1"],
+    [ALNDataverseBatchRequest requestWithMethod:@"PATCH /x HTTP/1.1\r\nIf-Match: *\r\nX"
+                                   relativePath:@"contacts(00000000-0000-0000-0000-000000000001)"
+                                        headers:nil
+                                     bodyObject:nil
+                                      contentID:@"1"],
+  ];
+  for (ALNDataverseBatchRequest *part in badParts) {
+    error = nil;
+    XCTAssertNil([client executeBatchRequests:@[ part ] error:&error], @"%@", part.contentID);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", part.contentID);
+  }
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+
+  // The curl transport checks the request it is handed too, before staging
+  // any file or starting curl.
+  ALNDataverseCurlTransport *curl = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:1];
+  ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:@"GET"
+                                                                   URLString:@"http://127.0.0.1:9/api/data/v9.2/accounts"
+                                                                     headers:@{ @"If-Match" : injected }
+                                                                    bodyData:nil];
+  error = nil;
+  XCTAssertNil([curl executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+}
+
+- (void)testRequestMethodsMustBeTokensBeforeAnyRequest {
+  ALNFakeDataverseTransport *transport = [[ALNFakeDataverseTransport alloc] init];
+  ALNFakeDataverseTokenProvider *tokenProvider = [[ALNFakeDataverseTokenProvider alloc] init];
+  NSError *error = nil;
+  ALNDataverseClient *client = [self clientWithTransport:transport
+                                           tokenProvider:tokenProvider
+                                              targetName:@"crm"
+                                              maxRetries:0
+                                                pageSize:250
+                                                   error:&error];
+  XCTAssertNil(error);
+  NSString *smuggled = @"GET /api/data/v9.2/WhoAmI HTTP/1.1\r\nHost: crm.example\r\nContent-Length: 0\r\n\r\nDELETE";
+  NSArray<NSString *> *methods = @[ smuggled, @"GET\nX", @"GE T", @"PATCH(" ];
+  for (NSString *method in methods) {
+    error = nil;
+    XCTAssertNil([client performRequestWithMethod:method
+                                             path:@"accounts(00000000-0000-0000-0000-00000000000b)"
+                                            query:nil
+                                          headers:nil
+                                       bodyObject:nil
+                           includeFormattedValues:NO
+                             returnRepresentation:NO
+                                 consistencyCount:NO
+                                            error:&error],
+                 @"%@", method);
+    XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code, @"%@", method);
+  }
+  XCTAssertEqual((NSUInteger)0, [transport.capturedRequests count]);
+  XCTAssertEqual((NSUInteger)0, tokenProvider.requestCount);
+
+  ALNDataverseCurlTransport *curl = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:1];
+  ALNDataverseRequest *request = [[ALNDataverseRequest alloc] initWithMethod:smuggled
+                                                                   URLString:@"http://127.0.0.1:9/api/data/v9.2/WhoAmI"
+                                                                     headers:@{}
+                                                                    bodyData:nil];
+  error = nil;
+  XCTAssertNil([curl executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorInvalidArgument, error.code);
+}
+
+- (void)testCurlTransportKeepsCredentialsOutOfArgv {
+#if defined(_WIN32)
+  XCTSkip(@"uses a POSIX shell script as a stand-in curl");
+#else
+  NSString *directory = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:[NSString stringWithFormat:@"dataverse-argv-%@", [[NSUUID UUID] UUIDString]]];
+  XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:NULL]);
+  NSString *argvPath = [directory stringByAppendingPathComponent:@"argv"];
+  NSString *stdinPath = [directory stringByAppendingPathComponent:@"stdin"];
+  NSString *curlPath = [directory stringByAppendingPathComponent:@"curl"];
+  NSString *script = [NSString stringWithFormat:@"#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%@'\ncat > '%@'\n"
+                                                 @"for arg in \"$@\"; do case \"$arg\" in @*) cat \"${arg#@}\" >> '%@';; esac; done\n"
+                                                 @"exit 7\n",
+                                                 argvPath, stdinPath, stdinPath];
+  XCTAssertTrue([script writeToFile:curlPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  XCTAssertTrue([[NSFileManager defaultManager] setAttributes:@{ NSFilePosixPermissions : @(0700) }
+                                                 ofItemAtPath:curlPath
+                                                        error:NULL]);
+
+  ALNDataverseCurlTransport *transport = [[ALNDataverseCurlTransport alloc] initWithTimeoutInterval:5];
+  transport.curlExecutablePath = curlPath;
+  ALNDataverseRequest *request =
+      [[ALNDataverseRequest alloc] initWithMethod:@"POST"
+                                        URLString:@"https://login.example/tenant/oauth2/v2.0/token"
+                                          headers:@{
+                                            @"Authorization" : @"Bearer SECRET-BEARER-TOKEN-abc123",
+                                            @"X-Quoted" : @"a \"b\" \\c",
+                                          }
+                                         bodyData:[@"grant_type=client_credentials&client_secret=SECRET-CLIENT-xyz"
+                                                      dataUsingEncoding:NSUTF8StringEncoding]];
+  NSError *error = nil;
+  XCTAssertNil([transport executeRequest:request error:&error]);
+  XCTAssertEqual((NSInteger)ALNDataverseErrorTransportFailed, error.code);
+
+  NSString *argv = [NSString stringWithContentsOfFile:argvPath encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+  NSString *input = [NSString stringWithContentsOfFile:stdinPath encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+  XCTAssertTrue([argv containsString:@"--config\n-\n"], @"%@", argv);
+  XCTAssertFalse([argv containsString:@"SECRET"], @"%@", argv);
+  XCTAssertFalse([argv containsString:@"Authorization"], @"%@", argv);
+  XCTAssertTrue([input containsString:@"header = \"Authorization: Bearer SECRET-BEARER-TOKEN-abc123\"\n"], @"%@", input);
+  XCTAssertTrue([input containsString:@"header = \"X-Quoted: a \\\"b\\\" \\\\c\"\n"], @"%@", input);
+  // The request body (and its client secret) went through an owner-only file.
+  XCTAssertTrue([input containsString:@"client_secret=SECRET-CLIENT-xyz"], @"%@", input);
+  [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
+#endif
+}
+
 @end

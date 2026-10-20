@@ -10,6 +10,7 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNMetrics.h"
+#import "ALNLogger.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNRoute.h"
@@ -28,6 +29,23 @@
   (void)error;
   context.stash[@"middleware"] = @"yes";
   [context.response setHeader:@"X-Middleware" value:@"ran"];
+  return YES;
+}
+
+@end
+
+@interface AppThrowingMiddleware : NSObject <ALNMiddleware>
+@end
+
+@implementation AppThrowingMiddleware
+
+// Raises like an ordinary middleware bug: a substring on a short header value.
+- (BOOL)processContext:(ALNContext *)context error:(NSError **)error {
+  (void)error;
+  NSString *tenant = [context.request headerValueForName:@"x-tenant"] ?: @"";
+  if ([tenant length] > 0) {
+    context.stash[@"tenant"] = [tenant substringToIndex:4];
+  }
   return YES;
 }
 
@@ -1567,6 +1585,33 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqual((NSUInteger)1, [AppFastPathController slowInvocationCount]);
 }
 
+- (void)testMiddlewareExceptionAnswers500AndLaterRequestsStillWork {
+  for (NSString *environment in @[ @"production", @"development" ]) {
+    ALNApplication *app = [self buildAppWithHaltingMiddleware:NO
+                                           performanceLogging:NO
+                                                  environment:environment
+                                                  extraConfig:nil];
+    [app addMiddleware:[[AppThrowingMiddleware alloc] init]];
+
+    ALNResponse *thrown = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{ @"x-tenant" : @"ab" }]];
+    XCTAssertEqual((NSInteger)500, thrown.statusCode, @"%@", environment);
+    NSString *body = [[NSString alloc] initWithData:thrown.bodyData encoding:NSUTF8StringEncoding] ?: @"";
+    if ([environment isEqualToString:@"production"]) {
+      XCTAssertFalse([body containsString:@"substringToIndex"], @"production 500 must not include the exception");
+      XCTAssertTrue([body containsString:@"middleware_exception"], @"%@", body);
+    }
+
+    ALNResponse *after = [app dispatchRequest:[self requestForPath:@"/dict"]];
+    XCTAssertEqual((NSInteger)200, after.statusCode, @"%@", environment);
+    ALNResponse *tenant = [app dispatchRequest:[self requestForPath:@"/dict"
+                                                         queryString:@""
+                                                             headers:@{ @"x-tenant" : @"acme" }]];
+    XCTAssertEqual((NSInteger)200, tenant.statusCode, @"%@", environment);
+  }
+}
+
 - (void)testHealthzJSONPayloadIncludesDeterministicSignalChecks {
   ALNApplication *app = [self buildAppWithHaltingMiddleware:NO];
   ALNResponse *response = [app dispatchRequest:[self requestForPath:@"/healthz"
@@ -1850,6 +1895,25 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
     local.remoteAddress = @"127.0.0.1";
     XCTAssertEqual((NSInteger)200, [loopbackApp dispatchRequest:local].statusCode, @"%@", path);
     XCTAssertEqual((NSInteger)200, [anonymousApp dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+}
+
+- (void)testOpenAPIRouteCatalogRequiresExplicitProductionOptIn {
+  for (NSString *environment in @[ @"production", @"PRODUCTION", @" Production ", @"staging", @"qa" ]) {
+  ALNApplication *closed = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : environment,
+    @"openapi" : @{ @"enabled" : @YES, @"docsUIEnabled" : @YES },
+  }];
+  for (NSString *path in @[ @"/openapi.json", @"/.well-known/openapi.json", @"/openapi" ]) {
+    XCTAssertEqual((NSInteger)404, [closed dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
+  ALNApplication *open = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : environment,
+    @"openapi" : @{ @"enabled" : @YES, @"docsUIEnabled" : @YES, @"publicInProduction" : @YES },
+  }];
+  for (NSString *path in @[ @"/openapi.json", @"/.well-known/openapi.json", @"/openapi" ]) {
+    XCTAssertEqual((NSInteger)200, [open dispatchRequest:[self requestForPath:path]].statusCode, @"%@", path);
+  }
   }
 }
 
@@ -2521,7 +2585,6 @@ static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
       }];
       NSError *startError = nil;
       XCTAssertTrue([app startWithError:&startError], @"%@ %@ %@", environment, secret, startError);
-      [app shutdown];
     }
   }
 }
@@ -2880,6 +2943,28 @@ static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
   NSDictionary *json = [self JSONObjectFromResponse:allowed];
   XCTAssertEqualObjects(@(YES), json[@"ok"]);
   [app shutdown];
+}
+
+- (void)testMultiWorkerRateLimitWarnsAtStartup {
+  for (NSNumber *enabled in @[ @YES, @NO ]) {
+    for (NSNumber *workers in @[ @1, @4 ]) {
+      ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+        @"environment" : @"test", @"logFormat" : @"json",
+        @"rateLimit" : @{ @"enabled" : enabled, @"requests" : @10 },
+        @"propaneAccessories" : @{ @"workerCount" : workers },
+      }];
+      NSPipe *pipe = [NSPipe pipe];
+      app.logger.outputFileDescriptor = pipe.fileHandleForWriting.fileDescriptor;
+      XCTAssertTrue([app startWithError:NULL]);
+      XCTAssertTrue([app startWithError:NULL]);
+      [pipe.fileHandleForWriting closeFile];
+      NSString *log = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile]
+                                          encoding:NSUTF8StringEncoding];
+      NSUInteger count = [[log componentsSeparatedByString:@"rate limit is per worker"] count] - 1;
+      XCTAssertEqual(([enabled boolValue] && [workers integerValue] > 1) ? (NSUInteger)1 : (NSUInteger)0, count);
+      app.logger.outputFileDescriptor = STDERR_FILENO;
+    }
+  }
 }
 
 @end

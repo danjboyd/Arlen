@@ -94,6 +94,41 @@ NSData *ALNHMACSHA256(NSData *input, NSData *key) {
   return ALNHMAC(input, key, EVP_sha256);
 }
 
+NSData *ALNSHA256FileHandle(NSFileHandle *handle) {
+  if (handle == nil) return nil;
+  EVP_MD_CTX *context = EVP_MD_CTX_new();
+  if (context == NULL) return nil;
+  NSData *result = nil;
+  unsigned long long offset = 0;
+  BOOL haveOffset = NO;
+  @try {
+    offset = handle.offsetInFile;
+    haveOffset = YES;
+    [handle seekToFileOffset:0];
+    BOOL ok = EVP_DigestInit_ex(context, EVP_sha256(), NULL) == 1;
+    while (ok) {
+      @autoreleasepool {
+        NSData *chunk = [handle readDataOfLength:65536];
+        if (chunk.length == 0) break;
+        ok = EVP_DigestUpdate(context, chunk.bytes, chunk.length) == 1;
+      }
+    }
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int length = 0;
+    if (ok && EVP_DigestFinal_ex(context, digest, &length) == 1) {
+      result = [NSData dataWithBytes:digest length:length];
+    }
+  } @catch (NSException *exception) {
+    (void)exception;
+  } @finally {
+    if (haveOffset) {
+      @try { [handle seekToFileOffset:offset]; } @catch (NSException *exception) { result = nil; }
+    }
+    EVP_MD_CTX_free(context);
+  }
+  return result;
+}
+
 NSData *ALNSHA256(NSData *input) {
   if (![input isKindOfClass:[NSData class]]) {
     return nil;

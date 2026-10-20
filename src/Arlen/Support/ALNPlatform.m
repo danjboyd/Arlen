@@ -1,3 +1,4 @@
+#import "ALNPrivateStorage.h"
 #import "ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
@@ -14,6 +15,7 @@
 #include <process.h>
 #include <sys/stat.h>
 #include <windows.h>
+#include <aclapi.h>
 #else
 #include <fcntl.h>
 #include <sys/file.h>
@@ -696,8 +698,26 @@ void ALNPlatformRemoveItemWhenUnmapped(NSString *path) {
 #endif
 }
 
+BOOL ALNPlatformPathHasNoControlCharacters(NSString *path) {
+  if (![path isKindOfClass:[NSString class]] || [path length] == 0) {
+    return NO;
+  }
+  NSUInteger length = [path length];
+  for (NSUInteger idx = 0; idx < length; idx++) {
+    unichar ch = [path characterAtIndex:idx];
+    if (ch < 0x20 || ch == 0x7f) {
+      return NO;
+    }
+  }
+  return YES;
+}
+
 FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
   if ([path length] == 0 || mode == NULL) {
+    return NULL;
+  }
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
+    errno = EINVAL;
     return NULL;
   }
 #if defined(_WIN32)
@@ -714,39 +734,148 @@ FILE *ALNPlatformOpenFile(NSString *path, const char *mode) {
 }
 
 int ALNPlatformOpenExclusiveLock(NSString *path) {
-  if ([path length] == 0) {
-    errno = EINVAL;
-    return -1;
-  }
+  return ALNPlatformOpenExclusiveLockWithTimeout(path, -1.0);
+}
+
+// Opens (creating, 0600) the lock file. -1 with errno on failure.
+static int ALNPlatformOpenLockFile(NSString *path) {
 #if defined(_WIN32)
-  int descriptor = _wopen((const wchar_t *)[path fileSystemRepresentation],
-                          _O_RDWR | _O_CREAT | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
-  if (descriptor < 0) {
-    return -1;
-  }
+  return _wopen((const wchar_t *)[path fileSystemRepresentation],
+                _O_RDWR | _O_CREAT | _O_BINARY | _O_NOINHERIT, _S_IREAD | _S_IWRITE);
+#else
+  int descriptor = -1;
+  do {
+    descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  } while (descriptor < 0 && errno == EINTR);
+  return descriptor;
+#endif
+}
+
+// Takes the exclusive lock on an open lock file. With wait = NO it fails at
+// once (errno EWOULDBLOCK) when another holder has it; with wait = YES it
+// blocks until the lock is free. Interrupted waits are retried.
+static int ALNPlatformLockDescriptor(int descriptor, BOOL wait) {
+#if defined(_WIN32)
   HANDLE handle = (HANDLE)_get_osfhandle(descriptor);
-  OVERLAPPED overlapped;
-  memset(&overlapped, 0, sizeof(overlapped));
-  if (handle == INVALID_HANDLE_VALUE ||
-      !LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped)) {
-    _close(descriptor);
+  if (handle == INVALID_HANDLE_VALUE) {
     errno = EIO;
     return -1;
   }
-  return descriptor;
+  OVERLAPPED overlapped;
+  memset(&overlapped, 0, sizeof(overlapped));
+  DWORD flags = LOCKFILE_EXCLUSIVE_LOCK | (wait ? 0 : LOCKFILE_FAIL_IMMEDIATELY);
+  if (LockFileEx(handle, flags, 0, MAXDWORD, MAXDWORD, &overlapped)) {
+    return 0;
+  }
+  errno = (GetLastError() == ERROR_LOCK_VIOLATION) ? EWOULDBLOCK : EIO;
+  return -1;
 #else
-  int descriptor = open([path fileSystemRepresentation], O_RDWR | O_CREAT, 0600);
+  int operation = LOCK_EX | (wait ? 0 : LOCK_NB);
+  for (;;) {
+    if (flock(descriptor, operation) == 0) {
+      return 0;
+    }
+    if (errno != EINTR) {
+      return -1;
+    }
+  }
+#endif
+}
+
+static void ALNPlatformCloseLockDescriptor(int descriptor) {
+#if defined(_WIN32)
+  _close(descriptor);
+#else
+  close(descriptor);
+#endif
+}
+
+// A blocking lock wait on its own thread, so the caller can give up after a
+// timeout. If the caller gives up first, the thread releases and closes the
+// lock as soon as it gets it.
+@interface ALNPlatformLockWaiter : NSObject
+@property(nonatomic, strong) NSCondition *condition;
+@property(nonatomic, assign) int descriptor;
+@property(nonatomic, assign) BOOL finished;
+@property(nonatomic, assign) BOOL abandoned;
+@property(nonatomic, assign) int result;
+@property(nonatomic, assign) int resultErrno;
+- (void)wait;
+@end
+
+@implementation ALNPlatformLockWaiter
+
+- (void)wait {
+  @autoreleasepool {
+    int result = ALNPlatformLockDescriptor(self.descriptor, YES);
+    int resultErrno = (result == 0) ? 0 : errno;
+    [self.condition lock];
+    if (self.abandoned) {
+      // Nobody is waiting any more; whoever needs the lock retries.
+      [self.condition unlock];
+      ALNPlatformReleaseExclusiveLock(self.descriptor);
+      if (result != 0) {
+        ALNPlatformCloseLockDescriptor(self.descriptor);
+      }
+      return;
+    }
+    self.result = result;
+    self.resultErrno = resultErrno;
+    self.finished = YES;
+    [self.condition signal];
+    [self.condition unlock];
+  }
+}
+
+@end
+
+int ALNPlatformOpenExclusiveLockWithTimeout(NSString *path, NSTimeInterval timeoutSeconds) {
+  if (!ALNPlatformPathHasNoControlCharacters(path)) {
+    errno = EINVAL;
+    return -1;
+  }
+  int descriptor = ALNPlatformOpenLockFile(path);
   if (descriptor < 0) {
     return -1;
   }
-  if (flock(descriptor, LOCK_EX) != 0) {
+  // Uncontended: no thread and no wait.
+  if (ALNPlatformLockDescriptor(descriptor, (timeoutSeconds < 0.0)) == 0) {
+    return descriptor;
+  }
+  if (timeoutSeconds < 0.0 || errno != EWOULDBLOCK) {
     int savedErrno = errno;
-    close(descriptor);
+    ALNPlatformCloseLockDescriptor(descriptor);
     errno = savedErrno;
     return -1;
   }
+
+  ALNPlatformLockWaiter *waiter = [[ALNPlatformLockWaiter alloc] init];
+  waiter.condition = [[NSCondition alloc] init];
+  waiter.descriptor = descriptor;
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeoutSeconds];
+  [NSThread detachNewThreadSelector:@selector(wait) toTarget:waiter withObject:nil];
+  [waiter.condition lock];
+  while (!waiter.finished) {
+    if (![waiter.condition waitUntilDate:deadline] && [deadline timeIntervalSinceNow] <= 0.0) {
+      break;
+    }
+  }
+  if (!waiter.finished) {
+    // The waiter thread now owns the descriptor and closes it.
+    waiter.abandoned = YES;
+    [waiter.condition unlock];
+    errno = ETIMEDOUT;
+    return -1;
+  }
+  int result = waiter.result;
+  int resultErrno = waiter.resultErrno;
+  [waiter.condition unlock];
+  if (result != 0) {
+    ALNPlatformCloseLockDescriptor(descriptor);
+    errno = resultErrno;
+    return -1;
+  }
   return descriptor;
-#endif
 }
 
 void ALNPlatformReleaseExclusiveLock(int descriptor) {
@@ -766,3 +895,50 @@ void ALNPlatformReleaseExclusiveLock(int descriptor) {
   close(descriptor);
 #endif
 }
+
+#if defined(_WIN32)
+// NTFS access control is a DACL, not POSIX permission bits. Restrict private
+// service storage to the current user and protect it from inherited broad ACLs.
+BOOL ALNWindowsSecurePrivatePath(NSString *path, BOOL directory, NSError **error) {
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE file = CreateFileW((const wchar_t *)wide.bytes, READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+  DWORD failure = ERROR_SUCCESS;
+  HANDLE token = NULL;
+  PACL acl = NULL;
+  NSMutableData *tokenData = nil;
+  if (file == INVALID_HANDLE_VALUE) { failure = GetLastError(); goto done; }
+  BY_HANDLE_FILE_INFORMATION info;
+  if (!GetFileInformationByHandle(file, &info)) { failure = GetLastError(); goto done; }
+  if ((info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+      !!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != !!directory) {
+    failure = ERROR_ACCESS_DENIED; goto done;
+  }
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) { failure = GetLastError(); goto done; }
+  DWORD size = 0;
+  GetTokenInformation(token, TokenUser, NULL, 0, &size);
+  tokenData = [NSMutableData dataWithLength:size];
+  if (!GetTokenInformation(token, TokenUser, tokenData.mutableBytes, size, &size)) {
+    failure = GetLastError(); goto done;
+  }
+  EXPLICIT_ACCESSW entry;
+  memset(&entry, 0, sizeof(entry));
+  entry.grfAccessPermissions = FILE_ALL_ACCESS;
+  entry.grfAccessMode = SET_ACCESS;
+  entry.grfInheritance = directory ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
+  BuildTrusteeWithSidW(&entry.Trustee, ((TOKEN_USER *)tokenData.mutableBytes)->User.Sid);
+  failure = SetEntriesInAclW(1, &entry, NULL, &acl);
+  if (failure == ERROR_SUCCESS) failure = SetSecurityInfo(file, SE_FILE_OBJECT,
+      DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, acl, NULL);
+done:
+  if (acl) LocalFree(acl);
+  if (token) CloseHandle(token);
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  if (failure != ERROR_SUCCESS && error) *error = [NSError errorWithDomain:NSOSStatusErrorDomain
+      code:failure userInfo:@{NSLocalizedDescriptionKey: @"private storage ACL could not be enforced"}];
+  return failure == ERROR_SUCCESS;
+}
+#endif

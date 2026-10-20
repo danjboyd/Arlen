@@ -1,13 +1,17 @@
+#import "ALNNotificationsCatalog.h"
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
 #import <unistd.h>
+#import <sys/stat.h>
 
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNNotificationsModule.h"
 #import "ALNRealtime.h"
 #import "../shared/ALNTestSupport.h"
+#import "../shared/ALNTestWait.h"
+#import "../shared/ALNTestProcessCheckpoint.h"
 
 @interface Phase16BNotification : NSObject <ALNNotificationDefinition>
 @end
@@ -144,6 +148,37 @@
 
 @implementation Phase16BTests
 
+- (NSArray<NSString *> *)childArgumentsForMethod:(NSString *)method bundlePath:(NSString *)bundlePath {
+#if defined(__APPLE__)
+  return @[ @"-XCTest", [@"Phase16BTests/" stringByAppendingString:method], bundlePath ];
+#else
+  return @[ @"-output-format", @"apple",
+            [@"-only-testing:ArlenUnitTests/Phase16BTests/" stringByAppendingString:method], bundlePath ];
+#endif
+}
+
+- (void)assertSelectedChildFinished:(NSTask *)child outputPath:(NSString *)outputPath {
+  BOOL exited = ALNTestWaitForTaskExit(child, 30.0);
+  if (!exited) {
+    [child terminate];
+    [child waitUntilExit];
+  }
+  NSData *data = [NSData dataWithContentsOfFile:outputPath];
+  NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+  XCTAssertTrue(exited, @"child timed out: %@", output);
+  XCTAssertEqual(0, child.terminationStatus, @"%@", output);
+  XCTAssertTrue([output containsString:@"Executed 1 test"], @"selected child test did not run: %@", output);
+}
+
+- (NSDictionary *)persistedStateAtPath:(NSString *)path {
+  NSError *error = nil;
+  ALNNotificationsCatalog *catalog = [[ALNNotificationsCatalog alloc]
+      initWithPath:[path stringByAppendingString:@".sqlite3"] legacyPath:path error:&error];
+  NSDictionary *state = [catalog readStateWithError:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  return state;
+}
+
 - (void)setUp {
   [super setUp];
   [[ALNRealtimeHub sharedHub] reset];
@@ -153,6 +188,12 @@
   NSString *directory = ALNTestTemporaryDirectory(@"arlen-phase16b");
   XCTAssertNotNil(directory);
   return directory;
+}
+
+- (BOOL)waitForFileAtPath:(NSString *)path {
+  return ALNTestWaitUntil(5.0, 0.05, ^BOOL {
+    return [[NSFileManager defaultManager] fileExistsAtPath:path];
+  });
 }
 
 - (ALNApplication *)applicationWithStatePath:(NSString *)statePath {
@@ -476,6 +517,285 @@
   NSArray *outbox = [runtime outboxSnapshot];
   NSPredicate *queuedPredicate = [NSPredicate predicateWithFormat:@"status == %@", @"queued"];
   XCTAssertEqual((NSUInteger)2, [[outbox filteredArrayUsingPredicate:queuedPredicate] count]);
+}
+
+- (void)testNotificationStateTransactionsAcrossProcesses {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *sharedPath = environment[@"ARLEN_NOTIFICATIONS_SHARED_STATE_PATH"];
+  if ([sharedPath length] > 0) {
+    ALNApplication *app = [self applicationWithStatePath:sharedPath];
+    [self registerModulesForApplication:app];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%d", getpid()];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    __block NSUInteger readyCount = 0;
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.05, ^BOOL {
+      NSArray *names = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[sharedPath stringByDeletingLastPathComponent]
+                                                                           error:NULL];
+      readyCount = 0;
+      for (NSString *name in names) {
+        if ([name hasPrefix:[[sharedPath lastPathComponent] stringByAppendingString:@".ready."]]) readyCount++;
+      }
+      return readyCount >= 2U;
+    }));
+    XCTAssertEqual((NSUInteger)2, readyCount);
+    NSString *recipient = [NSString stringWithFormat:@"worker-%d", getpid()];
+    ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+    NSError *error = nil;
+    NSDictionary *payload = @{ @"recipient" : @"shared-recipient", @"email" : @"reader@example.test", @"name" : @"Reader" };
+    NSDictionary *sent = [runtime testSendNotificationIdentifier:@"phase16b.digest"
+                                                         payload:payload channels:@[ @"in_app" ] error:&error];
+    XCTAssertNotNil(sent);
+    XCTAssertNil(error);
+    NSDictionary *preference = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+    NSDictionary *updated = [runtime updateNotificationPreferences:preference forRecipient:recipient error:&error];
+    XCTAssertNotNil(updated);
+    XCTAssertNil(error);
+    return;
+  }
+
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-process-state.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSUInteger index = 0; index < 2U; index++) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+    child.arguments = [self childArgumentsForMethod:@"testNotificationStateTransactionsAcrossProcesses" bundlePath:bundlePath];
+    NSString *outputPath = [statePath stringByAppendingFormat:@".child-%lu.log", (unsigned long)index];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
+    child.standardOutput = output;
+    child.standardError = output;
+    NSMutableDictionary *childEnvironment = [environment mutableCopy];
+    childEnvironment[@"ARLEN_NOTIFICATIONS_SHARED_STATE_PATH"] = statePath;
+    child.environment = childEnvironment;
+    [child launch];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
+  }
+  for (NSDictionary *entry in children) {
+    [self assertSelectedChildFinished:entry[@"task"] outputPath:entry[@"outputPath"]];
+    [entry[@"outputHandle"] closeFile];
+  }
+  NSDictionary *state = [self persistedStateAtPath:statePath];
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"outboxEntries"] count]);
+  XCTAssertEqual((NSUInteger)1, [(NSDictionary *)state[@"inboxByRecipient"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"inboxByRecipient"][@"shared-recipient"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSDictionary *)state[@"preferencesByRecipient"] count]);
+  XCTAssertEqual((NSUInteger)2, [(NSArray *)state[@"recentFanoutEvents"] count]);
+  for (NSDictionary *entry in state[@"outboxEntries"]) {
+    XCTAssertEqualObjects(@"delivered", entry[@"status"]);
+  }
+}
+
+- (void)testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *sharedPath = environment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_PATH"];
+  NSString *role = environment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_ROLE"];
+  if ([sharedPath length] > 0) {
+    [self registerModulesForApplication:[self applicationWithStatePath:sharedPath]];
+    NSString *readyPath = [sharedPath stringByAppendingFormat:@".ready.%@", role];
+    XCTAssertTrue([@"ready" writeToFile:readyPath atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    XCTAssertTrue(ALNTestWaitUntil(5.0, 0.05, ^BOOL {
+      return [[NSFileManager defaultManager] fileExistsAtPath:[sharedPath stringByAppendingString:@".ready.first"]] &&
+             [[NSFileManager defaultManager] fileExistsAtPath:[sharedPath stringByAppendingString:@".ready.second"]];
+    }));
+    ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+    NSError *error = nil;
+    if ([role isEqualToString:@"first"]) {
+      NSDictionary *payload = @{ @"recipient" : @"shared-recipient", @"email" : @"reader@example.test", @"name" : @"Reader" };
+      XCTAssertNotNil([runtime testSendNotificationIdentifier:@"phase16b.digest"
+                                                     payload:payload channels:@[ @"in_app" ] error:&error]);
+      XCTAssertNil(error);
+      NSDictionary *preference = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+      XCTAssertNotNil([runtime updateNotificationPreferences:preference forRecipient:@"shared-recipient" error:&error]);
+      XCTAssertNil(error);
+      XCTAssertTrue([@"done" writeToFile:[sharedPath stringByAppendingString:@".first"]
+                               atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+      XCTAssertTrue([self waitForFileAtPath:[sharedPath stringByAppendingString:@".second"]]);
+      XCTAssertEqualObjects(@YES, [runtime notificationPreferencesForRecipient:@"shared-recipient"][@"phase16b.digest"][@"email"]);
+      XCTAssertEqualObjects(@0, [runtime inboxSummaryForRecipient:@"shared-recipient"][@"unreadCount"]);
+      XCTAssertTrue([@"done" writeToFile:[sharedPath stringByAppendingString:@".third"]
+                               atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+      XCTAssertTrue([self waitForFileAtPath:[sharedPath stringByAppendingString:@".fourth"]]);
+      // A worker that held the old preference must not resurrect a cleared
+      // preference when it next writes unrelated delivery state.
+      NSDictionary *otherPayload = @{ @"recipient" : @"other-recipient", @"email" : @"reader@example.test", @"name" : @"Other" };
+      XCTAssertNotNil([runtime testSendNotificationIdentifier:@"phase16b.digest"
+                                                     payload:otherPayload channels:@[ @"in_app" ] error:&error]);
+      XCTAssertEqual((NSUInteger)0, [[runtime notificationPreferencesForRecipient:@"shared-recipient"] count]);
+    } else {
+      XCTAssertTrue([self waitForFileAtPath:[sharedPath stringByAppendingString:@".first"]]);
+      XCTAssertEqualObjects(@1, [runtime inboxSummaryForRecipient:@"shared-recipient"][@"unreadCount"]);
+      XCTAssertEqualObjects(@NO, [runtime notificationPreferencesForRecipient:@"shared-recipient"][@"phase16b.digest"][@"email"]);
+      NSDictionary *marked = [runtime markAllInboxEntriesReadForRecipient:@"shared-recipient" error:&error];
+      XCTAssertNotNil(marked);
+      XCTAssertEqualObjects(@1, marked[@"updatedCount"]);
+      XCTAssertNil(error);
+      NSDictionary *preference = @{ @"phase16b.digest" : @{ @"email" : @YES } };
+      XCTAssertNotNil([runtime updateNotificationPreferences:preference forRecipient:@"shared-recipient" error:&error]);
+      XCTAssertNil(error);
+      XCTAssertTrue([@"done" writeToFile:[sharedPath stringByAppendingString:@".second"]
+                               atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+      XCTAssertTrue([self waitForFileAtPath:[sharedPath stringByAppendingString:@".third"]]);
+      XCTAssertNotNil([runtime updateNotificationPreferences:@{} forRecipient:@"shared-recipient" error:&error]);
+      XCTAssertNil(error);
+      XCTAssertTrue([@"done" writeToFile:[sharedPath stringByAppendingString:@".fourth"]
+                               atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    }
+    return;
+  }
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-same-recipient.plist"];
+  NSString *runner = [[[NSProcessInfo processInfo] arguments] firstObject];
+  NSString *bundlePath = [[NSBundle bundleForClass:[self class]] bundlePath];
+  NSMutableArray *children = [NSMutableArray array];
+  for (NSString *childRole in @[ @"first", @"second" ]) {
+    NSTask *child = [[NSTask alloc] init];
+    child.launchPath = runner;
+    child.arguments = [self childArgumentsForMethod:@"testNotificationFreshReadsAndSameRecipientMutationsAcrossProcesses" bundlePath:bundlePath];
+    NSString *outputPath = [statePath stringByAppendingFormat:@".%@.log", childRole];
+    XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:outputPath contents:nil attributes:nil]);
+    NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+    XCTAssertNotNil(output);
+    child.standardOutput = output;
+    child.standardError = output;
+    NSMutableDictionary *childEnvironment = [environment mutableCopy];
+    childEnvironment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_PATH"] = statePath;
+    childEnvironment[@"ARLEN_NOTIFICATIONS_SAME_RECIPIENT_ROLE"] = childRole;
+    child.environment = childEnvironment;
+    [child launch];
+    [children addObject:@{ @"task" : child, @"outputPath" : outputPath, @"outputHandle" : output }];
+  }
+  for (NSDictionary *entry in children) {
+    [self assertSelectedChildFinished:entry[@"task"] outputPath:entry[@"outputPath"]];
+    [entry[@"outputHandle"] closeFile];
+  }
+  NSDictionary *state = [self persistedStateAtPath:statePath];
+  NSArray *inbox = state[@"inboxByRecipient"][@"shared-recipient"];
+  XCTAssertEqual((NSUInteger)1, [inbox count]);
+  XCTAssertEqualObjects(@YES, inbox[0][@"read"]);
+  XCTAssertEqual((NSUInteger)0, [(NSDictionary *)state[@"preferencesByRecipient"][@"shared-recipient"] count]);
+}
+
+- (void)testCorruptLegacyStateFailsStartupAndBinaryImportCanBeRetried {
+  NSString *path = [[self temporaryDirectory] stringByAppendingPathComponent:@"legacy.plist"];
+  NSData *corrupt = [@"corrupt legacy" dataUsingEncoding:NSUTF8StringEncoding];
+  XCTAssertTrue([corrupt writeToFile:path atomically:YES]);
+  ALNApplication *app = [self applicationWithStatePath:path];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  error = nil;
+  XCTAssertFalse([[[ALNNotificationsModule alloc] init] registerWithApplication:app error:&error]);
+  XCTAssertNotNil(error.localizedDescription);
+  XCTAssertEqualObjects(corrupt, [NSData dataWithContentsOfFile:path]);
+  XCTAssertFalse([[[ALNNotificationsModule alloc] init] registerWithApplication:app error:NULL]);
+  NSDictionary *legacy = @{ @"version":@1, @"outboxEntries":@[], @"inboxByRecipient":@{},
+      @"preferencesByRecipient":@{@"reader":@{@"phase16b.digest":@{@"email":@NO}}},
+      @"recentFanoutEvents":@[], @"nextEntrySequence":@0 };
+  NSData *binary = [NSPropertyListSerialization dataWithPropertyList:legacy format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+  XCTAssertTrue([binary writeToFile:path atomically:YES]);
+  [self registerModulesForApplication:[self applicationWithStatePath:path]];
+  XCTAssertEqualObjects(@NO, [[ALNNotificationsModuleRuntime sharedRuntime]
+      notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+  XCTAssertEqualObjects(binary, [NSData dataWithContentsOfFile:path]);
+  // A committed catalog remains authoritative even if its backup is damaged.
+  XCTAssertTrue([corrupt writeToFile:path atomically:YES]);
+  [self registerModulesForApplication:[self applicationWithStatePath:path]];
+  XCTAssertEqualObjects(@NO, [[ALNNotificationsModuleRuntime sharedRuntime]
+      notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+}
+
+#if defined(_WIN32)
+- (BOOL)corruptNotificationCatalogAtPath:(NSString *)path payload:(NSData *)payload {
+  NSTask *child = [[NSTask alloc] init];
+  child.launchPath = ALNTestToolPath(@"python3");
+  child.arguments = @[@"-c", @"import sqlite3,sys,base64; c=sqlite3.connect(sys.argv[1]); c.execute(\"UPDATE catalog SET value=? WHERE kind='meta'\",(base64.b64decode(sys.argv[2]),)); c.commit()",
+      path, [payload base64EncodedStringWithOptions:0]];
+  child.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  child.standardError = [NSFileHandle fileHandleWithNullDevice];
+  BOOL exited = NO;
+  BOOL reaped = NO;
+  @try {
+    [child launch];
+    exited = ALNTestWaitForTaskExit(child, 15.0);
+  } @finally {
+    reaped = ALNTestReapChild(child);
+  }
+  return exited && reaped && child.terminationStatus == 0;
+}
+#endif
+
+- (void)testCorruptNotificationStateDoesNotGetOverwrittenByMutation {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-corrupt-state.plist"];
+  [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSDictionary *initial = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+  NSError *error = nil;
+  XCTAssertNotNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNil(error);
+  statePath = [statePath stringByAppendingString:@".sqlite3"];
+  NSData *corrupt = [@"not a property list" dataUsingEncoding:NSUTF8StringEncoding];
+#if defined(_WIN32)
+  // System SQLite denies delete sharing. Verify the OS prevents replacement,
+  // then commit corrupt record bytes through a peer to exercise fail-closed
+  // runtime behavior without weakening the corruption/no-overwrite assertions.
+  NSData *originalBytes = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertFalse([corrupt writeToFile:statePath options:NSDataWritingAtomic error:NULL]);
+  XCTAssertEqualObjects(originalBytes, [NSData dataWithContentsOfFile:statePath]);
+  BOOL injected = [self corruptNotificationCatalogAtPath:statePath payload:corrupt];
+  XCTAssertTrue(injected);
+  if (!injected) return;
+  corrupt = [NSData dataWithContentsOfFile:statePath];
+#else
+  XCTAssertTrue([corrupt writeToFile:statePath atomically:YES]);
+#endif
+  error = nil;
+  XCTAssertNil([runtime updateNotificationPreferences:@{} forRecipient:@"reader" error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(corrupt, [NSData dataWithContentsOfFile:statePath]);
+  XCTAssertEqual((NSUInteger)0, [[runtime notificationPreferencesForRecipient:@"reader"] count]);
+  XCTAssertEqual((NSUInteger)0, [[runtime outboxSnapshot] count]);
+  NSData *wrongRoot = [NSPropertyListSerialization dataWithPropertyList:@[ @"not-a-dictionary" ]
+                                                                  format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
+#if defined(_WIN32)
+  injected = [self corruptNotificationCatalogAtPath:statePath payload:wrongRoot];
+  XCTAssertTrue(injected);
+  if (!injected) return;
+  wrongRoot = [NSData dataWithContentsOfFile:statePath];
+#else
+  XCTAssertTrue([wrongRoot writeToFile:statePath atomically:YES]);
+#endif
+  error = nil;
+  XCTAssertNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(wrongRoot, [NSData dataWithContentsOfFile:statePath]);
+}
+
+- (void)testFailedNotificationStateWriteRetainsLastDurablePreferences {
+#if defined(_WIN32)
+  XCTSkip(@"POSIX directory permissions are unavailable on Windows");
+#else
+  NSString *directory = [self temporaryDirectory];
+  NSString *statePath = [directory stringByAppendingPathComponent:@"notifications-write-failure.plist"];
+  [self registerModulesForApplication:[self applicationWithStatePath:statePath]];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSError *error = nil;
+  NSDictionary *initial = @{ @"phase16b.digest" : @{ @"email" : @NO } };
+  XCTAssertNotNil([runtime updateNotificationPreferences:initial forRecipient:@"reader" error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual(0, chmod([directory fileSystemRepresentation], 0500));
+  @try {
+    NSDictionary *changed = @{ @"phase16b.digest" : @{ @"email" : @YES } };
+    error = nil;
+    XCTAssertNil([runtime updateNotificationPreferences:changed forRecipient:@"reader" error:&error]);
+    XCTAssertNotNil(error);
+  } @finally {
+    XCTAssertEqual(0, chmod([directory fileSystemRepresentation], 0700));
+  }
+  NSDictionary *durable = [self persistedStateAtPath:statePath];
+  XCTAssertEqualObjects(@NO, durable[@"preferencesByRecipient"][@"reader"][@"phase16b.digest"][@"email"]);
+  XCTAssertEqualObjects(@NO, [runtime notificationPreferencesForRecipient:@"reader"][@"phase16b.digest"][@"email"]);
+#endif
 }
 
 @end

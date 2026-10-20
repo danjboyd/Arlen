@@ -5,11 +5,17 @@
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNFileResponse.h"
+#import "ALNFileResponseInternal.h"
 #import "ALNMIMETypes.h"
 #import "ALNPlatform.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "../shared/ALNWebTestSupport.h"
+#import "../shared/ALNTestSupport.h"
+#if defined(_WIN32)
+#include <windows.h>
+#include <winioctl.h>
+#endif
 
 static NSString *gFileResponseTestMediaPath = nil;
 static NSDictionary *gFileResponseTestOptions = nil;
@@ -51,6 +57,45 @@ static NSDictionary *gFileResponseTestOptions = nil;
 @end
 
 @implementation FileResponseTests
+
+- (void)testWindowsSparseFileKeeps64BitSizesAndRangeOffsets {
+#if defined(_WIN32)
+  XCTAssertEqual((NSUInteger)8, sizeof(off_t));
+  NSString *path = [self.directory stringByAppendingPathComponent:@"large-sparse.bin"];
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"] dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  HANDLE file = CreateFileW((const wchar_t *)wide.bytes, GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+  XCTAssertNotEqual(INVALID_HANDLE_VALUE, file);
+  if (file == INVALID_HANDLE_VALUE) return;
+  const unsigned long long size = 3ULL * 1024 * 1024 * 1024 + 123;
+  DWORD count = 0;
+  BOOL sparse = DeviceIoControl(file, FSCTL_SET_SPARSE, NULL, 0, NULL, 0, &count, NULL);
+  LARGE_INTEGER end;
+  end.QuadPart = (LONGLONG)size;
+  BOOL extended = sparse && SetFilePointerEx(file, end, NULL, FILE_BEGIN) && SetEndOfFile(file);
+  CloseHandle(file);
+  XCTAssertTrue(extended);
+  if (!extended) return;
+  struct stat info;
+  XCTAssertEqual(0, ALNFileResponseStatPath(path, &info));
+  XCTAssertEqual(size, (unsigned long long)info.st_size);
+  NSString *range = [NSString stringWithFormat:@"bytes=%llu-%llu", size - 11, size - 1];
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET" path:@"/large" queryString:@"" headers:@{@"range":range} body:[NSData data]];
+  ALNResponse *response = [ALNResponse new];
+  XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:request filePath:path contentType:nil options:nil]);
+  XCTAssertEqual((NSInteger)206, response.statusCode);
+  XCTAssertEqual(size - 11, response.fileBodyOffset);
+  XCTAssertEqual(11ULL, response.fileBodyLength);
+  NSFileHandle *reader = ALNTestOpenDeleteSharingReader(path);
+  ALNRequest *head = [[ALNRequest alloc] initWithMethod:@"HEAD" path:@"/large" queryString:@"" headers:@{} body:[NSData data]];
+  XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:head fileHandle:reader contentType:nil options:nil]);
+  XCTAssertEqual(size, response.fileBodyFullLength);
+  [reader closeFile];
+#else
+  XCTSkip(@"Windows file-offset ABI regression");
+#endif
+}
 
 - (void)setUp {
   [super setUp];
@@ -399,6 +444,107 @@ static NSDictionary *gFileResponseTestOptions = nil;
                                           options:nil]);
   XCTAssertEqual((NSInteger)404, response.statusCode);
   XCTAssertNil(response.fileBodyPath);
+}
+
+// A C path ends at U+0000, so "secrets.txt\0.pdf" would pass an NSString-level
+// hasSuffix:@".pdf" check and then serve secrets.txt.
+- (void)testPrepareResponseRefusesPathsWithControlCharacters {
+  NSString *secret = [self.directory stringByAppendingPathComponent:@"secrets.txt"];
+  XCTAssertTrue([@"top secret" writeToFile:secret atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  ALNRequest *request = ALNTestRequestWithMethod(@"GET", @"/x", @"", @{}, nil);
+
+  NSArray<NSString *> *paths = @[
+    [NSString stringWithFormat:@"%@%C.pdf", secret, (unichar)0],
+    [NSString stringWithFormat:@"%@%C", secret, (unichar)0x0a],
+    [NSString stringWithFormat:@"%@%C", secret, (unichar)0x7f],
+  ];
+  for (NSString *path in paths) {
+    ALNResponse *response = [[ALNResponse alloc] init];
+    XCTAssertFalse([ALNFileResponse prepareResponse:response
+                                         forRequest:request
+                                           filePath:path
+                                        contentType:@"application/pdf"
+                                            options:nil]);
+    XCTAssertEqual((NSInteger)404, response.statusCode);
+    XCTAssertNil(response.fileBodyPath);
+  }
+
+  // Format characters such as U+200D (used in emoji names) are not controls.
+  NSString *emoji = [self.directory stringByAppendingPathComponent:
+                                        [NSString stringWithFormat:@"family%C.txt", (unichar)0x200d]];
+  XCTAssertTrue([@"ok" writeToFile:emoji atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+  ALNResponse *response = [[ALNResponse alloc] init];
+  XCTAssertTrue([ALNFileResponse prepareResponse:response
+                                      forRequest:request
+                                        filePath:emoji
+                                     contentType:@"text/plain"
+                                         options:nil]);
+  XCTAssertEqualObjects(emoji, response.fileBodyPath);
+}
+
+- (void)testOpenFileResponsePinsBytesAndPreservesRangeAndValidators {
+  NSFileHandle *handle = ALNTestOpenDeleteSharingReader(gFileResponseTestMediaPath);
+  XCTAssertNotNil(handle);
+  NSDictionary *options = @{ ALNFileResponseETagOption : @"\"pinned\"" };
+  for (NSDictionary *headers in @[ @{}, @{ @"range" : @"bytes=2-5" }, @{ @"if-none-match" : @"\"pinned\"" } ]) {
+    ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET" path:@"/download" queryString:@"" headers:headers body:[NSData data]];
+    ALNResponse *response = [[ALNResponse alloc] init];
+    XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:request fileHandle:handle contentType:@"application/octet-stream" options:options]);
+    if (headers[@"if-none-match"] != nil) {
+      XCTAssertEqual((NSInteger)304, response.statusCode);
+      XCTAssertNil(response.fileBodyHandle);
+    } else {
+      XCTAssertEqualObjects(handle, response.fileBodyHandle);
+      XCTAssertEqual(headers[@"range"] ? (NSInteger)206 : (NSInteger)200, response.statusCode);
+      XCTAssertEqual(headers[@"range"] ? 4ULL : 16ULL, response.fileBodyLength);
+    }
+  }
+  XCTAssertTrue(ALNTestReplaceFilePath([@"replacement" dataUsingEncoding:NSUTF8StringEncoding], gFileResponseTestMediaPath));
+  [handle seekToFileOffset:0];
+  XCTAssertEqualObjects(self.payload, [handle readDataToEndOfFile]);
+  ALNResponse *head = [[ALNResponse alloc] init];
+  ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"HEAD" path:@"/download" queryString:@"" headers:@{} body:[NSData data]];
+  XCTAssertTrue([ALNFileResponse prepareResponse:head forRequest:request fileHandle:handle contentType:nil options:options]);
+  XCTAssertEqual(16ULL, head.fileBodyLength);
+  [head clearBody];
+  XCTAssertNil(head.fileBodyHandle);
+  [handle closeFile];
+}
+
+- (void)testClearingOpenFileResponseReleasesItsHandle {
+  __weak NSFileHandle *released = nil;
+  @autoreleasepool {
+    NSFileHandle *handle = [NSFileHandle fileHandleForReadingAtPath:gFileResponseTestMediaPath];
+    released = handle;
+    ALNResponse *response = [[ALNResponse alloc] init];
+    ALNRequest *request = [[ALNRequest alloc] initWithMethod:@"GET" path:@"/file" queryString:@"" headers:@{} body:[NSData data]];
+    XCTAssertTrue([ALNFileResponse prepareResponse:response forRequest:request fileHandle:handle contentType:nil options:nil]);
+    handle = nil;
+    XCTAssertNotNil(response.fileBodyHandle);
+    [response clearBody];
+    XCTAssertNil(response.fileBodyHandle);
+  }
+  XCTAssertNil(released);
+}
+
+- (void)testWindowsReadDescriptorHasIndependentPositionOnPinnedObject {
+#if defined(_WIN32)
+  NSFileHandle *original = ALNTestOpenDeleteSharingReader(gFileResponseTestMediaPath);
+  XCTAssertNotNil(original);
+  XCTAssertTrue(ALNTestReplaceFilePath([@"replacement bytes" dataUsingEncoding:NSUTF8StringEncoding], gFileResponseTestMediaPath));
+  int descriptor = ALNFileResponseDuplicateReadDescriptor(original.fileDescriptor);
+  XCTAssertGreaterThanOrEqual(descriptor, 0);
+  if (descriptor < 0) return;
+  NSFileHandle *copy = [[NSFileHandle alloc] initWithFileDescriptor:descriptor closeOnDealloc:YES];
+  [original seekToFileOffset:2];
+  [copy seekToFileOffset:6];
+  XCTAssertEqualObjects([@"2" dataUsingEncoding:NSUTF8StringEncoding], [original readDataOfLength:1]);
+  XCTAssertEqualObjects([@"6" dataUsingEncoding:NSUTF8StringEncoding], [copy readDataOfLength:1]);
+  [original closeFile];
+  [copy closeFile];
+#else
+  XCTSkip(@"POSIX file responses use positioned pread");
+#endif
 }
 
 @end

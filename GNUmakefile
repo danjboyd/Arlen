@@ -46,6 +46,7 @@ MIGRATION_SAMPLE_SERVER_TOOL := $(BUILD_DIR)/migration-sample-server$(TOOL_EXEEX
 ARLEN_DATA_EXAMPLE_TOOL := $(BUILD_DIR)/arlen-data-example$(TOOL_EXEEXT)
 ARLEN_TOOL := $(BUILD_DIR)/arlen$(TOOL_EXEEXT)
 JSON_PERF_BENCH_TOOL := $(BUILD_DIR)/json-perf-bench$(TOOL_EXEEXT)
+RESPONSE_HEADER_PERF_BENCH_TOOL := $(BUILD_DIR)/response-header-perf-bench$(TOOL_EXEEXT)
 DISPATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/dispatch-perf-bench$(TOOL_EXEEXT)
 HTTP_PARSE_PERF_BENCH_TOOL := $(BUILD_DIR)/http-parse-perf-bench$(TOOL_EXEEXT)
 ROUTE_MATCH_PERF_BENCH_TOOL := $(BUILD_DIR)/route-match-perf-bench$(TOOL_EXEEXT)
@@ -84,7 +85,7 @@ ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 # gnustep-make names the runner xctest.exe on Windows, and the toolchain's
 # Foundation.h needs HAVE_MODE_T there (see FEATURE_FLAGS below).
 VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest.exe
-VENDORED_XCTEST_MAKE_ARGS := ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1
+VENDORED_XCTEST_MAKE_ARGS := 'ADDITIONAL_OBJCFLAGS=-DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64'
 else
 VENDORED_XCTEST := $(VENDORED_TOOLS_XCTEST_DIR)/obj/xctest
 VENDORED_XCTEST_MAKE_ARGS :=
@@ -258,6 +259,7 @@ FEATURE_FLAGS += -UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1
 # Foundation.h includes <dispatch/dispatch.h>, whose os/generic_win_base.h
 # typedefs mode_t as int unless HAVE_MODE_T is set; MinGW already defines it.
 FEATURE_FLAGS += -DHAVE_MODE_T=1
+FEATURE_FLAGS += -D_FILE_OFFSET_BITS=64
 # The gnustep-cli toolchain's gnustep-base (1.31.1) neither declares nor
 # implements NSJSONWritingSortedKeys. Give it Apple's value (1 << 1) so
 # sorted-keys requests compile, and have ALNJSONSerialization write them with
@@ -399,6 +401,7 @@ MODULE_GENERATED_OBJS := $(call objs_from,$(MODULE_GENERATED_SRCS))
 EOCC_ENTRY_OBJS := $(call objs_from,tools/eocc.m)
 EOC_RUNTIME_OBJS := $(call objs_from,$(EOC_RUNTIME_SRCS))
 ARLEN_ENTRY_OBJS := $(call objs_from,tools/arlen.m)
+RUNTIME_CONCURRENCY_FIXTURE_OBJS := $(call objs_from,tools/runtime_concurrency_fixture.m)
 BOOMHAUER_ENTRY_OBJS := $(call objs_from,tools/boomhauer.m)
 SMOKE_RENDER_ENTRY_OBJS := $(call objs_from,tools/eoc_smoke_render.m)
 TECH_DEMO_SERVER_ENTRY_OBJS := $(call objs_from,examples/tech_demo/src/tech_demo_server.m)
@@ -408,6 +411,7 @@ AUTH_PRIMITIVES_SERVER_ENTRY_OBJS := $(call objs_from,examples/auth_primitives/s
 MIGRATION_SAMPLE_SERVER_ENTRY_OBJS := $(call objs_from,examples/gsweb_migration/src/migration_sample_server.m)
 ARLEN_DATA_EXAMPLE_ENTRY_OBJS := $(call objs_from,examples/arlen_data/src/arlen_data_example.m)
 JSON_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/json_perf_bench.m)
+RESPONSE_HEADER_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/response_header_perf_bench.m)
 DISPATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/dispatch_perf_bench.m)
 HTTP_PARSE_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/http_parse_perf_bench.m)
 ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS := $(call objs_from,tools/route_match_perf_bench.m)
@@ -441,7 +445,7 @@ PHASE24_WINDOWS_RUNTIME_TEST_OBJS := $(call objs_from,$(PHASE24_WINDOWS_RUNTIME_
 
 MCP_EXAMPLE_OBJS := $(call objs_from,examples/mcp_app/main.m)
 
-ALL_OBJECTS := $(sort $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
+ALL_OBJECTS := $(sort $(RUNTIME_CONCURRENCY_FIXTURE_OBJS) $(RESPONSE_HEADER_PERF_BENCH_ENTRY_OBJS) $(MCP_EXAMPLE_OBJS) $(FRAMEWORK_OBJS) $(MODULE_OBJS) $(ROOT_GENERATED_OBJS) $(TECH_DEMO_GENERATED_OBJS) $(MODULE_GENERATED_OBJS) $(EOCC_ENTRY_OBJS) $(ARLEN_ENTRY_OBJS) $(BOOMHAUER_ENTRY_OBJS) $(SMOKE_RENDER_ENTRY_OBJS) $(TECH_DEMO_SERVER_ENTRY_OBJS) $(API_REFERENCE_SERVER_ENTRY_OBJS) $(PHASE28_REFERENCE_SERVER_ENTRY_OBJS) $(AUTH_PRIMITIVES_SERVER_ENTRY_OBJS) $(MIGRATION_SAMPLE_SERVER_ENTRY_OBJS) $(ARLEN_DATA_EXAMPLE_ENTRY_OBJS) $(JSON_PERF_BENCH_ENTRY_OBJS) $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ROUTE_MATCH_PERF_BENCH_ENTRY_OBJS) $(BACKEND_CONTRACT_MATRIX_ENTRY_OBJS) $(PHASE23_LIVE_SMOKE_ENTRY_OBJS) $(PHASE26_ORM_PERF_ENTRY_OBJS) $(ARLEN_ORM_REFERENCE_ENTRY_OBJS) $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $(UNIT_TEST_OBJS) $(INTEGRATION_TEST_OBJS) $(BROWSER_ERROR_AUDIT_TEST_OBJS) $(TEST_SHARED_OBJS) $(PHASE20_SQL_BUILDER_TEST_OBJS) $(PHASE20_SCHEMA_TEST_OBJS) $(PHASE20_POSTGRES_LIVE_TEST_OBJS) $(PHASE20_MSSQL_LIVE_TEST_OBJS) $(PHASE20_ROUTING_TEST_OBJS) $(PHASE21_TEMPLATE_TEST_OBJS) $(PHASE23_DATAVERSE_TEST_OBJS) $(PHASE25_LIVE_TEST_OBJS) $(PHASE26_ORM_TEST_OBJS) $(PHASE26_ORM_UNIT_TEST_OBJS) $(PHASE26_ORM_GENERATED_TEST_OBJS) $(PHASE26_ORM_INTEGRATION_TEST_OBJS) $(PHASE26_ORM_BACKEND_PARITY_TEST_OBJS) $(PHASE27_SEARCH_TEST_OBJS) $(PHASE24_WINDOWS_DB_SMOKE_TEST_OBJS) $(PHASE24_WINDOWS_RUNTIME_TEST_OBJS))
 ALL_DEPFILES := $(ALL_OBJECTS:.o=.d)
 
 .PHONY: all framework-artifacts eocc transpile module-transpile tech-demo-transpile generated-compile arlen boomhauer tech-demo-server api-reference-server phase28-reference-server auth-primitives-server migration-sample-server arlen-data-example arlen-orm-reference json-perf-bench dispatch-perf-bench http-parse-perf-bench route-match-perf-bench backend-contract-matrix phase23-live-smoke phase24-windows-db-smoke phase24-windows-runtime-tests phase24-windows-confidence phase26-orm-perf phase27-search-characterize phase28-ts-unit phase28-ts-generated phase28-ts-integration phase28-react-reference phase28-confidence phase29-confidence phase30-confidence windows-confidence phase31-confidence phase32-confidence phase33-confidence phase35-confidence phase36-confidence phase37-contract phase37-eoc-golden phase37-intake phase37-packaged-deploy-proof phase37-acceptance-fast phase37-acceptance-runtime phase37-acceptance phase37-confidence phase37-harness-selftest test-data-layer dev-server tech-demo smoke-render smoke routes build-tests vendored-xctest test test-unit test-unit-filter test-integration test-integration-filter test-inventory-list test-inventory update-test-inventory browser-error-audit phase20-sql-builder-tests phase20-schema-tests phase20-postgres-live-tests phase20-mssql-live-tests phase20-routing-tests phase20-focused phase21-template-tests phase21-protocol-tests phase21-generated-app-tests phase21-focused phase21-confidence phase23-dataverse-tests phase23-focused phase23-confidence phase25-live-tests phase25-focused phase25-confidence phase26-orm-tests phase26-orm-unit phase26-orm-generated phase26-orm-integration phase26-orm-backend-parity phase26-orm-live phase26-confidence phase27-search-tests phase27-focused phase27-confidence perf perf-fast ci-perf-smoke parity-phaseb perf-phasec perf-phased deploy-smoke phase5e-confidence phase12-confidence phase13-confidence phase14-confidence phase15-confidence phase16-confidence phase19-confidence phase20-confidence ci-quality ci-sanitizers ci-fault-injection ci-release-certification ci-json-abstraction ci-json-perf ci-dispatch-perf ci-http-parse-perf ci-route-match-perf ci-backend-parity-matrix ci-protocol-adversarial ci-syscall-faults ci-allocation-faults ci-soak ci-chaos-restart ci-static-analysis ci-static-scan-build ci-static-clang-tidy ci-blob-throughput ci-phase11-protocol-adversarial ci-phase11-fuzz ci-phase11-live-adversarial ci-phase11-sanitizers ci-phase11 ci-docs ci-benchmark-contracts check docs-api docs-html docs-serve clean
@@ -603,6 +607,12 @@ $(DISPATCH_PERF_BENCH_TOOL): $(DISPATCH_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK
 
 dispatch-perf-bench: $(DISPATCH_PERF_BENCH_TOOL)
 
+.PHONY: response-header-perf-bench
+response-header-perf-bench: $(RESPONSE_HEADER_PERF_BENCH_TOOL)
+
+$(RESPONSE_HEADER_PERF_BENCH_TOOL): $(RESPONSE_HEADER_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(RESPONSE_HEADER_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $@ $(BASE_LINK_LIBS)
+
 $(HTTP_PARSE_PERF_BENCH_TOOL): $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) | $(BUILD_DIR)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(HTTP_PARSE_PERF_BENCH_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(HTTP_PARSE_PERF_BENCH_TOOL) $(BASE_LINK_LIBS)
@@ -640,6 +650,13 @@ $(PHASE27_SEARCH_CHARACTERIZE_TOOL): $(PHASE27_SEARCH_CHARACTERIZE_ENTRY_OBJS) $
 $(BOOMHAUER_TOOL): $(BOOMHAUER_ENTRY_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
 >@mkdir -p $(@D)
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(BOOMHAUER_ENTRY_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $(BOOMHAUER_TOOL) $(BASE_LINK_LIBS)
+
+$(BUILD_DIR)/runtime-concurrency-fixture$(TOOL_EXEEXT): $(RUNTIME_CONCURRENCY_FIXTURE_OBJS) $(ARLEN_FRAMEWORK_LIB) $(ROOT_GENERATED_OBJS) | $(BUILD_DIR) $(ROOT_TRANSPILE_STATE)
+>@mkdir -p $(@D)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $(RUNTIME_CONCURRENCY_FIXTURE_OBJS) $(ROOT_GENERATED_OBJS) $(ARLEN_FRAMEWORK_LIB) -o $@ $(BASE_LINK_LIBS)
+
+.PHONY: runtime-concurrency-fixture
+runtime-concurrency-fixture: $(BUILD_DIR)/runtime-concurrency-fixture$(TOOL_EXEEXT)
 
 boomhauer: $(BOOMHAUER_TOOL)
 dev-server: boomhauer
@@ -796,7 +813,7 @@ vendored-xctest: $(VENDORED_XCTEST)
 # Rebuild from clean whenever the submodule's sources change (a submodule bump
 # refreshes their mtimes), so a stale runner from an older pin is never reused.
 VENDORED_XCTEST_SOURCES := $(wildcard $(VENDORED_TOOLS_XCTEST_DIR)/GNUmakefile $(VENDORED_TOOLS_XCTEST_DIR)/main.m $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/*.[hm] $(VENDORED_TOOLS_XCTEST_DIR)/XCTest/GNUmakefile*)
-$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES)
+$(VENDORED_XCTEST): $(VENDORED_XCTEST_SOURCES) $(BUILD_FLAGS_SENTINEL)
 >source $(GNUSTEP_SH) && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) clean >/dev/null && $(MAKE) -C $(VENDORED_TOOLS_XCTEST_DIR) $(VENDORED_XCTEST_MAKE_ARGS)
 
 test-unit: $(UNIT_TEST_BIN) $(XCTEST_RUNNER_PREREQ)
@@ -1193,6 +1210,22 @@ DURABLE_JOB_PROBE_OBJ := $(OBJ_DIR)/tests/durable_jobs/job_probe.o
 
 $(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(BUILD_DIR)/file-job-probe: $(OBJ_DIR)/tests/durable_jobs/file_job_probe.o $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(UNIT_TEST_BIN): | $(BUILD_DIR)/file-job-probe
+
+# Exercise the vendored parser even on Windows, whose default backend is legacy.
+$(BUILD_DIR)/llhttp-framing-tests: tests/fixtures/http/llhttp_framing.c src/Arlen/Support/third_party/llhttp/llhttp.c src/Arlen/Support/third_party/llhttp/api.c src/Arlen/Support/third_party/llhttp/http.c src/Arlen/Support/third_party/llhttp/llhttp.h
+>@mkdir -p $(BUILD_DIR)
+>$(ARLEN_CC) $(C_COMPILE_FLAGS) -Isrc/Arlen/Support/third_party/llhttp $(filter %.c,$^) -o $@
+
+.PHONY: llhttp-framing-tests
+llhttp-framing-tests: $(BUILD_DIR)/llhttp-framing-tests
+>$(BUILD_DIR)/llhttp-framing-tests
+
+test-unit test-unit-filter: llhttp-framing-tests
 
 $(DURABLE_JOBS_BIN): $(DURABLE_JOBS_OBJ) $(TEST_WAIT_OBJS) $(OBJ_DIR)/modules/jobs/Sources/ALNJobsModule.o $(ARLEN_FRAMEWORK_LIB)
 >@mkdir -p $(DURABLE_JOBS_BUNDLE)/Resources

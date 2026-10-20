@@ -23,6 +23,8 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleOIDCErrorCode) {
 /// Auth module OIDC orchestration. Instantiate once per enabled provider at configuration time.
 @interface ALNAuthModuleOIDC : NSObject <ALNAuthProviderSessionResolver>
 @property(nonatomic, copy, readonly) NSDictionary *configuration;
+/// The application resolver this provider maps verified identities through.
+@property(nonatomic, strong, readonly) id<ALNAuthProviderSessionResolver> resolver;
 - (nullable instancetype)initWithIdentifier:(NSString *)identifier
                             configuration:(NSDictionary *)configuration
                                  resolver:(id<ALNAuthProviderSessionResolver>)resolver

@@ -62,6 +62,18 @@ connections held by handlers; do not use a one-connection pool if a handler hold
 that connection while it works. Construct pools after forking, in each worker.
 The existing `arlen jobs worker` / `jobs-worker` runner uses this adapter through
 the application's registration path.
+The auth module declares an optional jobs dependency from version 1.6.1, so
+auth-only development and explicit synchronous compatibility setups still load.
+In production-like
+environments with local passwords and mail enabled, configure this PostgreSQL
+adapter and `authModule.publicBaseURL` before registering auth, then keep a
+worker running. The auth module's `database.connectionString` and the jobs
+adapter must point to the same PostgreSQL database and search path: registration
+inserts the new user and its mail job on the auth transaction's connection.
+Auth registration and password-reset mail uses `auth_mail` jobs. If enqueue
+fails, a new registration rolls back and answers 503; an existing registration
+or password-reset request also answers a generic 503 without identifying the
+account.
 
 ## Enqueue and transaction boundaries
 

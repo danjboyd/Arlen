@@ -111,29 +111,38 @@ def ws_recv_text(sock: socket.socket) -> str:
     return payload.decode("utf-8")
 
 
-def run_channel_probe(port: int, expect_keep_alive: bool) -> None:
-    if expect_keep_alive:
-        publisher = ws_connect(port, "/ws/channel/runtime-gate")
-        subscriber = ws_connect(port, "/ws/channel/runtime-gate")
-        try:
-            ws_send_text(publisher, "runtime-fanout")
-            first = ws_recv_text(publisher)
-            second = ws_recv_text(subscriber)
-            if first != "runtime-fanout" or second != "runtime-fanout":
-                raise RuntimeError("websocket channel fanout mismatch")
-        finally:
-            publisher.close()
-            subscriber.close()
-        return
-
-    client = ws_connect(port, "/ws/channel/runtime-gate")
+def assert_channel_receive_only(sock: socket.socket) -> None:
+    previous_timeout = sock.gettimeout()
+    sock.settimeout(0.3)
     try:
-        ws_send_text(client, "runtime-fanout")
-        echoed = ws_recv_text(client)
-        if echoed != "runtime-fanout":
-            raise RuntimeError("websocket channel self-echo mismatch")
+        data = sock.recv(1)
+        if not data:
+            raise RuntimeError("receive-only channel closed unexpectedly")
+        raise RuntimeError("client frame rebroadcast on receive-only channel")
+    except socket.timeout:
+        pass
     finally:
-        client.close()
+        sock.settimeout(previous_timeout)
+
+
+def run_channel_probe(port: int, expect_keep_alive: bool, publish_fd: int) -> None:
+    publisher = ws_connect(port, "/ws/channel/runtime-gate")
+    subscriber = None
+    try:
+        if expect_keep_alive:
+            subscriber = ws_connect(port, "/ws/channel/runtime-gate")
+        ws_send_text(publisher, "runtime-fanout")
+        assert_channel_receive_only(publisher)
+        if subscriber is not None:
+            assert_channel_receive_only(subscriber)
+        os.write(publish_fd, b"P")
+        for peer in (publisher, subscriber):
+            if peer is not None and ws_recv_text(peer) != "runtime-server-fanout":
+                raise RuntimeError("server-originated channel fanout mismatch")
+    finally:
+        publisher.close()
+        if subscriber is not None:
+            subscriber.close()
 
 
 def run_sse_probe(port: int) -> None:
@@ -256,7 +265,7 @@ def read_log_tail(log_path: str, max_bytes: int = 4096) -> str:
         return handle.read().strip() or "(server log empty)"
 
 
-def run_mixed_probe_once(port: int, expect_keep_alive: bool) -> None:
+def run_mixed_probe_once(port: int, expect_keep_alive: bool, publish_fd: int) -> None:
     ws = ws_connect(port, "/ws/echo")
     try:
         for idx in range(4):
@@ -268,7 +277,7 @@ def run_mixed_probe_once(port: int, expect_keep_alive: bool) -> None:
     finally:
         ws.close()
 
-    run_channel_probe(port, expect_keep_alive)
+    run_channel_probe(port, expect_keep_alive, publish_fd)
     run_sse_probe(port)
 
     if expect_keep_alive:
@@ -362,9 +371,14 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
     fd, log_path = tempfile.mkstemp(prefix=f"runtime_concurrency_{mode}_", suffix=".log")
     os.close(fd)
 
+    publish_read, publish_write = os.pipe()
+    server_env = dict(os.environ, ARLEN_CONCURRENCY_PUBLISH_FD=str(publish_read))
+    succeeded = False
+
     def start_server() -> subprocess.Popen[str]:
         with open(log_path, "w", encoding="utf-8") as log_handle:
-            return subprocess.Popen(command, stdout=log_handle, stderr=subprocess.STDOUT, text=True)
+            return subprocess.Popen(command, stdout=log_handle, stderr=subprocess.STDOUT, text=True,
+                                    env=server_env, pass_fds=(publish_read,))
 
     server = start_server()
     try:
@@ -379,7 +393,7 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
         run_route_surface_probe(port)
         run_data_layer_probe(port)
         for _ in range(iterations):
-            run_mixed_probe_once(port, expect_keep_alive)
+            run_mixed_probe_once(port, expect_keep_alive, publish_write)
 
         overlap_errors: List[str] = []
         overlap_stop = threading.Event()
@@ -439,7 +453,8 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
         if overlap_errors:
             raise RuntimeError("; ".join(overlap_errors))
 
-        run_mixed_probe_once(port, expect_keep_alive)
+        run_mixed_probe_once(port, expect_keep_alive, publish_write)
+        succeeded = True
     finally:
         if overlap_stop is not None:
             overlap_stop.set()
@@ -452,13 +467,17 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=5)
-        if os.path.exists(log_path):
+        os.close(publish_read)
+        os.close(publish_write)
+        if succeeded and os.path.exists(log_path):
             os.remove(log_path)
+        elif not succeeded:
+            print(f"runtime concurrency server log retained: {log_path}", flush=True)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run runtime concurrency probe")
-    parser.add_argument("--binary", required=True, help="Path to boomhauer binary")
+    parser.add_argument("--binary", required=True, help="Path to runtime-concurrency-fixture binary")
     parser.add_argument(
         "--iterations",
         type=int,

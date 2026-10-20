@@ -73,6 +73,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, strong, readonly) id<ALNMailAdapter> mailAdapter;
 @property(nonatomic, strong, readonly) id<ALNWebhookAdapter> webhookAdapter;
 @property(nonatomic, strong, readonly) id<ALNAttachmentAdapter> attachmentAdapter;
+// YES until setAttachmentAdapter: is called: the attachment adapter is still
+// the process-local in-memory default.
+@property(nonatomic, assign, readonly) BOOL usesDefaultAttachmentAdapter;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamStore> eventStreamStore;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamBroker> eventStreamBroker;
 @property(nonatomic, strong, readonly, nullable) id<ALNEventStreamAuthorizationHook> eventStreamAuthorizationHook;
@@ -83,6 +86,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, assign, readonly) NSUInteger clusterObservedNodes;
 @property(nonatomic, assign, readonly) BOOL clusterEmitHeaders;
 @property(nonatomic, assign, readonly, getter=isStarted) BOOL started;
+// The error from the first configured module that failed to load, or nil.
+// Outside the development and test environments it makes -startWithError:
+// (and the jobs worker) refuse to start.
+@property(nonatomic, strong, readonly, nullable) NSError *moduleLoadError;
 @property(nonatomic, copy, readonly) NSString *runtimeInvocationMode;
 @property(nonatomic, strong, nullable) id<ALNTraceExporter> traceExporter;
 
@@ -208,6 +215,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)writeOpenAPISpecToPath:(NSString *)path
                         pretty:(BOOL)pretty
                          error:(NSError *_Nullable *_Nullable)error;
+// YES when moduleLoadError is set and the environment is neither development
+// nor test.
+- (BOOL)moduleLoadErrorPreventsStartup;
 - (BOOL)startWithError:(NSError *_Nullable *_Nullable)error;
 // Body limit for a request, from the matching route's maxBodyBytes (mounted
 // applications included) or else requestLimits.maxBodyBytes. The HTTP server

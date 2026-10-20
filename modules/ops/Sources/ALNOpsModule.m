@@ -1,3 +1,4 @@
+#import "ALNJSONSerialization.h"
 #import "ALNOpsModule.h"
 
 #import "ALNApplication.h"
@@ -72,7 +73,7 @@ static NSDictionary *OTJSONObjectFromData(NSData *data) {
   if ([data length] == 0) {
     return @{};
   }
-  id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+  id object = [ALNJSONSerialization JSONObjectWithData:data options:0 error:NULL];
   return [object isKindOfClass:[NSDictionary class]] ? object : @{};
 }
 
@@ -353,7 +354,6 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 @property(nonatomic, strong) NSLock *lock;
 
 - (BOOL)loadPersistedStateWithError:(NSError **)error;
-- (BOOL)persistStateWithError:(NSError **)error;
 - (NSArray<NSString *> *)configuredCardProviderClassNames;
 - (BOOL)loadCardProvidersWithError:(NSError **)error;
 - (NSArray<NSDictionary *> *)contributedCardsWithError:(NSError **)error;
@@ -444,7 +444,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   if (![self loadPersistedStateWithError:error]) {
     return NO;
   }
-  return [self persistStateWithError:error];
+  return YES;
 }
 
 - (NSDictionary *)resolvedConfigSummary {
@@ -512,19 +512,6 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   }
   [self.lock unlock];
   return YES;
-}
-
-- (BOOL)persistStateWithError:(NSError **)error {
-  if (!self.persistenceEnabled) {
-    return YES;
-  }
-  NSDictionary *payload = nil;
-  [self.lock lock];
-  payload = @{
-    @"historySnapshots" : [NSArray arrayWithArray:self.historySnapshots ?: @[]],
-  };
-  [self.lock unlock];
-  return OTWritePropertyListAtPath(self.statePath, payload, error);
 }
 
 - (NSArray<NSDictionary *> *)contributedCardsWithError:(NSError **)error {
@@ -767,12 +754,40 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
     },
   };
   [self.lock lock];
+  int stateLock = -1;
+  if (self.persistenceEnabled) {
+    NSString *directory = [self.statePath stringByDeletingLastPathComponent];
+    if ([[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                   withIntermediateDirectories:YES
+                                                    attributes:nil
+                                                         error:NULL]) {
+      stateLock = ALNPlatformOpenExclusiveLock([self.statePath stringByAppendingString:@".lock"]);
+    }
+    if (stateLock >= 0) {
+      NSDictionary *authoritative = OTReadPropertyListAtPath(self.statePath);
+      self.historySnapshots = [OTNormalizeArray(authoritative[@"historySnapshots"]) mutableCopy] ?: [NSMutableArray array];
+    }
+  }
+  if (self.persistenceEnabled && stateLock < 0) {
+    NSLog(@"ops module could not lock persisted dashboard history at %@", self.statePath);
+    [self.lock unlock];
+    return snapshot;
+  }
   [self.historySnapshots addObject:snapshot];
   while ([self.historySnapshots count] > ALNOpsSnapshotHistoryLimit) {
     [self.historySnapshots removeObjectAtIndex:0];
   }
+  if (self.persistenceEnabled) {
+    NSDictionary *payload = @{ @"historySnapshots" : [NSArray arrayWithArray:self.historySnapshots] };
+    NSError *writeError = nil;
+    if (!OTWritePropertyListAtPath(self.statePath, payload, &writeError)) {
+      NSLog(@"ops module could not persist dashboard history: %@", writeError.localizedDescription);
+      NSDictionary *authoritative = OTReadPropertyListAtPath(self.statePath);
+      self.historySnapshots = [OTNormalizeArray(authoritative[@"historySnapshots"]) mutableCopy] ?: [NSMutableArray array];
+    }
+    ALNPlatformReleaseExclusiveLock(stateLock);
+  }
   [self.lock unlock];
-  (void)[self persistStateWithError:NULL];
   return snapshot;
 }
 

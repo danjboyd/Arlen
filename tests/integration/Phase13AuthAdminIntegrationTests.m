@@ -8,6 +8,7 @@
 #import <unistd.h>
 
 #import "ALNTOTP.h"
+#import "ALNSecurityPrimitives.h"
 #import "../shared/ALNTestSupport.h"
 #import "../shared/ALNTestWait.h"
 
@@ -15,6 +16,11 @@
 @end
 
 @implementation Phase13AuthAdminIntegrationTests
+
+- (NSString *)storedBearerTokenForTestToken:(NSString *)token {
+  NSData *digest = ALNSHA256([token dataUsingEncoding:NSUTF8StringEncoding]);
+  return [@"sha256:" stringByAppendingString:ALNLowercaseHexStringFromData(digest)];
+}
 
 - (NSString *)pgTestDSN {
   const char *value = getenv("ARLEN_PG_TEST_DSN");
@@ -493,6 +499,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    bootstrapAdminEmails = (\"%@\", \"%@\");\n"
                                    "    providers = {\n"
                                    "      stub = {\n"
@@ -531,6 +538,9 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                       exitCode:&exitCode];
     XCTAssertEqual(0, exitCode, @"%@", addAuth);
     XCTAssertEqualObjects(@"ok", [self parseJSONDictionary:addAuth][@"status"]);
+    // This generated app must link and serve without the optional jobs module.
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:
+        [appRoot stringByAppendingPathComponent:@"modules/jobs"]]);
 
     NSString *addAdmin = [self runShellCapture:[NSString stringWithFormat:
         @"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ module add admin-ui --json",
@@ -743,6 +753,29 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual((NSInteger)200, [adminHTML[@"status"] integerValue]);
     XCTAssertTrue([adminHTML[@"body"] containsString:@"Arlen Admin"]);
 
+    NSDictionary *wildcardSearch = [self curlJSONAtPort:port
+                                                   path:@"/admin/api/users?q=%25"
+                                                 method:@"GET"
+                                              cookieJar:cookieJar
+                                              csrfToken:nil
+                                                payload:nil
+                                        followRedirects:NO
+                                               exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [wildcardSearch[@"status"] integerValue]);
+    XCTAssertEqual((NSUInteger)0, [[self parseJSONDictionary:wildcardSearch[@"body"]][@"items"] count]);
+    NSDictionary *wildcardRole = [self curlJSONAtPort:port
+                                                 path:@"/admin/api/users?roles=%25"
+                                               method:@"GET"
+                                            cookieJar:cookieJar
+                                            csrfToken:nil
+                                              payload:nil
+                                      followRedirects:NO
+                                             exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)200, [wildcardRole[@"status"] integerValue]);
+    XCTAssertEqual((NSUInteger)0, [[self parseJSONDictionary:wildcardRole[@"body"]][@"items"] count]);
+
     // Subjects look like "user:<uuid>". Apple's URLPathAllowedCharacterSet
     // escapes ':' and GNUstep's does not, and route parameters are matched
     // undecoded (GitHub issue 154), so keep ':' literal on both.
@@ -823,12 +856,15 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual((NSInteger)403, [deniedAction[@"status"] integerValue]);
     XCTAssertTrue([[self parseJSONDictionary:deniedAction[@"body"]][@"message"] length] > 0);
 
-    NSString *verificationToken = [self sqlScalar:[NSString stringWithFormat:
-        @"SELECT t.token FROM auth_verification_tokens t JOIN auth_users u ON u.id = t.user_id "
-         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1;",
-        [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
-                                         dsn:dsn];
-    XCTAssertTrue([verificationToken length] > 0);
+    NSString *verificationToken = [[[NSUUID UUID] UUIDString] lowercaseString];
+    NSString *verificationDigest = [self storedBearerTokenForTestToken:verificationToken];
+    NSString *updatedVerification = [self sqlScalar:[NSString stringWithFormat:
+        @"UPDATE auth_verification_tokens SET token = '%@' WHERE id = "
+         "(SELECT t.id FROM auth_verification_tokens t JOIN auth_users u ON u.id = t.user_id "
+         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1) RETURNING token;",
+        verificationDigest, [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                                  dsn:dsn];
+    XCTAssertTrue([updatedVerification hasPrefix:verificationDigest], @"%@", updatedVerification);
     NSDictionary *verifyResponse = [self curlJSONAtPort:port
                                                    path:[NSString stringWithFormat:@"/auth/api/verify?token=%@", verificationToken]
                                                  method:@"GET"
@@ -864,12 +900,15 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [forgotResponse[@"status"] integerValue]);
 
-    NSString *resetToken = [self sqlScalar:[NSString stringWithFormat:
-        @"SELECT t.token FROM auth_password_reset_tokens t JOIN auth_users u ON u.id = t.user_id "
-         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1;",
-        [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
-                                  dsn:dsn];
-    XCTAssertTrue([resetToken length] > 0);
+    NSString *resetToken = [[[NSUUID UUID] UUIDString] lowercaseString];
+    NSString *resetDigest = [self storedBearerTokenForTestToken:resetToken];
+    NSString *updatedReset = [self sqlScalar:[NSString stringWithFormat:
+        @"UPDATE auth_password_reset_tokens SET token = '%@' WHERE id = "
+         "(SELECT t.id FROM auth_password_reset_tokens t JOIN auth_users u ON u.id = t.user_id "
+         "WHERE lower(u.email) = lower('%@') ORDER BY t.id DESC LIMIT 1) RETURNING token;",
+        resetDigest, [localAdminEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                         dsn:dsn];
+    XCTAssertTrue([updatedReset hasPrefix:resetDigest], @"%@", updatedReset);
     NSDictionary *resetResponse = [self curlJSONAtPort:port
                                                   path:@"/auth/api/password/reset"
                                                 method:@"POST"
@@ -1238,6 +1277,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    providers = {\n"
                                    "      stub = {\n"
                                    "        enabled = NO;\n"
@@ -1367,6 +1407,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    ui = {\n"
                                    "      mode = \"headless\";\n"
                                    "    };\n"
@@ -1498,6 +1539,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    ui = {\n"
                                    "      mode = \"module-ui\";\n"
                                    "    };\n"
@@ -1731,6 +1773,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "  database = {\n"
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
+                                   "  authModule = { registration = { autoLogin = YES; }; };\n"
                                    "}\n",
                                    port,
                                    [dsn stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
@@ -1878,6 +1921,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    mfa = {\n"
                                    "      sms = {\n"
                                    "        enabled = YES;\n"
@@ -2000,6 +2044,41 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [smsStart[@"status"] integerValue]);
     XCTAssertTrue([[self parseJSONDictionary:smsStart[@"body"]][@"message"] containsString:@"We sent a code"]);
+
+    // Replaying the cookie from before failed checks must not reset the SMS
+    // verification budget. The authoritative count belongs in PostgreSQL.
+    NSString *staleCookieJar = [self createTempFilePathWithPrefix:@"phase18-sms-stale-cookie" suffix:@".txt"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:cookieJar toPath:staleCookieJar error:NULL]);
+    for (NSUInteger attempt = 0; attempt < 8U; attempt++) {
+      NSDictionary *invalidSMS = [self curlJSONAtPort:port
+                                                path:@"/auth/api/mfa/sms/verify"
+                                              method:@"POST"
+                                           cookieJar:cookieJar
+                                           csrfToken:csrfToken
+                                             payload:@{ @"code" : @"000000" }
+                                     followRedirects:NO
+                                            exitCode:&exitCode];
+      XCTAssertEqual(0, exitCode);
+      XCTAssertEqual((NSInteger)422, [invalidSMS[@"status"] integerValue]);
+    }
+    XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:cookieJar error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:staleCookieJar toPath:cookieJar error:NULL]);
+    NSDictionary *replayedSMS = [self curlJSONAtPort:port
+                                               path:@"/auth/api/mfa/sms/verify"
+                                             method:@"POST"
+                                          cookieJar:cookieJar
+                                          csrfToken:csrfToken
+                                            payload:@{ @"code" : smsCode }
+                                    followRedirects:NO
+                                           exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)429, [replayedSMS[@"status"] integerValue]);
+    NSString *clearSMSLimit = [self sqlScalar:[NSString stringWithFormat:
+        @"DELETE FROM auth_attempt_limits WHERE scope = 'sms_verify' AND user_id = "
+         "(SELECT id FROM auth_users WHERE lower(email) = lower('%@')) RETURNING 'cleared';",
+        [userEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]]
+                                         dsn:dsn];
+    XCTAssertTrue([clearSMSLimit containsString:@"cleared"]);
 
     sessionResponse = [self curlJSONAtPort:port
                                       path:@"/auth/api/session"
@@ -2200,6 +2279,7 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                    "    connectionString = \"%@\";\n"
                                    "  };\n"
                                    "  authModule = {\n"
+                                   "    registration = { autoLogin = YES; };\n"
                                    "    ui = {\n"
                                    "      mode = \"module-ui\";\n"
                                    "      layout = \"layouts/phase15_default_guest\";\n"

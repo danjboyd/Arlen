@@ -10,6 +10,8 @@ Options:
   -BinDir DIR      where the `arlen` launcher goes (default: <Prefix>\bin)
   -Archive FILE    install from a downloaded release zip instead
   -MsysRoot DIR    the gnustep-cli managed MSYS2 CLANG64 root (default: auto-detect)
+  -NoSetup         require an already matching toolchain; never provision it
+  -NoPathUpdate    skip persistent user PATH registration
 
 Windows gets the prebuilt arlen-X.Y.Z-windows-x64.zip. It runs on the
 gnustep-cli managed MSYS2 CLANG64 toolchain, and that toolchain's version must
@@ -23,7 +25,9 @@ param(
   [string]$Prefix = "",
   [string]$BinDir = "",
   [string]$Archive = "",
-  [string]$MsysRoot = ""
+  [string]$MsysRoot = "",
+  [switch]$NoSetup,
+  [switch]$NoPathUpdate
 )
 
 function Install-Arlen {
@@ -32,7 +36,9 @@ function Install-Arlen {
     [string]$Prefix,
     [string]$BinDir,
     [string]$Archive,
-    [string]$MsysRoot
+    [string]$MsysRoot,
+    [switch]$NoSetup,
+    [switch]$NoPathUpdate
   )
 
   Set-StrictMode -Version Latest
@@ -61,12 +67,22 @@ function Install-Arlen {
 
   if (-not $Prefix) { $Prefix = Join-Path $env:LOCALAPPDATA "Arlen" }
   if (-not $BinDir) { $BinDir = Join-Path $Prefix "bin" }
+  $Prefix = [IO.Path]::GetFullPath($Prefix)
+  $BinDir = [IO.Path]::GetFullPath($BinDir)
   $Version = $Version -replace '^v', ''
 
   if (-not [Environment]::Is64BitOperatingSystem) {
     Die "Arlen's Windows release is x64 only"
   }
 
+  # FileShare.None serializes even separate PowerShell processes/sessions.
+  # Keep the empty lock file: OS handle lifetime determines lock ownership.
+  $prefixLockPath = $Prefix.TrimEnd('\') + '.install.lock'
+  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($prefixLockPath)) | Out-Null
+  try { $prefixLock = [IO.File]::Open($prefixLockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+  catch { Die "another installer owns $prefixLockPath, or the lock cannot be opened: $($_.Exception.Message)" }
+  $binLock = $null
+  try {
   # scripts/run_clang64.ps1's search order, plus the root that gnustep-cli
   # setup records in GNUSTEP_MAKEFILES (it may have been given --root).
   $candidates = @()
@@ -79,42 +95,16 @@ function Install-Arlen {
   }
   if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA "gnustep-cli") }
   if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "gnustep-cli") }
+  # An explicit root is authoritative, including when it needs provisioning.
+  if ($MsysRoot) { $candidates = @($MsysRoot) }
   $resolvedRoot = $null
   foreach ($candidate in $candidates) {
     if ((Test-Path (Join-Path $candidate "usr\bin\env.exe")) -and
         (Test-Path (Join-Path $candidate "clang64\share\GNUstep\Makefiles\GNUstep.sh"))) {
-      $resolvedRoot = $candidate
+      $resolvedRoot = [IO.Path]::GetFullPath($candidate)
       break
     }
   }
-  if (-not $resolvedRoot) {
-    Die @"
-no gnustep-cli managed MSYS2 CLANG64 toolchain was found (tried: $([string]::Join(', ', $candidates))).
-
-Arlen's Windows release runs on the gnustep-cli managed toolchain. Install it
-for your user with the gnustep-cli PowerShell bootstrap:
-
-  $(BootstrapSetup "")
-
-Then rerun this installer. If the toolchain lives somewhere else, pass
--MsysRoot or set ARLEN_MSYS_ROOT. See docs/GETTING_STARTED_WINDOWS.md.
-"@
-  }
-  # Arlen links -lcurl; gnustep-cli ships libcurl from 0.1.1 on, so a root
-  # without it is an older toolchain.
-  if (-not (Test-Path (Join-Path $resolvedRoot "clang64\lib\libcurl.dll.a"))) {
-    Die @"
-libcurl is missing from $resolvedRoot, so this toolchain is older than
-gnustep-cli 0.1.1. Update it with the gnustep-cli PowerShell bootstrap, then
-rerun this installer:
-
-  $(BootstrapSetup "" $resolvedRoot)
-
-Don't install libcurl with pacman, and never run pacman -Sy or -Syu in the
-managed toolchain: a partial upgrade breaks its python and clang.
-"@
-  }
-
   # PowerShell 5.1 defaults to TLS 1.0/1.1, which GitHub refuses.
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor
       [Net.SecurityProtocolType]::Tls12
@@ -182,65 +172,74 @@ managed toolchain: a partial upgrade breaks its python and clang.
     if ($dist["kind"] -ne "windows-x64") {
       Die "$Archive is a '$($dist["kind"])' archive; Windows needs arlen-X.Y.Z-windows-x64.zip"
     }
+    foreach ($required in @('bin\arlen', 'build\arlen.exe', 'build\boomhauer.exe', 'build\eocc.exe', 'build\lib\libArlenFramework.a', 'build\.release-prebuilt')) {
+      if (-not (Test-Path -LiteralPath (Join-Path $top $required) -PathType Leaf)) { Die "archive lacks prebuilt $required" }
+    }
     $Version = $dist["version"]
 
-    # The prebuilt DLLs follow the toolchain's ABI. A rebuilt toolchain can be
-    # republished under the same version, so the artifact checksum also counts.
+    # Resolve the required ABI from the verified archive before provisioning.
     $wantToolchain = $dist["toolchain"]
     $wantToolchainSha = $dist["toolchain_sha256"]
-    $state = Get-GnustepToolchainState -Root $resolvedRoot
-    if (-not $state) {
-      Say "warning: $resolvedRoot has no gnustep-cli state (state\cli-state.json), so its toolchain version is unknown; Arlen $Version expects gnustep-cli toolchain $wantToolchain"
-    } elseif ($wantToolchain -and $state.Version -ne $wantToolchain) {
-      Die @"
-Arlen $Version was built against gnustep-cli toolchain $wantToolchain, but $resolvedRoot has $($state.Version).
-Rerun the gnustep-cli bootstrap setup to install toolchain $($wantToolchain):
-
-  $(BootstrapSetup $wantToolchain $resolvedRoot)
-
-Then rerun this installer. If that release isn't found, the Arlen $Version
-release notes name the gnustep-cli release to use.
-"@
-    } elseif ($wantToolchainSha -and $state.Sha256 -and $state.Sha256 -ne $wantToolchainSha.ToLowerInvariant()) {
-      Say "warning: $resolvedRoot has a different build of gnustep-cli toolchain $wantToolchain than Arlen $Version was built against; if arlen fails to start, rerun the gnustep-cli bootstrap setup"
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') { Die "invalid archive version '$Version'" }
+    if (-not $wantToolchain -or -not $wantToolchainSha) { Die "archive lacks pinned toolchain metadata" }
+    $state = if ($resolvedRoot) { Get-GnustepToolchainState -Root $resolvedRoot } else { $null }
+    $ready = $resolvedRoot -and $state -and $state.Version -eq $wantToolchain -and
+      $state.Sha256 -eq $wantToolchainSha.ToLowerInvariant() -and
+      (Test-Path (Join-Path $resolvedRoot "clang64\lib\libcurl.dll.a"))
+    if (-not $ready) {
+      $setupRoot = if ($resolvedRoot) { $resolvedRoot } elseif ($MsysRoot) { $MsysRoot } elseif ($env:ARLEN_MSYS_ROOT) { $env:ARLEN_MSYS_ROOT } else { Join-Path $env:LOCALAPPDATA "gnustep-cli" }
+      $setupRoot = [IO.Path]::GetFullPath($setupRoot)
+      if ($NoSetup) { Die "matching gnustep-cli toolchain $wantToolchain required at $setupRoot (-NoSetup). Run:`n$(BootstrapSetup $wantToolchain $setupRoot)" }
+      # Pin the executable bootstrap as well as its release manifest. Future
+      # toolchains require an explicit reviewed digest update here.
+      if ($wantToolchain -ne "0.1.1" -or $wantToolchainSha.ToLowerInvariant() -ne "07d57993b2d5364578aff0392fede18d5a427f9f5dd22a03df1ec56c28f98dba") {
+        Die "no automatic setup pin for toolchain $wantToolchain ($wantToolchainSha); provision it manually and use -NoSetup"
+      }
+      $bootstrapUrl = "https://github.com/danjboyd/gnustep-cli-new/releases/download/v$wantToolchain/gnustep-bootstrap.ps1"
+      $bootstrapPath = Join-Path $workDir "gnustep-bootstrap.ps1"
+      Say "installing gnustep-cli $wantToolchain at $setupRoot (about 1.1 GB download)"
+      Invoke-WebRequest -UseBasicParsing -Uri $bootstrapUrl -OutFile $bootstrapPath
+      if ((Get-FileHash -Algorithm SHA256 -LiteralPath $bootstrapPath).Hash.ToLowerInvariant() -ne "a41adbf84d38a6ae90f4bdbbe0b9c3e35136cb3ee695bf26b783c04972045034") { Die "gnustep-cli bootstrap checksum mismatch" }
+      $beforeSetupPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+      try {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath setup --user --root $setupRoot --manifest "https://github.com/danjboyd/gnustep-cli-new/releases/download/v$wantToolchain/release-manifest.json"
+        $setupExit = $LASTEXITCODE
+      } finally {
+        # The upstream bootstrap registers its own bin directory too.
+        if ($NoPathUpdate) { [Environment]::SetEnvironmentVariable('Path', $beforeSetupPath, 'User') }
+      }
+      if ($setupExit -ne 0) { Die "gnustep-cli setup failed (exit $setupExit); rerun the installer to retry" }
+      $resolvedRoot = $setupRoot
+      $state = Get-GnustepToolchainState -Root $resolvedRoot
+      if (-not $state -or $state.Version -ne $wantToolchain -or $state.Sha256 -ne $wantToolchainSha.ToLowerInvariant() -or
+          -not (Test-Path (Join-Path $resolvedRoot "usr\bin\env.exe")) -or
+          -not (Test-Path (Join-Path $resolvedRoot "clang64\share\GNUstep\Makefiles\GNUstep.sh")) -or
+          -not (Test-Path (Join-Path $resolvedRoot "clang64\lib\libcurl.dll.a"))) {
+        Die "gnustep-cli setup did not produce the matching CLANG64 toolchain; existing Arlen installation was preserved"
+      }
     }
 
     New-Item -ItemType Directory -Force -Path $Prefix | Out-Null
     $dest = Join-Path $Prefix $Version
-    # Rename the old version aside before deleting it. Windows refuses to rename
-    # a directory with a running or open file in it, so a busy install fails
-    # here untouched; deleting it in place could stop halfway and break it.
-    $previous = $null
-    if (Test-Path -LiteralPath $dest) {
-      Say "replacing existing $dest"
-      $previous = "$dest.old-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
-      try {
-        Move-Item -LiteralPath $dest -Destination $previous
-      } catch {
-        Die "could not replace $($dest): $($_.Exception.Message)`nA file in it is probably in use. Stop any arlen or boomhauer running from this install, then rerun this installer."
-      }
-    }
-    try {
-      Move-Item -LiteralPath $top -Destination $dest
-    } catch {
-      if ($previous) { Move-Item -LiteralPath $previous -Destination $dest -ErrorAction SilentlyContinue }
-      Die "could not move the release into $($dest): $($_.Exception.Message)"
-    }
-    if ($previous) {
-      Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction SilentlyContinue
-      if (Test-Path -LiteralPath $previous) { Say "warning: could not delete the previous copy at $previous; remove it later" }
-    }
+    # Never mutate an installed tree: a failed retry or a running app keeps
+    # its existing files. Successful retries retain the previous install.
+    if (Test-Path -LiteralPath $dest) { $dest += "-install-" + [Guid]::NewGuid().ToString("N").Substring(0, 8) }
+    Move-Item -LiteralPath $top -Destination $dest
   } finally {
-    Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    if ([IO.Path]::GetFullPath($workDir).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) {
+      Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 
-  # A junction needs no admin rights or Developer Mode, unlike a symlink.
-  # rmdir removes only the link; Remove-Item on 5.1 can follow it into the target.
-  $current = Join-Path $Prefix "current"
-  if (Test-Path -LiteralPath $current) { cmd /c rmdir "$current" | Out-Null }
-  New-Item -ItemType Junction -Path $current -Target $dest | Out-Null
-
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+  $binLockPath = $BinDir.TrimEnd('\') + '.install.lock'
+  if (-not [string]::Equals($binLockPath, $prefixLockPath, [StringComparison]::OrdinalIgnoreCase)) {
+    try { $binLock = [IO.File]::Open($binLockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+    catch { Die "another installer owns $binLockPath, or the lock cannot be opened: $($_.Exception.Message)" }
+  }
+  $current = Join-Path $Prefix "current"
+  $link = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+  if ($link -and $link.LinkType -ne 'Junction') { Die "$current is not a junction; refusing to replace it" }
   # The .cmd works from cmd.exe and PowerShell alike, whatever the execution
   # policy. The .ps1 has a different name so PowerShell never picks it over the .cmd.
   $launcherPs1 = Join-Path $BinDir "arlen-clang64.ps1"
@@ -341,26 +340,91 @@ $nativeArgs = @($args | ForEach-Object { ([string]$_).Replace('"', '\"') })
 exit $LASTEXITCODE
 '@
   $launcherBody = $launcherBody.Replace('__CURRENT__', $current.Replace("'", "''")).Replace('__MSYS_ROOT__', $resolvedRoot.Replace("'", "''"))
-  [IO.File]::WriteAllText($launcherPs1, $launcherBody, (New-Object Text.UTF8Encoding $false))
   $cmdBody = "@echo off`r`n" +
     "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0arlen-clang64.ps1`" %*`r`n" +
     "exit /b %ERRORLEVEL%`r`n"
-  [IO.File]::WriteAllText($launcherCmd, $cmdBody, (New-Object Text.ASCIIEncoding))
-
+  $transaction = [Guid]::NewGuid().ToString('N')
+  $stagedCurrent = Join-Path $Prefix ('.current-install-' + $transaction)
+  $backupCurrent = Join-Path $Prefix ('.current-old-' + $transaction)
+  $launchers = @(
+    @{ Path=$launcherPs1; Stage=($launcherPs1 + '.' + $transaction + '.new'); Backup=($launcherPs1 + '.' + $transaction + '.old'); Body=$launcherBody; Encoding=(New-Object Text.UTF8Encoding $false); OriginalMoved=$false; Installed=$false },
+    @{ Path=$launcherCmd; Stage=($launcherCmd + '.' + $transaction + '.new'); Backup=($launcherCmd + '.' + $transaction + '.old'); Body=$cmdBody; Encoding=(New-Object Text.ASCIIEncoding); OriginalMoved=$false; Installed=$false }
+  )
+  $oldCurrentMoved = $false
+  $newCurrentInstalled = $false
+  $committed = $false
+  try {
+    # Stage all writes and junction creation before touching working launchers.
+    foreach ($entry in $launchers) { Write-ArlenLauncherStage $entry.Stage $entry.Body $entry.Encoding }
+    New-Item -ItemType Junction -Path $stagedCurrent -Target $dest | Out-Null
+    foreach ($entry in $launchers) {
+      if ([IO.File]::Exists($entry.Path)) {
+        [IO.File]::Move($entry.Path, $entry.Backup)
+        $entry.OriginalMoved = $true
+      }
+      Move-ArlenActivationFile $entry.Stage $entry.Path
+      $entry.Installed = $true
+    }
+    if ($link) {
+      [IO.Directory]::Move($current, $backupCurrent)
+      $oldCurrentMoved = $true
+    }
+    Move-ArlenActivationJunction $stagedCurrent $current
+    $newCurrentInstalled = $true
+    $committed = $true
+  } catch {
+    $activationError = $_
+    $rollbackErrors = @()
+    try {
+      if ($newCurrentInstalled) { [IO.Directory]::Delete($current) }
+      if ($oldCurrentMoved) { [IO.Directory]::Move($backupCurrent, $current) }
+    } catch { $rollbackErrors += "junction: $_" }
+    for ($index = $launchers.Count - 1; $index -ge 0; $index--) {
+      $entry = $launchers[$index]
+      try {
+        if ($entry.Installed) { [IO.File]::Delete($entry.Path) }
+        if ($entry.OriginalMoved) { [IO.File]::Move($entry.Backup, $entry.Path) }
+      } catch { $rollbackErrors += "$($entry.Path): $_" }
+    }
+    if ($rollbackErrors.Count) { Die "activation failed ($activationError); rollback incomplete, preserve .old backups: $($rollbackErrors -join '; ')" }
+    Die "activation failed; previous launchers and current junction restored: $activationError"
+  } finally {
+    # Unlink checked transaction junctions only; never recurse into releases.
+    foreach ($entry in $launchers) {
+      if ([IO.File]::Exists($entry.Stage)) { [IO.File]::Delete($entry.Stage) }
+      if ($committed -and [IO.File]::Exists($entry.Backup)) { [IO.File]::Delete($entry.Backup) }
+    }
+    if (Get-Item -LiteralPath $stagedCurrent -Force -ErrorAction SilentlyContinue) { [IO.Directory]::Delete($stagedCurrent) }
+    if ($committed -and $oldCurrentMoved) { [IO.Directory]::Delete($backupCurrent) }
+  }
   Say "installed Arlen $Version at $dest"
   Say "toolchain: $resolvedRoot"
   Say "launcher: $launcherCmd"
-  $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-  $onPath = @(($userPath, $env:Path) -join ';' -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $BinDir.TrimEnd('\')) }).Count -gt 0
-  if (-not $onPath) {
-    Say "add $BinDir to your PATH, for example (then open a new terminal):"
-    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"$BinDir;`" + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')"
+  if (-not $NoPathUpdate) {
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $userEntries = @($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ine $BinDir.TrimEnd('\') })
+    [Environment]::SetEnvironmentVariable("Path", ((@($BinDir) + $userEntries) -join ';'), "User")
   }
+  # Script invocation and irm | iex both update the caller's process environment.
+  # A child powershell -File cannot update its parent; it must open a new shell.
+  $processEntries = @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ine $BinDir.TrimEnd('\') })
+  $env:Path = (@($BinDir) + $processEntries) -join ';'
+  Say "arlen is available in this process; new terminals use the saved user PATH unless -NoPathUpdate was passed"
   Write-Host ""
   Write-Host "Next:"
   Write-Host "  arlen doctor"
   Write-Host "  arlen new MyApp; cd MyApp; arlen boomhauer --port 3000"
+  } finally {
+    if ($binLock) { $binLock.Dispose() }
+    $prefixLock.Dispose()
+  }
 }
+
+# Small filesystem boundaries keep fault-injection tests on the actual
+# activation algorithm, without adding installer test flags to the CLI.
+function Write-ArlenLauncherStage($Path, $Body, $Encoding) { [IO.File]::WriteAllText($Path, $Body, $Encoding) }
+function Move-ArlenActivationFile($Source, $Destination) { [IO.File]::Move($Source, $Destination) }
+function Move-ArlenActivationJunction($Source, $Destination) { [IO.Directory]::Move($Source, $Destination) }
 
 function Get-GnustepToolchainState {
   param([string]$Root)
@@ -378,4 +442,4 @@ function Get-GnustepToolchainState {
   return [pscustomobject]@{ Version = [string]$state.toolchain_version; Sha256 = $sha }
 }
 
-Install-Arlen -Version $Version -Prefix $Prefix -BinDir $BinDir -Archive $Archive -MsysRoot $MsysRoot
+Install-Arlen -Version $Version -Prefix $Prefix -BinDir $BinDir -Archive $Archive -MsysRoot $MsysRoot -NoSetup:$NoSetup -NoPathUpdate:$NoPathUpdate

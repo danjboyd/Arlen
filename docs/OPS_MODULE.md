@@ -21,7 +21,9 @@ authentication, operator/admin roles, and AAL2 through the framework auth contex
 Ops still enforces those checks, with `/auth/login` and `/auth/mfa/totp` as the
 default login and step-up destinations. With the auth module installed, step-up
 goes to `authModule.paths.stepUp` (see
-[Auth Module](AUTH_MODULE.md#step-up-for-provider-sign-in)).
+[Auth Module](AUTH_MODULE.md#step-up-for-provider-sign-in)), and roles are the
+user's current roles on every request (see
+[Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
 ## Surfaces
 
@@ -112,6 +114,11 @@ opsModule = {
   };
 };
 ```
+
+When a persistence path is set, dashboard history writes reload the shared
+state under a sibling `.lock` file before atomic replacement. Separate ops
+processes can append snapshots to the same history without overwriting each
+other, and each dashboard read includes the latest persisted history.
 
 ## Current Limits
 

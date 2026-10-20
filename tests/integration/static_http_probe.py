@@ -10,6 +10,47 @@ import tempfile
 import time
 
 
+def check_windows_large_file(root, request):
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.DeviceIoControl.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p,
+                                      wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD,
+                                      ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    kernel.SetFilePointerEx.argtypes = [wintypes.HANDLE, ctypes.c_longlong, ctypes.c_void_p, wintypes.DWORD]
+    kernel.SetEndOfFile.argtypes = [wintypes.HANDLE]
+    kernel.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                                ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    asset = (root / "large.css").resolve()
+    handle = kernel.CreateFileW(str(asset), 0xC0000000, 7, None, 1, 0x80, None)
+    assert handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+    size = 3 * 1024**3 + 123
+    tail = b"large-tail!"
+    try:
+        count = wintypes.DWORD()
+        assert kernel.DeviceIoControl(handle, 0x900C4, None, 0, None, 0, ctypes.byref(count), None), ctypes.get_last_error()
+        assert kernel.SetFilePointerEx(handle, size, None, 0), ctypes.get_last_error()
+        assert kernel.SetEndOfFile(handle), ctypes.get_last_error()
+        assert kernel.SetFilePointerEx(handle, size - len(tail), None, 0), ctypes.get_last_error()
+        buffer = ctypes.create_string_buffer(tail)
+        assert kernel.WriteFile(handle, buffer, len(tail), ctypes.byref(count), None), ctypes.get_last_error()
+        assert count.value == len(tail)
+    finally:
+        kernel.CloseHandle(handle)
+    target = "/static/" + root.name + "/large.css"
+    head = request(method="HEAD", target=target, body=b"")
+    assert int(head["content-length"]) == size, head
+    fields = request({"Range": f"bytes={size-len(tail)}-{size-1}"}, target=target, status=206, body=tail)
+    assert fields["content-range"] == f"bytes {size-len(tail)}-{size-1}/{size}", fields
+    print("native large-file HEAD and range bytes passed")
+
+
 def main():
     port = int(sys.argv[1])
     root = Path(tempfile.mkdtemp(prefix="issue30-", dir="public"))
@@ -165,9 +206,11 @@ def main():
                 connection.close()
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             list(executor.map(parallel_range, range(24)))
+        check_windows_large_file(root, request)
         print(f"static HTTP contract: {checks} sequential checks and 24 concurrent ranges passed")
     finally:
         conn.close()
+        assert root.resolve().parent == Path("public").resolve()
         shutil.rmtree(root)
 
 

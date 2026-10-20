@@ -41,6 +41,11 @@ def classify(tests_dir):
             continue
         with open(os.path.join(tests_dir, name), encoding="utf-8", errors="replace") as handle:
             source = handle.read()
+        # Comments may discuss make/cleanup without executing either. Preserve
+        # quoted literals (including URLs) while removing actual C comments.
+        source = re.sub(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/',
+                        lambda m: re.sub(r"[^\n]", " ", m.group(0)) if m.group(0).startswith(("//", "/*")) else m.group(0),
+                        source, flags=re.DOTALL)
         match = re.search(r"@implementation\s+(\w+)", source)
         if not match:
             continue

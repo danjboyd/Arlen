@@ -33,6 +33,10 @@ typedef NS_ENUM(NSInteger, ALNAuthSessionErrorCode) {
   maximumAuthenticationAgeSeconds:(NSUInteger)maximumAuthenticationAgeSeconds
                      referenceDate:(nullable NSDate *)referenceDate;
 
+// Establishing or elevating a session starts a fresh session dictionary: only
+// the auth state and `return_to` are kept. Everything else stored before,
+// including `_csrf_token`, is dropped, and the next -[ALNContext csrfToken]
+// read mints a new token.
 + (BOOL)establishAuthenticatedSessionForSubject:(NSString *)subject
                                        provider:(nullable NSString *)provider
                                         methods:(nullable NSArray *)methods
