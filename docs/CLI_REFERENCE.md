@@ -25,7 +25,7 @@ production apps that need those guarantees.
 ## Installer (`tools/install.sh`)
 
 ```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes && export PATH="$HOME/.local/bin:$PATH"
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
 The installer downloads a release archive, checks it against the release's
