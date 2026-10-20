@@ -58,7 +58,8 @@ Options:
 
 On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), missing Linux
 prerequisites trigger a consent prompt. With consent, the installer uses apt
-for build packages (sudo may prompt) and the checksum-verified gnustep-cli
+for build packages and the SQLite runtime (`libsqlite3-0`; sudo may prompt),
+and the checksum-verified gnustep-cli
 `v0.1.0` bootstrap for a managed clang/libobjc2 toolchain in your home. Other
 Linux distributions require manual prerequisites and `--no-setup`. Framework
 builds use at most four jobs. `--no-setup` also prevents network prerequisite
@@ -73,7 +74,9 @@ the matching export.
 
 Downloads and builds complete in a staging directory before replacing an
 existing release. Failed downloads, checksums, prerequisite setup, and builds
-preserve the working release and launcher; rerun the same command after fixing
+preserve the working release and launcher. Archive kind and required executable
+files are checked before activation; handled termination signals during
+replacement restore the previous release. Rerun the same command after fixing
 the cause. A failed build log is retained at `<prefix>/last-build-failure.log`.
 Concurrent installs into one prefix are refused. After forcibly terminating an
 installer, remove `<prefix>/.install-lock` only after confirming it has stopped.
@@ -85,6 +88,9 @@ candidate being tested.
 
 Release archives are produced by `tools/release/package_framework.sh` (see
 `docs/RELEASE_PROCESS.md`).
+
+`arlen doctor` probes do not write compiler dependency files into the current
+directory, so toolchain checks also work outside a writable app checkout.
 
 ## Windows installer (`tools/install.ps1`)
 

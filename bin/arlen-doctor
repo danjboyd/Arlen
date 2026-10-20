@@ -420,7 +420,7 @@ else
         "Verify your active GNUstep environment and gnustep-config availability."
     fi
 
-    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only - >/dev/null 2>&1"; then
+    if bash -lc "set +u; source '$gnustep_script' >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\n' | clang \$(gnustep-config --objc-flags) $probe_flags -x objective-c -fsyntax-only - -MF /dev/null >/dev/null 2>&1"; then
       add_check "dispatch_headers" "pass" "dispatch/dispatch.h is available to clang"
     else
       add_check "dispatch_headers" "fail" "dispatch/dispatch.h is missing from the active toolchain include paths" \

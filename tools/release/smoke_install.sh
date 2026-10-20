@@ -43,6 +43,7 @@ arlen doctor
 cd "$work"
 arlen new SmokeApp
 cd SmokeApp
+arlen build
 
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 if command -v setsid >/dev/null 2>&1; then

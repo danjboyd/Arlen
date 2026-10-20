@@ -8526,7 +8526,7 @@ static int CommandDoctor(NSArray *args) {
 
     int dispatchHeaderCode = 0;
     RunShellCaptureCommand([NSString
-                               stringWithFormat:@"set +u; source %@ >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\\n' | clang $(gnustep-config --objc-flags) -x objective-c -fsyntax-only - >/dev/null 2>&1",
+                               stringWithFormat:@"set +u; source %@ >/dev/null 2>&1; set -u; printf '#import <dispatch/dispatch.h>\\n' | clang $(gnustep-config --objc-flags) -x objective-c -fsyntax-only - -MF /dev/null >/dev/null 2>&1",
                                                 ShellQuote(gnustepScript)],
                            &dispatchHeaderCode);
     if (dispatchHeaderCode == 0) {

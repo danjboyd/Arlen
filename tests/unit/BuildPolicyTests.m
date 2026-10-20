@@ -573,6 +573,23 @@
   NSString *resolverScript = [self readFile:[repoRoot stringByAppendingPathComponent:@"tools/resolve_gnustep.sh"]];
   XCTAssertTrue([resolverScript containsString:@"clang64_gnustep_sh"]);
   XCTAssertTrue([resolverScript containsString:@"/clang64/share/GNUstep/Makefiles/GNUstep.sh"]);
+#if defined(__linux__)
+  // GNUstep flags include -MMD. A diagnostic probe must not try to write -.d
+  // into the user's cwd (here /), or report present headers as missing.
+  int doctorCode = 0;
+  NSString *output = ALNTestRunShellCapture(
+      [NSString stringWithFormat:@"cd / && ARLEN_FRAMEWORK_ROOT=%@ bash %@ --json 2>/dev/null",
+       ALNTestShellQuote(repoRoot),
+       ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/arlen-doctor"])], &doctorCode);
+  NSData *jsonData = [output dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary *report = jsonData ? [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL] : nil;
+  XCTAssertNotNil(report, @"%@", output);
+  NSString *dispatchStatus = nil;
+  for (NSDictionary *check in report[@"checks"]) {
+    if ([check[@"id"] isEqual:@"dispatch_headers"]) dispatchStatus = check[@"status"];
+  }
+  XCTAssertEqualObjects(@"pass", dispatchStatus, @"%@", output);
+#endif
 }
 
 - (void)testPhase20FocusedRunnerScriptExecutesRepoNativeLaneTargets {

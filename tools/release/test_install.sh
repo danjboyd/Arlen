@@ -11,12 +11,18 @@ cat > "$work/pkg/arlen-1.2.3/tools/source_gnustep_env.sh" <<'SH'
 gnustep-config() { echo '-fobjc-runtime=gnustep-2.2'; }
 SH
 printf '#!/usr/bin/env bash\nprintf "fixture-ok\\n"\n' > "$work/pkg/arlen-1.2.3/bin/arlen"
-chmod +x "$work/pkg/arlen-1.2.3/bin/arlen"
+cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/bin/arlen-doctor"
+cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/bin/boomhauer"
+cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/tools/resolve_gnustep.sh"
+chmod +x "$work/pkg/arlen-1.2.3/bin/"* "$work/pkg/arlen-1.2.3/tools/"*
+mkdir -p "$work/pkg/arlen-1.2.3/src/Arlen"
+touch "$work/pkg/arlen-1.2.3/GNUmakefile" "$work/pkg/arlen-1.2.3/tools/arlen.m"
 tar -czf "$work/archive.tar.gz" -C "$work/pkg" arlen-1.2.3
 # Force the Linux branch on macOS too; no real package installation or build.
 printf '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n' > "$work/mocks/uname"
 printf '#!/bin/sh\nexit 71\n' > "$work/mocks/make"
 printf '#!/bin/sh\nexit 0\n' > "$work/mocks/clang"
+printf '#!/bin/sh\nexit 0\n' > "$work/mocks/python3"
 chmod +x "$work/mocks/"*
 prefix="$work/home/install with ' quote"
 bin_dir="$work/home/bin with ' quote"
@@ -62,6 +68,31 @@ if run_install --version 1.2.3; then exit 1; fi
 grep -q 'checksum mismatch' "$work/output"
 [[ -f "$prefix/1.2.3/marker" ]]
 cmp "$bin_dir/arlen" "$work/launcher-before"
+# An incomplete but otherwise valid same-version archive never activates.
+mv "$work/pkg/arlen-1.2.3/bin/arlen" "$work/saved-arlen"
+tar -czf "$work/incomplete.tar.gz" -C "$work/pkg" arlen-1.2.3
+if run_install --archive "$work/incomplete.tar.gz" --no-build; then exit 1; fi
+[[ -f "$prefix/1.2.3/marker" ]]
+mv "$work/saved-arlen" "$work/pkg/arlen-1.2.3/bin/arlen"
+# Interrupt immediately after moving the previous version. The wrapper models
+# TERM landing between mv's return and the next shell instruction.
+cat > "$work/mocks/mv" <<'SH'
+#!/usr/bin/env bash
+command_path="$INSTALL_REAL_MV"
+case "$*" in
+  *"/previous")
+    "$command_path" "$@"
+    kill -TERM "$PPID"
+    exit 0 ;;
+esac
+exec "$command_path" "$@"
+SH
+export INSTALL_REAL_MV="$(command -v mv)"
+chmod +x "$work/mocks/mv"
+if run_install --archive "$work/archive.tar.gz" --no-build; then exit 1; fi
+[[ -f "$prefix/1.2.3/marker" ]]
+[[ "$(env PATH="$bin_dir:$PATH" arlen)" == fixture-ok ]]
+rm "$work/mocks/mv"
 # Retry works and --no-modify-path leaves profiles untouched.
 cp "$work/home/.profile" "$work/profile-before"
 run_install --archive "$work/archive.tar.gz" --no-build --no-modify-path

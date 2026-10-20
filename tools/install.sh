@@ -77,9 +77,10 @@ quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 consent() {
   [[ $yes -eq 1 ]] && return 0
   local answer=""
-  if [[ -r /dev/tty ]]; then
-    printf 'arlen-install: %s [y/N] ' "$*" > /dev/tty 2>/dev/null || true
-    read -r answer < /dev/tty 2>/dev/null || true
+  if { exec 3<> /dev/tty; } 2>/dev/null; then
+    printf 'arlen-install: %s [y/N] ' "$*" >&3
+    read -r answer <&3 || true
+    exec 3>&-
   fi
   [[ "$answer" == y || "$answer" == Y ]] || die "prerequisite setup needs consent; rerun with --yes, or provision manually with --no-setup"
 }
@@ -128,6 +129,7 @@ backup=""
 dest=""
 final_dest=""
 activating=0
+had_previous=0
 old_current=""
 launcher_stage=""
 lock_dir="$prefix/.install-lock"
@@ -135,8 +137,12 @@ mkdir "$lock_dir" 2>/dev/null || die "another install is active (lock: $lock_dir
 cleanup() {
   local status=$?
   if [[ $activating -eq 1 ]]; then
-    rm -rf "$final_dest"
-    if [[ -n "$backup" && -e "$backup" ]]; then mv "$backup" "$final_dest"; fi
+    if [[ -n "$backup" && ( -e "$backup" || -L "$backup" ) ]]; then
+      rm -rf "$final_dest"
+      mv "$backup" "$final_dest"
+    elif [[ $had_previous -eq 0 && ! -d "$stage/release" ]]; then
+      rm -rf "$final_dest"
+    fi
     if [[ -n "$old_current" ]]; then ln -sfn "$old_current" "$prefix/current"
     else rm -f "$prefix/current"; fi
   fi
@@ -199,6 +205,23 @@ version="$archive_version"
 stage="$(mktemp -d "$prefix/.install-$version.XXXXXX")"
 mv "$work_dir/unpack/$top" "$stage/release"
 dest="$stage/release"
+archive_kind="$(awk -F= '$1 == "kind" {print $2}' "$dest/.arlen-dist")"
+case "$platform:$archive_kind" in
+  linux:source|macos:macos-arm64) ;;
+  *) die "archive kind '$archive_kind' is not supported on $platform" ;;
+esac
+for required in bin/arlen bin/arlen-doctor bin/boomhauer tools/source_gnustep_env.sh tools/resolve_gnustep.sh; do
+  [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
+done
+if [[ "$platform" == macos ]]; then
+  for required in build/apple/arlen build/apple/boomhauer build/apple/eocc; do
+    [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
+  done
+  [[ -f "$dest/build/apple/.release-prebuilt" ]] || die "archive is incomplete: missing Apple prebuilt manifest"
+else
+  [[ -f "$dest/GNUmakefile" && -f "$dest/tools/arlen.m" && -d "$dest/src/Arlen" ]] ||
+    die "archive is incomplete: missing framework source/build inputs"
+fi
 
 linux_toolchain_ready() {
   ( source "$dest/tools/source_gnustep_env.sh" >/dev/null 2>&1 &&
@@ -211,8 +234,11 @@ setup_linux() {
     printf '#include <openssl/ssl.h>\nint main(void) { return OPENSSL_init_ssl(0, 0) == 0; }\n' |
       clang -x c - -lssl -lcrypto -o "$work_dir/openssl-check" >/dev/null 2>&1 || missing=1
   fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import ctypes; ctypes.CDLL("libsqlite3.so.0")' >/dev/null 2>&1 || missing=1
+  fi
   if linux_toolchain_ready && [[ $missing -eq 0 ]]; then return; fi
-  [[ $do_setup -eq 1 ]] || die "missing clang GNUstep or build prerequisites; --no-setup leaves the host unchanged. See docs/GETTING_STARTED.md (make, python3, clang, libssl-dev and GNUstep libobjc2)."
+  [[ $do_setup -eq 1 ]] || die "missing clang GNUstep or build prerequisites; --no-setup leaves the host unchanged. See docs/GETTING_STARTED.md (make, python3, clang, libssl-dev, libsqlite3-0 and GNUstep libobjc2)."
   os_id="$(. /etc/os-release; printf '%s' "$ID")"
   os_version="$(. /etc/os-release; printf '%s' "$VERSION_ID")"
   case "$os_id:$os_version:$arch" in
@@ -223,7 +249,7 @@ setup_linux() {
   need curl
   if [[ $missing -eq 1 ]]; then
     root_command apt-get update
-    root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates clang make python3 libssl-dev
+    root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates clang make python3 libssl-dev libsqlite3-0
   fi
   if ! linux_toolchain_ready; then
     local bootstrap_url="https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh"
@@ -293,11 +319,12 @@ final_dest="$prefix/$version"
 [[ ! -e "$prefix/current" || -L "$prefix/current" ]] || die "$prefix/current must be a symlink"
 [[ ! -d "$launcher" ]] || die "$launcher is a directory"
 old_current="$(readlink "$prefix/current" 2>/dev/null || true)"
-if [[ -e "$final_dest" || -L "$final_dest" ]]; then
-  backup="$stage/previous"
-  mv "$final_dest" "$backup"
-fi
+if [[ -e "$final_dest" || -L "$final_dest" ]]; then had_previous=1; fi
+backup="$stage/previous"
+# Arm rollback before the first rename. Cleanup checks whether the backup
+# actually exists, so interruption/failure before mv cannot remove the old tree.
 activating=1
+if [[ $had_previous -eq 1 ]]; then mv "$final_dest" "$backup"; fi
 mv "$dest" "$final_dest"
 dest="$final_dest"
 ln -sfn "$version" "$prefix/current"
