@@ -209,6 +209,9 @@ Run bootstrap environment diagnostics without requiring a framework build.
  set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
  requests when `observability.operabilityAnonymous` /
  `ARLEN_OPERABILITY_ANONYMOUS` is set
+- with `--env production`, reports `multi_worker_state`: warns when more than
+ one propane worker is configured without a declared durable state or database
+ signal; a passing check records a declared signal or a single worker
 - in an app root, warns (`module_outdated`) for each vendored
  `modules/<id>` whose `version` is lower than the framework checkout's
  `modules/<id>`, with the fix: `arlen module upgrade <id>`, then

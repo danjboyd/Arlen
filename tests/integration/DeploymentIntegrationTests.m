@@ -53,6 +53,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 @interface DeploymentIntegrationTests : XCTestCase
+
 @end
 
 @implementation DeploymentIntegrationTests
@@ -6084,5 +6085,46 @@ static NSString *ALNHostDeployProfile(void) {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }
+
+- (void)testBuiltDoctorReportsProductionMultiWorkerState {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"doctor-multi-worker-state"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+
+  @try {
+    NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
+    XCTAssertTrue([self writeFile:configPath
+                          content:@"{ propaneAccessories = { workerCount = 4; }; state = { durable = NO; }; }"]);
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+#if defined(__APPLE__)
+    NSString *binary = [repoRoot stringByAppendingPathComponent:@"build/apple/arlen"];
+#else
+    NSString *binary = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+#endif
+    NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ doctor --env production --json",
+                                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
+                                                   [self shellQuoted:binary]];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    NSDictionary *doctor = [self parseJSONDictionaryFromOutput:output context:@"built doctor production"];
+    NSPredicate *stateCheck = [NSPredicate predicateWithFormat:@"id == %@", @"multi_worker_state"];
+    NSArray *checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
+    XCTAssertEqual((NSUInteger)1, [checks count], @"%@", output);
+    XCTAssertEqualObjects(@"warn", [checks firstObject][@"status"], @"%@", output);
+
+    XCTAssertTrue([self writeFile:configPath
+                          content:@"{ propaneAccessories = { workerCount = 1; }; state = { durable = NO; }; }"]);
+    output = [self runShellCapture:command exitCode:&code];
+    doctor = [self parseJSONDictionaryFromOutput:output context:@"built doctor single worker"];
+    checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
+    XCTAssertEqual((NSUInteger)1, [checks count], @"%@", output);
+    XCTAssertEqualObjects(@"pass", [checks firstObject][@"status"], @"%@", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 
 @end
