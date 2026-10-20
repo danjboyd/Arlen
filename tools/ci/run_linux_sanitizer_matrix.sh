@@ -24,7 +24,9 @@ if [[ -z "$ubsan_so" || ! -f "$ubsan_so" ]]; then
 fi
 
 export EXTRA_OBJC_FLAGS="${EXTRA_OBJC_FLAGS:--fsanitize=address,undefined -fno-omit-frame-pointer}"
-export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:halt_on_error=1:strict_string_checks=1}"
+# quarantine_size_mb and malloc_context_size keep the single unit-test
+# xctest process under the 4 GB iep-apt runner (HD-2076).
+export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:halt_on_error=1:strict_string_checks=1:quarantine_size_mb=64:malloc_context_size=10}"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 export XCTEST_LD_PRELOAD="$asan_so:$ubsan_so"
 
