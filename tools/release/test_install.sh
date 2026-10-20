@@ -14,7 +14,8 @@ printf '#!/usr/bin/env bash\nprintf "fixture-ok\\n"\n' > "$work/pkg/arlen-1.2.3/
 cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/bin/arlen-doctor"
 cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/bin/boomhauer"
 cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/tools/resolve_gnustep.sh"
-chmod +x "$work/pkg/arlen-1.2.3/bin/"* "$work/pkg/arlen-1.2.3/tools/"*
+chmod +x "$work/pkg/arlen-1.2.3/bin/"*
+chmod 644 "$work/pkg/arlen-1.2.3/tools/"*
 mkdir -p "$work/pkg/arlen-1.2.3/src/Arlen"
 touch "$work/pkg/arlen-1.2.3/GNUmakefile" "$work/pkg/arlen-1.2.3/tools/arlen.m"
 tar -czf "$work/archive.tar.gz" -C "$work/pkg" arlen-1.2.3

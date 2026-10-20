@@ -210,8 +210,11 @@ case "$platform:$archive_kind" in
   linux:source|macos:macos-arm64) ;;
   *) die "archive kind '$archive_kind' is not supported on $platform" ;;
 esac
-for required in bin/arlen bin/arlen-doctor bin/boomhauer tools/source_gnustep_env.sh tools/resolve_gnustep.sh; do
+for required in bin/arlen bin/arlen-doctor bin/boomhauer; do
   [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
+done
+for required in tools/source_gnustep_env.sh tools/resolve_gnustep.sh; do
+  [[ -r "$dest/$required" ]] || die "archive is incomplete: missing readable $required"
 done
 if [[ "$platform" == macos ]]; then
   for required in build/apple/arlen build/apple/boomhauer build/apple/eocc; do
