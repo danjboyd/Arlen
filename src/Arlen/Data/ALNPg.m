@@ -1884,7 +1884,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 @property(nonatomic, assign) NSUInteger builderExecutionDepth;
 
 - (BOOL)hasActiveTransaction;
-- (void)reportConnectionLossForError:(NSError **)error;
+- (BOOL)reportConnectionLossForError:(NSError **)error;
 - (BOOL)isInsideTransaction;
 - (BOOL)failIfConnectionClosedBeforeSend:(NSError **)error;
 - (BOOL)checkConnectionLiveness:(NSError **)error;
@@ -2089,10 +2089,11 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
 // closed it, restarted or failed over), report the failure as
 // ALNPgErrorConnectionFailed with ALNPgErrorConnectionLostKey = YES, whatever
 // SQLSTATE (or none) the last result carried, and close the connection so the
-// pool discards it instead of reusing it.
-- (void)reportConnectionLossForError:(NSError **)error {
+// pool discards it instead of reusing it. Returns YES when a lost connection
+// was detected and closed, even if the caller did not request an error.
+- (BOOL)reportConnectionLossForError:(NSError **)error {
   if (_conn == NULL || ALNPQstatus(_conn) == ALNConnectionOK) {
-    return;
+    return NO;
   }
   if (error != NULL && *error != nil) {
     NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:(*error).userInfo ?: @{}];
@@ -2100,6 +2101,7 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
     *error = [NSError errorWithDomain:ALNPgErrorDomain code:ALNPgErrorConnectionFailed userInfo:userInfo];
   }
   [self close];
+  return YES;
 }
 
 // YES while a transaction is open on this connection: one started with

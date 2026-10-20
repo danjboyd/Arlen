@@ -1938,7 +1938,6 @@ static BOOL ALNSendFileDescriptor(ALNSocketHandle clientFd,
         ALNTransientWriteBackoff();
         continue;
       }
-      transientRetries = 0;
       if (errno == EINVAL || errno == ENOSYS) {
         ok = ALNSendFileReadFallback(clientFd, fileFd, remaining, offset, budget);
         goto cleanup;

@@ -35,17 +35,6 @@
       "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
     },
     {
-      "file": "src/Arlen/HTTP/ALNHTTPServer.m",
-      "line": 1731,
-      "type": "Dead assignment",
-      "category": "Unused code",
-      "function": "ALNSendFileDescriptor",
-      "message": "Value stored to 'transientRetries' is never read",
-      "hash": "9a896b1a1897740b992cc7bcbd1e54b5",
-      "key": "src/Arlen/HTTP/ALNHTTPServer.m|Dead assignment|ALNSendFileDescriptor|9a896b1a1897740b992cc7bcbd1e54b5",
-      "reason": "Dead store; harmless. Remove this entry when the store is cleaned up."
-    },
-    {
       "file": "src/Arlen/MVC/Template/ALNEOCTranspiler.m",
       "line": 656,
       "type": "Dead assignment",
