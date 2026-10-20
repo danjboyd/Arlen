@@ -61,6 +61,11 @@ function Get-FileHash {
 try {
   $tree = Join-Path $sandbox 'fixture\arlen-0.3.0'
   New-Item -ItemType Directory -Force $tree | Out-Null
+  foreach ($relative in @('bin\arlen', 'build\arlen.exe', 'build\boomhauer.exe', 'build\eocc.exe', 'build\lib\libArlenFramework.a', 'build\.release-prebuilt')) {
+    $file = Join-Path $tree $relative
+    New-Item -ItemType Directory -Force (Split-Path -Parent $file) | Out-Null
+    [IO.File]::WriteAllText($file, 'fixture')
+  }
   [IO.File]::WriteAllText((Join-Path $tree '.arlen-dist'), "version=0.3.0`nkind=windows-x64`ntoolchain=0.1.1`ntoolchain_sha256=$toolchainSha`n")
   [IO.File]::WriteAllText((Join-Path $tree 'sentinel'), 'working install')
   $archive = Join-Path $sandbox 'fixture.zip'
@@ -114,6 +119,34 @@ try {
     $before = [Environment]::GetEnvironmentVariable('Path', 'User')
     & $installer -Archive $archive -Prefix (Join-Path $sandbox 'ephemeral') -MsysRoot $root -NoSetup -NoPathUpdate
     Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $before) 'NoPathUpdate changed saved PATH'
+  }
+  Case 'NoSetup rejects artifact drift and preserves active install' {
+    $stateFile = Join-Path $root 'state\cli-state.json'
+    $stateText = [IO.File]::ReadAllText($stateFile)
+    [IO.File]::WriteAllText($stateFile, $stateText.Replace($toolchainSha, ('0' * 64)))
+    try {
+      Fails { & $installer -Archive $archive -Prefix $prefix -MsysRoot $root -NoSetup -NoPathUpdate } '-NoSetup'
+      Assert ((Get-Content (Join-Path $prefix 'current\sentinel')) -eq 'working install') 'toolchain drift damaged current install'
+    } finally { [IO.File]::WriteAllText($stateFile, $stateText) }
+  }
+  Case 'ordinary current directory is never deleted' {
+    $otherPrefix = Join-Path $sandbox 'ordinary current'
+    $ordinaryCurrent = Join-Path $otherPrefix 'current'
+    New-Item -ItemType Directory -Force $ordinaryCurrent | Out-Null
+    [IO.File]::WriteAllText((Join-Path $ordinaryCurrent 'sentinel'), 'preserve')
+    Fails { & $installer -Archive $archive -Prefix $otherPrefix -MsysRoot $root -NoSetup -NoPathUpdate } 'not a junction'
+    Assert ((Get-Content (Join-Path $ordinaryCurrent 'sentinel')) -eq 'preserve') 'ordinary current was removed'
+  }
+  Case 'incomplete prebuilt archive never activates or runs setup' {
+    $incompleteTree = Join-Path $sandbox 'incomplete\arlen-0.3.0'
+    New-Item -ItemType Directory -Force $incompleteTree | Out-Null
+    Copy-Item -LiteralPath (Join-Path $tree '.arlen-dist') -Destination $incompleteTree
+    $incompleteArchive = Join-Path $sandbox 'incomplete.zip'
+    [IO.Compression.ZipFile]::CreateFromDirectory((Split-Path -Parent $incompleteTree), $incompleteArchive)
+    $beforeCalls = $global:ArlenInstallerTestsetupCalls
+    Fails { & $installer -Archive $incompleteArchive -Prefix $prefix -MsysRoot $root -NoPathUpdate } 'archive lacks prebuilt'
+    Assert ($global:ArlenInstallerTestsetupCalls -eq $beforeCalls) 'incomplete archive ran setup'
+    Assert ((Get-Content (Join-Path $prefix 'current\sentinel')) -eq 'working install') 'incomplete archive damaged install'
   }
   Write-Host "Windows installer regressions passed: $global:ArlenInstallerTesttests"
 } finally {

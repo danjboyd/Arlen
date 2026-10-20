@@ -93,7 +93,7 @@ function Install-Arlen {
   foreach ($candidate in $candidates) {
     if ((Test-Path (Join-Path $candidate "usr\bin\env.exe")) -and
         (Test-Path (Join-Path $candidate "clang64\share\GNUstep\Makefiles\GNUstep.sh"))) {
-      $resolvedRoot = $candidate
+      $resolvedRoot = [IO.Path]::GetFullPath($candidate)
       break
     }
   }
@@ -164,6 +164,9 @@ function Install-Arlen {
     if ($dist["kind"] -ne "windows-x64") {
       Die "$Archive is a '$($dist["kind"])' archive; Windows needs arlen-X.Y.Z-windows-x64.zip"
     }
+    foreach ($required in @('bin\arlen', 'build\arlen.exe', 'build\boomhauer.exe', 'build\eocc.exe', 'build\lib\libArlenFramework.a', 'build\.release-prebuilt')) {
+      if (-not (Test-Path -LiteralPath (Join-Path $top $required) -PathType Leaf)) { Die "archive lacks prebuilt $required" }
+    }
     $Version = $dist["version"]
 
     # Resolve the required ABI from the verified archive before provisioning.
@@ -177,6 +180,7 @@ function Install-Arlen {
       (Test-Path (Join-Path $resolvedRoot "clang64\lib\libcurl.dll.a"))
     if (-not $ready) {
       $setupRoot = if ($resolvedRoot) { $resolvedRoot } elseif ($MsysRoot) { $MsysRoot } elseif ($env:ARLEN_MSYS_ROOT) { $env:ARLEN_MSYS_ROOT } else { Join-Path $env:LOCALAPPDATA "gnustep-cli" }
+      $setupRoot = [IO.Path]::GetFullPath($setupRoot)
       if ($NoSetup) { Die "matching gnustep-cli toolchain $wantToolchain required at $setupRoot (-NoSetup). Run:`n$(BootstrapSetup $wantToolchain $setupRoot)" }
       # Pin the executable bootstrap as well as its release manifest. Future
       # toolchains require an explicit reviewed digest update here.
