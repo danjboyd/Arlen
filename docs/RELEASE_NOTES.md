@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.2 — 2026-10-20
+
+A patch release with one thread-safety fix.
+
+- Fixed a data race on the cached largest per-route body limit. The HTTP
+  server and request dispatch read it on every connection and request, from
+  many threads, and the first callers could read and write the cache at the
+  same time. The cache is now guarded by a lock. ThreadSanitizer reported it
+  in `ApplicationTests`; the race came in with per-route body limits in
+  0.2.0 (#309).
+
 ## 0.2.1 — 2026-10-15
 
 A patch release with two fixes found while preparing the 0.2.0 announcement.
