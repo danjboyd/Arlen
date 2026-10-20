@@ -36,10 +36,13 @@ dir.
 How it gets the framework tools depends on the platform:
 
 - Apple Silicon: uses the prebuilt `arlen-X.Y.Z-macos-arm64.tar.gz`.
-- Linux: builds `arlen-X.Y.Z.tar.gz` once with `make all`, against the
+- Linux: builds `arlen-X.Y.Z.tar.gz` with `make all`, against the
   GNUstep that `tools/source_gnustep_env.sh` resolves.
 - Intel Macs: not supported. The installer exits with an error because the
   Apple build targets arm64 only.
+
+The first Linux app command may rebuild framework artifacts after installation
+moves them from staging to their final path.
 
 The launcher exports `ARLEN_FRAMEWORK_ROOT` (unless already set) so apps
 outside the install find the framework. On Linux it also sources
