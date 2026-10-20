@@ -121,9 +121,16 @@ exit $LASTEXITCODE
   try {
     # `arlen build` builds the framework; apps build through boomhauer.
     Step "app build" {
-      $output = & arlen boomhauer --prepare-only 2>&1 | Out-String
+      # PS5.1 turns redirected native stderr into ErrorRecords, even for a
+      # successful command (e.g. the whitespace-alias notice). Judge the exit.
+      $savedPreference = $ErrorActionPreference
+      try {
+        $ErrorActionPreference = 'Continue'
+        $output = & arlen boomhauer --prepare-only 2>&1 | Out-String
+        $buildExit = $LASTEXITCODE
+      } finally { $ErrorActionPreference = $savedPreference }
       Write-Host $output
-      if ($LASTEXITCODE -ne 0) { throw "arlen boomhauer --prepare-only exited $LASTEXITCODE" }
+      if ($buildExit -ne 0) { throw "arlen boomhauer --prepare-only exited $buildExit" }
       if ($output -match "building framework artifacts|rebuilding clean framework artifacts") {
         throw "boomhauer rebuilt the prebuilt framework"
       }
