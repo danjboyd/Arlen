@@ -49,6 +49,11 @@ function Invoke-WebRequest {
   }
   Copy-Item -LiteralPath $global:ArlenInstallerTestArchive -Destination $OutFile
 }
+function Invoke-RestMethod {
+  param([switch]$UseBasicParsing, [string]$Uri)
+  Assert ($Uri -eq 'https://api.github.com/repos/danjboyd/Arlen/releases/latest') 'unexpected latest lookup'
+  return [pscustomobject]@{ tag_name='v0.3.0' }
+}
 function Get-FileHash {
   param([string]$Algorithm, [string]$LiteralPath)
   if ($LiteralPath -like '*gnustep-bootstrap.ps1') {
@@ -147,6 +152,23 @@ try {
     Fails { & $installer -Archive $incompleteArchive -Prefix $prefix -MsysRoot $root -NoPathUpdate } 'archive lacks prebuilt'
     Assert ($global:ArlenInstallerTestsetupCalls -eq $beforeCalls) 'incomplete archive ran setup'
     Assert ((Get-Content (Join-Path $prefix 'current\sentinel')) -eq 'working install') 'incomplete archive damaged install'
+  }
+  Case 'default irm/iex-style execution registers bare arlen immediately' {
+    $savedLocal = $env:LOCALAPPDATA
+    $savedMsys = $env:ARLEN_MSYS_ROOT
+    $savedMakefiles = $env:GNUSTEP_MAKEFILES
+    try {
+      $env:LOCALAPPDATA = Join-Path $sandbox 'default user'
+      $env:ARLEN_MSYS_ROOT = $null
+      $env:GNUSTEP_MAKEFILES = $null
+      Write-Toolchain (Join-Path $env:LOCALAPPDATA 'gnustep-cli')
+      Invoke-Expression ([IO.File]::ReadAllText((Resolve-Path $installer)))
+      Assert ((Get-Command arlen).Source -eq (Join-Path $env:LOCALAPPDATA 'Arlen\bin\arlen.cmd')) 'iex did not update current-shell command resolution'
+    } finally {
+      $env:LOCALAPPDATA = $savedLocal
+      $env:ARLEN_MSYS_ROOT = $savedMsys
+      $env:GNUSTEP_MAKEFILES = $savedMakefiles
+    }
   }
   Write-Host "Windows installer regressions passed: $global:ArlenInstallerTesttests"
 } finally {
