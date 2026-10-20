@@ -67,56 +67,44 @@ HTML-escaped by default, and template errors report the file and line.
 
 ## Install
 
-The storage and notifications modules use the operating system SQLite runtime
-(`libsqlite3-0` on Linux; system SQLite on macOS and Windows). Storage 1.4 and
-notifications 1.3 import legacy state once; stop older workers before upgrading.
-See [Storage migration and backups](docs/STORAGE_MODULE.md) and
-[Notifications migration and backups](docs/NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
-
-One command installs the latest release and puts an `arlen` command in
-`~/.local/bin`:
+On **Linux or macOS**, paste this command into your terminal:
 
 ```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-First install your platform's toolchain:
+The installer checks release checksums, sets up supported prerequisites, and
+adds `arlen` to future shells. The final `export` makes it available in this
+terminal too. `--yes` allows prerequisite installation; Linux may ask for your
+sudo password. On macOS, install Apple's Command Line Tools and Homebrew first
+if they are missing; the installer explains the required steps.
 
-| Platform | Prerequisites | What the installer does |
-|---|---|---|
-| **macOS, Apple Silicon** | macOS 14 or later, the Xcode Command Line Tools (`xcode-select --install`), and `brew install openssl@3 libpq`. Full Xcode is needed only for `arlen test`. | Installs **prebuilt** framework tools; nothing to compile. |
-| **macOS, Intel** | Not supported yet; the Apple build targets arm64 only. | — |
-| **Windows x64** (development) | The [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed MSYS2 `CLANG64` toolchain (`v0.1.1`); see [Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md). Use the PowerShell installer below. | Installs **prebuilt** framework tools; nothing to compile. |
-| **Linux** | A **clang-built GNUstep**. If you don't have one, the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) managed toolchain installs one without root (command below). | Builds the framework once against your toolchain, in about a minute |
-
-The managed GNUstep toolchain for Linux is gnustep-cli `v0.1.0`. Arlen is
-verified with it on **Debian 13** (amd64 and arm64) and **Ubuntu 26.04 LTS**
-(amd64). Debian 12, Ubuntu 24.04, and Ubuntu on arm64 are not covered yet. Install it, plus the OpenSSL
-headers Arlen links against:
-
-```bash
-curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
-  | sh -s -- --yes setup --user
-sudo apt-get install -y libssl-dev libsqlite3-0
-```
-
-On Windows, run the PowerShell installer instead:
+On **Windows x64**, paste this into PowerShell:
 
 ```powershell
 irm https://github.com/danjboyd/Arlen/releases/latest/download/install.ps1 | iex
 ```
 
-Releases unpack to `~/.local/share/arlen/<version>` (`%LOCALAPPDATA%\Arlen\<version>` on Windows). Every download is checked
-against the release's `SHA256SUMS`. Rerun the installer to upgrade, or pass
-`--version X.Y.Z` to pin a release. `arlen doctor` checks your setup and
-explains anything that's missing. Platform details are in
-[Getting Started (Linux)](docs/GETTING_STARTED.md),
-[Getting Started (macOS)](docs/GETTING_STARTED_MACOS.md) and
-[Getting Started (Windows)](docs/GETTING_STARTED_WINDOWS.md).
+The Windows installer provisions the matching managed GNUstep toolchain when
+needed and adds `arlen` to the current shell and your user PATH.
 
-Prefer a git checkout? Run `git clone --recursive https://github.com/danjboyd/Arlen.git`,
-then `make all` on Linux (after `source tools/source_gnustep_env.sh`) or
-`./bin/build-apple` on macOS, or `make all` inside `scripts\run_clang64.ps1` on Windows, and use `./bin/arlen`.
+| Platform | Installation support |
+|---|---|
+| Linux | Automatic setup on Debian 13 (amd64/arm64) and Ubuntu 26.04 LTS (amd64). Other systems need a manually provisioned clang-built GNUstep toolchain. |
+| macOS | Apple Silicon, macOS 14 or later; Xcode Command Line Tools and Homebrew at `/opt/homebrew`. Prebuilt tools; full Xcode is needed for `arlen test`. Intel Macs are not supported. |
+| Windows | x64 with PowerShell 5.1; managed MSYS2 CLANG64 toolchain. Native development is supported; deploy production apps to Linux or macOS. |
+
+Then run `arlen doctor` and continue below. For version pinning, offline
+archives, custom locations, or manual prerequisite setup, see
+[Linux installation](docs/GETTING_STARTED.md),
+[macOS installation](docs/GETTING_STARTED_MACOS.md), or
+[Windows installation](docs/GETTING_STARTED_WINDOWS.md).
+
+Upgrading existing apps? Re-vendor their modules and review
+[Storage migration and backups](docs/STORAGE_MODULE.md) and
+[Notifications migration and backups](docs/NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading)
+before replacing workers. Storage and notifications need the operating system
+SQLite runtime (`libsqlite3-0` on Linux).
 
 ## Quick Start
 

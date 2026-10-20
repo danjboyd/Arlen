@@ -1,111 +1,71 @@
 # Getting Started
 
-Custom Windows CLANG64 build scripts must include `_FILE_OFFSET_BITS=64` and
-rebuild application objects after upgrading. The standard CLI and make paths
-set it automatically, keeping large-file sizes and Range offsets intact.
+Install Arlen, create an app, and run it locally. This page covers Linux;
+use [Getting Started on macOS](GETTING_STARTED_MACOS.md) or
+[Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for those platforms.
 
-When upgrading existing apps, re-vendor the first-party modules you use with
-`arlen module upgrade <name> --source <framework>/modules/<name>`, then rebuild
-and redeploy. Module source is copied into apps; upgrading framework binaries
-alone does not replace it. JSON input is limited to 512 nested containers on
-both parser backends. See the [Live UI guide](LIVE_UI.md) for receive-only
-WebSocket channels and reconnect behavior.
+## 1. Install Arlen
 
-This guide gets you from a clean checkout to a running Arlen app without
-pulling you through contributor-only release or CI material first.
-
-If you are targeting macOS with Apple APIs rather than GNUstep, use
-`docs/GETTING_STARTED_MACOS.md` first. On Windows, use
-`docs/GETTING_STARTED_WINDOWS.md` first.
-
-If you prefer a narrower path, see:
-
-- `docs/GETTING_STARTED_QUICKSTART.md`
-- `docs/GETTING_STARTED_API_FIRST.md`
-- `docs/GETTING_STARTED_HTML_FIRST.md`
-- `docs/GETTING_STARTED_DATA_LAYER.md`
-
-For SQL ORM models, see the [ORM guide](ARLEN_ORM.md#sql-property-names).
-Generated properties may use safe aliases for columns such as `State`; use the
-manifest property names or `objectForColumnName:` with the original SQL name.
-Legacy columns such as `Target ID` and `Unit/Well Notes` are supported without
-schema renames; see [quoted identifiers](ARLEN_ORM.md#quoted-sql-identifiers).
-
-## 1. Install a clang-built GNUstep Toolchain
-
-Arlen needs clang, the `libobjc2` runtime, and `gnustep-base`. Distro GNUstep
-packages built with GCC will not work.
-
-If you don't already have one, install the managed toolchain from
-[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new). It installs under
-`~/.local/share/gnustep-cli` and needs no root except for host packages.
-
-The command below installs gnustep-cli's stable `v0.1.0` toolchain and checks
-the release's signature. Arlen is verified with it on:
-
-- Debian 13 "trixie", amd64 and arm64
-- Ubuntu 26.04 LTS "resolute", amd64
-
-Each distribution gets its own toolchain build. Debian 12, Ubuntu 24.04, and
-Ubuntu on arm64 are not covered yet.
+Paste this command into a bash or zsh terminal:
 
 ```bash
-curl -fsSL https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh \
-  | sh -s -- --yes setup --user
-sudo apt-get install -y libssl-dev
+bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-`--yes` lets setup install host prerequisites (clang, libcurl, libffi, ICU,
-and so on) with `sudo apt-get`. Leave it off to print the command and run it
-yourself. Arlen also needs the OpenSSL development package (`libssl-dev`),
-which the toolchain does not install. To use PostgreSQL, install the client
-library too (`libpq5`, or `libpq-dev` for the headers). Arlen's env helper finds this toolchain on its own when
-`/usr/GNUstep` is absent.
+On Debian 13 (amd64/arm64) and Ubuntu 26.04 LTS (amd64), the installer can
+set up missing build prerequisites and the managed clang GNUstep toolchain.
+`--yes` permits setup; installing host packages may ask for your sudo password.
+The framework is built once, with at most four parallel jobs. Leave off
+`--yes` to be asked before prerequisite setup.
 
-If you already have a clang-built GNUstep, for example under `/usr/GNUstep`,
-use it as is. On other distributions, build clang + libobjc2 + GNUstep from
-source with [gnustep/tools-scripts](https://github.com/gnustep/tools-scripts). For the known-good baseline, see `docs/TOOLCHAIN_MATRIX.md`.
+The installer verifies the release archive against `SHA256SUMS`, installs it
+under `~/.local/share/arlen`, and writes a launcher to `~/.local/bin`. It
+configures future bash/zsh shells automatically. The final `export` in the
+command above makes `arlen` available immediately in the current shell.
+The launcher loads the GNUstep environment for you.
 
-## 2. Install Arlen
-
-### From a release (recommended)
-
-```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
-```
-
-The installer:
-
-1. downloads the latest release archive and checks it against `SHA256SUMS`;
-2. unpacks it to `~/.local/share/arlen/<version>`;
-3. builds the framework once against your toolchain, which takes about a
-   minute;
-4. writes an `arlen` launcher to `~/.local/bin`.
-
-The launcher sets up the GNUstep environment by itself, so you don't need to
-source anything. Make sure `~/.local/bin` is on your `PATH`, then check your
-setup:
+Check the result:
 
 ```bash
 arlen doctor
 ```
 
-Useful installer options:
+Then continue to **Create Your First App** below. No repository checkout is
+needed to develop an app.
 
-- `--version X.Y.Z` pins a release.
-- `--prefix DIR` and `--bin-dir DIR` move the install.
-- `--archive FILE` installs an archive you already downloaded.
+### Installation options
 
-To upgrade, rerun the installer. Earlier versions stay under
-`~/.local/share/arlen/`. The launcher follows `current`, so set
-`ARLEN_HOME=~/.local/share/arlen/<version>` to run an older one.
+- `--version X.Y.Z`: select a release instead of the latest.
+- `--archive FILE`: use a downloaded archive; a sibling `SHA256SUMS` is checked
+  when present. Otherwise, only use a local archive you trust.
+- `--no-setup`: use existing prerequisites without installing anything else.
+- `--no-modify-path`: leave shell startup files unchanged; export PATH yourself.
+- `--prefix DIR` and `--bin-dir DIR`: choose custom locations. Export the chosen
+  bin directory in your current shell.
 
-With the installer, every `/path/to/Arlen/bin/arlen` in the rest of this
-guide is just `arlen`.
+Rerun the installer to upgrade. A failed setup or build preserves the existing
+working release. For the complete options, see [CLI Reference](CLI_REFERENCE.md).
+
+### Manual toolchain setup
+
+Arlen requires clang, `libobjc2`, and `gnustep-base`; GCC-built distro GNUstep
+packages are not compatible. The automatic setup uses the managed
+[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) Linux `v0.1.0`
+toolchain. Its supported distribution/architecture combinations are listed
+above; Debian 12, Ubuntu 24.04, and Ubuntu arm64 are not covered by that path.
+
+For an existing clang-built GNUstep installation, use `--no-setup`.
+Include `make`, `python3`, OpenSSL development headers (`libssl-dev` on
+Debian/Ubuntu), and the SQLite runtime (`libsqlite3-0`). For PostgreSQL,
+install `libpq5` as well, or `libpq-dev` if you need headers. Arlen discovers
+the managed toolchain when `/usr/GNUstep` is absent. See the
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the build contract.
 
 ### From a git checkout
 
-Use a checkout to work on Arlen itself or to track `main`:
+Use a checkout to work on Arlen itself or to track `main`. Provision the
+clang GNUstep toolchain above first; use `./bin/arlen` in place of the installed
+`arlen` command in this guide:
 
 ```bash
 git clone --recursive https://github.com/danjboyd/Arlen.git
@@ -124,15 +84,15 @@ This builds the main tools you will use first:
 If you want structured doctor output for automation:
 
 ```bash
-/path/to/Arlen/bin/arlen doctor --json
+arlen doctor --json
 ```
 
-## 3. Create Your First App
+## 2. Create Your First App
 
 ```bash
 mkdir -p ~/arlen-apps
 cd ~/arlen-apps
-/path/to/Arlen/bin/arlen new MyApp
+arlen new MyApp
 cd MyApp
 ```
 
@@ -149,12 +109,12 @@ The full-mode scaffold gives you:
 If you want the smallest possible app shape instead, see
 `docs/LITE_MODE_GUIDE.md`.
 
-## 4. Run the App
+## 3. Run the App
 
 From app root:
 
 ```bash
-/path/to/Arlen/bin/arlen boomhauer --port 3000
+arlen boomhauer --port 3000
 ```
 
 Then verify:
@@ -174,12 +134,12 @@ access; see
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
 
-## 5. Add One More Route
+## 4. Add One More Route
 
 Prefer the generator-driven path for your second route:
 
 ```bash
-/path/to/Arlen/bin/arlen generate endpoint Hello \
+arlen generate endpoint Hello \
   --route /hello \
   --method GET \
   --template
@@ -202,14 +162,14 @@ with the top-level `routes` array. Those entries call the same router APIs as
 Objective-C route code, so matching, policies, reverse lookup, and route
 inspection stay on one effective route table.
 
-## 6. Common Next Commands
+## 5. Common Next Commands
 
 From app root:
 
 ```bash
-/path/to/Arlen/bin/arlen routes
-/path/to/Arlen/bin/arlen config --env development --json
-/path/to/Arlen/bin/arlen check
+arlen routes
+arlen config --env development --json
+arlen check
 ```
 
 `arlen config` prints secret values (session secrets, connection-string
@@ -222,8 +182,8 @@ New apps ship a request test (`tests/HomeControllerTests.m`, or
 `tests/HomeTests.m` in lite mode). Run it, and any tests you add, with:
 
 ```bash
-/path/to/Arlen/bin/arlen test --app
-/path/to/Arlen/bin/arlen generate test Hello --request --route /hello
+arlen test --app
+arlen generate test Hello --request --route /hello
 ```
 
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
@@ -235,7 +195,7 @@ instead of `make`. `arlen check` runs the Apple verification lane there, and
 `arlen test` runs the Apple unit and integration bundles. `arlen perf` gates
 against a baseline recorded on the same Mac.
 
-## 7. Choose the Next Guide
+## 6. Choose the Next Guide
 
 For login/logout flows that issue multiple cookies, see
 [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md).
@@ -257,14 +217,14 @@ For login/logout flows that issue multiple cookies, see
   generate the client and React targets from the OpenAPI export alone.
 - using Dataverse through the Web API: `docs/DATAVERSE.md`
 
-## 8. Optional Dataverse Path
+## 7. Optional Dataverse Path
 
 If your app needs Dataverse rather than the SQL migration/schema-codegen path,
 use `docs/DATAVERSE.md`. The Dataverse surface is compiled in but
 runtime-inactive by default, so apps that do not configure it do not pick up
 extra startup work.
 
-## 9. Contributor Notes
+## 8. Contributor Notes
 
 If you are working on Arlen itself rather than just building an app with it:
 
@@ -502,3 +462,14 @@ still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).
 For Linux contributor sanitizer checks, run `make ci-sanitizers` after sourcing
 `tools/source_gnustep_env.sh`. The gate requires clang's shared sanitizer runtime
 and uses it consistently for XCTest bundles and instrumented child processes.
+
+## Upgrading existing applications
+
+Re-vendor the first-party modules you use with
+`arlen module upgrade <name> --source <framework>/modules/<name>`, then rebuild
+and redeploy. Upgrading framework binaries alone does not replace copied
+module sources. JSON input is limited to 512 nested containers on both parser
+backends. See [Live UI](LIVE_UI.md) for receive-only channels and reconnect
+behavior. Custom Windows CLANG64 build scripts must include
+`_FILE_OFFSET_BITS=64` and rebuild application objects after upgrading; standard
+CLI and make paths set it automatically.

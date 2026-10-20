@@ -11,6 +11,10 @@ the upgrade notes below before replacing an existing installation.
 Known limitations remain documented in the [Known Risk Register](KNOWN_RISK_REGISTER.md),
 including unresolved, non-blocking ThreadSanitizer findings.
 
+- Concurrent requests now synchronize access to the cached largest per-route
+  request-body limit. Mounted applications are inspected outside the cache lock,
+  so parent and child application locks are not nested.
+
 - Auth 1.6.1 moves registration verification and password-reset mail to durable
   `auth_mail` jobs when the durable adapter is configured. Production-like apps
   with local passwords and mail must install/configure the PostgreSQL jobs
