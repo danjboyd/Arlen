@@ -221,6 +221,7 @@ if [[ "$platform" == macos ]]; then
     [[ -x "$dest/$required" ]] || die "archive is incomplete: missing executable $required"
   done
   [[ -f "$dest/build/apple/.release-prebuilt" ]] || die "archive is incomplete: missing Apple prebuilt manifest"
+  [[ -s "$dest/build/apple/lib/libArlenFramework.a" ]] || die "archive is incomplete: missing Apple framework library"
 else
   [[ -f "$dest/GNUmakefile" && -f "$dest/tools/arlen.m" && -d "$dest/src/Arlen" ]] ||
     die "archive is incomplete: missing framework source/build inputs"

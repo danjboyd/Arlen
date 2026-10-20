@@ -102,4 +102,23 @@ cmp "$work/home/.profile" "$work/profile-before"
 [[ "$(env PATH="$bin_dir:$PATH" arlen)" == fixture-ok ]]
 if run_install --prefix; then exit 1; fi
 if run_install --version '../bad'; then exit 1; fi
+# Apple archives must include the library needed to build generated apps, even
+# if their executable tools and prebuilt manifest are present.
+printf '#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; esac\n' > "$work/mocks/uname"
+printf 'version=1.2.3\nkind=macos-arm64\n' > "$work/pkg/arlen-1.2.3/.arlen-dist"
+mkdir -p "$work/pkg/arlen-1.2.3/build/apple/lib"
+for tool in arlen boomhauer eocc; do cp "$work/pkg/arlen-1.2.3/bin/arlen" "$work/pkg/arlen-1.2.3/build/apple/$tool"; done
+touch "$work/pkg/arlen-1.2.3/build/apple/.release-prebuilt"
+printf 'fixture library\n' > "$work/pkg/arlen-1.2.3/build/apple/lib/libArlenFramework.a"
+tar -czf "$work/mac.tar.gz" -C "$work/pkg" arlen-1.2.3
+run_install --archive "$work/mac.tar.gz" --no-build --no-modify-path
+printf 'working Apple install\n' > "$prefix/1.2.3/marker"
+: > "$work/pkg/arlen-1.2.3/build/apple/lib/libArlenFramework.a"
+tar -czf "$work/mac-broken.tar.gz" -C "$work/pkg" arlen-1.2.3
+if run_install --archive "$work/mac-broken.tar.gz" --no-build; then exit 1; fi
+grep -q 'missing Apple framework library' "$work/output"
+[[ -f "$prefix/1.2.3/marker" ]]
+if run_install --archive "$work/archive.tar.gz" --no-build; then exit 1; fi
+grep -q 'archive kind' "$work/output"
+[[ -f "$prefix/1.2.3/marker" ]]
 echo 'installer failure/retry/PATH scenarios passed'
