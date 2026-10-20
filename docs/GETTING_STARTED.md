@@ -134,6 +134,10 @@ access; see
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
 
+When using `propane` for production, repeated worker startup failures exhaust
+its configured retry limit and return exit status `3`. A worker exiting during
+descriptor sampling does not interrupt that policy. See [Propane](PROPANE.md).
+
 ## 4. Add One More Route
 
 Prefer the generator-driven path for your second route:

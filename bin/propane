@@ -925,7 +925,14 @@ worker_fd_soft_limit() {
     echo "0"
     return
   fi
-  awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null
+  # The worker can exit between the readability check and awk opening limits.
+  # An unavailable sample must not trigger errexit before worker reaping.
+  local sampled_limit
+  if ! sampled_limit="$(awk '$1 == "Max" && $2 == "open" && $3 == "files" {print $4; found=1} END {if (!found) print 0}' "/proc/$pid/limits" 2>/dev/null)"; then
+    echo "0"
+    return
+  fi
+  printf '%s\n' "$sampled_limit"
 }
 
 worker_fd_targets() {

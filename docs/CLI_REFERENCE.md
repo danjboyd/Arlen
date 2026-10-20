@@ -1378,6 +1378,9 @@ Environment:
 
 ## `propane` Script (`bin/propane`)
 
+Descriptor samples that disappear as workers exit do not terminate the manager;
+startup failures still use the configured retry policy and exit status `3`.
+
 Usage:
 
 ```text

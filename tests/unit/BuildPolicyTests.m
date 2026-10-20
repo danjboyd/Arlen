@@ -134,6 +134,7 @@
   XCTAssertTrue([output containsString:@"healthy top_calls=0 events=0"], @"%@", output);
   XCTAssertTrue([output containsString:@"warn top_calls=1 events=1"], @"%@", output);
   XCTAssertTrue([output containsString:@"targets ok"], @"%@", output);
+  XCTAssertTrue([output containsString:@"unavailable limits sample preserved manager loop"], @"%@", output);
 }
 
 - (void)testPropaneLsofProbeFailurePreservesStartupPolicyAndValidCounts {

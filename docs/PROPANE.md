@@ -99,7 +99,9 @@ propane tells each worker where to report that error
   still starting) room to clear.
 - After `startupFailureLimit` consecutive startup failures (any error),
   propane stops its workers and exits with status `3`, so systemd or launchd
-  reports a failed unit. `0` disables the limit.
+  reports a failed unit. `0` disables the limit. A worker disappearing during
+  descriptor sampling is treated as an unavailable sample; it does not abort
+  the manager or bypass startup-failure handling.
 - A worker exit that is not a startup failure (a worker that started and later
   crashed) resets the count and respawns after the plain respawn delay.
 
