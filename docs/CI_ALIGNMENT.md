@@ -197,7 +197,14 @@ never merge gates:
  runner and certifies the user install path with
  `tools/ci/run_windows_release_certification.ps1` (`install.ps1`, `arlen
  new`, `arlen boomhauer --prepare-only`, and a `boomhauer` `/healthz` and `/`
- smoke through the installed `arlen.cmd`).
+ smoke through the installed `arlen.cmd`). The installer regression script
+ `tools/ci/test_windows_installer.ps1` runs in both `windows-preview` and this
+ release lane. It covers pinned prerequisite dispatch with mocked network/setup,
+ opt-outs, PATH registration, checksum/download failure and same-version retry.
+ The installed-release smoke resolves bare `arlen` outside the checkout in the
+ current shell and a fresh PowerShell process using saved user PATH; the test
+ restores the runner user PATH afterwards. These are installation checks on a
+ provisioned runner, not evidence of a clean Windows host setup.
 - `release-assets / *`: the source, macOS arm64 and Windows x64 archives, the
  installers and `SHA256SUMS`.
 

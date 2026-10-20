@@ -253,3 +253,26 @@ Not planned:
 - The `windows-preview` CI lane runs `make phase24-windows-confidence` and
   `make test-unit`. `make windows-confidence` (packaged release and deploy
   parity) is a manual lane until Windows production support lands in 0.4.0.
+
+## Installer Regression Checks
+
+From Windows PowerShell 5.1, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
+```
+
+This focused fixture suite mocks network/bootstrap execution and restores user
+PATH after checking setup pins, opt-outs, current/persistent PATH, interrupted
+downloads, checksum rejection and safe same-version retries. It runs in the
+Windows preview and release certification workflows. It does not establish
+clean-host provisioning success.
+
+The installed-release smoke also verifies bare `arlen doctor` outside the
+checkout in the current PowerShell and a fresh process reading saved user PATH,
+then scaffolds, builds and serves a generated app. Use
+`tools\ci\run_windows_release_certification.ps1 -Archive <zip> -WorkDir <path>`;
+`-KeepWorkDir` preserves app/build/server evidence. Tests restore user PATH on
+exit. See [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for setup,
+offline options, and the distinction between an in-process installer and a
+child PowerShell process.

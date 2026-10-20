@@ -104,6 +104,10 @@ jobs:
           "ARLEN_CERT_VERSION=$version" | Out-File -Append -Encoding ascii $env:GITHUB_ENV
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/release/package_framework.sh --version $version --kind windows-x64 --out build/release-assets"
 
+      - name: Test Windows installer failure and retry contracts
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
+
       - name: Install and certify the Windows archive
         shell: powershell
         run: |

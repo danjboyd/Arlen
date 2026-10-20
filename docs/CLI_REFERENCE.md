@@ -104,20 +104,27 @@ release's `SHA256SUMS`. It unpacks the zip to `<Prefix>\<version>`, points the
 `<Prefix>\current` junction at it, and writes an `arlen.cmd` launcher to the
 bin dir. Nothing in the framework is compiled at install time.
 
-Before installing, it checks the gnustep-cli managed MSYS2 `CLANG64` toolchain.
-It looks for the toolchain in `-MsysRoot`, then `ARLEN_MSYS_ROOT`, then the root
-that `GNUSTEP_MAKEFILES` points into, then `%LOCALAPPDATA%\gnustep-cli`, then
-`%ProgramFiles%\gnustep-cli`. It exits with an error when:
+After checking and unpacking the release archive, the installer validates the
+gnustep-cli managed MSYS2 `CLANG64` toolchain against the archive's exact version
+and artifact digest. An explicit `-MsysRoot` is authoritative; otherwise it
+searches `ARLEN_MSYS_ROOT`, the root containing `GNUSTEP_MAKEFILES`,
+`%LOCALAPPDATA%\gnustep-cli`, then `%ProgramFiles%\gnustep-cli`.
 
-- no toolchain root is found (the message gives the gnustep-cli bootstrap
-  command);
-- libcurl is missing from the toolchain, which means the toolchain is older
-  than gnustep-cli `v0.1.1` (the message gives the bootstrap command);
-- the toolchain's `toolchain_version` in `state\cli-state.json` differs from
-  the `toolchain=` the zip was built against.
+Missing, incomplete or mismatched prerequisites trigger automatic per-user
+setup using the pinned upstream gnustep-cli release manifest and a SHA256-pinned
+PowerShell bootstrap (0.1.1 for Arlen 0.3.0; about 1.1 GB). Unknown toolchain
+pins fail with manual setup guidance. `-NoSetup` requires an already matching
+toolchain; combined with `-Archive`, it supports offline installation. A local
+archive is trusted; verify its checksum yourself before using `-Archive`.
 
-It warns, without failing, when the toolchain's artifact checksum differs from
-the zip's `toolchain_sha256=`, or when the root has no gnustep-cli state file.
+It prepends the launcher directory to current-process and persistent user PATH
+without duplicates. `irm | iex` or `& .\install.ps1` enables bare `arlen`
+immediately. A child `powershell -File` cannot update the parent's PATH; open
+a new terminal afterwards. `-NoPathUpdate` suppresses only persistent changes.
+
+Failed downloads, checksum checks and prerequisite setup preserve the active
+Arlen install. Same-version retries use a new `-install-` directory and retain
+the old tree. Only a junction may occupy `<Prefix>\current`.
 
 `arlen.cmd` works from cmd.exe and PowerShell under any execution policy. It
 runs `bin\arlen-clang64.ps1`, which enters `CLANG64` the same way
@@ -135,6 +142,8 @@ Options:
 - `-BinDir DIR`: launcher directory (default `<Prefix>\bin`)
 - `-Archive FILE`: install a local `arlen-X.Y.Z-windows-x64.zip` instead of downloading
 - `-MsysRoot DIR`: toolchain root, overriding the search
+- `-NoSetup`: require matching prerequisites without downloading or running setup
+- `-NoPathUpdate`: skip persistent user PATH registration
 
 Under `irm | iex` the installer takes no options. To pass them, use
 `& ([scriptblock]::Create((irm <url>))) -Version 0.3.0`, or download the script

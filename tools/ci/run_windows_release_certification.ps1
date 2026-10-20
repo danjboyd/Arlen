@@ -13,12 +13,15 @@ build\release_confidence\windows\summary.json.
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Archive,
-  [string]$WorkDir = ""
+  [string]$WorkDir = "",
+  [switch]$KeepWorkDir
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$savedUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$savedProcessPath = $env:Path
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Archive = (Resolve-Path -LiteralPath $Archive).Path
@@ -65,7 +68,7 @@ function Step([string]$Name, [scriptblock]$Body) {
 
 # Runs arlen.cmd with output shown, and fails on a nonzero exit.
 function Invoke-Arlen([string[]]$Arguments) {
-  & $script:arlenCmd @Arguments
+  & arlen @Arguments
   if ($LASTEXITCODE -ne 0) { throw "arlen $($Arguments -join ' ') exited $LASTEXITCODE" }
 }
 
@@ -90,6 +93,24 @@ try {
 
   Push-Location $appsDir
   try {
+    Step "bare arlen current shell" {
+      if ((Get-Command arlen).Source -ne $script:arlenCmd) { throw 'bare arlen resolved outside the new install' }
+      Invoke-Arlen @('doctor')
+    }
+    Step "bare arlen fresh shell from saved PATH" {
+      $freshScript = Join-Path $WorkDir 'fresh-shell.ps1'
+      $freshBody = @'
+$ErrorActionPreference = 'Stop'
+# Construct a fresh login environment, rather than inheriting the installer's
+# process PATH. This verifies the persisted user PATH from outside checkout.
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + [Environment]::GetEnvironmentVariable('Path', 'Machine')
+& arlen doctor
+exit $LASTEXITCODE
+'@
+      [IO.File]::WriteAllText($freshScript, $freshBody)
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $freshScript
+      if ($LASTEXITCODE -ne 0) { throw 'fresh shell could not run bare arlen doctor' }
+    }
     Step "arlen new" { Invoke-Arlen @("new", "CertApp") }
   } finally {
     Pop-Location
@@ -100,7 +121,7 @@ try {
   try {
     # `arlen build` builds the framework; apps build through boomhauer.
     Step "app build" {
-      $output = & $script:arlenCmd boomhauer --prepare-only 2>&1 | Out-String
+      $output = & arlen boomhauer --prepare-only 2>&1 | Out-String
       Write-Host $output
       if ($LASTEXITCODE -ne 0) { throw "arlen boomhauer --prepare-only exited $LASTEXITCODE" }
       if ($output -match "building framework artifacts|rebuilding clean framework artifacts") {
@@ -148,5 +169,15 @@ try {
   Say "FAILED: $_"
   exit 1
 } finally {
-  Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+  $env:Path = $savedProcessPath
+  [Environment]::SetEnvironmentVariable('Path', $savedUserPath, 'User')
+  if (-not $KeepWorkDir) {
+    $resolvedWork = [IO.Path]::GetFullPath($WorkDir)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    if ($resolvedWork.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+      $current = Join-Path $resolvedWork 'Arlen\current'
+      if ((Test-Path -LiteralPath $current) -and (Get-Item -LiteralPath $current -Force).LinkType -eq 'Junction') { [IO.Directory]::Delete($current) }
+      Remove-Item -LiteralPath $resolvedWork -Recurse -Force -ErrorAction SilentlyContinue
+    } else { Say "retaining non-temporary work directory $resolvedWork" }
+  }
 }
