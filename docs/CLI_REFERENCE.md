@@ -22,6 +22,12 @@ process-local cache holds at most 1024 entries with LRU eviction and sweeps
 expired keys on writes. Configure durable mail delivery and a shared cache for
 production apps that need those guarantees.
 
+Apps run by `arlen boomhauer` or `arlen propane` decode query and form values
+with the same strict UTF-8 percent-decoder on Apple and GNUstep. `+` means a
+space in query/form data, and `%00`, malformed escapes, and invalid UTF-8 are
+not partially decoded. Core query values keep the original component in those
+cases; module form parsers use an empty value and skip an invalid name.
+
 ## Installer (`tools/install.sh`)
 
 ```bash

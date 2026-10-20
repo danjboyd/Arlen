@@ -18,6 +18,7 @@
 #import "ALNPg.h"
 #import "ALNPlatform.h"
 #import "ALNPasswordHash.h"
+#import "ALNPercentDecoding.h"
 #import "ALNRecoveryCodes.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNServices.h"
@@ -173,30 +174,6 @@ static NSDictionary *AMExpandedOIDCProvider(NSString *identifier, NSDictionary *
   return expanded;
 }
 
-// YES when every '%' in `value` starts a two-hex-digit escape. Checked
-// explicitly because Foundation implementations differ on what
-// -stringByRemovingPercentEncoding returns for malformed escapes.
-static BOOL AMPercentEscapesValid(NSString *value) {
-  NSUInteger length = [value length];
-  for (NSUInteger index = 0; index < length; index++) {
-    if ([value characterAtIndex:index] != '%') {
-      continue;
-    }
-    for (NSUInteger offset = 1; offset <= 2; offset++) {
-      if (index + offset >= length) {
-        return NO;
-      }
-      unichar digit = [value characterAtIndex:index + offset];
-      BOOL hex = (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') || (digit >= 'A' && digit <= 'F');
-      if (!hex) {
-        return NO;
-      }
-    }
-    index += 2;
-  }
-  return YES;
-}
-
 static BOOL AMHostCharactersValid(NSString *host, BOOL bracketed) {
   NSCharacterSet *allowed = bracketed
                                 ? [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF:."]
@@ -252,7 +229,7 @@ static NSString *AMNormalizedPublicBaseURL(id value, NSError **error) {
     BOOL pathValid = YES;
     for (NSString *segment in [path componentsSeparatedByString:@"/"]) {
       // Compare the decoded segment so %2e forms are caught too.
-      NSString *decoded = AMPercentEscapesValid(segment) ? [segment stringByRemovingPercentEncoding] : nil;
+      NSString *decoded = ALNPercentDecodedString(segment, NO);
       if (decoded == nil || [decoded isEqualToString:@"."] || [decoded isEqualToString:@".."]) {
         pathValid = NO;
       }

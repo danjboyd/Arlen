@@ -1,5 +1,6 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNStorageModule.h"
 #import "ALNStorageCatalog.h"
 
@@ -385,9 +386,7 @@ static NSString *SMConfiguredPath(NSDictionary *moduleConfig, NSString *key, NSS
 }
 
 static NSString *SMQueryDecodeComponent(NSString *component) {
-  NSString *withSpaces = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "]
-      stringByRemovingPercentEncoding];
-  return withSpaces ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *SMJSONParametersFromBody(NSData *body) {

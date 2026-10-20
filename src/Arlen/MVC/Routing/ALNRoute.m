@@ -1,4 +1,5 @@
 #import "ALNRoute.h"
+#import "ALNPercentDecoding.h"
 
 static NSArray *ALNSplitPathSegments(NSString *path) {
   if (path == nil || [path length] == 0 || [path isEqualToString:@"/"]) {
@@ -18,111 +19,11 @@ static NSArray *ALNSplitPathSegments(NSString *path) {
   return [normalized componentsSeparatedByString:@"/"];
 }
 
-// A named parameter's value is its path segment percent-decoded. The path is
-// split on "/" first, so an encoded slash (%2F) stays inside one value, and
-// the value is decoded once ("%2541" yields "%41"). "+" is literal in a path.
-//
-// Decoding is all-or-nothing and does not use -stringByRemovingPercentEncoding,
-// whose results differ between Apple and GNUstep. The segment is kept exactly
-// as sent when any escape is malformed ("%zz", "%4"), when it decodes to NUL
-// ("%00"), or when the decoded bytes are not strict UTF-8 (overlong forms,
-// surrogates, code points above U+10FFFF, truncated sequences).
-static int ALNHexDigitValue(unsigned char c) {
-  if (c >= '0' && c <= '9') {
-    return c - '0';
-  }
-  if (c >= 'a' && c <= 'f') {
-    return c - 'a' + 10;
-  }
-  if (c >= 'A' && c <= 'F') {
-    return c - 'A' + 10;
-  }
-  return -1;
-}
-
-static BOOL ALNBytesAreStrictUTF8(const unsigned char *bytes, NSUInteger length) {
-  NSUInteger i = 0;
-  while (i < length) {
-    unsigned char lead = bytes[i];
-    if (lead < 0x80) {
-      i += 1;
-      continue;
-    }
-    NSUInteger count = 0;
-    uint32_t codePoint = 0;
-    uint32_t minimum = 0;
-    if (lead >= 0xC2 && lead <= 0xDF) {
-      count = 1;
-      codePoint = lead & 0x1F;
-      minimum = 0x80;
-    } else if (lead >= 0xE0 && lead <= 0xEF) {
-      count = 2;
-      codePoint = lead & 0x0F;
-      minimum = 0x800;
-    } else if (lead >= 0xF0 && lead <= 0xF4) {
-      count = 3;
-      codePoint = lead & 0x07;
-      minimum = 0x10000;
-    } else {
-      return NO;
-    }
-    if (length - i <= count) {
-      return NO;
-    }
-    for (NSUInteger k = 1; k <= count; k++) {
-      unsigned char next = bytes[i + k];
-      if ((next & 0xC0) != 0x80) {
-        return NO;
-      }
-      codePoint = (codePoint << 6) | (next & 0x3F);
-    }
-    if (codePoint < minimum || codePoint > 0x10FFFF ||
-        (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
-      return NO;
-    }
-    i += count + 1;
-  }
-  return YES;
-}
-
+// Split the path before decoding, so an encoded slash stays in one parameter.
+// Invalid escapes remain exactly as sent, and '+' is literal in a path.
 static NSString *ALNDecodedRouteParameter(NSString *segment) {
-  if (segment == nil) {
-    return @"";
-  }
-  if ([segment rangeOfString:@"%"].location == NSNotFound) {
-    return segment;
-  }
-  NSData *encoded = [segment dataUsingEncoding:NSUTF8StringEncoding];
-  if (encoded == nil) {
-    return segment;
-  }
-  const unsigned char *bytes = [encoded bytes];
-  NSUInteger length = [encoded length];
-  NSMutableData *decoded = [NSMutableData dataWithCapacity:length];
-  for (NSUInteger i = 0; i < length; i++) {
-    unsigned char byte = bytes[i];
-    if (byte == '%') {
-      if (length - i < 3) {
-        return segment;
-      }
-      int high = ALNHexDigitValue(bytes[i + 1]);
-      int low = ALNHexDigitValue(bytes[i + 2]);
-      if (high < 0 || low < 0) {
-        return segment;
-      }
-      byte = (unsigned char)((high << 4) | low);
-      if (byte == 0) {
-        return segment;
-      }
-      i += 2;
-    }
-    [decoded appendBytes:&byte length:1];
-  }
-  if (!ALNBytesAreStrictUTF8([decoded bytes], [decoded length])) {
-    return segment;
-  }
-  NSString *value = [[NSString alloc] initWithData:decoded encoding:NSUTF8StringEncoding];
-  return value ?: segment;
+  if (segment == nil) return @"";
+  return ALNPercentDecodedString(segment, NO) ?: segment;
 }
 
 static NSString *ALNNormalizeRouteFormat(NSString *value) {

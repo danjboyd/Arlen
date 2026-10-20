@@ -1,4 +1,5 @@
 #import "ALNRequest.h"
+#import "ALNPercentDecoding.h"
 #import "../Support/ALNPlatform.h"
 
 #import <dispatch/dispatch.h>
@@ -106,7 +107,7 @@ static BOOL ALNParseContentLengthHeaderValue(NSString *value) {
 
 static NSString *ALNURLDecode(NSString *value) {
   NSString *plusNormalized = [value stringByReplacingOccurrencesOfString:@"+" withString:@" "];
-  NSString *decoded = [plusNormalized stringByRemovingPercentEncoding];
+  NSString *decoded = ALNPercentDecodedString(value, YES);
   return decoded ?: plusNormalized;
 }
 

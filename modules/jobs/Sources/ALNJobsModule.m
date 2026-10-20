@@ -1,5 +1,6 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNJobsModule.h"
 #import "ALNPostgresJobAdapter.h"
 
@@ -83,9 +84,7 @@ static NSDictionary *JMJSONParametersFromBody(NSData *body) {
 }
 
 static NSString *JMQueryDecodeComponent(NSString *component) {
-  NSString *withSpaces = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "]
-      stringByRemovingPercentEncoding];
-  return withSpaces ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *JMFormParametersFromBody(NSData *body) {
