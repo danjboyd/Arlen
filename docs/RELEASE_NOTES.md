@@ -27,7 +27,10 @@ including unresolved, non-blocking ThreadSanitizer findings.
 - Jobs operator-state reads now refresh shared state, and mutations use short
   cross-process transactions. Run one scheduler: scheduler bookkeeping and job
   enqueue are still separate operations.
-- Search state transactions reject stale rebuild and incremental results with
+- Ops 1.1.0 and Search 1.2.0 mark the changed module sources for
+  `arlen module upgrade`. Ops dashboard history updates use cross-process
+  transactions.
+- Search 1.2.0 state transactions reject stale rebuild and incremental results with
   `state_conflict`. Replay claims expire after five minutes and require
   idempotent operations. External search engines still need one reindex writer
   per resource unless the backend provides publication fencing. See
@@ -490,11 +493,11 @@ including unresolved, non-blocking ThreadSanitizer findings.
   request host; other environments send no link and log an error, so set
   `authModule.publicBaseURL` before upgrading a production app that uses local
   passwords.
-- `search` (`1.1.0`): an unscoped query (`GET /search`, `GET /search/api/query`)
+- `search` (`1.2.0`): an unscoped query (`GET /search`, `GET /search/api/query`)
   from a caller who may not query any registered resource now returns no
   results, autocomplete, suggestions or facets, with `total = 0`. It used to
   search every resource.
-- `search` (`1.1.0`) and `admin-ui` (`1.1.0`): resources the search module
+- `search` (`1.2.0`) and `admin-ui` (`1.1.0`): resources the search module
   auto-registers from `admin-ui` (`searchModule.adminUI.autoResources`,
   including the built-in `users` resource) now use `queryPolicy = role_gated`
   with `admin-ui`'s roles (`admin`), AAL2 and the resource's `list` operation
@@ -531,7 +534,7 @@ including unresolved, non-blocking ThreadSanitizer findings.
   is renewed by use. Without migration 003, signing out still clears the
   cookie and one warning names the migration. See
   [Auth Module](AUTH_MODULE.md#sessions-and-roles).
-- `search` (`1.1.0`): the operator/admin guard on drilldown and reindex routes
+- `search` (`1.2.0`): the operator/admin guard on drilldown and reindex routes
   and `role_gated` resources check roles through the new
   `+[ALNAuth context:hasAnyRole:]`, so they use the user's current roles like
   the other modules.

@@ -301,7 +301,10 @@ sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `00
 legacy import; stop old workers and follow the [migration/backup guide](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
 Its `1.2.0` change ensures `POST /notifications/api/queue` queues
 only for the signed-in user unless the caller has the `admin` role at AAL2.
-`auth` remains at `1.6.0`, while `search` remains at `1.1.0` and `admin-ui`
+`ops` moved to `1.1.0` for cross-process dashboard history transactions.
+`search` moved to `1.2.0` for shared-state transactions, replay protection,
+and the security fixes below. Upgrade vendored copies with `arlen module upgrade`.
+`auth` remains at `1.6.0`, while `admin-ui`
 moved to `1.1.0` for the following security fixes and configuration:
 
 - `auth`: the stub provider is development/test only; password-reset and
