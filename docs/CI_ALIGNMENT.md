@@ -200,7 +200,8 @@ never merge gates:
  smoke through the installed `arlen.cmd`). The installer regression script
  `tools/ci/test_windows_installer.ps1` runs in both `windows-preview` and this
  release lane. It covers pinned prerequisite dispatch with mocked network/setup,
- opt-outs, PATH registration, checksum/download failure and same-version retry.
+ opt-outs, PATH registration, checksum/download failure, same-version retry,
+ launcher/junction activation rollback and concurrent activation rejection.
  The installed-release smoke resolves bare `arlen` outside the checkout in the
  current shell and a fresh PowerShell process using saved user PATH; the test
  restores the runner user PATH afterwards. These are installation checks on a

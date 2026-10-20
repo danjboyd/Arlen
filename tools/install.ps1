@@ -75,6 +75,14 @@ function Install-Arlen {
     Die "Arlen's Windows release is x64 only"
   }
 
+  # FileShare.None serializes even separate PowerShell processes/sessions.
+  # Keep the empty lock file: OS handle lifetime determines lock ownership.
+  $prefixLockPath = $Prefix.TrimEnd('\') + '.install.lock'
+  [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($prefixLockPath)) | Out-Null
+  try { $prefixLock = [IO.File]::Open($prefixLockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+  catch { Die "another installer owns $prefixLockPath, or the lock cannot be opened: $($_.Exception.Message)" }
+  $binLock = $null
+  try {
   # scripts/run_clang64.ps1's search order, plus the root that gnustep-cli
   # setup records in GNUSTEP_MAKEFILES (it may have been given --root).
   $candidates = @()
@@ -216,14 +224,15 @@ function Install-Arlen {
     }
   }
 
-  $current = Join-Path $Prefix "current"
-  $oldTarget = $null
-  if (Test-Path -LiteralPath $current) {
-    $link = Get-Item -LiteralPath $current -Force
-    if ($link.LinkType -ne 'Junction') { Die "$current is not a junction; refusing to replace it" }
-    $oldTarget = [string]$link.Target[0]
-  }
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+  $binLockPath = $BinDir.TrimEnd('\') + '.install.lock'
+  if (-not [string]::Equals($binLockPath, $prefixLockPath, [StringComparison]::OrdinalIgnoreCase)) {
+    try { $binLock = [IO.File]::Open($binLockPath, 'OpenOrCreate', 'ReadWrite', 'None') }
+    catch { Die "another installer owns $binLockPath, or the lock cannot be opened: $($_.Exception.Message)" }
+  }
+  $current = Join-Path $Prefix "current"
+  $link = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+  if ($link -and $link.LinkType -ne 'Junction') { Die "$current is not a junction; refusing to replace it" }
   # The .cmd works from cmd.exe and PowerShell alike, whatever the execution
   # policy. The .ps1 has a different name so PowerShell never picks it over the .cmd.
   $launcherPs1 = Join-Path $BinDir "arlen-clang64.ps1"
@@ -324,22 +333,62 @@ $nativeArgs = @($args | ForEach-Object { ([string]$_).Replace('"', '\"') })
 exit $LASTEXITCODE
 '@
   $launcherBody = $launcherBody.Replace('__CURRENT__', $current.Replace("'", "''")).Replace('__MSYS_ROOT__', $resolvedRoot.Replace("'", "''"))
-  [IO.File]::WriteAllText($launcherPs1, $launcherBody, (New-Object Text.UTF8Encoding $false))
   $cmdBody = "@echo off`r`n" +
     "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0arlen-clang64.ps1`" %*`r`n" +
     "exit /b %ERRORLEVEL%`r`n"
-  [IO.File]::WriteAllText($launcherCmd, $cmdBody, (New-Object Text.ASCIIEncoding))
-
-  # Switch only after extraction, prerequisite validation and launcher writes.
-  # Directory.Delete without recursion removes only the checked junction.
+  $transaction = [Guid]::NewGuid().ToString('N')
+  $stagedCurrent = Join-Path $Prefix ('.current-install-' + $transaction)
+  $backupCurrent = Join-Path $Prefix ('.current-old-' + $transaction)
+  $launchers = @(
+    @{ Path=$launcherPs1; Stage=($launcherPs1 + '.' + $transaction + '.new'); Backup=($launcherPs1 + '.' + $transaction + '.old'); Body=$launcherBody; Encoding=(New-Object Text.UTF8Encoding $false); OriginalMoved=$false; Installed=$false },
+    @{ Path=$launcherCmd; Stage=($launcherCmd + '.' + $transaction + '.new'); Backup=($launcherCmd + '.' + $transaction + '.old'); Body=$cmdBody; Encoding=(New-Object Text.ASCIIEncoding); OriginalMoved=$false; Installed=$false }
+  )
+  $oldCurrentMoved = $false
+  $newCurrentInstalled = $false
+  $committed = $false
   try {
-    if ($oldTarget) { [IO.Directory]::Delete($current) }
-    New-Item -ItemType Junction -Path $current -Target $dest | Out-Null
-  } catch {
-    if ($oldTarget -and -not (Test-Path -LiteralPath $current)) {
-      New-Item -ItemType Junction -Path $current -Target $oldTarget | Out-Null
+    # Stage all writes and junction creation before touching working launchers.
+    foreach ($entry in $launchers) { Write-ArlenLauncherStage $entry.Stage $entry.Body $entry.Encoding }
+    New-Item -ItemType Junction -Path $stagedCurrent -Target $dest | Out-Null
+    foreach ($entry in $launchers) {
+      if ([IO.File]::Exists($entry.Path)) {
+        [IO.File]::Move($entry.Path, $entry.Backup)
+        $entry.OriginalMoved = $true
+      }
+      Move-ArlenActivationFile $entry.Stage $entry.Path
+      $entry.Installed = $true
     }
-    throw
+    if ($link) {
+      [IO.Directory]::Move($current, $backupCurrent)
+      $oldCurrentMoved = $true
+    }
+    Move-ArlenActivationJunction $stagedCurrent $current
+    $newCurrentInstalled = $true
+    $committed = $true
+  } catch {
+    $activationError = $_
+    $rollbackErrors = @()
+    try {
+      if ($newCurrentInstalled) { [IO.Directory]::Delete($current) }
+      if ($oldCurrentMoved) { [IO.Directory]::Move($backupCurrent, $current) }
+    } catch { $rollbackErrors += "junction: $_" }
+    for ($index = $launchers.Count - 1; $index -ge 0; $index--) {
+      $entry = $launchers[$index]
+      try {
+        if ($entry.Installed) { [IO.File]::Delete($entry.Path) }
+        if ($entry.OriginalMoved) { [IO.File]::Move($entry.Backup, $entry.Path) }
+      } catch { $rollbackErrors += "$($entry.Path): $_" }
+    }
+    if ($rollbackErrors.Count) { Die "activation failed ($activationError); rollback incomplete, preserve .old backups: $($rollbackErrors -join '; ')" }
+    Die "activation failed; previous launchers and current junction restored: $activationError"
+  } finally {
+    # Unlink checked transaction junctions only; never recurse into releases.
+    foreach ($entry in $launchers) {
+      if ([IO.File]::Exists($entry.Stage)) { [IO.File]::Delete($entry.Stage) }
+      if ($committed -and [IO.File]::Exists($entry.Backup)) { [IO.File]::Delete($entry.Backup) }
+    }
+    if (Get-Item -LiteralPath $stagedCurrent -Force -ErrorAction SilentlyContinue) { [IO.Directory]::Delete($stagedCurrent) }
+    if ($committed -and $oldCurrentMoved) { [IO.Directory]::Delete($backupCurrent) }
   }
   Say "installed Arlen $Version at $dest"
   Say "toolchain: $resolvedRoot"
@@ -358,7 +407,17 @@ exit $LASTEXITCODE
   Write-Host "Next:"
   Write-Host "  arlen doctor"
   Write-Host "  arlen new MyApp; cd MyApp; arlen boomhauer --port 3000"
+  } finally {
+    if ($binLock) { $binLock.Dispose() }
+    $prefixLock.Dispose()
+  }
 }
+
+# Small filesystem boundaries keep fault-injection tests on the actual
+# activation algorithm, without adding installer test flags to the CLI.
+function Write-ArlenLauncherStage($Path, $Body, $Encoding) { [IO.File]::WriteAllText($Path, $Body, $Encoding) }
+function Move-ArlenActivationFile($Source, $Destination) { [IO.File]::Move($Source, $Destination) }
+function Move-ArlenActivationJunction($Source, $Destination) { [IO.Directory]::Move($Source, $Destination) }
 
 function Get-GnustepToolchainState {
   param([string]$Root)

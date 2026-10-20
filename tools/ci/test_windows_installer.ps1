@@ -170,6 +170,64 @@ try {
       $env:GNUSTEP_MAKEFILES = $savedMakefiles
     }
   }
+  # Load the same implementation so filesystem boundaries can be faulted
+  # without CLI-only test switches or a second activation implementation.
+  $faultPrefix = Join-Path $sandbox 'transaction install'
+  . $installer -Archive $archive -Prefix $faultPrefix -MsysRoot $root -NoSetup -NoPathUpdate
+  $faultPs1 = Join-Path $faultPrefix 'bin\arlen-clang64.ps1'
+  $faultCmd = Join-Path $faultPrefix 'bin\arlen.cmd'
+  $oldPs1 = "[Console]::WriteLine('previous-working-launcher'); exit 0"
+  $oldCmd = "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0arlen-clang64.ps1`"`r`nexit /b %ERRORLEVEL%`r`n"
+  [IO.File]::WriteAllText($faultPs1, $oldPs1)
+  [IO.File]::WriteAllText($faultCmd, $oldCmd)
+  $faultTarget = [string](Get-Item -LiteralPath (Join-Path $faultPrefix 'current')).Target[0]
+  $global:ArlenInstallerTestFault = ''
+  function Write-ArlenLauncherStage($Path, $Body, $Encoding) {
+    if ($global:ArlenInstallerTestFault -eq 'second stage write' -and $Path -like '*arlen.cmd.*.new') { throw 'injected second stage write' }
+    [IO.File]::WriteAllText($Path, $Body, $Encoding)
+  }
+  function Move-ArlenActivationFile($Source, $Destination) {
+    if ($global:ArlenInstallerTestFault -eq 'second launcher publish' -and $Destination -like '*\arlen.cmd') { throw 'injected second launcher publish' }
+    [IO.File]::Move($Source, $Destination)
+  }
+  function Move-ArlenActivationJunction($Source, $Destination) {
+    if ($global:ArlenInstallerTestFault -eq 'junction switch') { throw 'injected junction switch' }
+    [IO.Directory]::Move($Source, $Destination)
+  }
+  function New-Item {
+    param([string]$Path, [string]$ItemType, [string]$Target, [switch]$Force)
+    if ($global:ArlenInstallerTestFault -eq 'junction creation' -and $ItemType -eq 'Junction' -and $Path -like '*\.current-install-*') { throw 'injected junction creation' }
+    Microsoft.PowerShell.Management\New-Item @PSBoundParameters
+  }
+  function Assert-PreviousLauncher {
+    Assert ([IO.File]::ReadAllText($faultPs1) -eq $oldPs1) 'previous ps1 content changed'
+    Assert ([IO.File]::ReadAllText($faultCmd) -eq $oldCmd) 'previous cmd content changed'
+    Assert ([string](Get-Item -LiteralPath (Join-Path $faultPrefix 'current')).Target[0] -eq $faultTarget) 'previous junction changed'
+    $output = & arlen
+    Assert ($LASTEXITCODE -eq 0 -and $output -eq 'previous-working-launcher') 'previous bare arlen stopped working'
+  }
+  foreach ($faultMode in @('second stage write', 'second launcher publish', 'junction creation', 'junction switch')) {
+    $global:ArlenInstallerTestFault = $faultMode
+    Case "activation rollback after $faultMode" {
+      Fails { Install-Arlen -Archive $archive -Prefix $faultPrefix -BinDir (Join-Path $faultPrefix 'bin') -MsysRoot $root -NoSetup -NoPathUpdate } 'injected'
+      Assert-PreviousLauncher
+    }
+  }
+  $global:ArlenInstallerTestFault = ''
+  Case 'concurrent prefix installer rejected before activation' {
+    $held = [IO.File]::Open(($faultPrefix + '.install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+      Fails { Install-Arlen -Archive $archive -Prefix $faultPrefix -MsysRoot $root -NoSetup -NoPathUpdate } 'another installer'
+      Assert-PreviousLauncher
+    } finally { $held.Dispose() }
+  }
+  Case 'different prefixes sharing a launcher directory cannot activate concurrently' {
+    $held = [IO.File]::Open((Join-Path $faultPrefix 'bin.install.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+    try {
+      Fails { Install-Arlen -Archive $archive -Prefix (Join-Path $sandbox 'other prefix') -BinDir (Join-Path $faultPrefix 'bin') -MsysRoot $root -NoSetup -NoPathUpdate } 'another installer'
+      Assert-PreviousLauncher
+    } finally { $held.Dispose() }
+  }
   Write-Host "Windows installer regressions passed: $global:ArlenInstallerTesttests"
 } finally {
   $env:Path = $savedPath

@@ -96,6 +96,12 @@ Reinstalling the same version stages a new directory with an `-install-`
 suffix, retaining the old tree so running applications keep their files.
 Previous trees are retained for manual cleanup after those applications stop.
 The installer rejects a `current` path that is not a junction.
+Launcher files and the new junction are staged before activation. If activation
+fails, the previous launchers and junction are restored. Failed restoration
+reports the retained `.old` backups for recovery. Filesystem locks reject a
+simultaneous installer using the same prefix or launcher directory; rerun once
+the other installer finishes. Empty `.install.lock` files remain between runs;
+the open file handle determines whether an install is active.
 
 To run a downloaded installer, use `Unblock-File .\install.ps1` then
 `& .\install.ps1`, or use `powershell -ExecutionPolicy Bypass -File` and open

@@ -264,7 +264,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_instal
 
 This focused fixture suite mocks network/bootstrap execution and restores user
 PATH after checking setup pins, opt-outs, current/persistent PATH, interrupted
-downloads, checksum rejection and safe same-version retries. It runs in the
+downloads, checksum rejection and safe same-version retries. Fault injection
+also exercises launcher write/publish and junction create/switch rollback,
+verifying that the previous bare `arlen` command still runs. Concurrent prefix
+and shared-launcher-directory activation is rejected. The suite runs in the
 Windows preview and release certification workflows. It does not establish
 clean-host provisioning success.
 

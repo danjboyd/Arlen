@@ -125,6 +125,11 @@ a new terminal afterwards. `-NoPathUpdate` suppresses only persistent changes.
 Failed downloads, checksum checks and prerequisite setup preserve the active
 Arlen install. Same-version retries use a new `-install-` directory and retain
 the old tree. Only a junction may occupy `<Prefix>\current`.
+Activation stages both launcher files and the junction, then renames them with
+rollback backups. Activation errors restore the previous launcher content and
+junction; an incomplete rollback reports the retained backups. Exclusive
+filesystem locks reject concurrent installs sharing a prefix or launcher
+directory. Empty `.install.lock` files are retained; locks release on exit.
 
 `arlen.cmd` works from cmd.exe and PowerShell under any execution policy. It
 runs `bin\arlen-clang64.ps1`, which enters `CLANG64` the same way
