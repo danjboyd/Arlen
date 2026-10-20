@@ -8602,6 +8602,20 @@ static int CommandDoctor(NSArray *args) {
       passCount += 1;
 
       if ([environment isEqualToString:@"production"]) {
+        NSArray<NSDictionary *> *stateWarnings =
+            Phase39MultiWorkerStateWarnings(loadedConfig, environment, @"", @"default");
+        if ([stateWarnings count] > 0) {
+          NSDictionary *warning = stateWarnings[0];
+          AddDoctorCheck(checks, @"multi_worker_state", @"warn",
+                         warning[@"message"], warning[@"hint"]);
+          warnCount += 1;
+        } else {
+          AddDoctorCheck(checks, @"multi_worker_state", @"pass",
+                         @"production multi-worker state has a declared durable signal or uses one worker",
+                         @"");
+          passCount += 1;
+        }
+
         NSDictionary *observability = [loadedConfig[@"observability"] isKindOfClass:[NSDictionary class]]
                                           ? loadedConfig[@"observability"]
                                           : @{};
