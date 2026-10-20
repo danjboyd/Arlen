@@ -11,6 +11,25 @@ ROOT = Path(__file__).resolve().parents[2]
 HELPER = ROOT / "tools/release/install_macos_prereqs.sh"
 
 
+class MacosInstallConsentTests(unittest.TestCase):
+    def test_noninteractive_setup_requires_explicit_yes(self):
+        result = subprocess.run(
+            ["bash", "-c", 'source "$1"; aln_install_macos_confirm_brew 0',
+             "test", str(HELPER)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--yes", result.stderr)
+
+    def test_yes_authorizes_noninteractive_setup(self):
+        result = subprocess.run(
+            ["bash", "-c", 'source "$1"; aln_install_macos_confirm_brew 1',
+             "test", str(HELPER)],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
 @unittest.skipUnless(os.uname().sysname == "Darwin" and os.uname().machine == "arm64",
                      "requires Apple Silicon macOS")
 class MacosInstallPrereqTests(unittest.TestCase):

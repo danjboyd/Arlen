@@ -2,6 +2,24 @@
 # Sourced by install.sh before activating a prebuilt Apple Silicon release.
 # The release binaries link Homebrew OpenSSL at the standard arm64 opt path.
 
+aln_install_macos_confirm_brew() {
+  local assume_yes="$1"
+  local answer
+  if [[ "$assume_yes" == "1" ]]; then
+    return 0
+  fi
+  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+    printf 'arlen-install: error: installing openssl@3 needs consent; rerun with --yes or install it manually.\n' >&2
+    return 1
+  fi
+  printf 'arlen-install: install Homebrew openssl@3 now? [y/N] ' > /dev/tty
+  IFS= read -r answer < /dev/tty || return 1
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) printf 'arlen-install: error: openssl@3 was not installed; rerun with --yes or install it manually.\n' >&2; return 1 ;;
+  esac
+}
+
 aln_install_macos_prereqs() {
   local setup_mode="${1:-auto}"
   local assume_yes="${2:-0}"
@@ -48,8 +66,7 @@ aln_install_macos_prereqs() {
     return 1
   fi
 
-  # Homebrew's install command has no yes/no prompt. The caller's --yes flag
-  # is accepted for a shared Linux/macOS installer interface.
+  aln_install_macos_confirm_brew "$assume_yes" || return 1
   printf 'arlen-install: installing Homebrew openssl@3 for the prebuilt framework\n'
   "$brew_command" install openssl@3 || {
     printf 'arlen-install: error: Homebrew could not install openssl@3; rerun after resolving its error.\n' >&2

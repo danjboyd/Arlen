@@ -638,7 +638,10 @@ inventory) and `tools/ci/run_durable_jobs.sh` (the Apple durable-jobs bundle).
 Its bootstrap installs Homebrew `postgresql@17` and `libpq` in addition to
 `openssl@3`; the script selects their paths explicitly and uses a private Unix
 socket PostgreSQL cluster. Apple builds link system libcurl for the new HTTP
-result API. The existing NSURLSession helper remains covered too.
+result API. The existing NSURLSession helper remains covered too. Before the
+runtime gate, the same Apple job checks the macOS installer prerequisite
+helper's SDK, minimum OS, and setup-consent behavior, plus offline discovery
+of an installed Homebrew formula from an uncached home directory.
 
 The Apple job retains logs under its existing artifact directory. No lane or
 required check is renamed or promoted: branch protection continues to require

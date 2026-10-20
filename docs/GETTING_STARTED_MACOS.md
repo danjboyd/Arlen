@@ -13,9 +13,10 @@ apps are still compiled on your Mac, so you need:
   installer stops with this instruction if Apple clang or the macOS SDK is
   missing. Finish the system installation dialog before retrying. Full Xcode
   is needed for `arlen test`, which runs Apple XCTest.
-- Homebrew at its standard Apple Silicon prefix, `/opt/homebrew`. The
-  installer installs `openssl@3` through an existing Homebrew installation
-  when it is missing. The prebuilt binaries link directly to
+- Homebrew at its standard Apple Silicon prefix, `/opt/homebrew`. When
+  `openssl@3` is missing, the installer asks before installing it through
+  Homebrew; `--yes` allows this setup in a noninteractive run. The prebuilt
+  binaries link directly to
   `/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib`. If Homebrew itself is
   missing, install it from [brew.sh](https://brew.sh/) and rerun the installer.
   Install `libpq` separately (`brew install libpq`) if your app uses PostgreSQL.
