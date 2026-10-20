@@ -17,6 +17,7 @@ class MacosInstallConsentTests(unittest.TestCase):
             ["bash", "-c", 'source "$1"; aln_install_macos_confirm_brew 0',
              "test", str(HELPER)],
             stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            start_new_session=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--yes", result.stderr)

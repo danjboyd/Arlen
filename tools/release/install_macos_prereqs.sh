@@ -8,12 +8,19 @@ aln_install_macos_confirm_brew() {
   if [[ "$assume_yes" == "1" ]]; then
     return 0
   fi
-  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+  # /dev/tty can have read/write permissions even when this process has no
+  # controlling terminal (CI, an agent, or a detached service). Open it first.
+  if ! { exec 9<> /dev/tty; } 2>/dev/null; then
     printf 'arlen-install: error: installing openssl@3 needs consent; rerun with --yes or install it manually.\n' >&2
     return 1
   fi
-  printf 'arlen-install: install Homebrew openssl@3 now? [y/N] ' > /dev/tty
-  IFS= read -r answer < /dev/tty || return 1
+  if ! printf 'arlen-install: install Homebrew openssl@3 now? [y/N] ' >&9 ||
+     ! IFS= read -r answer <&9; then
+    exec 9>&-
+    printf 'arlen-install: error: installing openssl@3 needs consent; rerun with --yes or install it manually.\n' >&2
+    return 1
+  fi
+  exec 9>&-
   case "$answer" in
     y|Y|yes|YES|Yes) return 0 ;;
     *) printf 'arlen-install: error: openssl@3 was not installed; rerun with --yes or install it manually.\n' >&2; return 1 ;;
