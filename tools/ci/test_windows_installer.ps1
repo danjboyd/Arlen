@@ -35,7 +35,11 @@ function powershell.exe {
   Assert (($args -join ' ') -match 'v0.1.1/release-manifest.json') 'setup manifest must be pinned'
   $rootIndex = [Array]::IndexOf($args, '--root')
   Assert ($rootIndex -ge 0) 'setup needs the selected root'
-  if ($global:ArlenInstallerTestsetupExit -eq 0) { Write-Toolchain $args[$rootIndex + 1] }
+  if ($global:ArlenInstallerTestsetupExit -eq 0) {
+    Write-Toolchain $args[$rootIndex + 1]
+    # Match the upstream bootstrap's persistent PATH side effect.
+    [Environment]::SetEnvironmentVariable('Path', ((Join-Path $args[$rootIndex + 1] 'bin') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')), 'User')
+  }
   $global:LASTEXITCODE = $global:ArlenInstallerTestsetupExit
 }
 function Invoke-WebRequest {
@@ -169,6 +173,11 @@ try {
       $env:ARLEN_MSYS_ROOT = $savedMsys
       $env:GNUSTEP_MAKEFILES = $savedMakefiles
     }
+  }
+  Case 'NoPathUpdate also suppresses upstream bootstrap PATH registration' {
+    $before = [Environment]::GetEnvironmentVariable('Path', 'User')
+    & $installer -Archive $archive -Prefix (Join-Path $sandbox 'setup no path') -MsysRoot (Join-Path $sandbox 'new toolchain') -NoPathUpdate
+    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $before) 'upstream setup changed PATH despite NoPathUpdate'
   }
   # Load the same implementation so filesystem boundaries can be faulted
   # without CLI-only test switches or a second activation implementation.

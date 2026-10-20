@@ -200,8 +200,15 @@ function Install-Arlen {
       Say "installing gnustep-cli $wantToolchain at $setupRoot (about 1.1 GB download)"
       Invoke-WebRequest -UseBasicParsing -Uri $bootstrapUrl -OutFile $bootstrapPath
       if ((Get-FileHash -Algorithm SHA256 -LiteralPath $bootstrapPath).Hash.ToLowerInvariant() -ne "a41adbf84d38a6ae90f4bdbbe0b9c3e35136cb3ee695bf26b783c04972045034") { Die "gnustep-cli bootstrap checksum mismatch" }
-      & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath setup --user --root $setupRoot --manifest "https://github.com/danjboyd/gnustep-cli-new/releases/download/v$wantToolchain/release-manifest.json"
-      if ($LASTEXITCODE -ne 0) { Die "gnustep-cli setup failed (exit $LASTEXITCODE); rerun the installer to retry" }
+      $beforeSetupPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+      try {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath setup --user --root $setupRoot --manifest "https://github.com/danjboyd/gnustep-cli-new/releases/download/v$wantToolchain/release-manifest.json"
+        $setupExit = $LASTEXITCODE
+      } finally {
+        # The upstream bootstrap registers its own bin directory too.
+        if ($NoPathUpdate) { [Environment]::SetEnvironmentVariable('Path', $beforeSetupPath, 'User') }
+      }
+      if ($setupExit -ne 0) { Die "gnustep-cli setup failed (exit $setupExit); rerun the installer to retry" }
       $resolvedRoot = $setupRoot
       $state = Get-GnustepToolchainState -Root $resolvedRoot
       if (-not $state -or $state.Version -ne $wantToolchain -or $state.Sha256 -ne $wantToolchainSha.ToLowerInvariant() -or
