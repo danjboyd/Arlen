@@ -25,7 +25,7 @@ production apps that need those guarantees.
 ## Installer (`tools/install.sh`)
 
 ```bash
-curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes && export PATH="$HOME/.local/bin:$PATH"
 ```
 
 The installer downloads a release archive, checks it against the release's
@@ -51,10 +51,37 @@ Options:
 - `--prefix DIR`: install root (default `~/.local/share/arlen`)
 - `--bin-dir DIR`: launcher directory (default `~/.local/bin`)
 - `--archive FILE`: install a local release archive instead of downloading
-- `--no-build`: unpack only
+- `--no-build`: unpack only; skip prerequisites and framework build
+- `--no-setup`: never install prerequisites; use an existing toolchain (also for offline use)
+- `--no-modify-path`: do not edit shell startup files
+- `--yes`: consent to prerequisite installation without an interactive prompt
 
-If no clang-built GNUstep is found on Linux, the installer exits non-zero and
-prints the gnustep-cli managed-toolchain command.
+On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), missing Linux
+prerequisites trigger a consent prompt. With consent, the installer uses apt
+for build packages (sudo may prompt) and the checksum-verified gnustep-cli
+`v0.1.0` bootstrap for a managed clang/libobjc2 toolchain in your home. Other
+Linux distributions require manual prerequisites and `--no-setup`. Framework
+builds use at most four jobs. `--no-setup` also prevents network prerequisite
+setup for local archives; downloading an Arlen release still requires network.
+
+The installer adds its bin directory idempotently to bash's `.bashrc` and
+active login profile, or zsh's `.zprofile` and `.zshrc` (respecting `ZDOTDIR`).
+Other shells receive a `.profile` entry; configure non-POSIX shells manually.
+A child installer cannot modify the current shell: run its printed PATH export
+or open a new terminal before using bare `arlen`. Custom `--bin-dir` paths need
+the matching export.
+
+Downloads and builds complete in a staging directory before replacing an
+existing release. Failed downloads, checksums, prerequisite setup, and builds
+preserve the working release and launcher; rerun the same command after fixing
+the cause. A failed build log is retained at `<prefix>/last-build-failure.log`.
+Concurrent installs into one prefix are refused. After forcibly terminating an
+installer, remove `<prefix>/.install-lock` only after confirming it has stopped.
+Local `--archive` inputs verify a sibling `SHA256SUMS` when present. Without
+that file they are explicitly treated as trusted local inputs; use only
+archives you built or independently verified.
+The `latest` URL selects the published release, which may precede an unreleased
+candidate being tested.
 
 Release archives are produced by `tools/release/package_framework.sh` (see
 `docs/RELEASE_PROCESS.md`).

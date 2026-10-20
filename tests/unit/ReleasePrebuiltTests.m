@@ -108,4 +108,16 @@
   XCTAssertEqualObjects(@"llhttp=rebuild\n", output);
 }
 
+- (void)testUnixInstallerPreservesWorkingReleaseAndConfiguresPath {
+#if defined(_WIN32)
+  XCTSkip(@"Unix installer; Windows uses install.ps1");
+#else
+  int exitCode = 0;
+  NSString *output = ALNTestRunShellCapture(
+      [NSString stringWithFormat:@"bash %@ 2>&1",
+       ALNTestShellQuote(ALNTestPathFromRepoRoot(@"tools/release/test_install.sh"))], &exitCode);
+  XCTAssertEqual(0, exitCode, @"%@", output);
+#endif
+}
+
 @end
