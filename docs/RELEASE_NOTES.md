@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Auth 1.7.5 retains the current session generation after TOTP or SMS step-up,
+  so a user who changed their password stays signed in at the new assurance
+  level. Password registration, sign-in, and change now preserve surrounding
+  whitespace exactly, matching password reset and policy validation. Upgrade
+  vendored auth modules.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured

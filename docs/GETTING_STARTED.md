@@ -360,6 +360,9 @@ verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
 Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
+Auth passwords preserve surrounding spaces on every path. If older registration
+flows removed those spaces, sign in with the stored form before changing the
+password. Upgrade vendored `auth` modules to 1.7.5.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text

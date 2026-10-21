@@ -519,6 +519,76 @@
   [self signedInClientForApplication:client.application email:email password:@"role-refresh-password-changed"];
 }
 
+- (void)testStepUpKeepsSessionGenerationAfterPasswordChange {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[]];
+  NSString *subject = [self registerUser:client email:[self uniqueEmail:@"step-up-stamp"]];
+  ALNResponse *change = [client post:@"/auth/api/password/change"
+                                JSON:@{ @"current_password" : @"role-refresh-password",
+                                        @"new_password" : @"role-refresh-password-changed" }];
+  XCTAssertEqual((NSInteger)200, change.statusCode, @"%@", [change bodyText]);
+  XCTAssertEqualObjects(@"1", [self scalar:@"SELECT session_stamp::text FROM auth_users WHERE subject = $1"
+                                parameters:@[ subject ]]);
+  [self stepUp:client subject:subject];
+  XCTAssertEqualObjects(@YES, [self sessionState:client][@"authenticated"]);
+  XCTAssertEqualObjects(@2, [self sessionState:client][@"aal"]);
+}
+
+- (void)testPasswordInputsRetainSurroundingWhitespaceAcrossFlows {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSString *email = [self uniqueEmail:@"password-spaces"];
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[]];
+  ALNResponse *registered = [client post:@"/auth/api/register"
+                                    JSON:@{ @"email" : email, @"display_name" : @"Spaces",
+                                            @"password" : @"  starting-password  " }];
+  XCTAssertEqual((NSInteger)200, registered.statusCode, @"%@", [registered bodyText]);
+  NSString *subject = [registered JSONObject][@"subject"];
+  XCTAssertTrue([subject length] > 0);
+
+  ALNTestClient *login = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exact = [login post:@"/auth/api/login"
+                             JSON:@{ @"email" : email, @"password" : @"  starting-password  " }];
+  XCTAssertEqual((NSInteger)200, exact.statusCode, @"%@", [exact bodyText]);
+  ALNTestClient *trimmed = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *trimmedRegistrationPassword = [trimmed post:@"/auth/api/login"
+                                                    JSON:@{ @"email" : email, @"password" : @"starting-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedRegistrationPassword.statusCode);
+
+  ALNResponse *changed = [client post:@"/auth/api/password/change"
+                                 JSON:@{ @"current_password" : @"  starting-password  ",
+                                         @"new_password" : @" changed-password " }];
+  XCTAssertEqual((NSInteger)200, changed.statusCode, @"%@", [changed bodyText]);
+  ALNTestClient *changedLogin = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exactChanged = [changedLogin post:@"/auth/api/login"
+                                           JSON:@{ @"email" : email, @"password" : @" changed-password " }];
+  XCTAssertEqual((NSInteger)200, exactChanged.statusCode);
+  ALNResponse *trimmedChanged = [trimmed post:@"/auth/api/login"
+                                         JSON:@{ @"email" : email, @"password" : @"changed-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedChanged.statusCode);
+
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *storedToken = [@"sha256:" stringByAppendingString:
+      ALNLowercaseHexStringFromData(ALNSHA256([token dataUsingEncoding:NSUTF8StringEncoding]))];
+  [self execute:@"INSERT INTO auth_password_reset_tokens (user_id, token, expires_at) "
+                 "SELECT id, $2, NOW() + INTERVAL '1 hour' FROM auth_users WHERE subject = $1 RETURNING id"
+     parameters:@[ subject, storedToken ]];
+  ALNTestClient *resetting = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *reset = [resetting post:@"/auth/api/password/reset"
+                                JSON:@{ @"token" : token, @"password" : @" reset-password " }];
+  XCTAssertEqual((NSInteger)200, reset.statusCode, @"%@", [reset bodyText]);
+  ALNTestClient *resetLogin = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exactReset = [resetLogin post:@"/auth/api/login"
+                                     JSON:@{ @"email" : email, @"password" : @" reset-password " }];
+  XCTAssertEqual((NSInteger)200, exactReset.statusCode);
+  ALNResponse *trimmedReset = [trimmed post:@"/auth/api/login"
+                                       JSON:@{ @"email" : email, @"password" : @"reset-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedReset.statusCode);
+}
+
 - (void)testPasswordResetByTokenEndsExistingSessions {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

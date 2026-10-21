@@ -55,6 +55,12 @@ static NSString *AMTrimmedString(id value) {
   return [(NSString *)value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+// Passwords are opaque: validation, hashing, and verification must see the
+// same bytes, including any leading or trailing spaces.
+static NSString *AMPasswordInput(id value) {
+  return [value isKindOfClass:[NSString class]] ? value : @"";
+}
+
 /// Clamps a caller-supplied `return_to` to a same-origin path.
 ///
 /// `return_to` arrives from the query string or a form field and is handed back
@@ -3827,6 +3833,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                       error:error]) {
     return nil;
   }
+  if (![self recordCurrentSessionStampForContext:context error:error]) {
+    [ALNAuthSession clearAuthenticatedSessionForContext:context];
+    return nil;
+  }
   NSMutableDictionary *payload =
       [NSMutableDictionary dictionaryWithDictionary:[self sessionPayloadForContext:context includeUser:YES error:NULL] ?: @{}];
   if ([plainRecoveryCodes count] > 0) {
@@ -4430,6 +4440,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                             authenticatedAt:nil
                                                     context:context
                                                       error:error]) {
+    return nil;
+  }
+  if (![self recordCurrentSessionStampForContext:context error:error]) {
+    [ALNAuthSession clearAuthenticatedSessionForContext:context];
     return nil;
   }
   NSMutableDictionary *payload =
@@ -5129,7 +5143,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 - (id)login:(ALNContext *)ctx {
   NSDictionary *parameters = [self requestParameters];
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
-  NSString *password = AMTrimmedString(parameters[@"password"]);
+  NSString *password = AMPasswordInput(parameters[@"password"]);
   NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   NSError *error = nil;
   NSDictionary *user = [self.runtime authenticateLocalEmail:email
@@ -5300,7 +5314,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   NSDictionary *parameters = [self requestParameters];
   NSString *email = AMLowerTrimmedString(parameters[@"email"]);
   NSString *displayName = AMTrimmedString(parameters[@"display_name"]);
-  NSString *password = AMTrimmedString(parameters[@"password"]);
+  NSString *password = AMPasswordInput(parameters[@"password"]);
   NSString *returnTo = AMSafeReturnTo(parameters[@"return_to"]);
   BOOL durableMail = self.runtime.durableMailDispatchEnabled && !self.runtime.registrationAutoLogin;
   NSString *durableBaseURL = durableMail
@@ -5668,11 +5682,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
   NSError *updateError = nil;
   NSString *passwordMessage = nil;
-  if (![self.runtime validatePassword:parameters[@"new_password"] errorMessage:&passwordMessage]) {
+  NSString *newPassword = AMPasswordInput(parameters[@"new_password"]);
+  if (![self.runtime validatePassword:newPassword errorMessage:&passwordMessage]) {
     [self setStatus:422];
     return @{ @"status" : @"error", @"message" : passwordMessage ?: @"Password does not satisfy policy" };
   }
-  NSString *encodedHash = [ALNPasswordHash hashPasswordString:AMTrimmedString(parameters[@"new_password"])
+  NSString *encodedHash = [ALNPasswordHash hashPasswordString:newPassword
                                                       options:[ALNPasswordHash defaultArgon2idOptions]
                                                         error:&updateError];
   if ([encodedHash length] == 0) {
