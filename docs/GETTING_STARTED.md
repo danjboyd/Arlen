@@ -37,6 +37,9 @@ Check the result:
 arlen doctor
 ```
 
+On Windows, framework-root overrides for this bootstrap check may use native
+drive-letter, UNC, or MSYS paths.
+
 Then continue to **Create Your First App** below. No repository checkout is
 needed to develop an app.
 

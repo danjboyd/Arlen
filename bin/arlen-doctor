@@ -46,7 +46,9 @@ to_absolute_path() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" = /* ]]; then
+  if aln_platform_is_msys && command -v cygpath >/dev/null 2>&1; then
+    cygpath -au "$raw"
+  elif [[ "$raw" = /* ]]; then
     printf '%s\n' "$raw"
   else
     printf '%s\n' "$app_root/$raw"
