@@ -11,6 +11,9 @@
 #import "ALNResponse.h"
 #import "ALNSearchModule.h"
 
+extern NSString *ALNEOCRender_modules_admin_ui_resources_index_html_eoc(id ctx, NSError **error);
+extern NSString *ALNEOCRender_modules_admin_ui_resources_show_html_eoc(id ctx, NSError **error);
+
 static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase16IntegrationOrderStore(void) {
   static NSMutableDictionary<NSString *, NSMutableDictionary *> *store = nil;
   if (store == nil) {
@@ -344,6 +347,31 @@ static void Phase16IntegrationResetOrderStore(void) {
 @end
 
 @implementation Phase16ModuleIntegrationTests
+
+- (void)testAdminResourceLinkTemplatesUseSafeTargets {
+  NSDictionary *resource = @{
+    @"singularLabel" : @"Link",
+    @"identifierField" : @"id",
+    @"primaryField" : @"id",
+    @"paths" : @{ @"html_index" : @"/admin/resources/links" },
+    @"fields" : @[ @{ @"name" : @"id", @"label" : @"ID", @"list" : @YES, @"detail" : @YES },
+                    @{ @"name" : @"dictLink", @"label" : @"Dict", @"kind" : @"link", @"list" : @YES, @"detail" : @YES },
+                    @{ @"name" : @"stringLink", @"label" : @"String", @"kind" : @"link", @"list" : @YES, @"detail" : @YES } ],
+  };
+  NSDictionary *record = @{ @"id" : @"one", @"dictLink" : @{ @"href" : @"javascript:alert(1)", @"label" : @"Unsafe" },
+                            @"stringLink" : @"data:text/html,unsafe" };
+  NSError *error = nil;
+  NSString *index = ALNEOCRender_modules_admin_ui_resources_index_html_eoc(
+      @{ @"resource" : resource, @"records" : @[ record ] }, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [[index componentsSeparatedByString:@"href=\"#\""] count] - 1);
+  XCTAssertFalse([index containsString:@"href=\"javascript:"]);
+  XCTAssertFalse([index containsString:@"href=\"data:"]);
+  NSString *show = ALNEOCRender_modules_admin_ui_resources_show_html_eoc(
+      @{ @"resource" : resource, @"record" : record }, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [[show componentsSeparatedByString:@"href=\"#\""] count] - 1);
+}
 
 - (void)setUp {
   [super setUp];
