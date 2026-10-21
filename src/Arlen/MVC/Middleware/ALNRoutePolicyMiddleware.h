@@ -13,6 +13,8 @@ FOUNDATION_EXPORT NSString *const ALNContextRoutePolicyDecisionStashKey;
 @interface ALNRoutePolicyMiddleware : NSObject <ALNMiddleware>
 
 + (nullable NSError *)validateSecurityConfiguration:(NSDictionary *)config;
+// Read-only catalog check. Invocation still runs the full route policy.
++ (BOOL)context:(ALNContext *)context canListRoute:(ALNRoute *)route;
 
 @end
 

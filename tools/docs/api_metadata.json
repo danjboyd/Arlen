@@ -290,6 +290,10 @@
     }
   },
   "methods": {
+    "ALNRoutePolicyMiddleware|context:canListRoute:": {
+      "purpose": "Check catalog visibility against current caller identity, source IP, and route policy metadata without executing the route.",
+      "usage": "Use for metadata listings. Invocation must still enforce the full policy with concrete route arguments; this check does not run handlers or guards."
+    },
     "ALNApplication|addMiddleware:beforeMiddlewareOfClass:": {
       "purpose": "Insert middleware before the first middleware matching the supplied class, or append when none is present.",
       "usage": "Call during bootstrap before request dispatch. Nil middleware is ignored; a Nil class appends the middleware."

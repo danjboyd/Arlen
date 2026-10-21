@@ -1761,6 +1761,8 @@ DB-backed tests are skipped unless this environment variable is set:
 route export or consumer upgrade. From the framework checkout, `make mcp-example`
 builds the read-only example and `make mcp-check` runs focused unit and real HTTP
 checks. See [MCP Module](MCP_MODULE.md) for runtime configuration and protocol limits.
+With MCP 1.0.6, `tools/list` filters by route roles, scopes, assurance,
+authentication age, and applicable route policies without running tool handlers.
 
 ## OAuth-protected MCP and REST
 

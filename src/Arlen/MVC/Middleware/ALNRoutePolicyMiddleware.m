@@ -126,14 +126,11 @@ static NSArray *ALNTrustedProxyCIDRs(NSDictionary *config) {
   return ALNPolicyStringArray(ALNSecurityDictionary(config)[@"trustedProxies"]);
 }
 
-static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
-  NSDictionary *policies = ALNRoutePoliciesDictionary([context application].config ?: @{});
+static NSArray *ALNPolicyNamesForPath(NSDictionary *config, NSString *path,
+                                     NSString *matchedPath, NSArray *routePolicyNames) {
+  NSDictionary *policies = ALNRoutePoliciesDictionary(config);
   NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSet];
   NSArray *sortedNames = [[policies allKeys] sortedArrayUsingSelector:@selector(compare:)];
-  NSString *path = context.request.path ?: @"/";
-  NSString *matchedPath = [context.stash[ALNContextRoutePolicyMatchedPathStashKey] isKindOfClass:[NSString class]]
-                              ? context.stash[ALNContextRoutePolicyMatchedPathStashKey]
-                              : path;
   for (NSString *name in sortedNames) {
     NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : @{};
     NSArray *prefixes = ALNPolicyStringArray(policy[@"pathPrefixes"]);
@@ -145,15 +142,21 @@ static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
       }
     }
   }
-  NSArray *routePolicyNames = [context.stash[ALNContextRoutePolicyNamesStashKey] isKindOfClass:[NSArray class]]
-                                  ? context.stash[ALNContextRoutePolicyNamesStashKey]
-                                  : @[];
   for (NSString *name in routePolicyNames) {
     if ([name isKindOfClass:[NSString class]] && [name length] > 0) {
       [names addObject:name];
     }
   }
   return [names array];
+}
+
+static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
+  NSString *path = context.request.path ?: @"/";
+  NSString *matchedPath = [context.stash[ALNContextRoutePolicyMatchedPathStashKey] isKindOfClass:[NSString class]]
+                              ? context.stash[ALNContextRoutePolicyMatchedPathStashKey] : path;
+  NSArray *routeNames = [context.stash[ALNContextRoutePolicyNamesStashKey] isKindOfClass:[NSArray class]]
+                            ? context.stash[ALNContextRoutePolicyNamesStashKey] : @[];
+  return ALNPolicyNamesForPath([context application].config ?: @{}, path, matchedPath, routeNames);
 }
 
 static NSDictionary *ALNResolvedClientIP(ALNContext *context, BOOL trustForwardedClientIP) {
@@ -210,6 +213,30 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
 }
 
 @implementation ALNRoutePolicyMiddleware
+
++ (BOOL)context:(ALNContext *)context canListRoute:(ALNRoute *)route {
+  if (context == nil || route == nil) return NO;
+  NSDictionary *config = [context application].config ?: @{};
+  NSDictionary *policies = ALNRoutePoliciesDictionary(config);
+  NSString *path = route.pathPattern ?: @"/";
+  NSArray *names = ALNPolicyNamesForPath(config, path, path, route.policyNames ?: @[]);
+  for (NSString *name in names) {
+    NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : nil;
+    if (policy == nil || ALNPolicyListFieldProblem(policy, @"sourceIPAllowlist") != nil) return NO;
+    NSArray *allowlist = ALNPolicyStringArray(policy[@"sourceIPAllowlist"]);
+    if ([allowlist count] > 0) {
+      BOOL trustForwarded = [policy[@"trustForwardedClientIP"] respondsToSelector:@selector(boolValue)]
+                                  ? [policy[@"trustForwardedClientIP"] boolValue] : NO;
+      NSDictionary *resolved = ALNResolvedClientIP(context, trustForwarded);
+      NSString *clientIP = [resolved[@"client_ip"] isKindOfClass:[NSString class]]
+                               ? resolved[@"client_ip"] : @"";
+      if (![resolved[@"status"] isEqualToString:@"ok"] ||
+          !ALNClientAddressMatchesAnyCIDR(clientIP, allowlist)) return NO;
+    }
+    if ([policy[@"requireAuth"] boolValue] && [[context authSubject] length] == 0) return NO;
+  }
+  return YES;
+}
 
 + (NSError *)validationErrorWithCode:(NSInteger)code
                               reason:(NSString *)reason
