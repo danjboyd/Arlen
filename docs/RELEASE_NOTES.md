@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Route path-prefix policies also apply to format-suffixed requests that
+  dispatch to the protected route. Compiled fast routes now use the normal
+  authorization path when assurance or authentication-age limits are set, and
+  recognize string-valued path-prefix policies.
+
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
   cannot be reloaded. Backend exceptions release writer locks, discard
   uncommitted cached entries on the next reload, and remove the failed update's

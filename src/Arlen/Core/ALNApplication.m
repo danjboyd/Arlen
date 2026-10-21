@@ -502,7 +502,9 @@ static BOOL ALNRoutePolicyMiddlewareIsTransparentForFastRoute(ALNApplication *ap
                                 : @{};
   for (NSString *name in [policies allKeys]) {
     NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : nil;
-    NSArray *prefixes = [policy[@"pathPrefixes"] isKindOfClass:[NSArray class]] ? policy[@"pathPrefixes"] : @[];
+    id configuredPrefixes = policy[@"pathPrefixes"];
+    NSArray *prefixes = [configuredPrefixes isKindOfClass:[NSArray class]] ? configuredPrefixes
+                         : [configuredPrefixes isKindOfClass:[NSString class]] ? @[ configuredPrefixes ] : @[];
     for (id prefix in prefixes) {
       if (ALNRoutePolicyPrefixCouldMatchFastRoute(route, [prefix isKindOfClass:[NSString class]] ? prefix : @"")) {
         return NO;
@@ -530,6 +532,9 @@ static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRou
     }
   }
   if (route.guardSelector != NULL) {
+    return NO;
+  }
+  if (route.minimumAuthAssuranceLevel > 0 || route.maximumAuthenticationAgeSeconds > 0) {
     return NO;
   }
   if ([route.requestSchema count] > 0 || [route.responseSchema count] > 0) {
@@ -6188,6 +6193,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   baseStash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
   baseStash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
   baseStash[ALNContextRoutePolicyNamesStashKey] = matchedRoute.policyNames ?: @[];
+  baseStash[ALNContextRoutePolicyMatchedPathStashKey] = routePath;
   NSMutableDictionary *stash =
       (NSMutableDictionary *)[[ALNRequestLazyStash alloc] initWithBaseValues:baseStash
                                                              requestIdentity:requestIdentity

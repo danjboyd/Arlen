@@ -506,7 +506,8 @@ startup with deterministic diagnostics.
 
 Policy keys:
 
-- `pathPrefixes`: URL path prefixes protected by the policy
+- `pathPrefixes`: URL path prefixes protected by the policy, including requests
+  with a format suffix that dispatch to a matching route
 - `sourceIPAllowlist`: IPv4 or IPv6 CIDR ranges allowed through the outer gate
 - `requireAuth`: deny when the request has no authenticated subject
 - `trustForwardedClientIP`: allow the policy to use proxy-provided client IP

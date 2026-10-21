@@ -267,6 +267,21 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
   XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
 }
 
+- (void)testRoutePolicyAppliesToMatchedRouteWithFormatSuffix {
+  NSDictionary *security = @{ @"routePolicies" : @{
+    @"admin" : @{ @"pathPrefixes" : @[ @"/admin" ],
+                   @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ] }
+  } };
+  ALNApplication *app = [self routePolicyApplicationWithSecurity:security route:@"/admin" policies:nil];
+  XCTAssertTrue([app startWithError:NULL]);
+  for (NSString *path in @[ @"/admin", @"/admin.json", @"/admin.html", @"/admin.x" ]) {
+    ALNResponse *response = [self dispatchPolicyRequestForApp:app path:path
+                                                remoteAddress:@"203.0.113.10" headers:@{}];
+    ALNAssertResponseStatus(response, 403);
+    XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+  }
+}
+
 - (void)testRoutePolicyTrustedProxyUsesForwardedClientIPWhenConfigured {
   NSDictionary *security = @{
     @"trustedProxies" : @[ @"127.0.0.1/32" ],
