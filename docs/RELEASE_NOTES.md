@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windows watch scans read each file's size and sub-second modification/change
+  times together, preserving edit detection while avoiding delayed build-error
+  recovery on large source checkouts.
+
 - Redis URLs containing literal or encoded NUL are rejected before parsing.
 - Template exceptions now restore per-thread render options and discard the
   failed render's composition slots, preserving any enclosing render state.

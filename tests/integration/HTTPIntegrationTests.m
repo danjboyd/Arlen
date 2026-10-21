@@ -6330,6 +6330,11 @@
       [server waitUntilExit];
     }
     [log closeFile];
+    ALNTestAttachCommandOutput(self, @"boomhauer --watch log",
+        [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:NULL] ?: @"", 0);
+    ALNTestAttachCommandOutput(self, @"boomhauer last build error",
+        [NSString stringWithContentsOfFile:[appRoot stringByAppendingPathComponent:@".boomhauer/last_build_error.log"]
+                                  encoding:NSUTF8StringEncoding error:NULL] ?: @"", 0);
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }
 }

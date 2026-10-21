@@ -639,13 +639,9 @@ build_error_recovery_hint="${ARLEN_BOOMHAUER_BUILD_ERROR_RECOVERY_HINT:-Fix the 
 
 file_fingerprint_fields() {
   local path="$1"
-  local size mtime ctime
-
-  size="$(stat -c %s "$path" 2>/dev/null || echo 0)"
-  # Keep sub-second precision so same-size edits remain visible to watch mode.
-  mtime="$(stat -c %y "$path" 2>/dev/null || echo 0)"
-  ctime="$(stat -c %z "$path" 2>/dev/null || echo 0)"
-  printf '%s|%s|%s\n' "$size" "$mtime" "$ctime"
+  # One snapshot preserves sub-second same-size edit detection without three
+  # process launches per watched file (particularly costly under MSYS2).
+  stat -c '%s|%y|%z' "$path" 2>/dev/null || printf '0|0|0\n'
 }
 
 append_fingerprint_entries() {

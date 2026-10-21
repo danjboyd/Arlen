@@ -4,6 +4,8 @@ On Windows, `boomhauer --watch` stops its app and build-error server when the
 watch process is terminated, including a forced process-tree termination.
 See [Windows setup](GETTING_STARTED_WINDOWS.md) for the supported CLANG64 path.
 Native watch helper header updates invalidate packaged prebuilt tools.
+Automatic build-error recovery also handles same-size source edits on large
+Windows checkouts.
 
 Install Arlen, create an app, and run it locally. This page covers Linux;
 use [Getting Started on macOS](GETTING_STARTED_MACOS.md) or
