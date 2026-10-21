@@ -1411,6 +1411,20 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
   [self.mutableMiddlewares addObject:middleware];
 }
 
+- (void)addMiddleware:(id<ALNMiddleware>)middleware beforeMiddlewareOfClass:(Class)middlewareClass {
+  if (middleware == nil) return;
+  NSUInteger index = [self.mutableMiddlewares count];
+  if (middlewareClass != Nil) {
+    for (NSUInteger candidateIndex = 0; candidateIndex < [self.mutableMiddlewares count]; candidateIndex++) {
+      if ([self.mutableMiddlewares[candidateIndex] isKindOfClass:middlewareClass]) {
+        index = candidateIndex;
+        break;
+      }
+    }
+  }
+  [self.mutableMiddlewares insertObject:middleware atIndex:index];
+}
+
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter {
   if (adapter == nil) {
     return;

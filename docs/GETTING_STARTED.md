@@ -362,6 +362,9 @@ Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
 Upgrade vendored `jobs` to 1.1.4 and `auth` to 1.7.2 before relying on manual
 job restrictions and queued auth-mail link origins.
+
+Auth session refresh precedes `security.routePolicies` checks, so a revoked
+session cannot pass a `requireAuth` policy.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text

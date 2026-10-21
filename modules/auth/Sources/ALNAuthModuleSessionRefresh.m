@@ -7,6 +7,7 @@
 #import "ALNLogger.h"
 #import "ALNPg.h"
 #import "ALNResponse.h"
+#import "ALNRoutePolicyMiddleware.h"
 #import "ALNSecurityPrimitives.h"
 
 #import <dispatch/dispatch.h>
@@ -242,7 +243,8 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
       return;
     }
   }
-  [application addMiddleware:[[ALNAuthModuleSessionMiddleware alloc] init]];
+  [application addMiddleware:[[ALNAuthModuleSessionMiddleware alloc] init]
+      beforeMiddlewareOfClass:[ALNRoutePolicyMiddleware class]];
 }
 
 @implementation ALNAuthModuleRuntime (ALNAuthModuleSessionRefresh)

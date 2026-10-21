@@ -21,6 +21,10 @@
   authorization path when assurance or authentication-age limits are set, and
   recognize string-valued path-prefix policies.
 
+- Auth 1.7.3 refreshes and revokes signed sessions before `requireAuth` route
+  policies run. Upgrade vendored auth modules before protecting routes solely
+  with `security.routePolicies`.
+
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
   cannot be reloaded. Backend exceptions release writer locks, discard
   uncommitted cached entries on the next reload, and remove the failed update's
