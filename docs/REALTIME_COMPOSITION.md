@@ -145,7 +145,8 @@ boundary.
 
 Behavior:
 
-- parent app rewrites request path under mount prefix and dispatches to mounted app
+- parent app evaluates matching path prefix route policies, then rewrites the
+  request path under the mount prefix and dispatches to the mounted app
 - mounted response is returned directly
 - parent adds `X-Arlen-Mount-Prefix` header
 

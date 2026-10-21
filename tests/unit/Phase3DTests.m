@@ -2,6 +2,7 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNApplication.h"
+#import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRealtime.h"
@@ -50,6 +51,19 @@
     @"mounted" : @(YES),
     @"source" : @"phase3d"
   };
+}
+
+- (id)signIn:(ALNContext *)ctx {
+  NSError *error = nil;
+  [ALNAuthSession establishAuthenticatedSessionForSubject:@"mounted-user"
+                                                provider:@"test"
+                                                 methods:@[ @"password" ]
+                                          assuranceLevel:1
+                                         authenticatedAt:[NSDate date]
+                                                 context:ctx
+                                                   error:&error];
+  [self renderText:error == nil ? @"signed-in\n" : @"sign-in failed\n"];
+  return nil;
 }
 
 @end
@@ -291,6 +305,53 @@
   NSDictionary *json = [self jsonFromResponse:apiResponse];
   XCTAssertEqualObjects(@(YES), json[@"mounted"]);
   XCTAssertEqualObjects(@"phase3d", json[@"source"]);
+}
+
+- (void)testMountedChildHonorsParentPathPolicies {
+  ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-parent-policy-test-secret-0123456789" },
+    @"security" : @{ @"routePolicies" : @{
+      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ],
+                       @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+                       @"requireAuth" : @YES }
+    } }
+  }];
+  ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  [child registerRouteMethod:@"GET" path:@"/status" name:@"child_status"
+             controllerClass:[Phase3DMountedController class] action:@"status"];
+  [parent registerRouteMethod:@"GET" path:@"/sign-in" name:@"parent_sign_in"
+              controllerClass:[Phase3DMountedController class] action:@"signIn"];
+  XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
+  XCTAssertTrue([parent startWithError:NULL]);
+
+  ALNRequest *blockedIP = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                       queryString:@"" headers:@{}];
+  blockedIP.remoteAddress = @"203.0.113.9";
+  ALNResponse *ipResponse = [parent dispatchRequest:blockedIP];
+  XCTAssertEqual((NSInteger)403, ipResponse.statusCode);
+  XCTAssertEqualObjects(@"source_ip_denied", [ipResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNRequest *anonymous = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                      queryString:@"" headers:@{}];
+  anonymous.remoteAddress = @"127.0.0.1";
+  ALNResponse *authResponse = [parent dispatchRequest:anonymous];
+  XCTAssertEqual((NSInteger)403, authResponse.statusCode);
+  XCTAssertEqualObjects(@"authentication_required", [authResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNResponse *signIn = [parent dispatchRequest:[self requestWithMethod:@"GET" path:@"/sign-in"
+                                                         queryString:@"" headers:@{}]];
+  XCTAssertEqual((NSInteger)200, signIn.statusCode);
+  NSString *cookie = [[[signIn headerForName:@"Set-Cookie"] ?: @"" componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue([cookie length] > 0);
+  ALNRequest *authenticated = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                          queryString:@"" headers:@{ @"cookie" : cookie ?: @"" }];
+  authenticated.remoteAddress = @"127.0.0.1";
+  ALNResponse *allowed = [parent dispatchRequest:authenticated];
+  XCTAssertEqual((NSInteger)200, allowed.statusCode);
+  XCTAssertEqualObjects(@"child-ok\n", [[NSString alloc] initWithData:allowed.bodyData
+                                                              encoding:NSUTF8StringEncoding]);
 }
 
 - (void)testControllerWebSocketAndSSEContracts {

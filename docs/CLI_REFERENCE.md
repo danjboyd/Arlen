@@ -1358,6 +1358,9 @@ Behavior:
  - `/ws/channel/:channel`
  - `/sse/ticker`
  - mounted app sample at `/embedded/*`
+   Parent `security.routePolicies` path prefixes are checked on the original
+   `/embedded/*` path before forwarding. A parent `requireAuth` policy uses the
+   parent's session, and source IP rules use the original peer.
 - built- sample ecosystem-service routes:
  - `/services/cache`
  - `/services/jobs`

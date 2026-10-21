@@ -87,6 +87,11 @@ uses only the hops your trusted proxies appended.
 
 ## `/admin`
 
+Path prefix policies configured on a parent application also apply to mounted
+child requests before path rewriting and child dispatch. Source IP checks use
+the parent request's peer, and `requireAuth` uses the parent's session and
+current auth state. Child policies continue to run in the child application.
+
 The admin UI is the first framework-owned route-policy consumer. If
 `security.routePolicies.admin` is configured, every mounted admin route is
 attached to the `admin` policy. Apps without `security.routePolicies.admin`

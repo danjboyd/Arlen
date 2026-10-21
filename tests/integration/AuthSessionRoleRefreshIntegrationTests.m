@@ -5,6 +5,7 @@
 #import "../shared/ALNTestSupport.h"
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
+#import "ALNController.h"
 #import "ALNAuthModule.h"
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
@@ -19,6 +20,17 @@
 // signed session cookie at sign-in. Signing out, password changes and the
 // absolute session lifetime end sessions server-side. Runs in-process against
 // ARLEN_PG_TEST_DSN.
+@interface ALNMountedAuthPolicyTestController : ALNController
+@end
+
+@implementation ALNMountedAuthPolicyTestController
+- (id)status:(ALNContext *)context {
+  (void)context;
+  [self renderText:@"mounted-ok\n"];
+  return nil;
+}
+@end
+
 @interface AuthSessionRoleRefreshIntegrationTests : XCTestCase
 @property(nonatomic, strong) ALNPg *database;
 @end
@@ -98,7 +110,26 @@
                  bootstrapAdmins:(NSArray *)emails
                       authConfig:(NSDictionary *)authConfig
                           search:(BOOL)search
+                 mountedSecurity:(NSDictionary *)security {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig
+                     search:search security:security mountChild:YES];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
                         security:(NSDictionary *)security {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig
+                     search:search security:security mountChild:NO];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
+                        security:(NSDictionary *)security
+                      mountChild:(BOOL)mountChild {
   NSMutableDictionary *authModule = [NSMutableDictionary dictionaryWithDictionary:authConfig ?: @{}];
   if (authModule[@"registration"] == nil) {
     authModule[@"registration"] = @{ @"autoLogin" : @YES };
@@ -122,6 +153,12 @@
     };
   }
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
+  if (mountChild) {
+    ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+    [child registerRouteMethod:@"GET" path:@"/status" name:@"mounted_status"
+               controllerClass:[ALNMountedAuthPolicyTestController class] action:@"status"];
+    XCTAssertTrue([app mountApplication:child atPrefix:@"/embedded"]);
+  }
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
@@ -441,6 +478,29 @@
 }
 
 #pragma mark - Ending sessions
+
+- (void)testMountedChildParentPolicyRejectsRevokedAuthSession {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *security = @{ @"routePolicies" : @{
+    @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ], @"requireAuth" : @YES }
+  } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:nil
+                                       search:NO mountedSecurity:security];
+  [self registerUser:client email:[self uniqueEmail:@"mounted-policy"]];
+  NSString *cookie = [self cookieHeader:client];
+  ALNResponse *before = [client get:@"/embedded/status"];
+  XCTAssertEqual((NSInteger)200, before.statusCode, @"%@", [before bodyText]);
+
+  ALNResponse *logout = [client post:@"/auth/api/logout" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, logout.statusCode, @"%@", [logout bodyText]);
+  ALNTestClient *replay = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *after = [replay requestWithMethod:@"GET" path:@"/embedded/status" query:nil
+                                        headers:@{ @"cookie" : cookie ?: @"" } body:nil];
+  XCTAssertEqual((NSInteger)403, after.statusCode, @"%@", [after bodyText]);
+  XCTAssertEqualObjects(@"authentication_required", [after headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
 
 - (void)testRoutePolicyRequiresFreshAuthSessionBeforeProtectedController {
   NSString *dsn = [self pgTestDSN];
