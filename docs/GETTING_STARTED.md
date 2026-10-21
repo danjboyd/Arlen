@@ -545,3 +545,7 @@ PostgreSQL and MSSQL decimal result decoding rejects text longer than 40
 characters or containing more than 38 digits with a query error. This also
 applies to PostgreSQL numeric arrays. Select wider values as text when exact
 arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
+
+Synchronous HTTP compatibility helpers reject invalid header names and values
+before transport, including CR/LF injection and embedded NUL. They return
+`NSURLErrorDomain/NSURLErrorBadURL`; see [HTTP Client](HTTP_CLIENT.md).

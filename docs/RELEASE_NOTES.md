@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Synchronous HTTP compatibility helpers now reject invalid header names and
+  CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
+  Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured
+  HTTP client's existing invalid-request error remains unchanged.
+
+- PostgreSQL numeric results, including array elements, and MSSQL decimal
+  results reject text over 40 characters or 38 digits before Foundation
+  conversion. Queries return a decode error and leave the connection usable.
+  Select wider values as text when exact arbitrary precision is needed.
+
 - Route path-prefix policies also apply to format-suffixed requests that
   dispatch to the protected route. Compiled fast routes now use the normal
   authorization path when assurance or authentication-age limits are set, and

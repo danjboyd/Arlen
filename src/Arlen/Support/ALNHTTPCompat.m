@@ -219,6 +219,27 @@ static NSError *ALNSynchronousURLError(NSInteger code, NSString *description) {
                          userInfo:@{NSLocalizedDescriptionKey : description ?: @"request failed"}];
 }
 
+// Shared preflight for the client and every compatibility transport.
+BOOL ALNHTTPHeadersValid(NSDictionary *headers) {
+  NSCharacterSet *token = [NSCharacterSet characterSetWithCharactersInString:
+      @"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+  for (id name in headers) {
+    id value = headers[name];
+    if (![name isKindOfClass:[NSString class]] || [name length] == 0 ||
+        [name rangeOfCharacterFromSet:token.invertedSet].location != NSNotFound ||
+        ![value isKindOfClass:[NSString class]]) {
+      return NO;
+    }
+    for (NSUInteger index = 0; index < [value length]; index++) {
+      unichar ch = [value characterAtIndex:index];
+      if (ch == 0 || ch == '\r' || ch == '\n') {
+        return NO;
+      }
+    }
+  }
+  return YES;
+}
+
 // Internal parser seam used by wire-version regression tests. No canonical fallback.
 NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line) {
   if (![line hasPrefix:@"HTTP/1."]) return nil;
@@ -402,6 +423,11 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
                                          NSURLResponse *__autoreleasing *response,
                                          NSString *__autoreleasing *receivedPhrase,
                                          NSError *__autoreleasing *error) {
+  NSDictionary *requestHeaders = [request.allHTTPHeaderFields copy] ?: @{};
+  if (!ALNHTTPHeadersValid(requestHeaders)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"Invalid HTTP headers");
+    return nil;
+  }
   if (!ALNCurlGlobalReady()) {
     if (error) *error = ALNSynchronousURLError(NSURLErrorUnknown, @"libcurl could not initialize");
     return nil;
@@ -420,7 +446,6 @@ static NSData *ALNSynchronousCurlRequest(NSURLRequest *request, NSUInteger maxRe
   NSData *requestBody = ALNSynchronousRequestBody(request);
   NSString *method = [request.HTTPMethod length] > 0 ? [request.HTTPMethod uppercaseString] : @"GET";
   NSString *urlString = request.URL.absoluteString ?: @"";
-  NSDictionary *requestHeaders = request.allHTTPHeaderFields ?: @{};
   NSTimeInterval timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 60;
   char message[CURL_ERROR_SIZE] = {0};
   struct curl_slist *headerList = NULL;
@@ -518,6 +543,10 @@ ALNHTTPClientResult *ALNSynchronousHTTPResult(NSURLRequest *request, NSUInteger 
   if (error) *error = nil;
   if (request.URL == nil || (policy != ALNHTTPRedirectLimitError && policy != ALNHTTPRedirectLimitReturnResponse)) {
     if (error) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"invalid request URL or redirect policy");
+    return nil;
+  }
+  if (!ALNHTTPHeadersValid(request.allHTTPHeaderFields)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"Invalid HTTP headers");
     return nil;
   }
 #if defined(GNUSTEP) || defined(__APPLE__)
@@ -649,8 +678,15 @@ NSData *ALNSynchronousURLRequestFollowingRedirects(NSURLRequest *request, NSUInt
   if (request == nil) {
     return nil;
   }
+  // Keep the validated request stable until Foundation starts the transfer.
+  request = [request copy];
   if (request.URL == nil) {
     if (error != NULL) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"request has no URL");
+    return nil;
+  }
+
+  if (!ALNHTTPHeadersValid(request.allHTTPHeaderFields)) {
+    if (error) *error = ALNSynchronousURLError(NSURLErrorBadURL, @"Invalid HTTP headers");
     return nil;
   }
 

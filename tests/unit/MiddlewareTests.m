@@ -279,6 +279,9 @@ static NSUInteger MiddlewarePingInvocationCount = 0;
                                                 remoteAddress:@"203.0.113.10" headers:@{}];
     ALNAssertResponseStatus(response, 403);
     XCTAssertEqualObjects(@"source_ip_denied", [response headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+    ALNResponse *allowed = [self dispatchPolicyRequestForApp:app path:path
+                                               remoteAddress:@"10.1.2.3" headers:@{}];
+    ALNAssertResponseStatus(allowed, 200);
   }
 }
 

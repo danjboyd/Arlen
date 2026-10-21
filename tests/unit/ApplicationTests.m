@@ -1595,6 +1595,14 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqual((NSInteger)401, assuranceResponse.statusCode);
   XCTAssertNil([assuranceResponse headerForName:@"X-Fast-Path"]);
 
+  ALNApplication *recentApp = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  ALNRoute *recentRoute = [recentApp registerRouteMethod:@"GET" path:@"/fast/:name"
+      name:@"fast_recent" controllerClass:[AppFastPathController class] action:@"ping"];
+  recentRoute.maximumAuthenticationAgeSeconds = 60;
+  ALNResponse *recentResponse = [recentApp dispatchRequest:[self requestForPath:@"/fast/bob"]];
+  XCTAssertEqual((NSInteger)401, recentResponse.statusCode);
+  XCTAssertNil([recentResponse headerForName:@"X-Fast-Path"]);
+
   ALNApplication *policyApp = [[ALNApplication alloc] initWithConfig:@{
     @"environment" : @"test",
     @"security" : @{ @"routePolicies" : @{
