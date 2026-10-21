@@ -1,5 +1,8 @@
 # Auth Module
 
+Auth session state is refreshed before `security.routePolicies` checks
+`requireAuth`, so a revoked cookie cannot pass a policy protected route.
+
 The first-party `auth` module ships one auth backend contract with three UI
 ownership modes:
 

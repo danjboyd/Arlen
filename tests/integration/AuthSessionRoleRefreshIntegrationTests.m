@@ -91,6 +91,14 @@
                  bootstrapAdmins:(NSArray *)emails
                       authConfig:(NSDictionary *)authConfig
                           search:(BOOL)search {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig search:search security:nil];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
+                        security:(NSDictionary *)security {
   NSMutableDictionary *authModule = [NSMutableDictionary dictionaryWithDictionary:authConfig ?: @{}];
   if (authModule[@"registration"] == nil) {
     authModule[@"registration"] = @{ @"autoLogin" : @YES };
@@ -105,6 +113,9 @@
     @"authModule" : authModule,
     @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
   }];
+  if (security != nil) {
+    config[@"security"] = security;
+  }
   if (search) {
     config[@"searchModule"] = @{
       @"adminUI" : @{ @"autoResources" : @YES, @"resourceProviderClass" : @"ALNSearchAdminResourceProvider" },
@@ -430,6 +441,29 @@
 }
 
 #pragma mark - Ending sessions
+
+- (void)testRoutePolicyRequiresFreshAuthSessionBeforeProtectedController {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *security = @{ @"routePolicies" : @{
+    @"session" : @{ @"pathPrefixes" : @[ @"/auth/api/session" ], @"requireAuth" : @YES }
+  } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:nil
+                                       search:NO security:security];
+  [self registerUser:client email:[self uniqueEmail:@"policy-replay"]];
+  NSString *cookie = [self cookieHeader:client];
+  ALNResponse *before = [client get:@"/auth/api/session"];
+  XCTAssertEqual((NSInteger)200, before.statusCode, @"%@", [before bodyText]);
+
+  ALNResponse *logout = [client post:@"/auth/api/logout" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, logout.statusCode, @"%@", [logout bodyText]);
+  ALNTestClient *replay = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *after = [replay requestWithMethod:@"GET" path:@"/auth/api/session" query:nil
+                                        headers:@{ @"cookie" : cookie ?: @"" } body:nil];
+  XCTAssertEqual((NSInteger)403, after.statusCode, @"%@", [after bodyText]);
+  XCTAssertEqualObjects(@"authentication_required", [after headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
 
 - (void)testReplayedCookieAfterLogoutIsSignedOutWhileOtherDevicesStaySignedIn {
   NSString *dsn = [self pgTestDSN];

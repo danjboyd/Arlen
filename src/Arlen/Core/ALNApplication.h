@@ -149,6 +149,7 @@ NS_ASSUME_NONNULL_BEGIN
 // between the server, workers and CLI delegates.
 - (NSString *)pathRelativeToAppRoot:(NSString *)path;
 - (void)addMiddleware:(id<ALNMiddleware>)middleware;
+- (void)addMiddleware:(id<ALNMiddleware>)middleware beforeMiddlewareOfClass:(Class)middlewareClass;
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter;
 - (void)setCacheAdapter:(id<ALNCacheAdapter>)adapter;
 - (void)setLocalizationAdapter:(id<ALNLocalizationAdapter>)adapter;
