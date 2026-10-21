@@ -295,6 +295,29 @@ static NSData *ALNFakeRedisASCII(NSString *text) {
 
 @implementation RedisCacheAdapterTests
 
+- (void)testRedisURLRejectsNULBeforeFoundationParsing {
+  unichar zero = 0;
+  NSString *nul = [NSString stringWithCharacters:&zero length:1];
+  for (NSString *url in @[
+         @"redis://127.0.0.1%00.evil:6379/0",
+         [NSString stringWithFormat:@"redis://127.0.0.1%@.evil:6379/0", nul],
+         @"redis://localhost:6379/0%00ignored",
+         [NSString stringWithFormat:@"redis://localhost:6379/0%@ignored", nul] ]) {
+    NSError *error = nil;
+    ALNRedisCacheAdapter *adapter = [[ALNRedisCacheAdapter alloc] initWithURLString:url
+        namespace:@"validation" adapterName:@"validation" error:&error];
+    XCTAssertNil(adapter, @"Redis URLs must not silently lose bytes during parsing");
+    XCTAssertNotNil(error);
+  }
+  // An ordinary escaped credential remains valid; validation must not ban all escapes.
+  NSError *error = nil;
+  ALNRedisCacheAdapter *valid = [[ALNRedisCacheAdapter alloc]
+      initWithURLString:@"redis://:pass%40word@localhost:6379/0"
+      namespace:@"validation" adapterName:@"validation" error:&error];
+  XCTAssertNotNil(valid);
+  XCTAssertNil(error);
+}
+
 #if !defined(_WIN32)
 - (void)tearDown {
   [self.server stop];
