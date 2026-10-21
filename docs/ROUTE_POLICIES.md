@@ -93,9 +93,11 @@ the parent request's peer, and `requireAuth` uses the parent's session and
 current auth state. Child policies continue to run in the child application.
 For mounted requests with a format suffix, parent policies match both the
 original path and the path without the suffix. This includes exact leaf
-prefixes and nested mounts. Give parent and child sessions distinct cookie
-names when both applications may write session cookies; they otherwise share
-the default cookie name and browser path.
+prefixes and nested mounts. Parent and child sessions may share a cookie name
+when they share the same secret. If both are enabled with the same cookie name
+but different secrets, startup fails; configure distinct `session.cookieName`
+values. When a shared-session child writes its cookie during a parent legacy
+cookie refresh, the child value takes precedence so the update is retained.
 
 The admin UI is the first framework-owned route-policy consumer. If
 `security.routePolicies.admin` is configured, every mounted admin route is

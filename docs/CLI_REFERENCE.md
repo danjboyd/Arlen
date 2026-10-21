@@ -1909,6 +1909,12 @@ body or layout throws. Exceptions still propagate to the caller; failed renders
 do not leave slot content available to later renders on the same worker thread.
 Nested rendering preserves the enclosing render state.
 
+Mounted apps with enabled parent and child sessions cannot use the same cookie
+name with different secrets. Startup fails with the mount prefix and cookie
+name; configure distinct `session.cookieName` values or intentionally share the
+same secret. A child write to a shared session cookie wins over a parent legacy
+cookie refresh.
+
 ORM transaction exceptions now restore context connection state. Throwing
 savepoint blocks roll back their writes before an enclosing transaction can
 continue; PostgreSQL and MSSQL connections close if that cleanup fails. See

@@ -5443,6 +5443,26 @@ static void ALNFinalizeResponse(ALNApplication *application,
     if (mounted == nil) {
       continue;
     }
+    NSDictionary *parentSession = ALNDictionaryConfigValue(self.config, @"session");
+    NSDictionary *childSession = ALNDictionaryConfigValue(mounted.config, @"session");
+    if (ALNBoolConfigValue(parentSession[@"enabled"], NO) &&
+        ALNBoolConfigValue(childSession[@"enabled"], NO)) {
+      NSString *parentCookieName = ALNStringConfigValue(parentSession[@"cookieName"], @"arlen_session");
+      NSString *childCookieName = ALNStringConfigValue(childSession[@"cookieName"], @"arlen_session");
+      NSString *parentSecret = ALNStringConfigValue(parentSession[@"secret"], @"");
+      NSString *childSecret = ALNStringConfigValue(childSession[@"secret"], @"");
+      if ([parentCookieName isEqualToString:childCookieName] &&
+          ![parentSecret isEqualToString:childSecret]) {
+        if (error != NULL) {
+          NSString *prefix = ALNStringConfigValue(entry[@"prefix"], @"/");
+          *error = [NSError errorWithDomain:ALNApplicationErrorDomain code:309
+                                   userInfo:@{ NSLocalizedDescriptionKey :
+                                      [NSString stringWithFormat:@"mounted application at %@ shares session cookie %@ with parent but uses a different secret; configure distinct session.cookieName values",
+                                          prefix, parentCookieName] }];
+        }
+        return NO;
+      }
+    }
     NSError *mountedError = nil;
     BOOL mountedStarted = [mounted startWithError:&mountedError];
     if (!mountedStarted) {
@@ -5788,7 +5808,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
 
       ALNResponse *forwardedResponse = [mountedApp dispatchRequest:forwarded];
       for (NSString *cookie in [parentPolicyResponse headerValuesForName:@"Set-Cookie"] ?: @[]) {
-        [forwardedResponse appendHeader:@"Set-Cookie" value:cookie];
+        NSString *name = [[cookie componentsSeparatedByString:@"="] firstObject];
+        NSString *namePrefix = [name stringByAppendingString:@"="];
+        BOOL childWroteSameCookie = NO;
+        for (NSString *childCookie in [forwardedResponse headerValuesForName:@"Set-Cookie"] ?: @[]) {
+          if ([childCookie hasPrefix:namePrefix]) {
+            childWroteSameCookie = YES;
+            break;
+          }
+        }
+        if (!childWroteSameCookie) [forwardedResponse appendHeader:@"Set-Cookie" value:cookie];
       }
       if ([prefix length] > 0 && [forwardedResponse headerForName:@"X-Arlen-Mount-Prefix"] == nil) {
         [forwardedResponse setHeader:@"X-Arlen-Mount-Prefix" value:prefix];

@@ -426,6 +426,11 @@ does not match `filter.<field>` or a per-resource filter is omitted.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.
 
+When mounting apps that both enable sessions, use distinct `session.cookieName`
+values if their secrets differ. Startup rejects a shared cookie name with
+different secrets. A shared cookie name and secret, as used by the admin UI
+child app, remains supported.
+
 For company sign-in, add `auth`, configure an OIDC provider and an application
 identity resolver, and explicitly disable stub/password access if your copied
 manifest enables it. Follow the [Entra example and upgrade steps](AUTH_MODULE.md#configurable-oidc-login-including-microsoft-entra).
