@@ -481,3 +481,9 @@ backends. See [Live UI](LIVE_UI.md) for receive-only channels and reconnect
 behavior. Custom Windows CLANG64 build scripts must include
 `_FILE_OFFSET_BITS=64` and rebuild application objects after upgrading; standard
 CLI and make paths set it automatically.
+
+Redis cache configuration: `ALNRedisCacheAdapter` rejects literal NUL and `%00`
+in Redis URLs before parsing. If adapter initialization reports this error,
+correct `ARLEN_REDIS_URL` (or the URL passed by your application); no connection
+is made using a truncated destination. Ordinary percent-encoded credentials
+remain supported.
