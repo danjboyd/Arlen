@@ -379,6 +379,10 @@ session cannot pass a `requireAuth` policy.
 
 If SMS is already verified, adding a TOTP authenticator requires a recent MFA
 step-up. Upgrade vendored `auth` modules to 1.7.4.
+
+Auth passwords preserve surrounding spaces on every path. If older registration
+flows removed those spaces, sign in with the stored form before changing the
+password. Upgrade vendored `auth` modules to 1.7.5.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Admin UI CSV exports escape formula-like cells for spreadsheet use; JSON exports

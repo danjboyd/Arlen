@@ -14,6 +14,10 @@ the new TOTP secret until step-up succeeds. App code that calls
 `totpProvisioningPayloadForUser:context:error:` form when an existing factor
 needs step-up; the user-only form refuses to release the secret in that case.
 
+Passwords are treated as exact strings, including leading and trailing spaces,
+across registration, sign-in, change, and reset. TOTP and SMS step-up rotate
+the session identifier and retain the current server-side session generation.
+
 The first-party `auth` module ships one auth backend contract with three UI
 ownership modes:
 
