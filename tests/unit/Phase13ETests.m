@@ -195,6 +195,31 @@ static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
 - (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email password:(NSString *)password error:(NSError **)error;
 @end
 
+@interface ALNAuthModuleRuntime (Phase13EQueuedMailTesting)
+- (BOOL)dispatchQueuedMailPayload:(NSDictionary *)payload error:(NSError **)error;
+@end
+
+@interface Phase13EQueuedMailRuntime : ALNAuthModuleRuntime
+@property(nonatomic, copy) NSString *sentBaseURL;
+@end
+
+@implementation Phase13EQueuedMailRuntime
+- (NSDictionary *)userForEmail:(NSString *)email error:(NSError **)error {
+  (void)error;
+  return @{ @"id" : @"user-1", @"email" : email ?: @"" };
+}
+- (NSString *)issuePasswordResetTokenForUserID:(NSString *)userID error:(NSError **)error {
+  (void)userID; (void)error;
+  return @"test-token";
+}
+- (BOOL)sendNotificationEvent:(NSString *)event user:(NSDictionary *)user
+                        token:(NSString *)token baseURL:(NSString *)baseURL error:(NSError **)error {
+  (void)event; (void)user; (void)token; (void)error;
+  self.sentBaseURL = baseURL;
+  return YES;
+}
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -1292,6 +1317,23 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqualObjects(@"http://[fe80::1]", runtime.publicBaseURL);
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
   XCTAssertEqualObjects(@"", runtime.publicBaseURL);
+}
+
+- (void)testQueuedAuthMailUsesConfiguredPublicBaseURL {
+  Phase13EQueuedMailRuntime *runtime = [Phase13EQueuedMailRuntime new];
+  NSError *error = nil;
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://app.example.test" }
+                                            environment:@"production" error:&error]);
+  XCTAssertNil(error);
+  NSDictionary *payload = @{
+    @"eligible" : @YES,
+    @"event" : @"password_reset",
+    @"email" : @"user@example.test",
+    @"baseURL" : @"https://attacker.example.test",
+  };
+  XCTAssertTrue([runtime dispatchQueuedMailPayload:payload error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"https://app.example.test", runtime.sentBaseURL);
 }
 
 - (ALNApplication *)mailingApplicationWithEnvironment:(NSString *)environment

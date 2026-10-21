@@ -1057,6 +1057,18 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
     return nil;
   }
 
+  NSString *enqueueSource = JMTrimmedString(options[@"source"]);
+  if (([enqueueSource isEqualToString:@"manual_api"] ||
+       [enqueueSource isEqualToString:@"dead_letter_replay"]) &&
+      ![metadata[@"allowManualEnqueue"] boolValue]) {
+    if (error != NULL) {
+      *error = JMError(ALNJobsModuleErrorUnsupported,
+                       [NSString stringWithFormat:@"job %@ does not allow manual enqueue or replay", jobID],
+                       @{ @"job" : jobID });
+    }
+    return nil;
+  }
+
   NSDictionary *normalizedPayload = JMNormalizeDictionary(payload);
   NSError *validationError = nil;
   if (![definition jobsModuleValidatePayload:normalizedPayload error:&validationError]) {
@@ -1864,6 +1876,7 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   NSString *jobID = [self.runtime enqueueJobIdentifier:identifier
                                                payload:payload
                                                options:@{
+                                                 @"source" : @"manual_api",
                                                  @"queue" : JMTrimmedString(parameters[@"queue"]),
                                                  @"idempotencyKey" : JMTrimmedString(parameters[@"idempotencyKey"]),
                                                  @"retainDeduplication" : @([parameters[@"retainDeduplication"] boolValue]),
@@ -1915,10 +1928,23 @@ static id<ALNJobsOptionalAuthRuntime> JMSharedAuthRuntime(void) {
   NSDictionary *summary = nil;
   if ([self.runtime.jobsAdapter respondsToSelector:@selector(replayJobID:idempotencyKey:delaySeconds:error:)]) {
     NSString *sourceID = [self stringParamForName:@"jobID"] ?: @"";
-    NSString *newID = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter replayJobID:sourceID
-        idempotencyKey:JMTrimmedString(parameters[@"idempotencyKey"])
-        delaySeconds:[parameters[@"delaySeconds"] doubleValue] error:&error];
-    if (newID) summary = @{@"deadLetterJobID":sourceID,@"replayedJobID":newID};
+    NSDictionary *status = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter jobStatusForID:sourceID error:&error];
+    if (status == nil && error == nil) {
+      error = JMError(ALNJobsModuleErrorNotFound, @"dead-letter job was not found", nil);
+    }
+    if (status != nil && ![status[@"state"] isEqualToString:@"failed"]) {
+      error = JMError(ALNJobsModuleErrorNotFound, @"dead-letter job was not found", nil);
+    } else if (status != nil) {
+      NSDictionary *metadata = [self.runtime jobDefinitionMetadataForIdentifier:status[@"name"]];
+      if (metadata == nil || ![metadata[@"allowManualEnqueue"] boolValue]) {
+        error = JMError(ALNJobsModuleErrorUnsupported, @"job does not allow manual replay", nil);
+      } else {
+        NSString *newID = [(id<ALNDurableJobAdapter>)self.runtime.jobsAdapter replayJobID:sourceID
+            idempotencyKey:JMTrimmedString(parameters[@"idempotencyKey"])
+            delaySeconds:[parameters[@"delaySeconds"] doubleValue] error:&error];
+        if (newID) summary = @{@"deadLetterJobID":sourceID,@"replayedJobID":newID};
+      }
+    }
   } else {
   summary = [self.runtime replayDeadLetterJobID:[self stringParamForName:@"jobID"] ?: @""
                                                  delaySeconds:[parameters[@"delaySeconds"] respondsToSelector:@selector(doubleValue)]

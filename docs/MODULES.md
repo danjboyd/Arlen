@@ -298,6 +298,9 @@ request-time auth mail. Its `1.6.0` change refuses reused TOTP codes, limits fai
 recovery-code attempts per account, slow down repeated failed password
 sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `004_auth_totp_limits`; run
 `arlen module migrate` after upgrading.
+`jobs` moved to `1.1.4` to enforce manual enqueue and replay restrictions.
+`auth` moved to `1.7.2` so queued auth-mail links use `publicBaseURL` instead
+of a job-supplied origin. Integrate auth 1.7.1's SMS test-code guard first.
 `notifications` moved to `1.3.0` for per-record SQLite persistence and one-time
 legacy import; stop old workers and follow the [migration/backup guide](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
 Its `1.3.1` update removes recipient-bearing mail headers from self-queued

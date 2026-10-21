@@ -133,6 +133,10 @@ JSON:
 - `GET /jobs/api/jobs/:jobID` (durable status/results)
 
 The JSON routes are included in module OpenAPI output.
+Jobs with `jobsModuleJobMetadata.allowManualEnqueue = NO` cannot be submitted
+through the enqueue API or replayed through the dead-letter API. Framework
+code may still enqueue them directly for its own workflows. Upgrade vendored
+`jobs` modules to 1.1.4 to enforce this rule.
 
 The queue and dashboard surfaces now expose:
 

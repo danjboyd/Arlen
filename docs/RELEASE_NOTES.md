@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Jobs 1.1.4 enforces `allowManualEnqueue = NO` for API enqueue and dead-letter
+  replay. Auth 1.7.2 uses `authModule.publicBaseURL` for queued mail links even
+  when a job payload supplies another origin. Upgrade both vendored modules.
+
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
   cannot be reloaded. Backend exceptions release writer locks, discard
   uncommitted cached entries on the next reload, and remove the failed update's

@@ -759,13 +759,13 @@ warning naming it (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
 First-party module surfaces after install:
 
-- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support. SMS send and verification limits use PostgreSQL account counters; locked requests return 429 with `Retry-After`, and unavailable attempt-limit storage returns 503.
+- `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support. SMS send and verification limits use PostgreSQL account counters; locked requests return 429 with `Retry-After`, and unavailable attempt-limit storage returns 503. Queued auth-mail jobs use the configured `authModule.publicBaseURL` for links, ignoring a different payload origin.
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`; built-in users list `q` and `roles` filters match literal text, including `%` and `_`.
 - Generated OpenAPI routes, including `/openapi.json`, are closed in production unless `openapi.publicInProduction = YES` is set explicitly.
 - Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
 - `POST /auth/api/register` returns a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in flow only in `development` and `test`; other environments reject it at startup.
 - Production auth mail uses the PostgreSQL jobs adapter and jobs worker. Install the jobs schema, configure `authModule.publicBaseURL`, and register the jobs module before auth. `authModule.mailDispatch.mode = "synchronous"` is available only in `development` and `test` when local passwords and mail are enabled; see [Auth Module](AUTH_MODULE.md).
-- `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`
+- `jobs`: protected HTML under `/jobs/...`, JSON under `/jobs/api/...`. API enqueue and dead-letter replay reject definitions with `allowManualEnqueue = NO`.
   Shared operator-state reads refresh and changes transact across processes; this is separate
   from the job adapter's pending and leased records.
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
