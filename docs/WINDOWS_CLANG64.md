@@ -256,8 +256,10 @@ Not planned:
   64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
 - **Production: not supported until 0.4.0.** Deploy production apps to Linux,
   the authoritative production baseline, or to macOS.
-- The `windows-preview` CI lane runs `make phase24-windows-confidence` and
-  `make test-unit`. `make windows-confidence` (packaged release and deploy
+- The `windows-preview` CI lane runs `make phase24-windows-confidence`,
+  `make test-unit`, and `make test-integration` serially, retaining focused
+  static/realtime security checks and explicit platform/live-service skips.
+  The job keeps its 90-minute budget. `make windows-confidence` (packaged release and deploy
   parity) is a manual lane until Windows production support lands in 0.4.0.
 
 ## Installer Regression Checks

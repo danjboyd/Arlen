@@ -105,8 +105,14 @@ with their parent.
 `windows-preview` runs on the self-hosted runner `arlen-windows-agent`
 (labels `self-hosted`, `Windows`, `X64`, `arlen`, `msys2-clang64`). That
 runner is a persistent VM, so the job is skipped for pull requests from forks.
-It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`)
-and the unit suite (`make test-unit`). `make windows-confidence` (packaged
+It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`),
+the unit suite (`make test-unit`), and the complete integration suite
+(`make test-integration`) serially. Focused static/realtime transport regressions
+remain separate steps. Existing live-service and unsupported-production skips
+remain explicit in JUnit; full integration does not certify Windows production.
+On 2026-10-21 the local serial validation passed 1,325 unit tests (148 existing
+skips), four runtime tests, and 254 integration tests (82 existing skips);
+integration took 1,070.803 seconds. The existing job timeout remains 90 minutes. `make windows-confidence` (packaged
 release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
 development-only Windows scope; it returns with Windows production in 0.4.0
 (#200). It still fails at deploy doctor: the bash deploy scripts record MSYS

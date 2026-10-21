@@ -69,6 +69,12 @@ instrumented child executables. After sourcing the GNUstep environment, run
 with deliberate ASan, UBSan, and TSan faults. Do not substitute GCC's
 `libtsan.so` or disable detection to make the lane pass.
 
+On Windows, activate the managed `CLANG64` toolchain with
+`scripts/run_clang64.ps1`. CI runs the full unit and integration suites serially,
+alongside runtime parity and focused transport checks, within the existing
+90-minute job budget. Keep live-service and unsupported-production skips
+explicit; see [Platform Runners](docs/PLATFORM_RUNNERS.md) for commands.
+
 For a single test method (XCTest filter syntax):
 
 ```bash
