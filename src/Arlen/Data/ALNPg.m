@@ -992,6 +992,14 @@ static NSDecimalNumber *ALNPgDecimalNumberFromString(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return nil;
   }
+  // GNUstep's decimal parser has a fixed-size mantissa. Bound the textual
+  // driver value before entering Foundation; oversized values fail decoding.
+  if ([value length] > 40) return nil;
+  NSUInteger digits = 0;
+  for (NSUInteger index = 0; index < [value length]; index++) {
+    unichar ch = [value characterAtIndex:index];
+    if (ch >= '0' && ch <= '9' && ++digits > 38) return nil;
+  }
   NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:value];
   return [number isEqualToNumber:[NSDecimalNumber notANumber]] ? nil : number;
 }

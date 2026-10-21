@@ -93,7 +93,7 @@ PostgreSQL now materializes the supported scalar baseline as Objective-C
 runtime values:
 
 - `BOOL`, integer, float: `NSNumber`
-- `numeric`: `NSDecimalNumber`
+- `numeric`: `NSDecimalNumber` (up to 38 decimal digits in the returned text)
 - `date`, `timestamp`, `timestamp with time zone`: `NSDate`
 - `bytea`: `NSData`
 - `json`, `jsonb`: Foundation objects decoded from JSON, including scalar
@@ -188,3 +188,13 @@ Routing/liveness note:
 - DSN-gated live Pg/MSSQL data-layer tests now log explicit unsatisfied
   requirements when `ARLEN_PG_TEST_DSN` / `ARLEN_MSSQL_TEST_DSN` are absent,
   instead of passing silently via early return.
+
+### Oversized decimal results
+
+PostgreSQL `numeric` (including array elements) and MSSQL decimal results are
+checked before Foundation conversion. Values whose text exceeds 40 characters
+or contains more than 38 digits return a query decode error instead of risking
+an overflow in GNUstep's decimal parser. This includes very small values with
+long fractional scales; leading fractional zeros count toward the bound.
+The connection remains usable after a decode error. For wider numeric values,
+cast the selected column to text and handle that exact representation explicitly.

@@ -1497,6 +1497,33 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqual((NSUInteger)2, connection.livenessCheckCount);
 }
 
+- (void)testOversizedNumericValuesFailDecodingWithoutKillingTheConnection {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  XCTAssertNil(error);
+  if (!database) return;
+  for (NSString *value in @[ @"9999999999999999999999999999999999999999999999999",
+                             @"1e50", @"-1e50", @"0.00000000000000000000000000000000000000000000000001" ]) {
+    for (NSString *sql in @[ @"SELECT $1::numeric AS amount", @"SELECT ARRAY[$1::numeric] AS amounts" ]) {
+      error = nil;
+      XCTAssertNil([database executeQuery:sql parameters:@[value] error:&error]);
+      XCTAssertNotNil(error, @"oversized numeric must produce a decode error: %@", value);
+      error = nil;
+      NSArray *rows = [database executeQuery:@"SELECT 19.75::numeric AS amount" parameters:@[] error:&error];
+      XCTAssertNil(error);
+      XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:@"19.75"], rows.firstObject[@"amount"]);
+    }
+  }
+  error = nil;
+  NSArray *rows = [database executeQuery:@"SELECT $1::numeric AS amount" parameters:
+      @[@"99999999999999999999999999999999999999"] error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([rows.firstObject[@"amount"] isKindOfClass:[NSDecimalNumber class]]);
+}
+
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

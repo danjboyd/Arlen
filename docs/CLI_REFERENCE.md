@@ -1893,3 +1893,8 @@ ORM transaction exceptions now restore context connection state. Throwing
 savepoint blocks roll back their writes before an enclosing transaction can
 continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
 [Arlen ORM](ARLEN_ORM.md) for the adapter contract.
+
+PostgreSQL and MSSQL decimal result decoding rejects text longer than 40
+characters or containing more than 38 digits with a query error. This also
+applies to PostgreSQL numeric arrays. Select wider values as text when exact
+arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
