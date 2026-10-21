@@ -17,6 +17,9 @@
   modules before using tenant, soft-delete, or app-defined visibility rules
   with the PostgreSQL search engine.
 
+- Live keyed publishing requires explicit container and key arguments; broadcast
+  payloads omit requester-specific live metadata and tracing IDs.
+
 - ORM transaction exceptions clear the context's borrowed connection. Savepoint
   exceptions roll back inner writes before an outer transaction can continue;
   PostgreSQL and MSSQL close connections when that cleanup fails.

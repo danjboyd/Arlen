@@ -210,9 +210,17 @@ Server helpers:
 - `publishLiveOperations:onChannel:error:`
 - `publishLiveKeyedTemplate:container:key:prepend:context:onChannel:error:`
 
-`renderLiveTemplate:target:action:context:error:` and the keyed helper can use
-request metadata when the explicit target/container/key/action arguments are
-omitted.
+`renderLiveTemplate:target:action:context:error:` and
+`renderLiveKeyedTemplate:container:key:prepend:context:error:` can use request
+metadata when their explicit placement arguments are omitted. These responses
+return to that requester.
+
+Broadcast publishing requires server-selected operations.
+`publishLiveKeyedTemplate:container:key:prepend:context:onChannel:error:` requires
+explicit nonempty container and key values; omitted values return an error and
+publish nothing, regardless of request headers. Authorize the channel and choose
+placement from trusted application state. Both publish helpers omit request
+metadata, request/correlation IDs, and trace IDs from broadcast payloads.
 
 Example controller pattern:
 

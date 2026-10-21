@@ -244,14 +244,15 @@ static NSString *RenderLiveFeedItem(id ctx, NSError **error) {
   XCTAssertEqualObjects([ALNLive protocolVersion], payload[@"version"]);
   XCTAssertEqualObjects(@"append", payload[@"operations"][0][@"op"]);
   XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"target"]);
+  XCTAssertEqual((NSUInteger)0, [payload[@"meta"] count]);
 }
 
 - (void)testPublishLiveKeyedTemplatePublishesPayloadToChannel {
   ALNEOCRegisterTemplate(@"widgets/feed_item.html.eoc", &RenderLiveFeedItem);
   LiveControllerHarness *controller = [self freshControllerWithHeaders:@{
     @"X-Arlen-Live" : @"true",
-    @"X-Arlen-Live-Container" : @"#feed",
-    @"X-Arlen-Live-Key" : @"row-gamma",
+    @"X-Arlen-Live-Container" : @"#forged",
+    @"X-Arlen-Live-Key" : @"row-forged",
   }];
   LiveControllerSubscriber *subscriber = [[LiveControllerSubscriber alloc] init];
   ALNRealtimeSubscription *subscription =
@@ -260,8 +261,8 @@ static NSString *RenderLiveFeedItem(id ctx, NSError **error) {
 
   NSError *error = nil;
   NSUInteger delivered = [controller publishLiveKeyedTemplate:@"widgets/feed_item"
-                                                    container:nil
-                                                          key:nil
+                                                    container:@"#feed"
+                                                          key:@"row-gamma"
                                                       prepend:NO
                                                       context:@{
                                                         @"key" : @"row-gamma",
@@ -282,6 +283,34 @@ static NSString *RenderLiveFeedItem(id ctx, NSError **error) {
   XCTAssertEqualObjects(@"upsert", payload[@"operations"][0][@"op"]);
   XCTAssertEqualObjects(@"#feed", payload[@"operations"][0][@"container"]);
   XCTAssertEqualObjects(@"row-gamma", payload[@"operations"][0][@"key"]);
+  XCTAssertEqual((NSUInteger)0, [payload[@"meta"] count]);
+}
+
+- (void)testPublishLiveKeyedTemplateRejectsRequestMetadataDefaults {
+  ALNEOCRegisterTemplate(@"widgets/feed_item.html.eoc", &RenderLiveFeedItem);
+  LiveControllerHarness *controller = [self freshControllerWithHeaders:@{
+    @"X-Arlen-Live" : @"true",
+    @"X-Arlen-Live-Container" : @"#other-users-notice",
+    @"X-Arlen-Live-Key" : @"victim",
+  }];
+  LiveControllerSubscriber *subscriber = [[LiveControllerSubscriber alloc] init];
+  ALNRealtimeSubscription *subscription =
+      [[ALNRealtimeHub sharedHub] subscribeChannel:@"live.feed" subscriber:subscriber];
+  XCTAssertNotNil(subscription);
+  for (NSArray *arguments in @[ @[ @"", @"" ], @[ @"#feed", @"" ], @[ @"", @"server-key" ] ]) {
+    NSError *error = nil;
+    NSUInteger delivered = [controller publishLiveKeyedTemplate:@"widgets/feed_item"
+                                                       container:arguments[0]
+                                                             key:arguments[1]
+                                                         prepend:NO
+                                                         context:@{}
+                                                       onChannel:@"live.feed"
+                                                           error:&error];
+    XCTAssertEqual((NSUInteger)0, delivered);
+    XCTAssertEqualObjects(@"Arlen.Live.Error", error.domain);
+    XCTAssertEqual((NSInteger)6, error.code);
+  }
+  XCTAssertEqual((NSUInteger)0, [subscriber.messages count]);
 }
 
 - (void)testRenderLiveTemplateRejectsUnsupportedAction {
