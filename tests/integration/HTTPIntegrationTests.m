@@ -5413,6 +5413,24 @@
   XCTAssertEqualObjects(@"user:42\n", legacyBody);
 }
 
+- (void)testPropaneRejectsMultiWorkerRateLimiterBeforeLaunchingWorkers {
+#if defined(_WIN32)
+  XCTSkip(@"propane production hosting is unsupported on Windows");
+#endif
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *pidFile = [self createTempFilePathWithPrefix:@"propane-rate-limit" suffix:@".pid"];
+  int code = 0;
+  NSString *output = [self runShellCapture:[NSString stringWithFormat:
+      @"ARLEN_RATE_LIMIT_ENABLED=YES ARLEN_APP_ROOT=%@ ARLEN_FRAMEWORK_ROOT=%@ %@ --env development --workers 4 --pid-file %@ --once 2>&1",
+      [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"examples/tech_demo"]],
+      [self shellQuoted:repoRoot], [self shellQuoted:[repoRoot stringByAppendingPathComponent:@"bin/propane"]],
+      [self shellQuoted:pidFile]] exitCode:&code];
+  XCTAssertEqual(1, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"rateLimit.enabled requires one worker"], @"%@", output);
+  XCTAssertFalse([output containsString:@"propane: starting"], @"%@", output);
+  XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
+}
+
 - (void)testPropaneServesRequestsAndHandlesReloadSignal {
 #if defined(_WIN32)
   XCTSkip(@"propane is not supported on Windows until 0.4.0 (#200)");

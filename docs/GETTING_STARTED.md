@@ -477,3 +477,12 @@ backends. See [Live UI](LIVE_UI.md) for receive-only channels and reconnect
 behavior. Custom Windows CLANG64 build scripts must include
 `_FILE_OFFSET_BITS=64` and rebuild application objects after upgrading; standard
 CLI and make paths set it automatically.
+
+## Request limits with multiple workers
+
+The built-in request rate limiter requires one worker. Startup rejects
+`rateLimit.enabled = YES` when multiple workers are configured (the propane
+default is four). Select `propane --workers 1` or the propane accessory
+`workerCount = 1`, or disable the built-in limiter and enforce the budget at
+ingress. v0.3.0 only warned about multiplied budgets; startup now fails closed.
+See [propane's state contract](PROPANE.md#multi-worker-state-contract).

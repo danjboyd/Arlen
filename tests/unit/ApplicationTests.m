@@ -2945,24 +2945,27 @@ static NSArray<NSString *> *ALNTestPlaceholderSigningSecrets(void) {
   [app shutdown];
 }
 
-- (void)testMultiWorkerRateLimitWarnsAtStartup {
+- (void)testMultiWorkerRateLimitFailsBeforeStartup {
   for (NSNumber *enabled in @[ @YES, @NO ]) {
     for (NSNumber *workers in @[ @1, @4 ]) {
       ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
-        @"environment" : @"test", @"logFormat" : @"json",
+        @"environment" : @"test",
         @"rateLimit" : @{ @"enabled" : enabled, @"requests" : @10 },
         @"propaneAccessories" : @{ @"workerCount" : workers },
       }];
-      NSPipe *pipe = [NSPipe pipe];
-      app.logger.outputFileDescriptor = pipe.fileHandleForWriting.fileDescriptor;
-      XCTAssertTrue([app startWithError:NULL]);
-      XCTAssertTrue([app startWithError:NULL]);
-      [pipe.fileHandleForWriting closeFile];
-      NSString *log = [[NSString alloc] initWithData:[pipe.fileHandleForReading readDataToEndOfFile]
-                                          encoding:NSUTF8StringEncoding];
-      NSUInteger count = [[log componentsSeparatedByString:@"rate limit is per worker"] count] - 1;
-      XCTAssertEqual(([enabled boolValue] && [workers integerValue] > 1) ? (NSUInteger)1 : (NSUInteger)0, count);
-      app.logger.outputFileDescriptor = STDERR_FILENO;
+      BOOL allowed = ![enabled boolValue] || [workers integerValue] == 1;
+      for (NSUInteger attempt = 0; attempt < 2; attempt++) {
+        NSError *error = nil;
+        XCTAssertEqual(allowed, [app startWithError:&error]);
+        if (allowed) {
+          XCTAssertNil(error);
+        } else {
+          XCTAssertEqualObjects(@"Arlen.Application.Error", error.domain);
+          XCTAssertEqualObjects(@"multi_worker_rate_limit", error.userInfo[@"reason"]);
+          XCTAssertEqualObjects(@"rateLimit.enabled", error.userInfo[@"config_key"]);
+        }
+      }
+      [app shutdown];
     }
   }
 }

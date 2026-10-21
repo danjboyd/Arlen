@@ -3,6 +3,8 @@
 For upgrades, review [Getting Started](GETTING_STARTED.md), the
 [plugin service guide](PLUGIN_SERVICE_GUIDE.md), and [Live UI](LIVE_UI.md) for
 module re-vendoring, bounded default adapters, and receive-only channels.
+The [request-limiter migration note](GETTING_STARTED.md#request-limits-with-multiple-workers)
+explains startup validation for apps configured with multiple workers.
 
 This is the curated documentation index for Arlen. It is organized by reader
 intent: getting started, building apps, modules, data layer, operations,

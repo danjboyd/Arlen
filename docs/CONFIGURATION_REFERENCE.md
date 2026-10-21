@@ -888,9 +888,16 @@ Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
 `ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
 separate streaming lifecycle and are exempt from these bulk-transfer limits.
 
-The built-in `rateLimit` budget is **per worker**. With four propane workers,
-a client can receive up to four times `rateLimit.requests` in one window by
-opening connections across workers. Startup logs `rate limit is per worker`
-when rate limiting and multiple workers are configured. Use an ingress rate
-limiter for a deployment-wide quota; authentication's account attempt limits
-are separate from this request middleware.
+The built-in `rateLimit` stores its budget in one process. Startup refuses
+`rateLimit.enabled = YES` with more than one configured worker, including the
+default four propane workers. This prevents multiplying the configured request
+budget across independent workers. `ARLEN_PROPANE_WORKERS` (legacy alias
+`MOJOOBJC_PROPANE_WORKERS`) and propane's `--workers` override are enforced.
+
+Migration from v0.3.0: select `propaneAccessories.workerCount = 1` or
+`propane --workers 1` to retain the built-in limiter. For multiple workers,
+disable `rateLimit.enabled` and enforce the request budget at ingress before
+starting the app. Generated apps keep rate limiting disabled by default.
+Authentication's account attempt limits are separate from this request
+middleware. The built-in limiter does not provide a quota across independent
+app instances or hosts.

@@ -3,6 +3,8 @@
 Upgrading an existing app? Review [Getting Started](docs/GETTING_STARTED.md)
 for module re-vendoring and the [Live UI guide](docs/LIVE_UI.md) for channel
 subscription and reconnect behavior.
+Apps using the built-in request limiter must select one worker; see the
+[multi-worker migration note](docs/GETTING_STARTED.md#request-limits-with-multiple-workers).
 
 **A batteries-included web framework for Objective-C.**
 
