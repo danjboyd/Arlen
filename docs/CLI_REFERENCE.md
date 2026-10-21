@@ -1924,3 +1924,8 @@ arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
 Synchronous HTTP compatibility helpers reject invalid header names and values
 before transport, including CR/LF injection and embedded NUL. They return
 `NSURLErrorDomain/NSURLErrorBadURL`; see [HTTP Client](HTTP_CLIENT.md).
+
+Negotiated controller rendering uses only the explicit `jsonObject` for JSON.
+When that argument is nil it renders `{}`; template context is never copied to
+the JSON response. Successful HTML and JSON representations include
+`Vary: Accept` so shared caches distinguish them.

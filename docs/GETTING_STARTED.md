@@ -527,6 +527,9 @@ default is four). Select `propane --workers 1` or the propane accessory
 ingress. v0.3.0 only warned about multiplied budgets; startup now fails closed.
 See [propane's state contract](PROPANE.md#multi-worker-state-contract).
 
+`renderNegotiatedTemplate:context:jsonObject:error:` uses only `jsonObject` for
+JSON responses; nil produces `{}`. Responses include `Vary: Accept` so caches
+separate HTML and JSON variants.
 Template rendering restores thread-local options and composition slots when a
 body or layout throws. Exceptions still propagate to the caller; failed renders
 do not leave slot content available to later renders on the same worker thread.

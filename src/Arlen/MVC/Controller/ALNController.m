@@ -49,6 +49,23 @@ static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
   return [NSDictionary dictionaryWithDictionary:context];
 }
 
+static void ALNAddAcceptVary(ALNResponse *response) {
+  NSArray<NSString *> *values = [response headerValuesForName:@"Vary"];
+  NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+  for (NSString *value in values ?: @[]) {
+    for (NSString *component in [value componentsSeparatedByString:@","]) {
+      NSString *token = [component stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      if ([token length] == 0) continue;
+      if ([token caseInsensitiveCompare:@"Accept"] == NSOrderedSame ||
+          [token isEqualToString:@"*"]) return;
+      [tokens addObject:token];
+    }
+  }
+  [tokens addObject:@"Accept"];
+  [response setHeader:@"Vary" value:[tokens componentsJoinedByString:@", "]];
+}
+
 static NSString *ALNJSONStringFromObject(id value) {
   if (value == nil || value == [NSNull null]) {
     return @"";
@@ -360,11 +377,16 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
                       jsonObject:(id)jsonObject
                            error:(NSError **)error {
   if ([self.context wantsJSON]) {
-    id payload = jsonObject ?: context ?: @{};
-    return [self renderJSON:payload error:error];
+    // Template context often contains CSRF tokens and app-only values. JSON
+    // output must be an explicit object supplied for the API representation.
+    BOOL rendered = [self renderJSON:jsonObject ?: @{} error:error];
+    if (rendered) ALNAddAcceptVary(self.context.response);
+    return rendered;
   }
   NSDictionary *effectiveContext = context ?: [self templateContext];
-  return [self renderTemplate:templateName context:effectiveContext error:error];
+  BOOL rendered = [self renderTemplate:templateName context:effectiveContext error:error];
+  if (rendered) ALNAddAcceptVary(self.context.response);
+  return rendered;
 }
 
 - (BOOL)renderJSON:(id)object error:(NSError **)error {
