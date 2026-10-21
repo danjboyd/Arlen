@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Auth 1.7.0 rejects `registration.autoLogin = YES` outside `development` and
+  `test`, because immediate sign-in reveals registered addresses. Production-like
+  apps with local passwords and mail also reject `mailDispatch.mode = "synchronous"`
+  because delivery latency can reveal account membership. Remove these settings,
+  use the generic registration flow and durable mail jobs, then upgrade vendored
+  auth modules.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It

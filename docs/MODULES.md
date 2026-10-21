@@ -293,7 +293,8 @@ index names (a security fix).
 `search` to `1.0.5` and `storage` to `1.1.3` to classify the environment with
 the framework's shared helper, so environment names match regardless of case
 (GitHub issue 294).
-`auth` moved to `1.6.0` to refuse reused TOTP codes, limit failed TOTP and
+`auth` moved to `1.7.0` to reject production registration auto-login and
+request-time auth mail. Its `1.6.0` change refuses reused TOTP codes, limits failed TOTP and
 recovery-code attempts per account, slow down repeated failed password
 sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `004_auth_totp_limits`; run
 `arlen module migrate` after upgrading.

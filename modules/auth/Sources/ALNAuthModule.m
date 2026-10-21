@@ -1498,6 +1498,12 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                          ? self.moduleConfig[@"registration"]
                                          : @{};
   self.registrationAutoLogin = AMConfigBool(registrationConfig[@"autoLogin"], NO);
+  if (self.registrationAutoLogin && ![self isDevelopmentOrTestEnvironment]) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"authModule.registration.autoLogin is unavailable outside development and test because it reveals existing accounts",
+                                       @{ @"key_path" : @"authModule.registration.autoLogin" });
+    return NO;
+  }
   NSDictionary *uiConfig = [self.moduleConfig[@"ui"] isKindOfClass:[NSDictionary class]] ? self.moduleConfig[@"ui"] : @{};
   NSString *uiMode = AMLowerTrimmedString(uiConfig[@"mode"]);
   if (![uiMode isEqualToString:@"headless"] && ![uiMode isEqualToString:@"generated-app-ui"]) {
@@ -1818,6 +1824,13 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
       ![mailDispatchMode isEqualToString:@"synchronous"]) {
     if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
                                        @"authModule.mailDispatch.mode must be durable or synchronous",
+                                       @{ @"key_path" : @"authModule.mailDispatch.mode" });
+    return NO;
+  }
+  if ([mailDispatchMode isEqualToString:@"synchronous"] && ![self isDevelopmentOrTestEnvironment] &&
+      self.localPasswordEnabled && self.mailAdapter != nil) {
+    if (error != NULL) *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                                       @"authModule.mailDispatch.mode=synchronous is unavailable outside development and test because mail latency reveals existing accounts",
                                        @{ @"key_path" : @"authModule.mailDispatch.mode" });
     return NO;
   }

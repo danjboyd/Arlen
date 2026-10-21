@@ -1048,7 +1048,7 @@ static ALNContext *ALNTestStandInContext(void) {
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
     @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
-    @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"synchronous" } },
+    @"authModule" : @{ @"localPassword" : @{ @"enabled" : @NO } },
   }];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
@@ -1063,6 +1063,30 @@ static ALNContext *ALNTestStandInContext(void) {
                                                                  headers:@{ @"Accept" : @"application/json" }
                                                                     body:nil]];
     XCTAssertEqual((NSInteger)404, response.statusCode, @"%@", path);
+  }
+}
+
+- (void)testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest {
+  NSDictionary *autoLogin = @{ @"registration" : @{ @"autoLogin" : @YES } };
+  for (NSString *environment in @[ @"production", @"staging", @"qa" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:autoLogin
+                                                                  environment:environment error:&error]);
+    XCTAssertEqualObjects(@"authModule.registration.autoLogin", error.userInfo[@"key_path"]);
+
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : environment,
+      @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+      @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"synchronous" },
+                         @"publicBaseURL" : @"https://app.example.test" },
+    }];
+    error = nil;
+    XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+    XCTAssertEqualObjects(@"authModule.mailDispatch.mode", error.userInfo[@"key_path"]);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    XCTAssertTrue([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:autoLogin
+                                                                 environment:environment error:NULL]);
   }
 }
 
@@ -1447,7 +1471,7 @@ static ALNContext *ALNTestStandInContext(void) {
 
 - (void)testPasswordResetLinkUsesConfiguredPublicBaseURLNotHostHeader {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
-  for (NSString *environment in @[ @"test", @"production" ]) {
+  for (NSString *environment in @[ @"test", @"development" ]) {
     ALNInMemoryMailAdapter *adapter = nil;
     ALNApplication *app = [self mailingApplicationWithEnvironment:environment
                                                        authModule:@{ @"publicBaseURL" : @"https://app.example.test/" }
@@ -1537,20 +1561,8 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqual((NSUInteger)1, [bodies count]);
   XCTAssertTrue([[bodies firstObject] containsString:@"http://localhost:3000/auth/password/reset?token="], @"%@", bodies);
 
-  app = [self mailingApplicationWithEnvironment:@"production" authModule:nil mailAdapter:&adapter];
-  email = [self createLinkUserEmail];
-  ALNResponse *response = [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
-  XCTAssertEqual((NSInteger)200, response.statusCode);
-  XCTAssertEqualObjects(@"ok", [self JSONResponseBody:response][@"status"]);
-  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
-
-  NSString *registrant = [NSString stringWithFormat:@"register-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
-  response = [self postJSON:@{ @"email" : registrant, @"display_name" : @"Registrant", @"password" : @"register-password" }
-                         to:@"/auth/api/register"
-                        app:app
-                       host:@"evil.example"];
-  XCTAssertEqual((NSInteger)200, response.statusCode);
-  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
+  // Production now rejects synchronous mail, even when no public base URL is
+  // configured. The startup validation test covers that path.
 }
 
 @end
