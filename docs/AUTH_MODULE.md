@@ -250,7 +250,7 @@ These need auth module migration `004_auth_totp_limits` (run
     account is looked up. Known and unknown emails get the same counters,
     delays, response bodies and one Argon2 verification each, so the limiter
     does not reveal whether an account exists.
-  - the tables stay bounded: at most once a minute a sign-in starts a prune
+  - pruning limits table growth: at most once a minute a sign-in starts a prune
     on a background queue, so the request does not wait for it. Each prune
     deletes at most `pruneBatchSize` rows (default 1000). First it removes
     expired rows with no active wait: account-wide rows untouched for a whole
@@ -261,6 +261,10 @@ These need auth module migration `004_auth_totp_limits` (run
     oldest first, known devices last. Account-wide rows and rows with an
     active wait are never removed to meet the cap: if only those are left,
     the table stays over the cap until they expire and a warning is logged.
+    `maxTrackedEntries` is a soft limit, not a hard database row cap: influx
+    above `pruneBatchSize` per minute can outpace cleanup, and protected
+    account-wide or delayed rows can keep the table above the limit. Monitor
+    row count and prune warnings under sustained sign-in floods.
     Every statement is limited and walks the `updated_at` index; the only
     count reads at most `maxTrackedEntries + pruneBatchSize` rows.
 - forgot-password is not subject to the password delays or the account-wide
