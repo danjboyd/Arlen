@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import "../shared/ALNTestWait.h"
 
 #import "ALNServices.h"
 
@@ -258,6 +259,65 @@
   XCTAssertEqual((NSUInteger)200, produced.count);
   XCTAssertEqualObjects(produced, consumed);
   [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+}
+
+- (void)testFileJobsPreserveJobsDuringInterleavedProcessTransactions {
+  NSString *root = [self temporaryPathWithPrefix:@"file-jobs-mixed"];
+  NSString *storage = [root stringByAppendingPathComponent:@"jobs/state.plist"];
+  NSError *error = nil;
+  ALNFileJobAdapter *adapter = [[ALNFileJobAdapter alloc] initWithStoragePath:storage adapterName:nil error:&error];
+  XCTAssertNotNil(adapter, @"%@", error);
+  if (!adapter) return;
+  NSMutableArray *tasks = [NSMutableArray array];
+  NSMutableArray *logs = [NSMutableArray array];
+  NSMutableSet *produced = [NSMutableSet set];
+  NSMutableSet *consumed = [NSMutableSet set];
+  @try {
+    for (NSUInteger index = 0; index < 4; index++) {
+      NSString *log = [root stringByAppendingPathComponent:[NSString stringWithFormat:@"worker-%lu.log", (unsigned long)index]];
+      [[NSFileManager defaultManager] createFileAtPath:log contents:nil attributes:nil];
+      NSFileHandle *output = [NSFileHandle fileHandleForWritingAtPath:log];
+      NSTask *task = [NSTask new];
+      NSString *binary = [[self repoRoot] stringByAppendingPathComponent:@"build/file-job-probe"];
+#if defined(_WIN32)
+      binary = [binary stringByAppendingString:@".exe"];
+#endif
+      task.launchPath = binary;
+      task.arguments = @[@"mixed", storage];
+      task.standardOutput = output;
+      [tasks addObject:task];
+      [logs addObject:log];
+      [task launch];
+      [output closeFile];
+    }
+    for (NSUInteger index = 0; index < tasks.count; index++) {
+      NSTask *task = tasks[index];
+      BOOL exited = ALNTestWaitForTaskExit(task, 60.0);
+      XCTAssertTrue(exited, @"file-job worker timed out");
+      if (!exited) return;
+      XCTAssertEqual(0, task.terminationStatus);
+      NSString *text = [NSString stringWithContentsOfFile:logs[index] encoding:NSUTF8StringEncoding error:&error];
+      XCTAssertNotNil(text, @"%@", error);
+      for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        if (line.length == 0) continue;
+        NSArray *fields = [line componentsSeparatedByString:@" "];
+        XCTAssertEqual((NSUInteger)2, fields.count);
+        if (fields.count != 2) continue;
+        NSMutableSet *seen = [fields[0] isEqualToString:@"produced"] ? produced : consumed;
+        XCTAssertFalse([seen containsObject:fields[1]], @"duplicate %@", line);
+        [seen addObject:fields[1]];
+      }
+    }
+    XCTAssertEqual((NSUInteger)800, produced.count);
+    XCTAssertEqualObjects(produced, consumed);
+    XCTAssertNil([adapter dequeueDueJobAt:[NSDate dateWithTimeIntervalSinceNow:1] error:&error]);
+    XCTAssertNil(error);
+  } @finally {
+    for (NSTask *task in tasks) {
+      if ([task isRunning]) { [task terminate]; [task waitUntilExit]; }
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
 }
 
 - (void)testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite {
