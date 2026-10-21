@@ -100,7 +100,8 @@ Requested channels are validated against the notification definition before queu
   `recipients` removed
 - whatever the definition returns, the module then replaces every delivery
   target with the caller's own: the email goes only to the caller's address
-  (`to` replaced, `cc`, `bcc` and `To`/`Cc`/`Bcc` headers dropped), the
+  (`to` replaced; `cc`, `bcc`, address-bearing headers such as `Reply-To`, and
+  all `Resent-*` headers dropped), the
   in-app entry and web push go only to the caller's subject. No payload key,
   at any depth and under any name, can choose who or where it is delivered
 - a webhook target cannot be replaced, so the `webhook` channel is left out

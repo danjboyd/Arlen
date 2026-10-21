@@ -267,7 +267,11 @@ static NSArray *Phase14SneakyValues(NSDictionary *payload, NSArray *keys) {
                                       subject:@"Integration Sneaky"
                                      textBody:@"Hello."
                                      htmlBody:nil
-                                      headers:@{ @"Bcc" : @"hidden@outside.example.test", @"X-Kind" : @"sneaky" }
+                                      headers:@{ @"Bcc" : @"hidden@outside.example.test",
+                                                 @"rEpLy-To" : @"reply@outside.example.test",
+                                                 @"Resent-To" : @"resent@outside.example.test",
+                                                 @"Resent-Cc" : @"resent-cc@outside.example.test",
+                                                 @"X-Kind" : @"sneaky" }
                                      metadata:nil];
 }
 
@@ -577,6 +581,9 @@ static NSArray *Phase14SneakyValues(NSDictionary *payload, NSArray *keys) {
   XCTAssertEqual((NSUInteger)0, [message[@"bcc"] count]);
   NSDictionary *headers = [message[@"headers"] isKindOfClass:[NSDictionary class]] ? message[@"headers"] : @{};
   XCTAssertNil(headers[@"Bcc"]);
+  XCTAssertNil(headers[@"rEpLy-To"]);
+  XCTAssertNil(headers[@"Resent-To"]);
+  XCTAssertNil(headers[@"Resent-Cc"]);
   XCTAssertEqualObjects(@"sneaky", headers[@"X-Kind"]);
   XCTAssertEqual((NSUInteger)1, [self inboxCountForRecipient:subject]);
   XCTAssertEqual((NSUInteger)0, [self inboxCountForRecipient:victim]);
@@ -604,6 +611,8 @@ static NSArray *Phase14SneakyValues(NSDictionary *payload, NSArray *keys) {
   XCTAssertNotNil([[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:20 error:&error]);
   NSDictionary *message = [[app.mailAdapter deliveriesSnapshot] lastObject][@"message"];
   XCTAssertTrue([message[@"to"] containsObject:@"a@outside.example.test"]);
+  XCTAssertEqualObjects(@"reply@outside.example.test", message[@"headers"][@"rEpLy-To"]);
+  XCTAssertEqualObjects(@"resent@outside.example.test", message[@"headers"][@"Resent-To"]);
   XCTAssertEqual((NSUInteger)1, [self inboxCountForRecipient:victim]);
 }
 
