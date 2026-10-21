@@ -2,6 +2,12 @@
 
 This document defines Arlen release lifecycle operations.
 
+Synthetic certification-generator smoke tests supply their own current-dated
+risk fixture alongside their synthetic lane artifacts. Actual release
+certification still validates the checked-in risk register, including its
+review age, owners, and target dates. Resolve an expired real review through
+review without relaxing the freshness threshold.
+
 Windows installer contract tests and release certification temporarily modify
 the saved user PATH. Their shared per-user mutex serializes that interval
 across checkouts and runner sessions, preserving current-shell and fresh-shell
