@@ -217,7 +217,12 @@ if [[ "$phase39_environment_kind" != "development" && "$phase39_environment_kind
   fi
 
   phase39_has_durable_state=0
-  if phase39_config_blob | grep -Eq 'durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+  # Inspect the state dictionary itself; another module may also have a
+  # durable flag, which must not silence this app-state warning. The last
+  # declaration wins when an environment overlay supplies its own state.
+  phase39_state_declaration="$(phase39_config_blob | tr '\n' ' ' |
+    sed -nE 's/.*[;{[:space:]]state[[:space:]]*=[[:space:]]*\{([^{}]*)\}.*/\1/p')"
+  if [[ "$phase39_state_declaration" =~ durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*\; ]]; then
     phase39_has_durable_state=1
   fi
   phase39_state_durable="$(printf '%s' "${ARLEN_STATE_DURABLE:-}" | tr '[:upper:]' '[:lower:]')"

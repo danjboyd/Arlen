@@ -6142,7 +6142,8 @@ static NSString *ALNHostDeployProfile(void) {
     for (NSDictionary *item in cases) {
       NSString *config = [NSString stringWithFormat:
           @"{ propaneAccessories = { workerCount = %@; }; state = { durable = %@; }; "
-          @"database = { connectionString = \"postgresql://db.example.test/app\"; }; }",
+          @"database = { connectionString = \"postgresql://db.example.test/app\"; }; "
+          @"otherFeature = { durable = YES; }; }",
           item[@"workers"], item[@"durable"]];
       XCTAssertTrue([self writeFile:configPath content:config]);
       NSArray<NSString *> *commands = @[
