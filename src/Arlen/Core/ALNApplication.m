@@ -1961,6 +1961,25 @@ static NSError *ALNInsecureSigningSecretError(NSInteger code,
 }
 
 static NSError *ALNValidateSecurityConfiguration(NSDictionary *config, NSString *environment) {
+  NSDictionary *rateLimit = ALNDictionaryConfigValue(config, @"rateLimit");
+  NSDictionary *accessories = ALNDictionaryConfigValue(config, @"propaneAccessories");
+  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
+  // Propane exports the actual count after applying --workers. Read the live
+  // environment; NSProcessInfo may retain the process's initial environment.
+  const char *rawWorkers = getenv("ARLEN_PROPANE_WORKERS");
+  if (rawWorkers == NULL || rawWorkers[0] == '\0') {
+    rawWorkers = getenv("MOJOOBJC_PROPANE_WORKERS");
+  }
+  NSString *workerOverride = rawWorkers ? [NSString stringWithUTF8String:rawWorkers] : nil;
+  if ([workerOverride integerValue] > 0) workers = [workerOverride integerValue];
+  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
+    return ALNSecurityConfigValidationError(
+        343,
+        @"Invalid security configuration: rateLimit.enabled requires one worker because the built-in "
+         "rate limiter is process-local. Set propaneAccessories.workerCount = 1 (or propane --workers 1), "
+         "or disable rateLimit.enabled and enforce the request budget at ingress.",
+        @"rateLimit.enabled", @"multi_worker_rate_limit", nil);
+  }
   BOOL allowsInsecureSecrets = ALNEnvironmentAllowsInsecureSigningSecrets(environment);
   NSDictionary *session = ALNDictionaryConfigValue(config, @"session");
   NSDictionary *csrf = ALNDictionaryConfigValue(config, @"csrf");
@@ -5381,17 +5400,6 @@ static void ALNFinalizeResponse(ALNApplication *application,
       *error = self.moduleLoadError;
     }
     return NO;
-  }
-  NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
-  NSDictionary *accessories = ALNDictionaryConfigValue(self.config, @"propaneAccessories");
-  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
-  NSString *workerEnvironment = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_PROPANE_WORKERS"];
-  if ([workerEnvironment integerValue] > 0) workers = [workerEnvironment integerValue];
-  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
-    [self.logger warn:@"rate limit is per worker"
-               fields:@{ @"worker_count" : @(workers),
-                         @"requests_per_worker" : rateLimit[@"requests"] ?: @120,
-                         @"hint" : @"Use an ingress rate limiter for a deployment-wide request budget." }];
   }
   if (self.spaFallback != nil) {
     // A missing shell is expected while a frontend dev server serves the app.

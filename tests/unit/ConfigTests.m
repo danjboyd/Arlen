@@ -17,6 +17,58 @@
 
 @implementation ConfigTests
 
+- (void)testRateLimitStartupUsesDefaultWorkersAndEnvironmentOverrides {
+  NSArray *keys = @[@"ARLEN_PROPANE_WORKERS", @"MOJOOBJC_PROPANE_WORKERS",
+                    @"ARLEN_RATE_LIMIT_ENABLED", @"MOJOOBJC_RATE_LIMIT_ENABLED"];
+  NSMutableDictionary *saved = [NSMutableDictionary dictionary];
+  for (NSString *key in keys) {
+    const char *value = getenv(key.UTF8String);
+    if (value) saved[key] = [NSString stringWithUTF8String:value];
+    unsetenv(key.UTF8String);
+  }
+  NSString *root = [self createTempAppRoot];
+  @try {
+    XCTAssertTrue([self writeFile:[root stringByAppendingPathComponent:@"config/app.plist"]
+                         content:@"{ rateLimit = { enabled = YES; requests = 2; }; }"]);
+    for (NSDictionary *overrides in @[
+           @{}, @{@"MOJOOBJC_PROPANE_WORKERS": @"1"},
+           @{@"MOJOOBJC_PROPANE_WORKERS": @"3"},
+           @{@"MOJOOBJC_PROPANE_WORKERS": @"3", @"ARLEN_PROPANE_WORKERS": @"1"},
+           @{@"ARLEN_PROPANE_WORKERS": @"4", @"ARLEN_RATE_LIMIT_ENABLED": @"NO"}]) {
+      for (NSString *key in keys) unsetenv(key.UTF8String);
+      for (NSString *key in overrides) setenv(key.UTF8String, [overrides[key] UTF8String], 1);
+      NSError *error = nil;
+      NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test"
+                                        includeModules:NO error:&error];
+      XCTAssertNotNil(config, @"%@", error);
+      NSInteger workers = [config[@"propaneAccessories"][@"workerCount"] integerValue];
+      if (overrides.count == 0) XCTAssertEqual((NSInteger)4, workers);
+      BOOL allowed = workers == 1 || ![config[@"rateLimit"][@"enabled"] boolValue];
+      ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
+      XCTAssertEqual(allowed, [app startWithError:&error], @"%@", overrides);
+      if (!allowed) XCTAssertEqualObjects(@"multi_worker_rate_limit", error.userInfo[@"reason"]);
+      [app shutdown];
+    }
+    // Propane's CLI override is exported after config resolution. The runtime
+    // must use it even if the previously loaded config selected one worker.
+    setenv("ARLEN_PROPANE_WORKERS", "1", 1);
+    unsetenv("ARLEN_RATE_LIMIT_ENABLED");
+    NSDictionary *config = [ALNConfig loadConfigAtRoot:root environment:@"test"
+                                      includeModules:NO error:NULL];
+    setenv("ARLEN_PROPANE_WORKERS", "4", 1);
+    NSError *error = nil;
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
+    XCTAssertFalse([app startWithError:&error]);
+    XCTAssertEqualObjects(@"multi_worker_rate_limit", error.userInfo[@"reason"]);
+  } @finally {
+    for (NSString *key in keys) {
+      if (saved[key]) setenv(key.UTF8String, [saved[key] UTF8String], 1);
+      else unsetenv(key.UTF8String);
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
+}
+
 - (void)testDocumentedMultipartPlistLimitsNormalizeAndEnforce {
   NSString *root = [self createTempAppRoot];
   @try {

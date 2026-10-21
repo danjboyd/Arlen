@@ -483,3 +483,12 @@ in Redis URLs before parsing. If adapter initialization reports this error,
 correct `ARLEN_REDIS_URL` (or the URL passed by your application); no connection
 is made using a truncated destination. Ordinary percent-encoded credentials
 remain supported.
+
+## Request limits with multiple workers
+
+The built-in request rate limiter requires one worker. Startup rejects
+`rateLimit.enabled = YES` when multiple workers are configured (the propane
+default is four). Select `propane --workers 1` or the propane accessory
+`workerCount = 1`, or disable the built-in limiter and enforce the budget at
+ingress. v0.3.0 only warned about multiplied budgets; startup now fails closed.
+See [propane's state contract](PROPANE.md#multi-worker-state-contract).
