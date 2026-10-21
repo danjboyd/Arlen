@@ -358,6 +358,8 @@ again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
 SMS MFA also needs the auth module's attempt-limit migration. Send and code
 verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
+Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
+the auth module rejects this test-only bypass at startup.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Production apps keep `/openapi.json` and its docs routes closed unless they set

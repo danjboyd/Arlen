@@ -166,6 +166,8 @@ Current MFA factor scope:
 - authenticator-app TOTP remains the recommended and preferred factor
 - optional SMS/Twilio Verify is implemented as a disabled-by-default fallback
   factor
+- `mfa.sms.testVerificationCode` is a development/test fixture setting. The
+  module rejects a nonempty value at startup in every other environment.
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
 - when SMS is enabled, send and verification attempt budgets are recorded per
