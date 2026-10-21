@@ -178,6 +178,9 @@ typedef NS_ENUM(NSInteger, ALNAuthModuleErrorCode) {
                                            error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
                                                     error:(NSError *_Nullable *_Nullable)error;
+- (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                                  context:(ALNContext *)context
+                                                    error:(NSError *_Nullable *_Nullable)error;
 - (nullable NSDictionary *)totpFragmentContextForCurrentUserInContext:(ALNContext *)context
                                                              returnTo:(nullable NSString *)returnTo
                                                                 error:(NSError *_Nullable *_Nullable)error;

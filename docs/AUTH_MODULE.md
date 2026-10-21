@@ -7,6 +7,13 @@ that configured origin. Upgrade the vendored auth module with the jobs module.
 Auth session state is refreshed before `security.routePolicies` checks
 `requireAuth`, so a revoked cookie cannot pass a policy protected route.
 
+When a verified SMS factor already exists, adding an authenticator app requires
+recent AAL2 authentication. The factor discovery and management responses omit
+the new TOTP secret until step-up succeeds. App code that calls
+`totpProvisioningPayloadForUser:error:` must use the new
+`totpProvisioningPayloadForUser:context:error:` form when an existing factor
+needs step-up; the user-only form refuses to release the secret in that case.
+
 The first-party `auth` module ships one auth backend contract with three UI
 ownership modes:
 

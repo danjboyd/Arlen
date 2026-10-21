@@ -1099,9 +1099,16 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                                              error:(NSError **)error;
 - (nullable NSDictionary *)smsEnrollmentForUserID:(NSString *)userID
                                             error:(NSError **)error;
+- (BOOL)canEnrollTOTPForUser:(NSDictionary *)user
+                    context:(ALNContext *)context
+                      error:(NSError **)error;
 - (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
                                                     error:(NSError **)error;
+- (nullable NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                                  context:(ALNContext *)context
+                                                    error:(NSError **)error;
 - (nullable NSDictionary *)totpFragmentContextForUser:(NSDictionary *)user
+                                              context:(ALNContext *)context
                                              returnTo:(NSString *)returnTo
                                                 error:(NSError **)error;
 - (NSDictionary *)mfaFactorStateForUser:(NSDictionary *)user
@@ -3649,6 +3656,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
 
 - (NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
                                            error:(NSError **)error {
+  return [self totpProvisioningPayloadForUser:user context:nil error:error];
+}
+
+- (NSDictionary *)totpProvisioningPayloadForUser:(NSDictionary *)user
+                                         context:(ALNContext *)context
+                                           error:(NSError **)error {
+  if (![self canEnrollTOTPForUser:user context:context error:error]) {
+    return nil;
+  }
   NSString *userID = AMTrimmedString(user[@"id"]);
   NSDictionary *enrollment = [self totpEnrollmentForUserID:userID error:error];
   NSString *secret = AMTrimmedString(enrollment[@"secret"]);
@@ -3692,10 +3708,48 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   };
 }
 
+- (BOOL)canEnrollTOTPForUser:(NSDictionary *)user
+                    context:(ALNContext *)context
+                      error:(NSError **)error {
+  NSString *userID = AMTrimmedString(user[@"id"]);
+  NSError *lookupError = nil;
+  NSDictionary *totp = [self totpEnrollmentForUserID:userID error:&lookupError];
+  if (lookupError != nil) {
+    if (error != NULL) *error = lookupError;
+    return NO;
+  }
+  if ([AMTrimmedString(totp[@"verified_at"]) length] > 0 ||
+      AMBoolFromDatabaseValue(totp[@"enabled"])) {
+    return YES;
+  }
+  if (!self.smsEnabled || !self.smsAllowChallenge) {
+    return YES;
+  }
+  NSDictionary *sms = [self smsEnrollmentForUserID:userID error:&lookupError];
+  if (lookupError != nil) {
+    if (error != NULL) *error = lookupError;
+    return NO;
+  }
+  BOOL smsVerified = ([AMTrimmedString(sms[@"verified_at"]) length] > 0 ||
+                      AMBoolFromDatabaseValue(sms[@"enabled"]));
+  if (!smsVerified || [ALNAuthSession context:context
+                    satisfiesMinimumAssuranceLevel:2
+                  maximumAuthenticationAgeSeconds:self.smsRecentMFAMaxAgeSeconds
+                                     referenceDate:nil]) {
+    return YES;
+  }
+  if (error != NULL) {
+    *error = AMError(ALNAuthModuleErrorPolicyRejected,
+                     @"Verify an existing MFA factor before setting up an authenticator app", nil);
+  }
+  return NO;
+}
+
 - (NSDictionary *)totpFragmentContextForUser:(NSDictionary *)user
+                                      context:(ALNContext *)context
                                      returnTo:(NSString *)returnTo
                                         error:(NSError **)error {
-  NSDictionary *provisioning = [self totpProvisioningPayloadForUser:user error:error];
+  NSDictionary *provisioning = [self totpProvisioningPayloadForUser:user context:context error:error];
   if (provisioning == nil) {
     return nil;
   }
@@ -3894,7 +3948,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
     return nil;
   }
-  return [self totpFragmentContextForUser:user returnTo:returnTo error:error];
+  if (![self canEnrollTOTPForUser:user context:context error:error]) {
+    return nil;
+  }
+  return [self totpFragmentContextForUser:user context:context returnTo:returnTo error:error];
 }
 
 - (NSDictionary *)mfaFactorStateForUser:(NSDictionary *)user
@@ -3902,7 +3959,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                returnTo:(NSString *)returnTo
                                   error:(NSError **)error {
   NSString *userID = AMTrimmedString(user[@"id"]);
-  NSDictionary *totpProvisioning = [self totpProvisioningPayloadForUser:user error:NULL] ?: @{};
+  NSError *totpAccessError = nil;
+  BOOL totpEnrollmentAllowed = [self canEnrollTOTPForUser:user context:context error:&totpAccessError];
+  if (!totpEnrollmentAllowed && !([totpAccessError.domain isEqualToString:ALNAuthModuleErrorDomain] &&
+                                  totpAccessError.code == ALNAuthModuleErrorPolicyRejected)) {
+    if (error != NULL) *error = totpAccessError;
+    return nil;
+  }
+  NSDictionary *totpProvisioning = totpEnrollmentAllowed
+      ? ([self totpProvisioningPayloadForUser:user context:context error:error] ?: @{}) : @{};
   BOOL totpVerified = [totpProvisioning[@"verified"] boolValue];
   BOOL totpEnrolled = [totpProvisioning[@"enrolled"] boolValue];
 
@@ -3962,6 +4027,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"verified" : @(totpVerified),
     @"preferred_for_step_up" : @([preferredFactor isEqualToString:@"totp"]),
     @"challenge_available" : @(totpVerified),
+    @"management_allowed" : @(totpEnrollmentAllowed),
     @"manage_path" : self.mfaManagePath ?: @"/auth/mfa",
     @"challenge_path" : self.totpPath ?: @"/auth/mfa/totp",
     @"summary" : totpVerified ? @"Ready for step-up authentication." : @"Recommended. Set up an authenticator app for stronger MFA.",
@@ -4009,6 +4075,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"totp" : @{
       @"enrolled" : @(totpEnrolled),
       @"verified" : @(totpVerified),
+      @"management_allowed" : @(totpEnrollmentAllowed),
       @"provisioning" : totpProvisioning ?: @{},
       @"fallback_href" : smsChallengeAvailable ? smsFallbackHref : @"",
     },
@@ -4046,7 +4113,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     @"authMFAPreferredFactor" : factorState[@"preferred_factor"] ?: @"totp",
     @"authMFAAvailableChallengeFactors" : factorState[@"available_challenge_factors"] ?: @[],
     @"authMFAPolicy" : policyState ?: @{},
-    @"authTOTPNeedsEnrollment" : @(!totpVerified),
+    @"authTOTPNeedsEnrollment" : @(!totpVerified && [totpState[@"management_allowed"] boolValue]),
     @"authTOTPVerified" : @(totpVerified),
     @"authSMSState" : smsState ?: @{},
     @"authSMSPolicy" : [policyState[@"sms"] isKindOfClass:[NSDictionary class]] ? policyState[@"sms"] : @{},
@@ -4109,8 +4176,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     },
   }];
 
-  if (!totpVerified) {
-    NSDictionary *totpContext = [self totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+  if (!totpVerified && [totpState[@"management_allowed"] boolValue]) {
+    NSDictionary *totpContext = [self totpFragmentContextForUser:user context:context returnTo:returnTo error:NULL] ?: @{};
     [contextValues addEntriesFromDictionary:totpContext];
   }
   return contextValues;
@@ -6048,12 +6115,22 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
     return nil;
   }
+  NSError *enrollmentError = nil;
+  if (![self.runtime canEnrollTOTPForUser:user context:ctx error:&enrollmentError]) {
+    [self setStatusForAuthError:enrollmentError fallbackStatus:403];
+    NSString *message = [self clientMessageForError:enrollmentError fallback:@"Verify an existing MFA factor first."];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      return @{ @"status" : @"error", @"message" : message };
+    }
+    [self renderText:message];
+    return nil;
+  }
   NSString *returnTo = AMSafeReturnTo([self requestParameters][@"return_to"]);
-  NSDictionary *payload = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
+  NSDictionary *payload = [self.runtime totpProvisioningPayloadForUser:user context:ctx error:NULL] ?: @{};
   if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
     return [self totpJSONResponseForContext:ctx provisioning:payload returnTo:returnTo];
   }
-  NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+  NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
   BOOL verified = [payload[@"verified"] boolValue];
   [self renderAuthPageIdentifier:(verified ? @"totp_challenge" : @"totp_enrollment")
                            title:(verified ? @"Verify Your Authenticator" : @"Set Up Authenticator")
@@ -6080,6 +6157,16 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     [self redirectTo:[NSString stringWithFormat:@"%@?return_to=%@", self.runtime.loginPath, self.runtime.totpPath] status:302];
     return nil;
   }
+  NSError *enrollmentError = nil;
+  if (![self.runtime canEnrollTOTPForUser:user context:ctx error:&enrollmentError]) {
+    [self setStatusForAuthError:enrollmentError fallbackStatus:403];
+    NSString *message = [self clientMessageForError:enrollmentError fallback:@"Verify an existing MFA factor first."];
+    if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
+      return @{ @"status" : @"error", @"message" : message };
+    }
+    [self renderText:message];
+    return nil;
+  }
   NSDictionary *parameters = [self requestParameters];
   NSError *error = nil;
   NSDictionary *payload = [self.runtime verifyTOTPCode:parameters[@"code"] user:user context:ctx error:&error];
@@ -6087,7 +6174,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   if (payload == nil) {
     [self setStatusForAuthError:error fallbackStatus:422];
     NSArray *errors = [self errorEntriesForError:error field:@"code"];
-    NSDictionary *provisioning = [self.runtime totpProvisioningPayloadForUser:user error:NULL] ?: @{};
+    NSDictionary *provisioning = [self.runtime totpProvisioningPayloadForUser:user context:ctx error:NULL] ?: @{};
     if ([self shouldPreferJSONForHeadlessRequest:ctx]) {
       return @{
         @"status" : @"error",
@@ -6096,7 +6183,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
         @"mfa" : [self totpJSONStateForProvisioning:provisioning],
       };
     }
-    NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user returnTo:returnTo error:NULL] ?: @{};
+    NSDictionary *fragmentCtx = [self.runtime totpFragmentContextForUser:user context:ctx returnTo:returnTo error:NULL] ?: @{};
     BOOL verified = [provisioning[@"verified"] boolValue];
     [self renderAuthPageIdentifier:(verified ? @"totp_challenge" : @"totp_enrollment")
                              title:(verified ? @"Verify Your Authenticator" : @"Set Up Authenticator")

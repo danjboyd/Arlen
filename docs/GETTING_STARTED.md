@@ -376,6 +376,9 @@ job restrictions and queued auth-mail link origins.
 
 Auth session refresh precedes `security.routePolicies` checks, so a revoked
 session cannot pass a `requireAuth` policy.
+
+If SMS is already verified, adding a TOTP authenticator requires a recent MFA
+step-up. Upgrade vendored `auth` modules to 1.7.4.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Admin UI CSV exports escape formula-like cells for spreadsheet use; JSON exports
