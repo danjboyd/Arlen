@@ -41,6 +41,11 @@
   request-spanning stores before adding the declaration; the check records
   intent and does not verify store durability.
 
+- Notifications 1.3.1 removes `Reply-To`, `Resent-*`, and other address-bearing
+  mail headers when a signed-in user queues a notification for themselves.
+  Upgrade vendored notification modules with `arlen module upgrade notifications`;
+  admin AAL2 and app-owned runtime queue paths retain definition headers.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It

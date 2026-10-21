@@ -771,6 +771,8 @@ First-party module surfaces after install:
 - `notifications`: authenticated inbox/preferences plus admin preview/outbox/test-send under `/notifications/...` and `/notifications/api/...`
   Persisted notification writes coordinate across processes sharing one state path;
   inbox, outbox, and preference reads refresh from the shared state file.
+  Self-queued email replaces the recipient and drops address-bearing definition
+  headers, including `Reply-To` and `Resent-*`; see [Notifications Module](NOTIFICATIONS_MODULE.md#queueing-over-http).
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`

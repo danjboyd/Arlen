@@ -1671,8 +1671,12 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     if (message != nil) {
       NSMutableDictionary *headers = [NSMutableDictionary dictionary];
       for (id key in message.headers ?: @{}) {
-        NSString *lower = [[key description] lowercaseString];
-        if (![@[ @"to", @"cc", @"bcc" ] containsObject:lower]) {
+        NSString *lower = [NMTrimmedString([key description]) lowercaseString];
+        BOOL recipientHeader = [@[ @"to", @"cc", @"bcc", @"reply-to", @"sender", @"return-path",
+                                     @"disposition-notification-to", @"mail-followup-to", @"mail-reply-to",
+                                     @"errors-to", @"envelope-to" ] containsObject:lower] ||
+                               [lower hasPrefix:@"resent-"];
+        if (!recipientHeader) {
           headers[key] = message.headers[key];
         }
       }

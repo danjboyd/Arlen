@@ -300,6 +300,8 @@ sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `00
 `arlen module migrate` after upgrading.
 `notifications` moved to `1.3.0` for per-record SQLite persistence and one-time
 legacy import; stop old workers and follow the [migration/backup guide](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
+Its `1.3.1` update removes recipient-bearing mail headers from self-queued
+notifications; upgrade vendored copies before accepting user queue requests.
 Its `1.2.0` change ensures `POST /notifications/api/queue` queues
 only for the signed-in user unless the caller has the `admin` role at AAL2.
 `ops` moved to `1.1.0` for cross-process dashboard history transactions.
