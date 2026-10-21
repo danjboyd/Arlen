@@ -424,6 +424,10 @@ cleanup:
 #endif
 }
 
+BOOL ALNWritePrivateDataAtomically(NSData *data, NSString *path, NSError **error) {
+  return ALNWriteDataAtomicallyWithMode(data, path, 0600, error);
+}
+
 static NSArray *ALNNormalizeStringArray(NSArray *values) {
   NSMutableArray *normalized = [NSMutableArray array];
   for (id value in values ?: @[]) {

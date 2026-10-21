@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Deploy init restricts generated secret files before writing their contents
+  and stops on permission errors, replacing the later best-effort chmod.
+
 - Deploy doctor checks configured host-local PostgreSQL readiness in process
   through libpq instead of exposing the DSN in shell and `pg_isready` arguments.
   It fails closed if libpq is unavailable or the server is not ready.

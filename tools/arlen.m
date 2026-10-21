@@ -7,6 +7,7 @@
 
 #import "ALNDataCompat.h"
 #import "ALNPlatform.h"
+#import "ALNPrivateStorage.h"
 #import "ALNConfig.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
@@ -2541,7 +2542,12 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
   ];
   for (NSArray *file in files) {
     NSError *writeError = nil;
-    if (!WriteTextFile(file[0], file[1], YES, &writeError)) {
+    BOOL isSecretFile = [file[0] isEqualToString:envExamplePath];
+    BOOL written = isSecretFile
+        ? ALNWritePrivateDataAtomically([file[1] dataUsingEncoding:NSUTF8StringEncoding],
+                                        file[0], &writeError)
+        : WriteTextFile(file[0], file[1], YES, &writeError);
+    if (!written) {
       if (failureMessage != NULL) {
         *failureMessage = writeError.localizedDescription ?: file[3];
       }
@@ -2549,10 +2555,6 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
     }
     if ([file[2] boolValue]) {
       SetExecutablePermissions(file[0], NULL);
-    }
-    if ([file[0] isEqualToString:envExamplePath]) {
-      // Holds freshly generated signing secrets; keep it owner-only.
-      [fm setAttributes:@{ NSFilePosixPermissions : @(0600) } ofItemAtPath:envExamplePath error:NULL];
     }
     [writtenFiles addObject:file[0]];
   }

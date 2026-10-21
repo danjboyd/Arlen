@@ -198,6 +198,10 @@ arlen check
 `arlen config` prints secret values (session secrets, connection-string
 passwords and similar) as `[redacted]`; pass `--show-secrets` to see them.
 
+`arlen deploy init` writes generated secret environment examples through the
+private atomic writer. The containing directory is restricted before payload
+creation; permission failures stop generation instead of leaving a secret file.
+
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 

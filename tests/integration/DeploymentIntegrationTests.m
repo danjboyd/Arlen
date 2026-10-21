@@ -1794,6 +1794,23 @@ static NSString *ALNHostDeployProfile(void) {
   }
 }
 
+- (void)testDeployInitSecuresSecretFilesBeforePayloadAndFailsClosedOnPermissionError {
+#if !defined(__linux__)
+  XCTSkip(@"this permission fault-injection fixture uses Linux syscalls and /proc");
+#endif
+  NSString *binary = ALNTestArlenCLIPath();
+  XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:binary],
+                @"Build the CLI before running deployment permission checks");
+  NSString *fixture = ALNTestPathFromRepoRoot(@"tests/fixtures/deploy/private_secret_mode_check.py");
+  NSString *command = [NSString stringWithFormat:@"python3 %@ %@ 2>&1",
+      ALNTestShellQuote(fixture), ALNTestShellQuote(binary)];
+  int code = -1;
+  NSString *output = [self runShellCapture:command exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"secret payload stayed private; permission failure wrote no payload"], @"%@", output);
+}
+
 - (void)testDeployDoctorKeepsConfiguredDatabaseCredentialsOutOfChildArguments {
 #if defined(_WIN32)
   XCTSkip(@"deployment hosting is not supported on Windows until 0.4.0 (#200)");

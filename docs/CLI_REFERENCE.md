@@ -350,6 +350,10 @@ Named targets:
 
 `arlen deploy init`
 
+`arlen deploy init` writes generated secret environment examples through the
+private atomic writer. The containing directory is restricted before payload
+creation; permission failures stop generation instead of leaving a secret file.
+
 - requires a named target from `config/deploy.plist`
 - creates deterministic Linux/Debian-style host scaffolding for that target
 - by default runs against the local filesystem; it does not SSH to
@@ -504,6 +508,11 @@ Named targets:
  active packaged release on the remote host
 
 `arlen deploy doctor`
+
+When a host-local PostgreSQL DSN is configured, `arlen deploy doctor` probes it
+in process through libpq, keeping credentials out of shell and `pg_isready`
+arguments. libpq must be available; an unavailable library or non-ready server
+fails the check. Readiness retains a three-second connection timeout per host.
 
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates explicit database deployment contracts from the packaged manifest
@@ -1424,11 +1433,6 @@ Environment:
 
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
-
-When a host-local PostgreSQL DSN is configured, `arlen deploy doctor` probes it
-in process through libpq, keeping credentials out of shell and `pg_isready`
-arguments. libpq must be available; an unavailable library or non-ready server
-fails the check. Readiness retains a three-second connection timeout per host.
 
 ## `propane` Script (`bin/propane`)
 
