@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
+  cannot be reloaded. Backend exceptions release writer locks, discard
+  uncommitted cached entries on the next reload, and remove the failed update's
+  new attachment. Repair a corrupt catalog before retrying and upgrade vendored
+  storage modules with `arlen module upgrade`.
+
 - ORM transaction exceptions clear the context's borrowed connection. Savepoint
   exceptions roll back inner writes before an outer transaction can continue;
   PostgreSQL and MSSQL close connections when that cleanup fails.

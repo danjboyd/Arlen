@@ -71,8 +71,15 @@ Processes sharing a catalog must run on one host and use a local filesystem:
   application-level read-modify-write operations coherent across workers.
 - Reads detect changed database files and refresh one consistent SQLite
   snapshot. They do not take the cross-process application lock. If a writer
-  is busy, readers retain the last complete cached snapshot; SQLite reads have
-  a short 100 ms busy timeout.
+  is busy, readers retain the last complete cached snapshot unless a previous
+  reload or write failed. SQLite reads have a short 100 ms busy timeout.
+- A corrupt or unreadable catalog blocks cached object reads, download-token
+  issuance, and both buffered and streamed downloads, even when the caller
+  omits `NSError`. APIs without an error result return an empty list or summary.
+  Repair the catalog before retrying; successful reload restores service.
+- Backend exceptions release the process and shared writer locks. The next
+  operation reloads persisted state instead of retaining uncommitted entries;
+  failed object updates also remove their newly written attachment.
 - Object and upload-session IDs are random; tokens bind to each object's nonce.
   Attachment creation and hashing happen outside the catalog lock.
 - `persistence.lockTimeoutSeconds` defaults to 10; exhausted lock/SQLite busy

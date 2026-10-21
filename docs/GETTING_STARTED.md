@@ -462,6 +462,10 @@ CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](STORAGE_MODULE.md) and
 [Notifications Module](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading)
 for migration and backup rules.
+Storage 1.4.2 refuses cached object reads and downloads after a catalog reload
+fails; repairing the catalog permits a later successful reload. Backend
+exceptions release writer locks and force a reload of persisted state. Upgrade
+vendored storage modules with `arlen module upgrade`.
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.

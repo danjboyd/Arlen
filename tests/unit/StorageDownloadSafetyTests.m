@@ -1,11 +1,28 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
+#import <dispatch/dispatch.h>
 
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
 #import "ALNStorageModule.h"
+#import "ALNStorageCatalog.h"
+#import "ALNPlatform.h"
+#import "../shared/ALNTestSupport.h"
+
+@interface StorageSafetyThrowingCatalog : ALNStorageCatalog
+@property(nonatomic) BOOL throwNextWrite;
+@end
+@implementation StorageSafetyThrowingCatalog
+- (BOOL)writeState:(NSDictionary *)state error:(NSError **)error {
+  if (self.throwNextWrite) {
+    self.throwNextWrite = NO;
+    [NSException raise:@"StorageCatalogFailure" format:@"intentional backend exception"];
+  }
+  return [super writeState:state error:error];
+}
+@end
 
 @interface StorageDownloadSafetyFilesCollection : NSObject <ALNStorageCollectionDefinition>
 @end
@@ -133,6 +150,140 @@
   ALNResponse *response = [self.app dispatchRequest:request];
   XCTAssertEqual((NSInteger)200, response.statusCode);
   return response;
+}
+
+- (ALNStorageModuleRuntime *)persistentRuntimeAt:(NSString *)root backend:(NSString *)backend {
+  self.app = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"appRoot" : root, @"csrf" : @{ @"enabled" : @NO },
+    @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
+    @"storageModule" : @{
+      @"collections" : @{ @"classes" : @[ @"StorageDownloadSafetyCollectionProvider" ] },
+      @"persistence" : @{ @"path" : @"state.plist", @"backend" : backend, @"lockTimeoutSeconds" : @0.1 },
+    },
+  }];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:self.app error:&error], @"%@", error);
+  XCTAssertTrue([[[ALNStorageModule alloc] init] registerWithApplication:self.app error:&error], @"%@", error);
+  return [ALNStorageModuleRuntime sharedRuntime];
+}
+
+- (void)restoreApplication:(ALNApplication *)app {
+  self.app = app;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:NULL]);
+  XCTAssertTrue([[[ALNStorageModule alloc] init] registerWithApplication:app error:NULL]);
+}
+
+- (void)changeCatalogAt:(NSString *)path objectID:(NSString *)objectID backup:(NSString *)backup restore:(BOOL)restore {
+  NSTask *task = [NSTask new];
+  task.launchPath = ALNTestToolPath(@"python3");
+  task.arguments = @[ @"-c", @"import sqlite3,sys,pathlib; c=sqlite3.connect(sys.argv[1]); key=sys.argv[2]; p=pathlib.Path(sys.argv[3]); old=c.execute(\"SELECT value FROM catalog WHERE kind='objects' AND key=?\",(key,)).fetchone()[0]; value=p.read_bytes() if sys.argv[4]=='restore' else b'broken-catalog-record'; p.write_bytes(old) if sys.argv[4]!='restore' else None; c.execute(\"UPDATE catalog SET value=? WHERE kind='objects' AND key=?\",(value,key)); c.commit(); c.close()",
+    path, objectID, backup, restore ? @"restore" : @"corrupt" ];
+  NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
+  [environment removeObjectForKey:@"LD_PRELOAD"];
+  [environment removeObjectForKey:@"DYLD_INSERT_LIBRARIES"];
+  task.environment = environment;
+  [task launch];
+  [task waitUntilExit];
+  XCTAssertEqual(0, task.terminationStatus);
+}
+
+- (void)testCatalogReloadFailureDeniesCachedDownloadsAndRecoversAfterRepair {
+  ALNApplication *original = self.app;
+  for (NSString *backend in @[ @"sqlite", @"plist" ]) {
+    NSString *root = ALNTestTemporaryDirectory(@"storage-read-failure");
+    @try {
+      ALNStorageModuleRuntime *runtime = [self persistentRuntimeAt:root backend:backend];
+      NSError *error = nil;
+      NSData *body = [@"private object" dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary *object = [runtime storeObjectInCollection:@"files" name:@"data.txt"
+          contentType:@"text/plain" data:body metadata:nil error:&error];
+      XCTAssertNotNil(object, @"%@", error);
+      NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:&error];
+      XCTAssertEqualObjects(body, [runtime downloadDataForToken:token metadata:NULL error:&error]);
+      NSFileHandle *handle = [runtime openDownloadFileForToken:token metadata:NULL error:&error];
+      XCTAssertNotNil(handle, @"%@", error);
+      [handle closeFile];
+      NSString *state = [root stringByAppendingPathComponent:@"state.plist"];
+      NSData *originalState = nil;
+      NSString *backup = [root stringByAppendingPathComponent:@"record.backup"];
+      if ([backend isEqualToString:@"sqlite"]) {
+        [self changeCatalogAt:[state stringByAppendingString:@".sqlite3"] objectID:object[@"objectID"]
+                      backup:backup restore:NO];
+      } else {
+        originalState = [NSData dataWithContentsOfFile:state];
+        XCTAssertTrue([@"broken catalog" writeToFile:state atomically:YES encoding:NSUTF8StringEncoding error:&error]);
+      }
+      // Both buffered and pinned-file downloads must refuse the cached record,
+      // including when the caller does not request an NSError.
+      XCTAssertNil([runtime downloadDataForToken:token metadata:NULL error:NULL]);
+      error = nil;
+      handle = [runtime openDownloadFileForToken:token metadata:NULL error:&error];
+      XCTAssertNil(handle);
+      [handle closeFile];
+      XCTAssertNotNil(error);
+      XCTAssertEqual((NSUInteger)0, [[runtime listObjectsForCollection:@"files" query:nil] count]);
+      XCTAssertNil([runtime objectRecordForIdentifier:object[@"objectID"] error:NULL]);
+      XCTAssertNil([runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:NULL]);
+      if ([backend isEqualToString:@"sqlite"]) {
+        [self changeCatalogAt:[state stringByAppendingString:@".sqlite3"] objectID:object[@"objectID"]
+                      backup:backup restore:YES];
+      } else {
+        XCTAssertTrue([originalState writeToFile:state atomically:YES]);
+      }
+      error = nil;
+      XCTAssertEqualObjects(body, [runtime downloadDataForToken:token metadata:NULL error:&error]);
+      XCTAssertNil(error);
+    } @finally {
+      [self restoreApplication:original];
+      [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+    }
+  }
+}
+
+- (void)testCatalogWriterExceptionReleasesLocksAndDiscardsUncommittedState {
+  ALNApplication *original = self.app;
+  NSString *root = ALNTestTemporaryDirectory(@"storage-write-exception");
+  @try {
+    ALNStorageModuleRuntime *runtime = [self persistentRuntimeAt:root backend:@"sqlite"];
+    NSString *state = [root stringByAppendingPathComponent:@"state.plist"];
+    StorageSafetyThrowingCatalog *catalog = [[StorageSafetyThrowingCatalog alloc]
+        initWithPath:[state stringByAppendingString:@".sqlite3"] legacyPath:state error:NULL];
+    XCTAssertNotNil(catalog);
+    catalog.throwNextWrite = YES;
+    [runtime setValue:catalog forKey:@"catalog"];
+    BOOL caught = NO;
+    @try {
+      [runtime storeObjectInCollection:@"files" name:@"failed.txt" contentType:@"text/plain"
+          data:[@"failed" dataUsingEncoding:NSUTF8StringEncoding] metadata:nil error:NULL];
+    } @catch (NSException *exception) {
+      caught = [exception.name isEqualToString:@"StorageCatalogFailure"];
+    }
+    XCTAssertTrue(caught);
+    NSRecursiveLock *transactionLock = [runtime valueForKey:@"transactionLock"];
+    dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+    __block BOOL acquired = NO;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+      acquired = [transactionLock tryLock];
+      if (acquired) [transactionLock unlock];
+      dispatch_semaphore_signal(finished);
+    });
+    long waited = dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+    XCTAssertEqual((long)0, waited);
+    if (waited == 0) XCTAssertTrue(acquired, @"a backend exception must release the recursive transaction guard");
+    NSString *attachments = [root stringByAppendingPathComponent:@"state-attachments"];
+    XCTAssertEqual((NSUInteger)0, [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:attachments error:NULL] count]);
+    int descriptor = ALNPlatformOpenExclusiveLockWithTimeout([state stringByAppendingString:@".lock"], 0.1);
+    XCTAssertGreaterThanOrEqual(descriptor, 0, @"a backend exception must release the shared writer lock");
+    ALNPlatformReleaseExclusiveLock(descriptor);
+    XCTAssertEqual((NSUInteger)0, [[runtime listObjectsForCollection:@"files" query:nil] count]);
+    NSError *error = nil;
+    XCTAssertNotNil([runtime storeObjectInCollection:@"files" name:@"next.txt" contentType:@"text/plain"
+        data:[@"next" dataUsingEncoding:NSUTF8StringEncoding] metadata:nil error:&error], @"%@", error);
+    XCTAssertEqual((NSUInteger)1, [[runtime listObjectsForCollection:@"files" query:nil] count]);
+  } @finally {
+    [self restoreApplication:original];
+    [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+  }
 }
 
 - (void)testHTMLDownloadIsSandboxedAttachment {
