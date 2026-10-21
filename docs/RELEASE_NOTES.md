@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Search 1.2.1 applies explicit and per-resource filters to promoted results.
+  Filtered queries no longer include promotions that contradict those filters.
+  Upgrade vendored `search` modules with `arlen module upgrade`.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It

@@ -389,6 +389,8 @@ job claim durability still depends on the configured jobs adapter.
 Search workers refresh shared state and reject conflicting rebuild/update results
 instead of overwriting newer state. External engines still require one reindex
 worker per resource unless the backend fences publication; see [Search Module](SEARCH_MODULE.md).
+Search query filters also constrain promoted results, so a promoted record that
+does not match `filter.<field>` or a per-resource filter is omitted.
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)

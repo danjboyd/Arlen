@@ -275,6 +275,12 @@ engine/resource contract:
 - `resourceMetadata`
 - `engineCapabilities`
 
+Promotions match their configured query text, then pass through the same
+explicit `filter.<field>` constraints and per-resource filters as ordinary
+results. For example, `GET /search/api/resources/products/query?q=priority&filter.category=starter`
+omits a promoted product whose category is `priority`. This also applies to
+filters supplied in a JSON query body.
+
 They also expose:
 
 - `cursor` metadata when the selected engine supports cursor pagination
