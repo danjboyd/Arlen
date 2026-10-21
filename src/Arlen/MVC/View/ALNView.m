@@ -46,19 +46,14 @@
     resolvedLayout = ALNEOCResolveTemplateLayout(logical);
   }
   NSDictionary *bodyToken = ALNEOCPushRenderOptions(strictLocals, strictStringify);
-  NSDictionary *compositionToken = ALNEOCPushCompositionState();
-  NSString *body = nil;
+  NSDictionary *compositionToken = nil;
   @try {
-    body = ALNEOCRenderTemplate(logical, context ?: @{}, error);
-  } @finally {
-    if (body != nil) {
-      ALNEOCSetSlotContent(@"content", body);
-    }
-  }
-  @try {
+    compositionToken = ALNEOCPushCompositionState();
+    NSString *body = ALNEOCRenderTemplate(logical, context ?: @{}, error);
     if (body == nil) {
       return nil;
     }
+    ALNEOCSetSlotContent(@"content", body);
 
     if ([resolvedLayout length] == 0) {
       return body;
@@ -69,7 +64,9 @@
     layoutContext[@"content"] = body;
     return ALNEOCRenderTemplate(resolvedLayout, layoutContext, error);
   } @finally {
-    ALNEOCPopCompositionState(compositionToken);
+    if (compositionToken != nil) {
+      ALNEOCPopCompositionState(compositionToken);
+    }
     ALNEOCPopRenderOptions(bodyToken);
   }
 }

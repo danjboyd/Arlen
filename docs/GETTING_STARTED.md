@@ -503,3 +503,8 @@ default is four). Select `propane --workers 1` or the propane accessory
 `workerCount = 1`, or disable the built-in limiter and enforce the budget at
 ingress. v0.3.0 only warned about multiplied budgets; startup now fails closed.
 See [propane's state contract](PROPANE.md#multi-worker-state-contract).
+
+Template rendering restores thread-local options and composition slots when a
+body or layout throws. Exceptions still propagate to the caller; failed renders
+do not leave slot content available to later renders on the same worker thread.
+Nested rendering preserves the enclosing render state.

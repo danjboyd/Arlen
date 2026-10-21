@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Redis URLs containing literal or encoded NUL are rejected before parsing.
+- Template exceptions now restore per-thread render options and discard the
+  failed render's composition slots, preserving any enclosing render state.
+
 - Search 1.2.1 applies explicit and per-resource filters to promoted results.
   Filtered queries no longer include promotions that contradict those filters.
   Upgrade vendored `search` modules with `arlen module upgrade`.
