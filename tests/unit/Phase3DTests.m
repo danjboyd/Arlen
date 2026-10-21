@@ -313,7 +313,7 @@
     @"session" : @{ @"enabled" : @YES,
                     @"secret" : @"mounted-parent-policy-test-secret-0123456789" },
     @"security" : @{ @"routePolicies" : @{
-      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ],
+      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded/status", @"/embedded/nested/status" ],
                        @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
                        @"requireAuth" : @YES }
     } }
@@ -321,6 +321,10 @@
   ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
   [child registerRouteMethod:@"GET" path:@"/status" name:@"child_status"
              controllerClass:[Phase3DMountedController class] action:@"status"];
+  ALNApplication *grandchild = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  [grandchild registerRouteMethod:@"GET" path:@"/status" name:@"grandchild_status"
+                 controllerClass:[Phase3DMountedController class] action:@"status"];
+  XCTAssertTrue([child mountApplication:grandchild atPrefix:@"/nested"]);
   [parent registerRouteMethod:@"GET" path:@"/sign-in" name:@"parent_sign_in"
               controllerClass:[Phase3DMountedController class] action:@"signIn"];
   XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
@@ -340,6 +344,16 @@
   XCTAssertEqual((NSInteger)403, authResponse.statusCode);
   XCTAssertEqualObjects(@"authentication_required", [authResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
 
+  for (NSString *path in @[ @"/embedded/status.json", @"/embedded/nested/status.json" ]) {
+    ALNRequest *suffixDenied = [self requestWithMethod:@"GET" path:path
+                                          queryString:@"" headers:@{}];
+    suffixDenied.remoteAddress = @"127.0.0.1";
+    ALNResponse *denied = [parent dispatchRequest:suffixDenied];
+    XCTAssertEqual((NSInteger)403, denied.statusCode, @"%@", path);
+    XCTAssertEqualObjects(@"authentication_required",
+                          [denied headerForName:@"X-Arlen-Policy-Denial-Reason"], @"%@", path);
+  }
+
   ALNResponse *signIn = [parent dispatchRequest:[self requestWithMethod:@"GET" path:@"/sign-in"
                                                          queryString:@"" headers:@{}]];
   XCTAssertEqual((NSInteger)200, signIn.statusCode);
@@ -352,6 +366,13 @@
   XCTAssertEqual((NSInteger)200, allowed.statusCode);
   XCTAssertEqualObjects(@"child-ok\n", [[NSString alloc] initWithData:allowed.bodyData
                                                               encoding:NSUTF8StringEncoding]);
+  for (NSString *path in @[ @"/embedded/status.json", @"/embedded/nested/status.json" ]) {
+    ALNRequest *suffixAllowed = [self requestWithMethod:@"GET" path:path
+                                           queryString:@"" headers:@{ @"cookie" : cookie ?: @"" }];
+    suffixAllowed.remoteAddress = @"127.0.0.1";
+    ALNResponse *response = [parent dispatchRequest:suffixAllowed];
+    XCTAssertEqual((NSInteger)200, response.statusCode, @"%@", path);
+  }
 }
 
 - (void)testControllerWebSocketAndSSEContracts {

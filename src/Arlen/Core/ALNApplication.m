@@ -5710,6 +5710,11 @@ static void ALNFinalizeResponse(ALNApplication *application,
         parentPolicyResponse = [[ALNResponse alloc] init];
         NSMutableDictionary *policyStash = [NSMutableDictionary dictionaryWithObject:self
                                                                                forKey:ALNContextApplicationStashKey];
+        NSString *policyStrippedPath = nil;
+        (void)ALNExtractPathFormat(request.path, &policyStrippedPath);
+        if ([policyStrippedPath length] > 0 && ![policyStrippedPath isEqualToString:request.path]) {
+          policyStash[ALNContextRoutePolicyAdditionalPathStashKey] = policyStrippedPath;
+        }
         ALNContext *policyContext = [[ALNContext alloc] initWithRequest:request
                                                               response:parentPolicyResponse
                                                                 params:@{}

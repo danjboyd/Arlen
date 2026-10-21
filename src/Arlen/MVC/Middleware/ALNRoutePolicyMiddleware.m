@@ -9,6 +9,7 @@
 
 NSString *const ALNContextRoutePolicyNamesStashKey = @"aln.route_policies.names";
 NSString *const ALNContextRoutePolicyDecisionStashKey = @"aln.route_policies.decision";
+NSString *const ALNContextRoutePolicyAdditionalPathStashKey = @"aln.route_policies.additional_path";
 
 static NSString *ALNRoutePolicyErrorDomain = @"Arlen.RoutePolicy.Error";
 
@@ -130,11 +131,14 @@ static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
   NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSet];
   NSArray *sortedNames = [[policies allKeys] sortedArrayUsingSelector:@selector(compare:)];
   NSString *path = context.request.path ?: @"/";
+  NSString *additionalPath = [context.stash[ALNContextRoutePolicyAdditionalPathStashKey]
+      isKindOfClass:[NSString class]] ? context.stash[ALNContextRoutePolicyAdditionalPathStashKey] : nil;
   for (NSString *name in sortedNames) {
     NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : @{};
     NSArray *prefixes = ALNPolicyStringArray(policy[@"pathPrefixes"]);
     for (NSString *prefix in prefixes) {
-      if (ALNPathMatchesPolicyPrefix(path, prefix)) {
+      if (ALNPathMatchesPolicyPrefix(path, prefix) ||
+          ([additionalPath length] > 0 && ALNPathMatchesPolicyPrefix(additionalPath, prefix))) {
         [names addObject:name];
         break;
       }
