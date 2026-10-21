@@ -209,9 +209,10 @@ Run bootstrap environment diagnostics without requiring a framework build.
  set: `/metrics` and `/clusterz` then answer `404`, or answer anonymous
  requests when `observability.operabilityAnonymous` /
  `ARLEN_OPERABILITY_ANONYMOUS` is set
-- with `--env production`, reports `multi_worker_state`: warns when more than
- one propane worker is configured without a declared durable state or database
- signal; a passing check records a declared signal or a single worker
+- with `--env production` or another production-like environment such as
+ `staging`, reports `multi_worker_state`: warns when more than one propane worker
+ is configured without `state.durable = YES`; a database URL or deploy database
+ contract alone does not clear this warning
 - in an app root, warns (`module_outdated`) for each vendored
  `modules/<id>` whose `version` is lower than the framework checkout's
  `modules/<id>`, with the fix: `arlen module upgrade <id>`, then
@@ -491,9 +492,10 @@ Named targets:
 - validates release layout, manifest presence, packaged binaries, config loading, and database URL completeness
 - validates explicit database deployment contracts from the packaged manifest
  (`external`, `host_local`, `embedded`)
-- includes a `multi_worker_state` check; production apps with
- `propaneAccessories.workerCount > 1` warn when neither `state.durable = YES`
- nor an acceptable database-backed state signal is configured
+- includes a `multi_worker_state` check; production-like apps with
+ `propaneAccessories.workerCount > 1` warn unless `state.durable = YES`
+ is explicitly declared, even when a database URL or deploy database contract
+ is present
 - when run against a local named target without an active release, validates
  target-host readiness instead of failing immediately:
  - release/shared/log/tmp layout

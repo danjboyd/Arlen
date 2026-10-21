@@ -6094,8 +6094,6 @@ static NSString *ALNHostDeployProfile(void) {
 
   @try {
     NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
-    XCTAssertTrue([self writeFile:configPath
-                          content:@"{ propaneAccessories = { workerCount = 4; }; state = { durable = NO; }; }"]);
     int code = 0;
     NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
     XCTAssertEqual(0, code, @"%@", buildOutput);
@@ -6104,23 +6102,46 @@ static NSString *ALNHostDeployProfile(void) {
 #else
     NSString *binary = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
 #endif
-    NSString *command = [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ doctor --env production --json",
-                                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
-                                                   [self shellQuoted:binary]];
-    NSString *output = [self runShellCapture:command exitCode:&code];
-    NSDictionary *doctor = [self parseJSONDictionaryFromOutput:output context:@"built doctor production"];
     NSPredicate *stateCheck = [NSPredicate predicateWithFormat:@"id == %@", @"multi_worker_state"];
-    NSArray *checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
-    XCTAssertEqual((NSUInteger)1, [checks count], @"%@", output);
-    XCTAssertEqualObjects(@"warn", [checks firstObject][@"status"], @"%@", output);
-
-    XCTAssertTrue([self writeFile:configPath
-                          content:@"{ propaneAccessories = { workerCount = 1; }; state = { durable = NO; }; }"]);
-    output = [self runShellCapture:command exitCode:&code];
-    doctor = [self parseJSONDictionaryFromOutput:output context:@"built doctor single worker"];
-    checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
-    XCTAssertEqual((NSUInteger)1, [checks count], @"%@", output);
-    XCTAssertEqualObjects(@"pass", [checks firstObject][@"status"], @"%@", output);
+    NSArray<NSDictionary *> *cases = @[
+      @{ @"name" : @"database URL with explicit non-durable state",
+         @"env" : @"production", @"workers" : @4, @"durable" : @"NO", @"status" : @"warn" },
+      @{ @"name" : @"durable state declaration",
+         @"env" : @"production", @"workers" : @4, @"durable" : @"YES", @"status" : @"pass" },
+      @{ @"name" : @"production-like staging",
+         @"env" : @"staging", @"workers" : @4, @"durable" : @"NO", @"status" : @"warn" },
+      @{ @"name" : @"single worker",
+         @"env" : @"production", @"workers" : @1, @"durable" : @"NO", @"status" : @"pass" },
+      @{ @"name" : @"development",
+         @"env" : @"development", @"workers" : @4, @"durable" : @"NO", @"status" : @"absent" },
+    ];
+    for (NSDictionary *item in cases) {
+      NSString *config = [NSString stringWithFormat:
+          @"{ propaneAccessories = { workerCount = %@; }; state = { durable = %@; }; "
+          @"database = { connectionString = \"postgresql://db.example.test/app\"; }; }",
+          item[@"workers"], item[@"durable"]];
+      XCTAssertTrue([self writeFile:configPath content:config]);
+      NSArray<NSString *> *commands = @[
+        [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ doctor --env %@ --json",
+                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
+                                   [self shellQuoted:binary], [self shellQuoted:item[@"env"]]],
+        [NSString stringWithFormat:@"cd %@ && %@/bin/arlen-doctor --env %@ --json",
+                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
+                                   [self shellQuoted:item[@"env"]]],
+      ];
+      for (NSString *command in commands) {
+        NSString *output = [self runShellCapture:command exitCode:&code];
+        NSDictionary *doctor = [self parseJSONDictionaryFromOutput:output context:item[@"name"]];
+        NSArray *checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
+        NSString *expected = item[@"status"];
+        if ([expected isEqualToString:@"absent"]) {
+          XCTAssertEqual((NSUInteger)0, [checks count], @"%@\n%@", command, output);
+        } else {
+          XCTAssertEqual((NSUInteger)1, [checks count], @"%@\n%@", command, output);
+          XCTAssertEqualObjects(expected, [checks firstObject][@"status"], @"%@\n%@", command, output);
+        }
+      }
+    }
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
   }

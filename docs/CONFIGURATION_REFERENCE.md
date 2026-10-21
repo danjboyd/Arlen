@@ -221,7 +221,10 @@ Environment overrides:
 
 This is an operator/developer intent signal. Arlen does not claim it can
 statically prove every app-owned store is durable. The signal drives production
-doctor/deploy warnings for multi-worker apps.
+doctor/deploy warnings for multi-worker apps. A database URL or deploy database
+contract alone does not prove that sessions or other request-spanning app state
+use that database. In production-like environments, set `state.durable = YES`
+only after verifying those stores are shared across workers.
 
 ## 4.1a Storage Module Signing Secret
 

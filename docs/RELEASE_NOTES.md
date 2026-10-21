@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Multi-worker state diagnostics now require an explicit `state.durable = YES`
+  declaration in production-like environments. A database URL or deploy
+  database contract alone no longer clears the warning. Review app-owned
+  request-spanning stores before adding the declaration; the check records
+  intent and does not verify store durability.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It
