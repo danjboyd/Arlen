@@ -38,6 +38,10 @@
   whitespace exactly, matching password reset and policy validation. Upgrade
   vendored auth modules.
 
+- Ops 1.1.1 removes individual jobs and notification outbox/fanout records
+  from operator HTML and JSON summaries and drilldowns while keeping status
+  metrics. Admins retain full detail. Upgrade vendored `ops` modules.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured

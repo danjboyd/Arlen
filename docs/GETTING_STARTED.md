@@ -450,6 +450,8 @@ Search query filters also constrain promoted results, so a promoted record that
 does not match `filter.<field>` or a per-resource filter is omitted.
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
+With ops 1.1.1, operator views show queue and notification status without
+individual job or outbox records; admins retain the detailed views.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.
 

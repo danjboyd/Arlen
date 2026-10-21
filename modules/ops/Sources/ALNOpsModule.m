@@ -118,6 +118,39 @@ static NSArray *OTTailArray(NSArray *values, NSUInteger limit) {
   return [values subarrayWithRange:NSMakeRange([values count] - limit, limit)];
 }
 
+static NSDictionary *OTOperatorModuleSummary(NSString *moduleID, NSDictionary *summary) {
+  if (![summary isKindOfClass:[NSDictionary class]]) return @{};
+  if ([moduleID isEqualToString:@"jobs"]) {
+    return @{ @"available" : summary[@"available"] ?: @NO,
+              @"status" : summary[@"status"] ?: @"informational",
+              @"totals" : summary[@"totals"] ?: @{},
+              @"queues" : summary[@"queues"] ?: @[] };
+  }
+  if ([moduleID isEqualToString:@"notifications"]) {
+    return @{ @"available" : summary[@"available"] ?: @NO,
+              @"status" : summary[@"status"] ?: @"informational",
+              @"cards" : summary[@"cards"] ?: @[] };
+  }
+  return summary;
+}
+
+static NSDictionary *OTOperatorDashboardSummary(NSDictionary *summary) {
+  NSMutableDictionary *visible = [summary mutableCopy] ?: [NSMutableDictionary dictionary];
+  visible[@"jobs"] = OTOperatorModuleSummary(@"jobs", summary[@"jobs"]);
+  visible[@"notifications"] = OTOperatorModuleSummary(@"notifications", summary[@"notifications"]);
+  return visible;
+}
+
+static NSDictionary *OTOperatorDrilldown(NSDictionary *drilldown) {
+  NSString *moduleID = drilldown[@"identifier"];
+  if (![moduleID isEqualToString:@"jobs"] && ![moduleID isEqualToString:@"notifications"]) {
+    return drilldown;
+  }
+  NSMutableDictionary *visible = [drilldown mutableCopy];
+  visible[@"summary"] = OTOperatorModuleSummary(moduleID, drilldown[@"summary"]);
+  return visible;
+}
+
 static NSNumber *OTNumberValue(id value) {
   if ([value respondsToSelector:@selector(doubleValue)]) {
     return @([value doubleValue]);
@@ -955,6 +988,15 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   return OTRolesAllowAccess([ctx authRoles], self.runtime.accessRoles);
 }
 
+- (NSDictionary *)visibleSummaryForContext:(ALNContext *)ctx {
+  NSDictionary *summary = [self.runtime dashboardSummary] ?: @{};
+  return [[ctx authRoles] containsObject:@"admin"] ? summary : OTOperatorDashboardSummary(summary);
+}
+
+- (NSDictionary *)visibleDrilldown:(NSDictionary *)drilldown forContext:(ALNContext *)ctx {
+  return [[ctx authRoles] containsObject:@"admin"] ? drilldown : OTOperatorDrilldown(drilldown);
+}
+
 - (NSDictionary *)pageContextWithTitle:(NSString *)title
                                heading:(NSString *)heading
                                message:(NSString *)message
@@ -970,7 +1012,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
   context[@"authLoginPath"] = [self.authRuntime loginPath] ?: @"/auth/login";
   context[@"authLogoutPath"] = [self.authRuntime logoutPath] ?: @"/auth/logout";
   context[@"csrfToken"] = [self csrfToken] ?: @"";
-  context[@"summary"] = [self.runtime dashboardSummary] ?: @{};
+  context[@"summary"] = [self visibleSummaryForContext:self.context];
   if ([extra isKindOfClass:[NSDictionary class]]) {
     [context addEntriesFromDictionary:extra];
   }
@@ -1046,7 +1088,6 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (id)dashboard:(ALNContext *)ctx {
-  (void)ctx;
   [self renderTemplate:@"modules/ops/dashboard/index"
                context:[self pageContextWithTitle:@"Operations"
                                           heading:@"Operations"
@@ -1073,6 +1114,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
                    error:NULL];
     return nil;
   }
+  drilldown = [self visibleDrilldown:drilldown forContext:ctx];
   [self renderTemplate:@"modules/ops/drilldown/index"
                context:[self pageContextWithTitle:[NSString stringWithFormat:@"%@ Ops", drilldown[@"label"] ?: @"Module"]
                                           heading:drilldown[@"label"] ?: @"Module"
@@ -1085,8 +1127,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
 }
 
 - (id)apiSummary:(ALNContext *)ctx {
-  (void)ctx;
-  [self renderJSONEnvelopeWithData:[self.runtime dashboardSummary] meta:nil error:NULL];
+  [self renderJSONEnvelopeWithData:[self visibleSummaryForContext:ctx] meta:nil error:NULL];
   return nil;
 }
 
@@ -1097,7 +1138,7 @@ static NSUInteger const ALNOpsSnapshotHistoryLimit = 48U;
     [self renderAPIErrorWithStatus:404 code:@"not_found" message:@"ops module drilldown not found" meta:@{ @"module" : identifier ?: @"" }];
     return nil;
   }
-  [self renderJSONEnvelopeWithData:drilldown meta:nil error:NULL];
+  [self renderJSONEnvelopeWithData:[self visibleDrilldown:drilldown forContext:ctx] meta:nil error:NULL];
   return nil;
 }
 
