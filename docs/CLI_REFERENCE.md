@@ -1863,3 +1863,8 @@ compare middleware and dynamic-header construction; see
 
 Auth-only apps can build without the optional jobs module. Durable auth mail
 still requires jobs and its durable adapter; see [Auth Module](AUTH_MODULE.md).
+
+Template rendering restores thread-local options and composition slots when a
+body or layout throws. Exceptions still propagate to the caller; failed renders
+do not leave slot content available to later renders on the same worker thread.
+Nested rendering preserves the enclosing render state.

@@ -487,3 +487,8 @@ in Redis URLs before parsing. If adapter initialization reports this error,
 correct `ARLEN_REDIS_URL` (or the URL passed by your application); no connection
 is made using a truncated destination. Ordinary percent-encoded credentials
 remain supported.
+
+Template rendering restores thread-local options and composition slots when a
+body or layout throws. Exceptions still propagate to the caller; failed renders
+do not leave slot content available to later renders on the same worker thread.
+Nested rendering preserves the enclosing render state.

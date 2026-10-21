@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Redis URLs containing literal or encoded NUL are rejected before parsing.
+- Template exceptions now restore per-thread render options and discard the
+  failed render's composition slots, preserving any enclosing render state.
+
 - Windows watch mode now stops both app and build-error servers when its
   watch process tree is force-killed, releasing their listen ports even for
   direct CLANG64 shell launches.
