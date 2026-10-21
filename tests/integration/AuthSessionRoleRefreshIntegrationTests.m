@@ -547,6 +547,55 @@
   XCTAssertEqualObjects(@NO, [self sessionState:otherDevice][@"authenticated"]);
 }
 
+- (void)testExistingSMSFactorRequiresRecentMFAForTOTPEnrollment {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *authConfig = @{ @"mfa" : @{ @"sms" : @{
+    @"enabled" : @YES, @"allowPrimaryFactor" : @YES,
+    @"testVerificationCode" : @"123456"
+  } } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:authConfig search:NO];
+  NSString *subject = [self registerUser:client email:[self uniqueEmail:@"sms-before-totp"]];
+  [self execute:@"INSERT INTO auth_mfa_enrollments (user_id, type, secret, recovery_codes_json, enabled, verified_at) "
+                 "SELECT id, 'sms', '+15555550123', '[]', TRUE, NOW() FROM auth_users WHERE subject = $1 RETURNING id"
+     parameters:@[ subject ]];
+
+  NSError *provisioningError = nil;
+  NSDictionary *user = [[ALNAuthModuleRuntime sharedRuntime] currentUserForSubject:subject error:&provisioningError];
+  XCTAssertNotNil(user, @"%@", provisioningError);
+  XCTAssertNil([[ALNAuthModuleRuntime sharedRuntime] totpProvisioningPayloadForUser:user
+                                                                              error:&provisioningError]);
+  XCTAssertEqual(ALNAuthModuleErrorPolicyRejected, provisioningError.code);
+
+  ALNResponse *factors = [client get:@"/auth/api/mfa"];
+  XCTAssertEqual((NSInteger)200, factors.statusCode, @"%@", [factors bodyText]);
+  XCTAssertEqualObjects(@{}, [factors JSONObject][@"mfa"][@"totp"][@"provisioning"]);
+  XCTAssertEqualObjects(@"0", [self scalar:@"SELECT COUNT(*)::text FROM auth_mfa_enrollments m "
+                                              "JOIN auth_users u ON u.id = m.user_id "
+                                              "WHERE u.subject = $1 AND m.type = 'totp'"
+                                parameters:@[ subject ]]);
+  ALNResponse *blockedForm = [client get:@"/auth/api/mfa/totp"];
+  XCTAssertEqual((NSInteger)403, blockedForm.statusCode, @"%@", [blockedForm bodyText]);
+  ALNResponse *blockedVerify = [client post:@"/auth/api/mfa/totp/verify" JSON:@{ @"code" : @"123456" }];
+  XCTAssertEqual((NSInteger)403, blockedVerify.statusCode, @"%@", [blockedVerify bodyText]);
+
+  ALNResponse *send = [client post:@"/auth/api/mfa/sms/resend" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, send.statusCode, @"%@", [send bodyText]);
+  ALNResponse *stepUp = [client post:@"/auth/api/mfa/sms/verify" JSON:@{ @"code" : @"123456" }];
+  XCTAssertEqual((NSInteger)200, stepUp.statusCode, @"%@", [stepUp bodyText]);
+  ALNResponse *allowedForm = [client get:@"/auth/api/mfa/totp"];
+  XCTAssertEqual((NSInteger)200, allowedForm.statusCode, @"%@", [allowedForm bodyText]);
+  NSString *secret = [self scalar:@"SELECT m.secret FROM auth_mfa_enrollments m "
+                                    "JOIN auth_users u ON u.id = m.user_id "
+                                    "WHERE u.subject = $1 AND m.type = 'totp' ORDER BY m.id DESC LIMIT 1"
+                       parameters:@[ subject ]];
+  XCTAssertTrue([secret length] > 0);
+  NSString *code = [ALNTOTP codeForSecret:secret atDate:[NSDate date] error:NULL];
+  ALNResponse *allowedVerify = [client post:@"/auth/api/mfa/totp/verify" JSON:@{ @"code" : code ?: @"" }];
+  XCTAssertEqual((NSInteger)200, allowedVerify.statusCode, @"%@", [allowedVerify bodyText]);
+}
+
 - (void)testRemovingAnSMSFactorEndsOtherSessionsButKeepsTheCurrentOne {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");

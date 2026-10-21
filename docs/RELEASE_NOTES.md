@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Auth 1.7.4 requires recent MFA before an AAL1 session can view or verify a
+  new TOTP enrollment when a verified SMS factor already exists. Factor
+  discovery omits the new authenticator secret until step-up. Upgrade vendored
+  auth modules before using SMS as a primary factor.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured
