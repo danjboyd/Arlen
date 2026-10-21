@@ -1585,6 +1585,32 @@ static NSUInteger AppFastPathControllerSlowInvocationCount = 0;
   XCTAssertEqual((NSUInteger)1, [AppFastPathController slowInvocationCount]);
 }
 
+- (void)testFastRouteRespectsAssuranceAndStringPathPolicy {
+  [AppFastPathController resetCounters];
+  ALNApplication *assuranceApp = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  ALNRoute *assuranceRoute = [assuranceApp registerRouteMethod:@"GET" path:@"/fast/:name"
+      name:@"fast_assurance" controllerClass:[AppFastPathController class] action:@"ping"];
+  assuranceRoute.minimumAuthAssuranceLevel = 2;
+  ALNResponse *assuranceResponse = [assuranceApp dispatchRequest:[self requestForPath:@"/fast/bob"]];
+  XCTAssertEqual((NSInteger)401, assuranceResponse.statusCode);
+  XCTAssertNil([assuranceResponse headerForName:@"X-Fast-Path"]);
+
+  ALNApplication *policyApp = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"security" : @{ @"routePolicies" : @{
+      @"private" : @{ @"pathPrefixes" : @"/fast", @"sourceIPAllowlist" : @[ @"10.0.0.0/8" ] }
+    } }
+  }];
+  [policyApp registerRouteMethod:@"GET" path:@"/fast/:name" name:@"fast_policy"
+      controllerClass:[AppFastPathController class] action:@"ping"];
+  ALNRequest *policyRequest = [self requestForPath:@"/fast/bob"];
+  policyRequest.remoteAddress = @"127.0.0.1";
+  ALNResponse *policyResponse = [policyApp dispatchRequest:policyRequest];
+  XCTAssertEqual((NSInteger)403, policyResponse.statusCode);
+  XCTAssertEqualObjects(@"source_ip_denied", [policyResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+  XCTAssertNil([policyResponse headerForName:@"X-Fast-Path"]);
+}
+
 - (void)testMiddlewareExceptionAnswers500AndLaterRequestsStillWork {
   for (NSString *environment in @[ @"production", @"development" ]) {
     ALNApplication *app = [self buildAppWithHaltingMiddleware:NO

@@ -364,6 +364,8 @@ The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
 search with tenant or other resource visibility filters.
+Route policies cover format-suffixed requests to a protected route, such as
+`/admin.json` for `/admin`; assurance limits also apply to compiled fast routes.
 Production apps keep `/openapi.json` and its docs routes closed unless they set
 `openapi.publicInProduction = YES`; route metadata includes privileged API
 paths. Local development keeps the OpenAPI routes enabled.

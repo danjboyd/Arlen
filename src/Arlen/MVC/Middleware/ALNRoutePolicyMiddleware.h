@@ -7,6 +7,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString *const ALNContextRoutePolicyNamesStashKey;
+FOUNDATION_EXPORT NSString *const ALNContextRoutePolicyMatchedPathStashKey;
 FOUNDATION_EXPORT NSString *const ALNContextRoutePolicyDecisionStashKey;
 
 @interface ALNRoutePolicyMiddleware : NSObject <ALNMiddleware>
