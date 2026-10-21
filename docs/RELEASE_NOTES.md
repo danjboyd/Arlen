@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Deploy doctor checks configured host-local PostgreSQL readiness in process
+  through libpq instead of exposing the DSN in shell and `pg_isready` arguments.
+  It fails closed if libpq is unavailable or the server is not ready.
+
 - Propane keeps merged configuration secrets out of its Python parser process
   arguments while preserving unredacted worker settings.
 

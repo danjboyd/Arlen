@@ -302,6 +302,10 @@ URLs, credentials, response bodies, and custom loader error details.
 
 For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formParams`; see [Multipart Uploads](MULTIPART_UPLOADS.md) for examples and request limits.
 
+For host-local PostgreSQL readiness, deploy doctor uses libpq in process when
+a DSN is configured. Install libpq on the target host; the check fails if the
+library is unavailable or the configured server is not ready.
+
 ## Background work in separate processes
 
 `propane` passes merged configuration to its Python parser through an inherited

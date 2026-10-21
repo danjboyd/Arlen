@@ -23,6 +23,9 @@
 #import "ALNSecurityPrimitives.h"
 #import "ALNWebPush.h"
 
+// Private libpq readiness helper; the DSN never becomes a child argument.
+extern BOOL ALNPgServerIsReady(NSString *connectionString);
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -1258,12 +1261,20 @@ static NSDictionary *RunHostLocalDatabaseProbe(NSString *adapter, NSString *conn
   }
 
   if ([normalizedAdapter isEqualToString:@"postgresql"] || [normalizedAdapter isEqualToString:@"gdl2"]) {
+    if ([dsn length] > 0) {
+      BOOL ready = ALNPgServerIsReady(dsn);
+      return @{
+        @"status" : ready ? @"pass" : @"fail",
+        @"message" : ready ? @"host-local PostgreSQL probe succeeded"
+                            : @"host-local PostgreSQL probe failed",
+        @"hint" : ready ? @""
+                       : @"Ensure libpq is installed and the configured PostgreSQL host accepts connections.",
+      };
+    }
     int commandCode = 0;
     NSString *pgIsReady = Trimmed(RunShellCaptureCommand(@"command -v pg_isready 2>/dev/null", &commandCode));
     if (commandCode == 0 && [pgIsReady length] > 0) {
-      NSString *command = [dsn length] > 0
-                              ? [NSString stringWithFormat:@"pg_isready -q -d %@", ShellQuote(dsn)]
-                              : @"pg_isready -q";
+      NSString *command = @"pg_isready -q";
       int exitCode = 0;
       NSString *output = RunShellCaptureCommand(command, &exitCode);
       return @{

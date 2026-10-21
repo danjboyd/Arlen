@@ -106,6 +106,9 @@ static NSString *ALNPgSQLToken(NSString *sql);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
+static int (*ALNPQpingParams)(const char *const *keywords,
+                             const char *const *values,
+                             int expandDBName) = NULL;
 static int (*ALNPQconsumeInput)(PGconn *conn) = NULL;
 static ALNPGnotify *(*ALNPQnotifies)(PGconn *conn) = NULL;
 static int (*ALNPQsocket)(const PGconn *conn) = NULL;
@@ -333,6 +336,8 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
+    // The deploy doctor's readiness check is optional for ordinary queries.
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQpingParams, handle, "PQpingParams");
     // LISTEN/NOTIFY support (waitForNotificationsWithTimeout:); optional so a
     // minimal libpq still serves ordinary queries.
     ALNBindOptionalLibpqSymbol((void **)&ALNPQconsumeInput, handle, "PQconsumeInput");
@@ -1653,6 +1658,25 @@ static BOOL ALNPgTextContainsNUL(NSString *text) {
   return [text isKindOfClass:[NSString class]] &&
          [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
              NSNotFound;
+}
+
+// Internal CLI seam: let libpq parse the DSN in this process, rather than
+// exposing its credentials to a shell or pg_isready process argument list.
+BOOL ALNPgServerIsReady(NSString *connectionString) {
+  if (![connectionString isKindOfClass:[NSString class]] ||
+      [connectionString length] == 0 || ALNPgTextContainsNUL(connectionString) ||
+      !ALNLoadLibpq(NULL) || ALNPQpingParams == NULL) {
+    return NO;
+  }
+  // expandDBName handles both URI and keyword DSNs. The later timeout overrides
+  // a DSN's timeout, preserving pg_isready's default three seconds per host.
+  const char *dsn = [connectionString UTF8String];
+  if (dsn == NULL) {
+    return NO;
+  }
+  const char *keywords[] = { "dbname", "connect_timeout", NULL };
+  const char *values[] = { dsn, "3", NULL };
+  return ALNPQpingParams(keywords, values, 1) == 0; // PQPING_OK
 }
 
 static BOOL ALNPgFailIfTextContainsNUL(NSString *text, NSString *what, NSError **error) {

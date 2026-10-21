@@ -41,6 +41,7 @@ extern NSData *ALNPgDataFromByteaString(NSString *value);
 extern NSString *ALNPgTimestampStringFromDate(NSDate *value);
 extern NSDate *ALNPgDateFromTimestampString(NSString *value);
 extern NSDate *ALNPgDateFromDateString(NSString *value);
+extern BOOL ALNPgServerIsReady(NSString *connectionString);
 
 // Some GNUstep tagged-date runtimes represent an exact zero reference interval
 // as two seconds; build test dates the way ALNPg's decoder does.
@@ -297,6 +298,14 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 }
 
 #pragma mark - Text codecs (issues #233 and #234, no live DB required)
+
+- (void)testReadinessProbeRejectsEmptyNULAndMalformedConnectionStrings {
+  XCTAssertFalse(ALNPgServerIsReady(nil));
+  XCTAssertFalse(ALNPgServerIsReady(@""));
+  NSString *withNUL = [NSString stringWithFormat:@"host=127.0.0.1%Cignored", (unichar)0];
+  XCTAssertFalse(ALNPgServerIsReady(withNUL));
+  XCTAssertFalse(ALNPgServerIsReady(@"arlen_invalid_option=value"));
+}
 
 - (void)testTimestampDecoderMatchesPostgresProlepticGregorianCalendar {
   // Expected seconds since 2001-01-01 UTC, computed independently.

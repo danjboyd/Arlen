@@ -1794,6 +1794,25 @@ static NSString *ALNHostDeployProfile(void) {
   }
 }
 
+- (void)testDeployDoctorKeepsConfiguredDatabaseCredentialsOutOfChildArguments {
+#if defined(_WIN32)
+  XCTSkip(@"deployment hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  XCTSkipUnless([ALNTestEnvironmentString(@"ARLEN_PG_TEST_DSN") length] > 0,
+                @"ARLEN_PG_TEST_DSN is not set");
+  NSString *binary = ALNTestArlenCLIPath();
+  XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:binary],
+                @"Build the CLI before running deploy readiness checks");
+  NSString *fixture = ALNTestPathFromRepoRoot(@"tests/fixtures/deploy/host_local_private_probe.py");
+  NSString *command = [NSString stringWithFormat:@"python3 %@ %@ 2>&1",
+      ALNTestShellQuote(fixture), ALNTestShellQuote(binary)];
+  int code = -1;
+  NSString *output = [self runShellCapture:command exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"host-local readiness passed without external credential arguments"], @"%@", output);
+}
+
 - (void)testArlenDeployDoctorValidatesExplicitDatabaseModeAndRequiredEnvironmentKeys {
 #if defined(_WIN32)
   XCTSkip(@"deploy and propane are not supported on Windows until 0.4.0 (#200)");

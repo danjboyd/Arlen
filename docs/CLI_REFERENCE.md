@@ -1423,6 +1423,11 @@ Environment:
 - `ARLEN_APP_ROOT`
 - `ARLEN_FRAMEWORK_ROOT`
 
+When a host-local PostgreSQL DSN is configured, `arlen deploy doctor` probes it
+in process through libpq, keeping credentials out of shell and `pg_isready`
+arguments. libpq must be available; an unavailable library or non-ready server
+fails the check. Readiness retains a three-second connection timeout per host.
+
 ## `propane` Script (`bin/propane`)
 
 `propane` passes merged configuration to its Python parser through an inherited
