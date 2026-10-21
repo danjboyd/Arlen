@@ -300,6 +300,9 @@ sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `00
 `arlen module migrate` after upgrading.
 `auth` moved to `1.7.1` to reject the fixed SMS test verification code outside
 development and test.
+`jobs` moved to `1.1.4` to enforce manual enqueue and replay restrictions.
+`auth` moved to `1.7.2` so queued auth-mail links use `publicBaseURL` instead
+of a job-supplied origin.
 `notifications` moved to `1.3.0` for per-record SQLite persistence and one-time
 legacy import; stop old workers and follow the [migration/backup guide](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
 Its `1.3.1` update removes recipient-bearing mail headers from self-queued

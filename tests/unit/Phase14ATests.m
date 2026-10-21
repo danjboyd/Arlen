@@ -43,6 +43,20 @@
 
 @end
 
+@interface Phase14AInternalJob : NSObject <ALNJobsJobDefinition>
+@end
+
+@implementation Phase14AInternalJob
+- (NSString *)jobsModuleJobIdentifier { return @"phase14a.internal"; }
+- (NSDictionary *)jobsModuleJobMetadata { return @{ @"allowManualEnqueue" : @NO }; }
+- (BOOL)jobsModuleValidatePayload:(NSDictionary *)payload error:(NSError **)error {
+  (void)payload; (void)error; return YES;
+}
+- (BOOL)jobsModulePerformPayload:(NSDictionary *)payload context:(NSDictionary *)context error:(NSError **)error {
+  (void)payload; (void)context; (void)error; return YES;
+}
+@end
+
 @interface Phase14ABetaJob : NSObject <ALNJobsJobDefinition>
 @end
 
@@ -150,6 +164,27 @@
   XCTAssertNotNil(validJobID);
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)1, [[runtime pendingJobs] count]);
+}
+
+- (void)testInternalJobCannotBeManuallyEnqueuedOrReplayed {
+  ALNApplication *app = [self applicationWithConfig:nil];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error]);
+  ALNJobsModuleRuntime *runtime = [ALNJobsModuleRuntime sharedRuntime];
+  XCTAssertTrue([runtime registerSystemJobDefinition:[[Phase14AInternalJob alloc] init] error:&error]);
+  XCTAssertNil(error);
+
+  for (NSString *source in @[ @"manual_api", @"dead_letter_replay" ]) {
+    error = nil;
+    NSString *jobID = [runtime enqueueJobIdentifier:@"phase14a.internal" payload:@{}
+                                           options:@{ @"source" : source } error:&error];
+    XCTAssertNil(jobID);
+    XCTAssertEqual((NSInteger)ALNJobsModuleErrorUnsupported, error.code);
+  }
+  error = nil;
+  XCTAssertNotNil([runtime enqueueJobIdentifier:@"phase14a.internal" payload:@{}
+                                          options:@{ @"source" : @"system" } error:&error]);
+  XCTAssertNil(error);
 }
 
 @end

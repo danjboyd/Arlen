@@ -2706,7 +2706,9 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                         ? [self issuePasswordResetTokenForUserID:AMTrimmedString(user[@"id"]) error:error]
                         : [self issueVerificationTokenForUserID:AMTrimmedString(user[@"id"]) error:error];
   if ([token length] == 0) return NO;
-  return [self sendNotificationEvent:event user:user token:token baseURL:AMTrimmedString(payload[@"baseURL"]) error:error];
+  NSString *baseURL = [self emailLinkBaseURLWithRequestBaseURL:AMTrimmedString(payload[@"baseURL"])
+                                                       event:event];
+  return [self sendNotificationEvent:event user:user token:token baseURL:baseURL error:error];
 }
 
 - (NSString *)issueVerificationTokenForUserID:(NSString *)userID
