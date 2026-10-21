@@ -201,6 +201,9 @@ Create a new app scaffold.
 
 Run bootstrap environment diagnostics without requiring a framework build.
 
+On Windows, `ARLEN_FRAMEWORK_ROOT` accepts native drive-letter and UNC paths
+as well as MSYS paths; bootstrap doctor normalizes them before validation.
+
 - delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
 - intended for first-run toolchain validation (GNUstep/tooling presence)
 - resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
