@@ -386,6 +386,31 @@ static void Phase16IntegrationResetOrderStore(void) {
   XCTAssertNil(error);
 }
 
+- (void)testAdminCSVExportTreatsFormulaLikeCellsAsText {
+  Phase16IntegrationOrderStore()[@"ord-100"][@"order_number"] = @"=1+1";
+  Phase16IntegrationOrderStore()[@"ord-100"][@"owner_email"] = @"\t=HYPERLINK(\"https://example.test\",\"open\")";
+  Phase16IntegrationOrderStore()[@"ord-102"][@"order_number"] = @"+SUM(1,2)";
+  Phase16IntegrationOrderStore()[@"ord-102"][@"owner_email"] = @"@cmd";
+  ALNApplication *app = [self application];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAdminUIModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  NSDictionary *csvExport = [[ALNAdminUIModuleRuntime sharedRuntime]
+      exportPayloadForResourceIdentifier:@"orders" format:@"csv" parameters:@{} error:&error];
+  XCTAssertNotNil(csvExport, @"%@", error);
+  NSString *csv = [[NSString alloc] initWithData:csvExport[@"bodyData"] encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([csv containsString:@"\"'=1+1\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'\t=HYPERLINK(\"\"https://example.test\"\",\"\"open\"\")\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'+SUM(1,2)\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'@cmd\""], @"%@", csv);
+  XCTAssertTrue([csv hasPrefix:@"Order,Status,Owner,Total\n"], @"%@", csv);
+
+  NSDictionary *jsonExport = [[ALNAdminUIModuleRuntime sharedRuntime]
+      exportPayloadForResourceIdentifier:@"orders" format:@"json" parameters:@{} error:&error];
+  NSArray *jsonRows = [NSJSONSerialization JSONObjectWithData:jsonExport[@"bodyData"] options:0 error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([[jsonRows description] containsString:@"=1+1"]);
+}
+
 - (ALNRequest *)requestWithMethod:(NSString *)method
                              path:(NSString *)path
                       queryString:(NSString *)queryString

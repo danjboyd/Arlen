@@ -362,6 +362,8 @@ Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
+Admin UI CSV exports escape formula-like cells for spreadsheet use; JSON exports
+keep the original values. Upgrade vendored `admin-ui` modules to 1.1.2.
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
 search with tenant or other resource visibility filters.
 Production apps keep `/openapi.json` and its docs routes closed unless they set

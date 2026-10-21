@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Admin UI 1.1.2 exports spreadsheet formula-like CSV cells as text, including
+  configured column labels and values with leading whitespace. Upgrade vendored
+  admin UI modules before opening exports in spreadsheet software.
+
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
   cannot be reloaded. Backend exceptions release writer locks, discard
   uncommitted cached entries on the next reload, and remove the failed update's
