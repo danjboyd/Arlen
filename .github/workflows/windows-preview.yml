@@ -38,7 +38,8 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
 
-      # Covers development/watch/jobs smoke and rejection of unsupported propane
+      # Covers watch force-kill cleanup (app and build-error), recovery/jobs
+      # smoke and rejection of unsupported propane
       # startup; independent Windows workers must never share a listen port.
       - name: Run Windows preview runtime parity lane
         shell: powershell

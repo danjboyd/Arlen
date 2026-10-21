@@ -3,6 +3,8 @@
 param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows_installer_test_lock.ps1')
+$installerTestLock = Enter-ArlenInstallerTestLock
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $installer = Join-Path $PSScriptRoot '..\install.ps1'
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('arlen installer tests ' + [Guid]::NewGuid().ToString('N'))
@@ -68,6 +70,26 @@ function Get-FileHash {
   Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm
 }
 try {
+  Case 'another fixture cannot mutate user PATH while this fixture holds its snapshot' {
+    New-Item -ItemType Directory -Force $sandbox | Out-Null
+    $probe = Join-Path $sandbox 'path-lock-probe.ps1'
+    [IO.File]::WriteAllText($probe, @'
+param([string]$Helper)
+$ErrorActionPreference = 'Stop'
+. $Helper
+try {
+  $held = Enter-ArlenInstallerTestLock -TimeoutSeconds 0
+  $held.ReleaseMutex()
+  $held.Dispose()
+  exit 1
+} catch {
+  if ("$_" -notmatch 'another Windows installer fixture') { throw }
+  exit 0
+}
+'@)
+    & (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $probe -Helper (Join-Path $PSScriptRoot 'windows_installer_test_lock.ps1')
+    Assert ($LASTEXITCODE -eq 0) 'separate fixture acquired the shared user PATH lock'
+  }
   $tree = Join-Path $sandbox 'fixture\arlen-0.3.0'
   New-Item -ItemType Directory -Force $tree | Out-Null
   foreach ($relative in @('bin\arlen', 'build\arlen.exe', 'build\boomhauer.exe', 'build\eocc.exe', 'build\lib\libArlenFramework.a', 'build\.release-prebuilt')) {
@@ -106,6 +128,18 @@ try {
     Assert ($userEntries[0] -eq $bin) 'new terminals must find launcher through saved user PATH'
   }
   $oldTarget = [string](Get-Item -LiteralPath (Join-Path $prefix 'current')).Target[0]
+  Case 'invalid ZIP local header cannot activate partial extraction' {
+    $badArchive = Join-Path $sandbox 'invalid-local-header.zip'
+    $bytes = [IO.File]::ReadAllBytes($archive)
+    Assert ($bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4b -and $bytes[2] -eq 3 -and $bytes[3] -eq 4) 'expected a ZIP local header'
+    $bytes[0] = 0
+    [IO.File]::WriteAllBytes($badArchive, $bytes)
+    $beforePath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    Fails { & $installer -Archive $badArchive -Prefix $prefix -MsysRoot $root -NoSetup } 'corrupt|invalid|header'
+    Assert ([string](Get-Item -LiteralPath (Join-Path $prefix 'current')).Target[0] -eq $oldTarget) 'invalid header switched active install'
+    Assert ((Get-Content (Join-Path $prefix 'current\sentinel')) -eq 'working install') 'invalid header damaged active content'
+    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -eq $beforePath) 'invalid header changed saved PATH'
+  }
   Case 'download failure preserves current install and PATH' {
     $global:ArlenInstallerTestdownloadMode = 'fail'
     Fails { & $installer -Version 0.3.0 -Prefix $prefix -MsysRoot $root -NoSetup } 'download failed'
@@ -241,6 +275,8 @@ try {
 } finally {
   $env:Path = $savedPath
   [Environment]::SetEnvironmentVariable('Path', $savedUserPath, 'User')
+  $installerTestLock.ReleaseMutex()
+  $installerTestLock.Dispose()
   # Remove checked junctions without recursing through their targets on PS5.1.
   if ([IO.Path]::GetFullPath($sandbox).StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) {
     Get-ChildItem -LiteralPath $sandbox -Filter current -Directory -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.LinkType -eq 'Junction' } | ForEach-Object { [IO.Directory]::Delete($_.FullName) }

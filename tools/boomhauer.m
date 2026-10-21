@@ -10,6 +10,7 @@
 #import "ALNDataCompat.h"
 #import "ArlenServer.h"
 #import "ALNJSONSerialization.h"
+#import "ALNWindowsWatchChild.h"
 
 static NSData *BenchmarkStaticHTMLData(void);
 
@@ -2153,6 +2154,11 @@ static void PrintUsage(void) {
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {
+#if defined(_WIN32)
+    if (argc > 1 && strcmp(argv[1], "--windows-watch-child") == 0) {
+      return ALNRunWindowsWatchChild([[NSProcessInfo processInfo] arguments]);
+    }
+#endif
     int portOverride = 0;
     NSString *host = nil;
     NSString *environment = @"development";

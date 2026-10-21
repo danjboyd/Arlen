@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Windows watch mode now stops both app and build-error servers when its
+  watch process tree is force-killed, releasing their listen ports even for
+  direct CLANG64 shell launches.
+- Windows installer fixtures serialize saved-user-PATH checks across
+  checkouts, retaining current-shell and fresh-shell certification.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It
