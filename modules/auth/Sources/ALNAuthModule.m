@@ -1543,6 +1543,15 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   self.smsVerifyClient.apiKeySecret = AMTrimmedString(smsConfig[@"apiKeySecret"]) ?: @"";
   self.smsVerifyClient.verifyServiceSID = AMTrimmedString(smsConfig[@"verifyServiceSID"]) ?: @"";
   self.smsVerifyClient.defaultLocale = self.smsLocale ?: @"";
+  if ([AMTrimmedString(smsConfig[@"testVerificationCode"]) length] > 0 &&
+      ![self isDevelopmentOrTestEnvironment]) {
+    if (error != NULL) {
+      *error = AMError(ALNAuthModuleErrorInvalidConfiguration,
+                       @"SMS testVerificationCode is only allowed in development and test",
+                       @{ @"key_path" : @"authModule.mfa.sms.testVerificationCode" });
+    }
+    return NO;
+  }
   self.smsVerifyClient.testVerificationCode = AMTrimmedString(smsConfig[@"testVerificationCode"]) ?: @"";
   if (self.smsEnabled && ![self.smsVerifyClient isConfigured]) {
     if (error != NULL) {

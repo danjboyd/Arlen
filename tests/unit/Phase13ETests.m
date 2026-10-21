@@ -571,6 +571,23 @@ static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
   XCTAssertEqualObjects(@YES, [runtime resolvedHookSummary][@"mfa"][@"sms"][@"allowPrimaryFactor"]);
 }
 
+- (void)testSMSConfigurationRejectsTestVerificationCodeOutsideDevelopmentAndTest {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSDictionary *config = @{ @"mfa" : @{ @"sms" : @{ @"enabled" : @YES,
+                                                 @"testVerificationCode" : @"123456" } } };
+  for (NSString *environment in @[ @"production", @"staging", @"preview" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([runtime configureHooksWithModuleConfig:config environment:environment error:&error]);
+    XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code);
+    XCTAssertEqualObjects(@"authModule.mfa.sms.testVerificationCode", error.userInfo[@"key_path"]);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:config environment:environment error:&error]);
+    XCTAssertNil(error);
+  }
+}
+
 - (void)testAuthUIConfigurationResolvesGeneratedPathsAndContextHooks {
   ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
   NSError *error = nil;

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Auth 1.7.1 rejects `authModule.mfa.sms.testVerificationCode` outside
+  development and test at startup. Remove this test bypass from production-like
+  configuration and upgrade vendored `auth` modules.
+
 - ORM transaction exceptions clear the context's borrowed connection. Savepoint
   exceptions roll back inner writes before an outer transaction can continue;
   PostgreSQL and MSSQL close connections when that cleanup fails.
