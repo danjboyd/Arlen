@@ -115,7 +115,7 @@ an existing address enqueues a no-op job. A registration hook can still affect
 request latency, so applications using custom hooks should review their timing.
 Production-like environments with local passwords and mail configured require
 the durable jobs adapter and `authModule.publicBaseURL` at startup. Explicit
-`authModule.mailDispatch.mode = "synchronous"` keeps the old delivery path;
+`authModule.mailDispatch.mode = "synchronous"` is rejected in those environments;
 its provider and database latency can reveal whether an address exists.
 Use the same PostgreSQL database and search path for auth and jobs so the new
 account and its mail job commit together. A failed enqueue rolls back a new
@@ -124,16 +124,15 @@ registration and returns a generic 503 for registration or password reset.
 The previous registration behavior can be enabled explicitly with
 `authModule.registration.autoLogin = YES`. This compatibility setting starts
 a session and returns user details for new accounts, and reports an existing
-address as an error. It exposes whether an email is registered; use it only
-when that disclosure is acceptable. Existing apps that relied on automatic
-sign-in after registration must update their client flow or opt in.
+address as an error. It exposes whether an email is registered, so it is
+available only in `development` and `test`. Existing apps that relied on
+automatic sign-in after registration must update their client flow to sign in
+after verification.
 
 Password-reset and email-verification emails link to
 `authModule.publicBaseURL` (for example `publicBaseURL =
 "https://app.example.com";`). Set it in production: durable mail configuration
-fails startup without it. Explicit synchronous compatibility mode sends no link
-when it is absent and never trusts the request's `Host` header. In `development`
-and `test` an unset value falls back to the request's
+fails startup without it. In `development` and `test` an unset value falls back to the request's
 scheme and `Host`. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
 
@@ -952,9 +951,10 @@ development and test convenience only:
 
 Production apps that use local passwords and mail must set
 `authModule.publicBaseURL` and install the PostgreSQL jobs adapter and worker
-when upgrading to auth 1.6.1. See [Durable Jobs](DURABLE_JOBS.md). Explicit
-`authModule.mailDispatch.mode = "synchronous"` preserves legacy request-time
-delivery with its timing disclosure risk.
+when upgrading to auth 1.7.0. See [Durable Jobs](DURABLE_JOBS.md). Remove
+`authModule.mailDispatch.mode = "synchronous"` and
+`authModule.registration.autoLogin = YES` before upgrading production-like
+environments; both now stop startup with a configuration error.
 
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login

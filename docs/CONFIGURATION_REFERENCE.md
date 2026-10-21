@@ -795,20 +795,18 @@ to `claimTrustedEmail:`.
 When it is not set, the `development` and `test` environments fall back to the
 request's scheme and `Host` header so local sign-up keeps working. In other
 environments, durable auth mail configuration fails startup without this value.
-Explicit synchronous compatibility mode sends no link, logs a warning, and
-keeps the generic response. `claimTrustedEmail:` keeps taking its `baseURL`
-from the caller.
+`claimTrustedEmail:` keeps taking its `baseURL` from the caller.
 
 `authModule.mailDispatch.mode` accepts `durable` or `synchronous`. When a
 PostgreSQL `ALNDurableJobAdapter` and the jobs module are registered, durable
 dispatch is selected automatically. Production-like environments with local
-passwords and a mail adapter fail startup without that setup unless they
-explicitly select `synchronous`. Durable dispatch enqueues generic
+passwords and a mail adapter fail startup without that setup. Explicit
+`synchronous` mode also fails startup outside `development` and `test` when
+local passwords and mail are enabled. Durable dispatch enqueues generic
 `auth.mail.dispatch` jobs on `auth_mail`: registration commits user and job
 together, and password reset enqueues for both known and unknown addresses.
 Run a jobs worker for delivery. A queue failure returns 503 without reporting
-whether an account exists. The synchronous mode can expose account membership
-through mail provider latency; reserve it for compatibility.
+whether an account exists. Development and test may use synchronous mail.
 
 ## Auth Module Registration Privacy
 
@@ -817,7 +815,8 @@ addresses receive the same accepted registration response without an
 authenticated session. A new address receives one verification message when
 email links are configured; an existing account is unchanged. Set `YES` only
 for compatibility with the previous immediate sign-in flow, which reports
-duplicate addresses and can reveal account membership. See
+duplicate addresses and can reveal account membership. Outside `development`
+and `test`, `YES` is rejected at startup. See
 [Auth Module](AUTH_MODULE.md).
 
 ## Auth Module Sessions

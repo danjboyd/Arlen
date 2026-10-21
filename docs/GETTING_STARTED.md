@@ -357,9 +357,9 @@ The ops module coordinates persisted dashboard history across processes when
 they share its configured persistence path; see [Ops Module](OPS_MODULE.md).
 New auth registrations now receive a generic accepted response and sign in
 after verification. They do not get an authenticated session from the register
-request. Existing apps that require the old flow can opt in with
-`authModule.registration.autoLogin = YES`, which reveals whether an address is
-already registered; see [Auth Module](AUTH_MODULE.md).
+request. The old `authModule.registration.autoLogin = YES` flow is available
+only in `development` and `test` because it reveals whether an address is
+registered; see [Auth Module](AUTH_MODULE.md).
 For production registration and password reset, configure a PostgreSQL jobs
 adapter, apply its schema, run the jobs worker, and set
 `authModule.publicBaseURL`. Auth mail is queued; the request does not wait for
