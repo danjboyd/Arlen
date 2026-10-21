@@ -1,5 +1,16 @@
 # TSAN reliability investigation — 2026-09-21
 
+## v0.3.1 review — 2026-10-21
+
+The nightly check remains informational in configured branch protection, but
+v0.3.1 release is held until confirmed findings are fixed and two consecutive
+full unit plus HTTP-concurrency runs pass with a detecting application canary,
+retained evidence, and no new broad suppressions or test exclusions. Isolated
+normal and instrumented dependency candidates use the shipped GNUstep Base
+`d898f703` pin; diagnostic runs still expose dependency races. No full clean
+run is claimed and no system toolchain replacement has been made. The sections
+below preserve the September investigation and its historical lane policy.
+
 ## Outcome
 
 TSAN remains informational. The old green nightly runs did not establish race
