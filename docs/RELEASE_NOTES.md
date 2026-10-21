@@ -28,9 +28,10 @@
   discovery omits the new authenticator secret until step-up. Upgrade vendored
   auth modules before using SMS as a primary factor.
 
-- Auth 1.7.5 retains the current session generation after TOTP or SMS step-up,
-  so a user who changed their password stays signed in at the new assurance
-  level. Password registration, sign-in, and change now preserve surrounding
+- Auth 1.7.5 retains the validated session generation after TOTP or SMS step-up,
+  so normal step-up stays signed in at the new assurance level. Concurrent
+  revocation makes step-up fail and clears the session. Password registration,
+  sign-in, and change now preserve surrounding
   whitespace exactly, matching password reset and policy validation. Upgrade
   vendored auth modules.
 

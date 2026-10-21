@@ -1161,6 +1161,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
                        connection:(ALNPgConnection *)connection
                             error:(NSError **)error;
 - (BOOL)recordCurrentSessionStampForContext:(ALNContext *)context error:(NSError **)error;
+- (BOOL)recordRotatedSessionStampForContext:(ALNContext *)context
+                             validatedStamp:(NSString *)validatedStamp
+                                      error:(NSError **)error;
 @end
 
 @interface ALNAuthModuleController : ALNController
@@ -3879,6 +3882,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     }
   }
 
+  NSString *validatedStamp = AMTrimmedString(context.session[@"aln.auth_module.session_stamp"][@"stamp"]);
+  if ([validatedStamp length] == 0) validatedStamp = @"0";
   if (![self revokeSessionBeingElevatedForContext:context error:error]) {
     return nil;
   }
@@ -3889,7 +3894,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                       error:error]) {
     return nil;
   }
-  if (![self recordCurrentSessionStampForContext:context error:error]) {
+  if (![self recordRotatedSessionStampForContext:context validatedStamp:validatedStamp error:error]) {
     [ALNAuthSession clearAuthenticatedSessionForContext:context];
     return nil;
   }
@@ -4501,6 +4506,8 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
   }
 
   AMSetSMSSessionState(context, nil);
+  NSString *validatedStamp = AMTrimmedString(context.session[@"aln.auth_module.session_stamp"][@"stamp"]);
+  if ([validatedStamp length] == 0) validatedStamp = @"0";
   if (![self revokeSessionBeingElevatedForContext:context error:error]) {
     return nil;
   }
@@ -4511,7 +4518,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                                       error:error]) {
     return nil;
   }
-  if (![self recordCurrentSessionStampForContext:context error:error]) {
+  if (![self recordRotatedSessionStampForContext:context validatedStamp:validatedStamp error:error]) {
     [ALNAuthSession clearAuthenticatedSessionForContext:context];
     return nil;
   }

@@ -16,7 +16,9 @@ needs step-up; the user-only form refuses to release the secret in that case.
 
 Passwords are treated as exact strings, including leading and trailing spaces,
 across registration, sign-in, change, and reset. TOTP and SMS step-up rotate
-the session identifier and retain the current server-side session generation.
+the session identifier and retain the validated server-side session generation;
+if a concurrent revocation changes that generation, step-up fails and clears
+the session.
 
 The first-party `auth` module ships one auth backend contract with three UI
 ownership modes:

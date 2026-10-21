@@ -312,15 +312,23 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
 }
 
 - (BOOL)recordSessionStampForContext:(ALNContext *)context error:(NSError **)error {
-  return [self recordSessionStampForContext:context preservingIdentifier:NO error:error];
+  return [self recordSessionStampForContext:context preservingIdentifier:NO expectedStamp:nil error:error];
 }
 
 - (BOOL)recordCurrentSessionStampForContext:(ALNContext *)context error:(NSError **)error {
-  return [self recordSessionStampForContext:context preservingIdentifier:YES error:error];
+  return [self recordSessionStampForContext:context preservingIdentifier:YES expectedStamp:nil error:error];
+}
+
+- (BOOL)recordRotatedSessionStampForContext:(ALNContext *)context
+                             validatedStamp:(NSString *)validatedStamp
+                                      error:(NSError **)error {
+  return [self recordSessionStampForContext:context preservingIdentifier:NO
+                             expectedStamp:validatedStamp error:error];
 }
 
 - (BOOL)recordSessionStampForContext:(ALNContext *)context
                 preservingIdentifier:(BOOL)preserveIdentifier
+                      expectedStamp:(NSString *)expectedStamp
                                error:(NSError **)error {
   NSString *subject = ARTrimmedString([ALNAuthSession subjectFromContext:context]);
   if (context == nil || [subject length] == 0 || [self database] == nil) {
@@ -354,6 +362,13 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
     // Not an auth_users subject (for example a session policy hook mapped the
     // sign-in elsewhere); there is no stamp to record.
     return YES;
+  }
+  if (expectedStamp != nil && ![ARTrimmedString(row[@"session_stamp"]) isEqualToString:expectedStamp]) {
+    if (error != NULL) {
+      *error = ARError(ALNAuthModuleErrorAuthenticationFailed,
+                       @"The session was revoked while authentication was in progress", nil);
+    }
+    return NO;
   }
   NSDictionary *existing = ARSessionRecord(context);
   NSString *recordIdentifier = @"";

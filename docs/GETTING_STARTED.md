@@ -369,6 +369,8 @@ again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
 SMS MFA also needs the auth module's attempt-limit migration. Send and code
 verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
+TOTP and SMS step-up retain the validated session generation; a concurrent
+password reset or logout-all revocation makes step-up fail and clears that session.
 Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
 Upgrade vendored `jobs` to 1.1.4 and `auth` to 1.7.2 before relying on manual
