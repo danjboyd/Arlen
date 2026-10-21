@@ -11,6 +11,7 @@
 #import "ALNStorageModule.h"
 
 @interface Phase14OpsAuthMiddleware : NSObject <ALNMiddleware>
+@property(nonatomic, copy) NSArray *roles;
 @end
 
 @implementation Phase14OpsAuthMiddleware
@@ -19,10 +20,11 @@
   (void)error;
   NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
   context.stash[ALNContextAuthSubjectStashKey] = @"operator-14g";
-  context.stash[ALNContextAuthRolesStashKey] = @[ @"operator" ];
+  NSArray *roles = self.roles ?: @[ @"operator" ];
+  context.stash[ALNContextAuthRolesStashKey] = roles;
   context.stash[ALNContextAuthClaimsStashKey] = @{
     @"sub" : @"operator-14g",
-    @"roles" : @[ @"operator" ],
+    @"roles" : roles,
     @"aal" : @2,
     @"amr" : @[ @"otp" ],
     @"iat" : @((NSInteger)now),
@@ -257,12 +259,13 @@
 
 - (void)testOperatorCanAccessOpsHTMLAndJSONWithLiveModuleState {
   ALNApplication *app = [self application];
-  [app addMiddleware:[[Phase14OpsAuthMiddleware alloc] init]];
+  Phase14OpsAuthMiddleware *auth = [[Phase14OpsAuthMiddleware alloc] init];
+  [app addMiddleware:auth];
   [self registerModulesForApplication:app];
 
   NSError *error = nil;
   NSString *jobID = [[ALNJobsModuleRuntime sharedRuntime] enqueueJobIdentifier:@"phase14ops.echo"
-                                                                       payload:@{ @"value" : @"queued" }
+                                                                       payload:@{ @"value" : @"private-job-payload-marker" }
                                                                        options:nil
                                                                          error:&error];
   XCTAssertNotNil(jobID);
@@ -272,7 +275,7 @@
       [[ALNNotificationsModuleRuntime sharedRuntime] testSendNotificationIdentifier:@"phase14ops.notification"
                                                                             payload:@{
                                                                               @"recipient" : @"operator-14g",
-                                                                              @"email" : @"operator-14g@example.test",
+                                                                              @"email" : @"private-outbox-marker@example.test",
                                                                             }
                                                                            channels:nil
                                                                               error:&error];
@@ -292,7 +295,8 @@
       [app dispatchRequest:[self requestWithMethod:@"GET" path:@"/ops" headers:@{} body:nil]];
   XCTAssertEqual((NSInteger)200, htmlResponse.statusCode);
   NSString *html = [self stringFromResponse:htmlResponse];
-  XCTAssertTrue([html containsString:@"phase14ops.notification"]);
+  XCTAssertFalse([html containsString:@"private-job-payload-marker"]);
+  XCTAssertFalse([html containsString:@"private-outbox-marker"]);
   XCTAssertTrue([html containsString:@"phase14ops.txt"]);
 
   ALNResponse *jsonResponse =
@@ -304,9 +308,40 @@
   NSDictionary *json = [self JSONObjectFromResponse:jsonResponse];
   NSDictionary *summary = [json[@"data"] isKindOfClass:[NSDictionary class]] ? json[@"data"] : @{};
   XCTAssertEqualObjects(@1, summary[@"jobs"][@"totals"][@"pending"]);
-  XCTAssertEqual((NSUInteger)2, [summary[@"notifications"][@"recentOutbox"] count]);
+  XCTAssertNil(summary[@"jobs"][@"pendingJobs"]);
+  XCTAssertNil(summary[@"jobs"][@"leasedJobs"]);
+  XCTAssertNil(summary[@"jobs"][@"deadLetterJobs"]);
+  XCTAssertNil(summary[@"jobs"][@"recentRuns"]);
+  XCTAssertNil(summary[@"notifications"][@"recentOutbox"]);
+  XCTAssertNil(summary[@"notifications"][@"recentFanout"]);
   XCTAssertEqual((NSUInteger)1, [summary[@"storage"][@"recentObjects"] count]);
   XCTAssertEqualObjects(@"phase14ops.txt", summary[@"storage"][@"recentObjects"][0][@"name"]);
+  for (NSString *module in @[ @"jobs", @"notifications" ]) {
+    NSString *path = [@"/ops/api/modules/" stringByAppendingString:module];
+    ALNResponse *drilldownResponse = [app dispatchRequest:[self requestWithMethod:@"GET" path:path
+                                                      headers:@{ @"Accept" : @"application/json" } body:nil]];
+    XCTAssertEqual((NSInteger)200, drilldownResponse.statusCode);
+    NSString *body = [self stringFromResponse:drilldownResponse];
+    XCTAssertFalse([body containsString:@"private-job-payload-marker"]);
+    XCTAssertFalse([body containsString:@"private-outbox-marker"]);
+    NSString *htmlPath = [@"/ops/modules/" stringByAppendingString:module];
+    ALNResponse *htmlDrilldown = [app dispatchRequest:[self requestWithMethod:@"GET" path:htmlPath
+                                                                 headers:@{} body:nil]];
+    XCTAssertEqual((NSInteger)200, htmlDrilldown.statusCode);
+    XCTAssertFalse([[self stringFromResponse:htmlDrilldown] containsString:@"private-job-payload-marker"]);
+    XCTAssertFalse([[self stringFromResponse:htmlDrilldown] containsString:@"private-outbox-marker"]);
+  }
+
+  auth.roles = @[ @"admin" ];
+  ALNResponse *adminResponse = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                               path:@"/ops/api/summary"
+                                            headers:@{ @"Accept" : @"application/json" } body:nil]];
+  XCTAssertEqual((NSInteger)200, adminResponse.statusCode);
+  NSDictionary *adminSummary = [self JSONObjectFromResponse:adminResponse][@"data"];
+  XCTAssertEqual((NSUInteger)2, [adminSummary[@"notifications"][@"recentOutbox"] count]);
+  XCTAssertTrue([adminSummary[@"jobs"][@"pendingJobs"] count] > 0);
+  XCTAssertTrue([[self stringFromResponse:adminResponse] containsString:@"private-job-payload-marker"]);
+  XCTAssertTrue([[self stringFromResponse:adminResponse] containsString:@"private-outbox-marker"]);
 }
 
 @end
