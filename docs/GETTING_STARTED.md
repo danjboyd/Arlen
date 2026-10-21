@@ -148,9 +148,10 @@ access; see
 [Configuration Reference](CONFIGURATION_REFERENCE.md#6-rate-limits-and-security-headers)
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
-The same production doctor command warns when multiple propane workers have no
-declared durable state or database signal. A passing state check records the
-declaration; it does not verify that each app-owned store is shared.
+The same doctor command warns in production-like environments when multiple
+propane workers lack `state.durable = YES`. A database URL alone does not clear
+the warning. A passing state check records your declaration; it does not verify
+that each app-owned store is shared.
 
 When using `propane` for production, repeated worker startup failures exhaust
 its configured retry limit and return exit status `3`. A worker exiting during

@@ -113,10 +113,10 @@ Deliverables:
 
 - Decide how the new contract relates to existing `database` deployment
   metadata:
-  - database contract present may satisfy the first warning version
-  - explicit state contract should become the authoritative long-term signal
-- Document compatibility behavior for existing apps with only `database`
-  config.
+  - a database contract alone does not establish where app-owned state lives
+  - explicit state contract is the authoritative diagnostic signal
+- Document that existing apps with only `database` config must add an explicit
+  state declaration after reviewing request-spanning stores.
 
 Acceptance:
 
@@ -132,13 +132,13 @@ Status: Completed
 
 Deliverables:
 
-- Add a `multi_worker_state` check to `arlen doctor --env production`.
+- Add a `multi_worker_state` check to `arlen doctor --env production` and other
+  production-like environments.
 - Add a `multi_worker_state` check to `arlen deploy doctor`.
 - Trigger a warning when:
-  - environment is `production`
+  - environment is production-like (anything except `development` or `test`)
   - `propaneAccessories.workerCount > 1`
-  - no durable state contract or acceptable database-backed state signal is
-    configured
+  - `state.durable = YES` is not explicitly declared
 - Keep the first release as `warn`, not `fail`, so existing apps get actionable
   guidance without blocking emergency deploys.
 - Emit structured JSON in doctor output:
