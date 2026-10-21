@@ -302,7 +302,8 @@ legacy import; stop old workers and follow the [migration/backup guide](NOTIFICA
 Its `1.2.0` change ensures `POST /notifications/api/queue` queues
 only for the signed-in user unless the caller has the `admin` role at AAL2.
 `ops` moved to `1.1.0` for cross-process dashboard history transactions.
-`search` moved to `1.2.0` for shared-state transactions, replay protection,
+`search` moved to `1.2.1` so promotions honor explicit and per-resource query
+filters. Its `1.2.0` change added shared-state transactions, replay protection,
 and the security fixes below. Upgrade vendored copies with `arlen module upgrade`.
 `auth` remains at `1.6.0`, while `admin-ui`
 moved to `1.1.0` for the following security fixes and configuration:

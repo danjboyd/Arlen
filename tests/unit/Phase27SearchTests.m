@@ -500,6 +500,37 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqualObjects(@2, tenantMetadata[@"syncPolicy"][@"bulkBatchSize"]);
 }
 
+- (void)testPromotedResultsRespectExplicitAndResourceFilters {
+  ALNApplication *app = [self applicationWithConfig:nil database:nil];
+  [self registerModulesForApplication:app];
+
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSArray<NSDictionary *> *cases = @[
+    @{ @"filters" : @{ @"category" : @"priority" }, @"promotedCount" : @1 },
+    @{ @"filters" : @{ @"category" : @"starter" }, @"promotedCount" : @0 },
+    @{ @"filters" : @{ @"inventory_count__gte" : @5 }, @"promotedCount" : @0 },
+    @{ @"options" : @{ @"resourceFilters" : @{ @"products" : @{ @"category" : @"starter" } } },
+       @"promotedCount" : @0 },
+  ];
+  for (NSDictionary *testCase in cases) {
+    NSError *error = nil;
+    NSDictionary *response = [runtime searchQuery:@"priority"
+                               resourceIdentifier:@"products"
+                                          filters:testCase[@"filters"]
+                                             sort:nil
+                                            limit:10
+                                           offset:0
+                                     queryOptions:testCase[@"options"]
+                                            error:&error];
+    XCTAssertNotNil(response, @"%@", testCase);
+    XCTAssertNil(error, @"%@", testCase);
+    XCTAssertEqual([testCase[@"promotedCount"] unsignedIntegerValue],
+                   [(NSArray *)(response[@"promotedResults"] ?: @[]) count], @"%@", testCase);
+  }
+}
+
 - (void)testEmptyAllowedResourceSetMatchesNothing {
   ALNApplication *app = [self applicationWithConfig:nil database:nil];
   [self registerModulesForApplication:app];

@@ -823,6 +823,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (nullable NSArray<NSDictionary *> *)promotedResultsForQuery:(NSString *)query
                                               resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
                                            snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                                       filters:(NSDictionary *)filters
+                                                  queryOptions:(NSDictionary *)queryOptions
                                                          error:(NSError **)error;
 - (NSArray<NSDictionary *> *)facetSummariesForMatchedDocuments:(NSArray<NSDictionary *> *)matchedDocuments
                                                resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
@@ -878,6 +880,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (NSDictionary *)effectiveFilters:(NSDictionary *)filters
                            metadata:(NSDictionary *)metadata
                             options:(NSDictionary *)options;
+- (BOOL)document:(NSDictionary *)document
+    matchesFilters:(NSDictionary *)filters
+          metadata:(NSDictionary *)metadata
+             error:(NSError **)error;
 - (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
                                       generation:(NSUInteger)generation
                                            error:(NSError **)error;
@@ -6000,6 +6006,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 - (nullable NSArray<NSDictionary *> *)promotedResultsForQuery:(NSString *)query
                                               resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
                                            snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                                       filters:(NSDictionary *)filters
+                                                  queryOptions:(NSDictionary *)queryOptions
                                                          error:(NSError **)error {
   NSString *normalizedQuery = STLowerTrimmedString(query);
   if ([normalizedQuery length] == 0) {
@@ -6007,9 +6015,15 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
   NSMutableArray<NSDictionary *> *promoted = [NSMutableArray array];
   NSMutableSet<NSString *> *seenKeys = [NSMutableSet set];
+  ALNDefaultSearchEngine *filterEngine = [self.engine isKindOfClass:[ALNDefaultSearchEngine class]]
+                                             ? (ALNDefaultSearchEngine *)self.engine
+                                             : [[ALNDefaultSearchEngine alloc] init];
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *resourceIdentifier = STLowerTrimmedString(metadata[@"identifier"]);
     NSDictionary *snapshot = STNormalizeDictionary(snapshotsByResource[resourceIdentifier]);
+    NSDictionary *effectiveFilters = [filterEngine effectiveFilters:filters
+                                                           metadata:metadata
+                                                            options:queryOptions];
     NSMutableDictionary *documentsByRecordID = [NSMutableDictionary dictionary];
     for (NSDictionary *document in STNormalizeArray(snapshot[@"documents"])) {
       NSString *recordID = STTrimmedString(document[@"recordID"]);
@@ -6025,6 +6039,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       for (NSString *recordID in STTrimmedUniqueStringArray(promotion[@"recordIDs"])) {
         NSDictionary *document = documentsByRecordID[recordID];
         if (document == nil) {
+          continue;
+        }
+        if (![filterEngine document:document matchesFilters:effectiveFilters metadata:metadata error:error]) {
+          if (error != NULL && *error != nil) {
+            return nil;
+          }
           continue;
         }
         NSString *dedupeKey = [NSString stringWithFormat:@"%@:%@", resourceIdentifier, recordID];
@@ -6339,6 +6359,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSArray *promotedResults = [self promotedResultsForQuery:query
                                           resourceMetadata:candidateMetadata
                                        snapshotsByResource:snapshotsByResource
+                                                   filters:filters ?: @{}
+                                              queryOptions:queryOptions ?: @{}
                                                      error:error];
   if (promotedResults == nil) {
     return nil;

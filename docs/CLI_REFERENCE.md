@@ -247,6 +247,10 @@ Search generator behavior:
 - appends the provider to `config/app.plist` under `searchModule.providers.classes`
 - writes engine swap and migration notes under `docs/search/<name_slug>_search.md`
 
+The generated provider can define promotions. Search query routes apply explicit
+`filter.<field>` and per-resource filters to `promotedResults` as well as
+ordinary `results`; see [Search Module](SEARCH_MODULE.md).
+
 Generator behavior:
 
 - `controller`: `src/Controllers/<Name>Controller.{h,m}`
