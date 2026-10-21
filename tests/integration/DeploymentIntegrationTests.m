@@ -353,10 +353,12 @@ static NSString *ALNHostDeployProfile(void) {
          "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 %@ "
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/Support/ALNPlatform.m "
+         "%@/src/Arlen/Support/ALNPercentDecoding.m "
          "%@/src/Arlen/HTTP/ALNRequest.m %@/src/Arlen/HTTP/ALNMultipart.m "
          "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
         [self gnustepSourceCommandForRepoRoot:repoRoot], ALNTestPlatformObjCFlags(), repoRoot, repoRoot, repoRoot,
-        sourcePath, repoRoot, repoRoot, repoRoot, repoRoot, binaryPath, ALNTestPlatformLinkLibraries()]
+        sourcePath, repoRoot, repoRoot, repoRoot, repoRoot, repoRoot, binaryPath,
+        ALNTestPlatformLinkLibraries()]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 
