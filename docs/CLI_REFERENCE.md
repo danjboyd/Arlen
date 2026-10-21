@@ -1893,3 +1893,7 @@ ORM transaction exceptions now restore context connection state. Throwing
 savepoint blocks roll back their writes before an enclosing transaction can
 continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
 [Arlen ORM](ARLEN_ORM.md) for the adapter contract.
+
+Live keyed broadcasts require explicit server-selected container and key values.
+Publish helpers omit requester-specific metadata and tracing IDs; direct live
+responses retain request defaults. See [Live UI](LIVE_UI.md).
