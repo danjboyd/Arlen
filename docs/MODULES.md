@@ -310,6 +310,8 @@ only for the signed-in user unless the caller has the `admin` role at AAL2.
 `search` moved to `1.2.1` so promotions honor explicit and per-resource query
 filters. Its `1.2.0` change added shared-state transactions, replay protection,
 and the security fixes below. Upgrade vendored copies with `arlen module upgrade`.
+`search` moved to `1.2.2` so PostgreSQL full-text results honor resource
+visibility filters before facets and suggestions are built.
 `auth` remains at `1.6.0`, while `admin-ui`
 moved to `1.1.0` for the following security fixes and configuration:
 

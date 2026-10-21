@@ -92,6 +92,11 @@ searchModule = {
 };
 ```
 
+`ALNPostgresSearchEngine` applies resource visibility filters to full-text
+results before building facets, autocomplete, and suggestions. Upgrade to
+search 1.2.2 when tenant, soft-delete, archived, or app-defined visibility
+filters are used with this engine.
+
 `ALNPostgresSearchEngine` reads
 `searchModule.engine.postgres.connectionString` first and falls back to
 `database.connectionString`.

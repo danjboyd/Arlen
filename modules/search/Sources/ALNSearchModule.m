@@ -2370,12 +2370,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     if (rows == nil) {
       return nil;
     }
+    NSDictionary *effectiveFilters = [self effectiveFilters:filters metadata:metadata options:options];
     for (NSDictionary *row in rows) {
       NSDictionary *document = documentsByRecordID[STTrimmedString(row[@"record_id"])];
       if (document == nil) {
         continue;
       }
-      if (![self document:document matchesFilters:filters ?: @{} metadata:metadata error:error]) {
+      if (![self document:document matchesFilters:effectiveFilters metadata:metadata error:error]) {
         if (error != NULL && *error != NULL) {
           return nil;
         }
