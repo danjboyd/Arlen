@@ -6,6 +6,8 @@ Windows `boomhauer --watch` contains app and build-error children in native
 kill-on-close jobs. Terminating the watch process tree also releases the
 server's port; direct CLANG64 `bin/boomhauer` invocations use the same cleanup.
 Header-only changes to the native watch helper invalidate packaged prebuilt tools.
+Watch scans retain size and sub-second modification/change-time checks while
+avoiding redundant metadata reads on large Windows checkouts.
 
 On Windows, the CLI's application build path sets `_FILE_OFFSET_BITS=64`,
 matching the framework and test build. Keep this flag in custom CLANG64 builds
