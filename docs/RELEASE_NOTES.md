@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Linux automatic prerequisite setup pins the GNUstep bootstrap executable
+  digest instead of trusting a checksum downloaded with the script.
+
 - Deploy init restricts generated secret files before writing their contents
   and stops on permission errors, replacing the later best-effort chmod.
 

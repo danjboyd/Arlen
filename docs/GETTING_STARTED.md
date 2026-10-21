@@ -30,6 +30,8 @@ under `~/.local/share/arlen`, and writes a launcher to `~/.local/bin`. It
 configures future bash/zsh shells automatically. The final `export` in the
 command above makes `arlen` available immediately in the current shell.
 The launcher loads the GNUstep environment for you.
+When automatic setup needs GNUstep, it checks the bootstrap script against a
+SHA256 pinned in the Arlen installer before executing it.
 
 Check the result:
 

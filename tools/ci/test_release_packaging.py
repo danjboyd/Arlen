@@ -46,6 +46,50 @@ class SourceArchiveTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
 
 
+class LinuxBootstrapTrustTests(unittest.TestCase):
+    def test_matching_remote_checksum_cannot_replace_pinned_bootstrap(self):
+        installer = (REPO_ROOT / "tools/install.sh").read_text()
+        start = installer.index("  if ! linux_toolchain_ready; then\n")
+        end = installer.index("\n  fi\n  linux_toolchain_ready", start) + len("\n  fi")
+        fragment = installer[start:end]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "substitute-bootstrap.sh"
+            marker = root / "bootstrap-executed"
+            payload.write_text('#!/bin/sh\nprintf executed > "$ARLEN_TEST_BOOTSTRAP_MARKER"\n')
+            script = r'''
+set -euo pipefail
+linux_toolchain_ready() { return 1; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+sha256_of() {
+  python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+}
+curl() {
+  local output='' url=''
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) output="$2"; shift 2 ;;
+      -*) shift ;;
+      *) url="$1"; shift ;;
+    esac
+  done
+  case "$url" in
+    *.sha256) printf '%s  gnustep-bootstrap.sh\n' "$(sha256_of "$ARLEN_TEST_BOOTSTRAP_PAYLOAD")" > "$output" ;;
+    *) cp "$ARLEN_TEST_BOOTSTRAP_PAYLOAD" "$output" ;;
+  esac
+}
+setup_fragment() {
+''' + fragment + '\n}\nsetup_fragment\n'
+            environment = dict(os.environ, work_dir=directory,
+                               ARLEN_TEST_BOOTSTRAP_PAYLOAD=str(payload),
+                               ARLEN_TEST_BOOTSTRAP_MARKER=str(marker))
+            result = subprocess.run(["bash", "-c", script], env=environment,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("GNUstep bootstrap checksum mismatch", result.stderr)
+            self.assertFalse(marker.exists(), "untrusted bootstrap must not execute")
+
+
 class InstallPathHintTests(unittest.TestCase):
     def test_installer_persists_path_for_fresh_shells_without_duplicate_entries(self):
         cases = [

@@ -257,9 +257,10 @@ setup_linux() {
   fi
   if ! linux_toolchain_ready; then
     local bootstrap_url="https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh"
+    # Pin executable bytes independently of checksums served with the download.
+    local bootstrap_sha256="3bdfa7a29a6442ce1bb994b027bfcba78beec649ae820391f009ac9eeb40ba63"
     curl -fsSL "$bootstrap_url" -o "$work_dir/gnustep-bootstrap.sh" || die "GNUstep bootstrap download failed"
-    curl -fsSL "$bootstrap_url.sha256" -o "$work_dir/bootstrap.sha256" || die "GNUstep bootstrap checksum download failed"
-    [[ "$(sha256_of "$work_dir/gnustep-bootstrap.sh")" == "$(awk 'NR==1 {print $1}' "$work_dir/bootstrap.sha256")" ]] || die "GNUstep bootstrap checksum mismatch"
+    [[ "$(sha256_of "$work_dir/gnustep-bootstrap.sh")" == "$bootstrap_sha256" ]] || die "GNUstep bootstrap checksum mismatch"
     sh "$work_dir/gnustep-bootstrap.sh" --yes setup --user || die "GNUstep setup failed; existing Arlen installation preserved"
   fi
   linux_toolchain_ready || die "GNUstep setup completed but a clang GNUstep 2.2 toolchain is still unavailable"

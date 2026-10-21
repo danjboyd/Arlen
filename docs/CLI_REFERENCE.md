@@ -37,6 +37,10 @@ cases; module form parsers use an empty value and skip an invalid name.
 
 ## Installer (`tools/install.sh`)
 
+Linux automatic setup verifies the GNUstep bootstrap executable against a
+pinned SHA256 before execution. A checksum downloaded alongside substituted
+content cannot authorize that content.
+
 ```bash
 bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
