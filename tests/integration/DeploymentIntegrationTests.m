@@ -4674,6 +4674,28 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *phase9hDir = [fixtureRoot stringByAppendingPathComponent:@"phase9h"];
     NSString *phase9iDir = [fixtureRoot stringByAppendingPathComponent:@"phase9i"];
 
+    // This test supplies synthetic lane artifacts, so its risk register must
+    // also be a fixture. The real register's review date must continue to gate
+    // actual releases rather than making this positive generator test expire.
+    NSString *riskPath = [fixtureRoot stringByAppendingPathComponent:@"known_risks.json"];
+    NSDateFormatter *riskDate = [[NSDateFormatter alloc] init];
+    riskDate.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    riskDate.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    riskDate.dateFormat = @"yyyy-MM-dd";
+    NSDate *now = [NSDate date];
+    NSDictionary *riskFixture = @{
+      @"version" : @"phase9j-known-risk-register-v1",
+      @"lastUpdated" : [riskDate stringFromDate:now],
+      @"risks" : @[ @{
+        @"id" : @"fixture-active-risk", @"title" : @"Synthetic generator input",
+        @"status" : @"active", @"severity" : @"medium", @"owner" : @"test-fixture",
+        @"targetDate" : [riskDate stringFromDate:[now dateByAddingTimeInterval:365 * 24 * 60 * 60]],
+      } ],
+    };
+    NSData *riskData = [NSJSONSerialization dataWithJSONObject:riskFixture options:0 error:NULL];
+    XCTAssertNotNil(riskData);
+    XCTAssertTrue([riskData writeToFile:riskPath atomically:YES]);
+
     XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"manifest.json"]
                           content:@"{\n"
                                   "  \"version\": \"phase5e-confidence-v1\"\n"
@@ -4723,8 +4745,10 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *command = [NSString stringWithFormat:
         @"cd %@ && python3 ./tools/ci/generate_phase9j_release_certification_pack.py "
          "--repo-root %@ --output-dir %@ --release-id rc-test-001 "
-         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@",
-        repoRoot, repoRoot, outputRoot, phase5eDir, phase9hDir, phase9iDir];
+         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@ --risk-register %@",
+        [self shellQuoted:repoRoot], [self shellQuoted:repoRoot], [self shellQuoted:outputRoot],
+        [self shellQuoted:phase5eDir], [self shellQuoted:phase9hDir], [self shellQuoted:phase9iDir],
+        [self shellQuoted:riskPath]];
     NSString *output = [self runShellCapture:command exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertTrue([output containsString:@"phase9j-certification: generated artifacts"], @"%@", output);
