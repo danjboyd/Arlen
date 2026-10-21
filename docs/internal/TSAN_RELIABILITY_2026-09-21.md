@@ -25,8 +25,9 @@ bash tools/ci/run_linux_thread_race_nightly.sh
 
 The diagnostic compiles `tests/fixtures/sanitizers/tsan_runtime_probe.m` using
 clang and the active GNUstep configuration. It runs startup, synchronized
-monitor, NSLock, NSOperationQueue, and deliberately racy Foundation-callback
-probes both with and without the current suppressions. It retains every log,
+monitor, NSLock, NSOperationQueue (including idle worker retirement), cold
+Foundation singleton/string/regex operations, concurrent dispatch, and deliberately
+racy Foundation-callback probes both with and without the current suppressions. It retains every log,
 compiler command, compiler version, linked library paths, kernel and effective
 suppression text. TSAN logs include library build IDs and offsets even where
 private symbols are stripped.
@@ -120,3 +121,14 @@ No upstream library modification or TSAN gate promotion is part of this change.
 - TSAN diagnostic controls detect the deliberate application race; unsuppressed
   and narrowed runs expose the queue/CLI/configuration findings above. The full
   TSAN suite and HTTP concurrency probe are not certified clean.
+
+## v0.3.1 dependency follow-up
+
+The isolated dependency recipe and reviewable patches are documented in
+`docs/CI_ALIGNMENT.md`. It builds the same pinned sources in normal and thread
+modes without installing into the host toolchain. Expanded diagnostics exercise
+Foundation caches, idle queue retirement, dispatch once/apply, semaphore handoff,
+group wait/notification publication, concurrent task signals, and KVC cache
+refresh during method replacement, and autoreleased buffers, alongside the unchanged deliberate-race
+canary. This follow-up does not promote the gate or relax the two consecutive
+full-unit-plus-HTTP acceptance requirement above.

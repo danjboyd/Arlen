@@ -13,6 +13,8 @@ FOUNDATION_EXPORT BOOL ALNTestReplaceFilePath(NSData *data, NSString *path);
 FOUNDATION_EXPORT NSFileHandle *_Nullable ALNTestOpenDeleteSharingReader(NSString *path);
 FOUNDATION_EXPORT NSString *ALNTestPathFromRepoRoot(NSString *relativePath);
 FOUNDATION_EXPORT NSString *ALNTestShellQuote(NSString *value);
+// Compiler prefix for GNUstep runtime probes, including selected overlay headers.
+FOUNDATION_EXPORT NSString *ALNTestClangCommand(void);
 FOUNDATION_EXPORT NSString *ALNTestGNUstepSourceCommandForRepoRoot(NSString *_Nullable repoRoot);
 FOUNDATION_EXPORT NSData *_Nullable ALNTestDataAtRelativePath(NSString *relativePath,
                                                               NSError *_Nullable *_Nullable error);
@@ -45,6 +47,8 @@ FOUNDATION_EXPORT NSString *ALNTestFrameworkBuildCommand(NSString *targets);
 FOUNDATION_EXPORT NSString *ALNTestAppBinaryRelativePath(void);
 // path with the .exe suffix the linker adds on Windows; unchanged elsewhere.
 FOUNDATION_EXPORT NSString *ALNTestExecutablePath(NSString *path);
+// Built CLI, without a wrapper that can rebuild the shared framework.
+FOUNDATION_EXPORT NSString *ALNTestArlenCLIPath(void);
 FOUNDATION_EXPORT NSString *ALNTestClientCompileCommand(NSArray<NSString *> *sources,
                                                         NSString *includeDirectory,
                                                         NSString *output);

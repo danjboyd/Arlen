@@ -92,6 +92,24 @@ NSDictionary *ALNLiveRunRuntimeScenario(NSDictionary *scenario, NSError **error)
   NSTask *task = [[NSTask alloc] init];
   task.launchPath = nodePath;
   task.arguments = @[ scriptPath ];
+  // Node is an uninstrumented external tool, like the shell helpers. The live
+  // JavaScript assertions still run; sanitizer policy stays on linked children.
+  NSMutableDictionary *nodeEnvironment =
+      [ALNTestShellEnvironment([[NSProcessInfo processInfo] environment]) mutableCopy];
+  // A system Node may link the same ICU SONAME as the instrumented GNUstep
+  // overlay. Keep Node on its normal libraries, while preserving unrelated
+  // search paths and leaving Arlen child processes on the selected overlay.
+  NSString *overlay = nodeEnvironment[@"ARLEN_TSAN_LIBRARY_PATH"];
+  if ([overlay length] > 0) {
+    NSSet *overlayPaths = [NSSet setWithArray:[overlay componentsSeparatedByString:@":"]];
+    NSMutableArray *paths = [NSMutableArray array];
+    for (NSString *path in [nodeEnvironment[@"LD_LIBRARY_PATH"] componentsSeparatedByString:@":"]) {
+      if (![overlayPaths containsObject:path]) [paths addObject:path];
+    }
+    if ([paths count] > 0) nodeEnvironment[@"LD_LIBRARY_PATH"] = [paths componentsJoinedByString:@":"];
+    else [nodeEnvironment removeObjectForKey:@"LD_LIBRARY_PATH"];
+  }
+  task.environment = nodeEnvironment;
 
   NSPipe *stdinPipe = [NSPipe pipe];
   NSPipe *stdoutPipe = [NSPipe pipe];

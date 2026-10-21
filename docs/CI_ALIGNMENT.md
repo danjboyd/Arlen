@@ -775,3 +775,64 @@ must succeed, while ASan memory errors and UBSan overflow errors in either
 process must fail with the expected diagnostic. The check also verifies that an
 unrelated preload is retained. This corrects runtime selection without changing
 lane names, required checks, or branch-protection requirements.
+
+Code-generation CLI fixtures execute the CLI already built for their test bundle.
+They must not invoke `bin/arlen` with cleared build flags: that wrapper can rebuild
+the shared framework and replace the instrumented CLI during a sanitizer run.
+The shell helper removes sanitizer preloads from Bash while instrumented child
+executables retain their linked runtime and sanitizer options. The external Node
+fixture also removes only the selected overlay directories from its library
+search path: otherwise its system ICU dependency can load the instrumented ICU
+and sanitizer runtime even after the preload is removed. JavaScript assertions
+remain enabled, and unrelated library search paths are retained.
+
+`ARLEN_TSAN_LIBRARY_PATH` can select an isolated instrumented dependency overlay
+for XCTest, HTTP runtime probes, and Foundation diagnostics.
+`ARLEN_TSAN_EXTRA_FLAGS` supplies matching overlay header flags to both Arlen and
+the standalone Foundation probe and generated runtime-test executables, before
+installed GNUstep include paths. Build tools retain
+the bootstrap environment, and the vendored XCTest library precedes the overlay.
+Standalone probes and runtime-test children link the same shared clang TSan
+runtime as the dependency DSOs; a static runtime must not be mixed with ICU
+loading a shared one. The selected libraries and positive-control results must accompany any clean-run
+claim; an overlay does not authorize new suppressions or test exclusions.
+
+The thread-race lane builds an isolated dependency set with
+`tools/ci/build_tsan_toolchain.py --mode thread`. Exact upstream commits and the
+ICU archive checksum are in `tools/ci/tsan-toolchain/sources.json`; adjacent patch
+files are applied only after verifying each checkout. The cache key includes
+compiler/bootstrap flags, patches, build mode, and builder identity. A completed
+build records shared-library and dispatch-header hashes in `manifest.json`; changed artifacts fail
+verification instead of being silently reused. Build logs and manifests are
+uploaded with the nightly results. The lane and branch-protection requirements
+remain unchanged.
+
+For local reproduction, source `tools/source_gnustep_env.sh`, run the builder,
+and source the returned `environment.sh` before running the thread-race lane.
+`--mode normal` builds the same patches without sanitizer instrumentation for
+production toolchain review. Neither mode installs system files. Production
+packaging must propagate the patched libraries and dispatch headers together;
+a clean instrumented overlay is not evidence that existing installations have
+received the fixes. Both modes enable GNUstep Base's new KVO implementation.
+Base explicitly compiles and links against the pinned ICU headers and libraries,
+including when the bootstrap host supplies a different ICU version.
+The Base pin matches the existing managed toolchain source lock, including its
+queue idle-exit lock-order fix and the Foundation APIs Arlen already uses.
+
+The dependency patches preserve cached string hashes and class layout. They
+publish shared string metadata, singleton state, runtime class metadata, and
+exception metadata atomically or under the existing lock. NSTask consumes its
+cross-thread child-signal flag with a lock-free atomic exchange. KVC cache
+entries are copied and updated under the existing lock; method resolution and
+getter calls run outside it to preserve reentrancy. Autoreleased-buffer class
+metadata initialization is locked, and runtime method implementation pointers
+use atomic access with the existing pointer layout. Dispatch changes
+cover once publication, the final apply-worker reference, queue-link publication,
+group completion and notifications, and atomic queue-tail, reference-count, and
+semaphore-timeout reads. The Objective-C weak registry lives for the process
+lifetime so detached workers cannot race its destructor at exit. Standalone
+group and notification stress probes retain coverage of these handoffs.
+Linux PI-futex synchronization
+receives TSan acquire/release
+annotations at actual successful lock and unlock boundaries; non-sanitized
+builds omit those annotations. No library-wide suppression is added.
