@@ -1251,7 +1251,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"
@@ -1282,7 +1282,11 @@
     XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS= ARGS=EXTRA_OBJC_FLAGS= EOC_TOOL="],
                   @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@"eocc transpile module-transpile"], @"%@", makeLog);
-    XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer ARGS=EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer EOC_TOOL="],
+    NSString *instrumentedFlags = [NSString stringWithFormat:
+        @"-fsanitize=thread -fno-omit-frame-pointer -shared-libsan -Wl,-rpath,%@ -Wno-unused-command-line-argument", fakeBin];
+    NSString *instrumentedInvocation = [NSString stringWithFormat:
+        @"MAKE_EXTRA_OBJC_FLAGS=%@ ARGS=EXTRA_OBJC_FLAGS=%@ EOC_TOOL=", instrumentedFlags, instrumentedFlags];
+    XCTAssertTrue([makeLog containsString:instrumentedInvocation],
                   @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@" -o "], @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@"arlen"], @"%@", makeLog);
@@ -1388,7 +1392,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"
@@ -1487,7 +1491,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"

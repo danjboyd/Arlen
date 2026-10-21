@@ -629,6 +629,13 @@ Shell helpers remove only TSAN preload entries before launching Bash and keep
 TSAN options for linked instrumented binaries. No tests are excluded solely
 because TSAN is active; unrelated service-dependent opt-in tests remain.
 
+TSan resolves `libclang_rt.tsan` from the active clang installation and builds
+instrumented children with `-shared-libsan`, matching XCTest's preload. The
+required sanitizer runtime checks and nightly thread lane exercise dlopen and
+exec with a deliberate race; GCC's `libtsan.so` is not a supported substitute.
+This runtime alignment does not change required check names, branch protection,
+suppression scope, or the two-clean-run criterion for promotion.
+
 See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
 remaining runtime work, and promotion criteria.
 

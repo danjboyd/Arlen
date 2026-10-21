@@ -82,14 +82,21 @@ if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
   set -u
 fi
 
-tsan_so="$(clang -print-file-name=libtsan.so)"
+# A dlopened XCTest bundle and exec'd children must use the same clang
+# runtime. clang -print-file-name=libtsan.so can select GCC's incompatible DSO.
+tsan_arch="$(clang -dumpmachine)"
+tsan_arch="${tsan_arch%%-*}"
+tsan_so="$(clang -print-file-name="libclang_rt.tsan-${tsan_arch}.so")"
+if [[ ! -f "$tsan_so" ]]; then
+  tsan_so="$(clang -print-runtime-dir)/libclang_rt.tsan.so"
+fi
 if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then
   echo "ci: tsan experimental unavailable (libtsan.so missing)" | tee -a "$staged_log_path"
   write_summary "unavailable" "77" "libtsan_unavailable"
   exit 77
 fi
 
-tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer}"
+tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer} -shared-libsan -Wl,-rpath,$(dirname "$tsan_so") -Wno-unused-command-line-argument"
 tsan_suppressions_file="${ARLEN_TSAN_SUPPRESSIONS_FILE:-$repo_root/tests/fixtures/sanitizers/phase9h_tsan.supp}"
 tsan_options="${TSAN_OPTIONS:-halt_on_error=1:history_size=7:second_deadlock_stack=1}"
 using_default_tsan_suppressions=0

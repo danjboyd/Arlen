@@ -63,6 +63,12 @@ On macOS, `./bin/test --smoke-only` runs a fast smoke check. On Linux,
 `./bin/test` runs the full `make test`; use the targets above or a filter for
 something quicker.
 
+The Linux TSan lane uses clang's shared runtime for both XCTest bundles and
+instrumented child executables. After sourcing the GNUstep environment, run
+`python3 tools/ci/test_clang_sanitizer_runtime.py` to check dlopen/exec coverage
+with deliberate ASan, UBSan, and TSan faults. Do not substitute GCC's
+`libtsan.so` or disable detection to make the lane pass.
+
 For a single test method (XCTest filter syntax):
 
 ```bash

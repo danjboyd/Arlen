@@ -65,7 +65,14 @@ if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
 fi
 make boomhauer
 
-tsan_so="$(clang -print-file-name=libtsan.so)"
+# A dlopened XCTest bundle and exec'd children must use the same clang
+# runtime. clang -print-file-name=libtsan.so can select GCC's incompatible DSO.
+tsan_arch="$(clang -dumpmachine)"
+tsan_arch="${tsan_arch%%-*}"
+tsan_so="$(clang -print-file-name="libclang_rt.tsan-${tsan_arch}.so")"
+if [[ ! -f "$tsan_so" ]]; then
+  tsan_so="$(clang -print-runtime-dir)/libclang_rt.tsan.so"
+fi
 if [[ -n "$tsan_so" && -f "$tsan_so" ]]; then
   {
     echo "phase10m-thread-race: engine=tsan"

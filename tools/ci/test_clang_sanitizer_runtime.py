@@ -12,6 +12,64 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_tsan_dlopen_and_exec_use_clang_runtime(self):
+        compiler = os.environ.get('ARLEN_CC', 'clang')
+        arch = subprocess.check_output([compiler, '-dumpmachine'], text=True).strip().split('-')[0]
+        runtime = Path(subprocess.check_output(
+            [compiler, f'-print-file-name=libclang_rt.tsan-{arch}.so'], text=True).strip())
+        if not runtime.is_file():
+            runtime = Path(subprocess.check_output(
+                [compiler, '-print-runtime-dir'], text=True).strip()) / 'libclang_rt.tsan.so'
+        self.assertTrue(runtime.is_file(), f'clang shared TSan runtime missing: {runtime}')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            flags = ['-fsanitize=thread', '-shared-libsan', '-g', '-O1',
+                     '-fno-omit-frame-pointer', '-pthread', f'-Wl,-rpath,{runtime.parent}']
+            fault = '''#include <pthread.h>
+#include <stdlib.h>
+volatile int ArlenTSanRuntimeCanary;
+static pthread_barrier_t barrier;
+static void *worker(void *unused) {
+ pthread_barrier_wait(&barrier);
+ for (int i=0;i<10000;i++) ArlenTSanRuntimeCanary++;
+ return 0;
+}
+int check(int mode) {
+ if (!mode) return 0;
+ pthread_t t;
+ pthread_barrier_init(&barrier,0,2);
+ pthread_create(&t,0,worker,0); worker(0); pthread_join(t,0);
+ pthread_barrier_destroy(&barrier); return 0;
+}
+'''
+            for name, code, extra in [
+                ('bundle.so', fault, ['-shared', '-fPIC']),
+                ('child', fault + '\nint main(int c,char **v){return check(atoi(v[1]));}', []),
+                ('parent', '''#include <dlfcn.h>
+#include <stdlib.h>
+#include <unistd.h>
+int main(int c,char **v) {
+ void *lib=dlopen(v[1],RTLD_NOW); if(!lib) return 90;
+ int (*check)(int)=dlsym(lib,"check"); if(!check) return 91;
+ check(atoi(v[3])); execl(v[2],v[2],v[4],(char *)0); return 92;
+}''', ['-ldl'])]:
+                source = root / (name + '.c')
+                source.write_text(code)
+                subprocess.run([compiler, str(source), '-o', str(root / name),
+                                *(flags if name != 'parent' else []), *extra], check=True)
+            env = dict(os.environ, LD_PRELOAD=str(runtime),
+                       TSAN_OPTIONS='halt_on_error=1:exitcode=66')
+            for parent_mode, child_mode in [(0, 0), (1, 0), (0, 1)]:
+                result = subprocess.run([str(root / 'parent'), str(root / 'bundle.so'),
+                                         str(root / 'child'), str(parent_mode), str(child_mode)],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                if parent_mode or child_mode:
+                    self.assertEqual(result.returncode, 66, result.stderr)
+                    self.assertIn('ThreadSanitizer: data race', result.stderr)
+                    self.assertIn('ArlenTSanRuntimeCanary', result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_missing_runtime_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             compiler = Path(tmp) / 'clang'
