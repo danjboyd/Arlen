@@ -10,6 +10,7 @@
 NSString *const ALNContextRoutePolicyNamesStashKey = @"aln.route_policies.names";
 NSString *const ALNContextRoutePolicyMatchedPathStashKey = @"aln.route_policies.matched_path";
 NSString *const ALNContextRoutePolicyDecisionStashKey = @"aln.route_policies.decision";
+NSString *const ALNContextRoutePolicyAdditionalPathStashKey = @"aln.route_policies.additional_path";
 
 static NSString *ALNRoutePolicyErrorDomain = @"Arlen.RoutePolicy.Error";
 
@@ -127,7 +128,7 @@ static NSArray *ALNTrustedProxyCIDRs(NSDictionary *config) {
 }
 
 static NSArray *ALNPolicyNamesForPath(NSDictionary *config, NSString *path,
-                                     NSString *matchedPath, NSArray *routePolicyNames) {
+                                     NSString *matchedPath, NSString *additionalPath, NSArray *routePolicyNames) {
   NSDictionary *policies = ALNRoutePoliciesDictionary(config);
   NSMutableOrderedSet *names = [NSMutableOrderedSet orderedSet];
   NSArray *sortedNames = [[policies allKeys] sortedArrayUsingSelector:@selector(compare:)];
@@ -136,7 +137,8 @@ static NSArray *ALNPolicyNamesForPath(NSDictionary *config, NSString *path,
     NSArray *prefixes = ALNPolicyStringArray(policy[@"pathPrefixes"]);
     for (NSString *prefix in prefixes) {
       if (ALNPathMatchesPolicyPrefix(path, prefix) ||
-          ALNPathMatchesPolicyPrefix(matchedPath, prefix)) {
+          ALNPathMatchesPolicyPrefix(matchedPath, prefix) ||
+          ([additionalPath length] > 0 && ALNPathMatchesPolicyPrefix(additionalPath, prefix))) {
         [names addObject:name];
         break;
       }
@@ -154,9 +156,11 @@ static NSArray *ALNPolicyNamesForRequest(ALNContext *context) {
   NSString *path = context.request.path ?: @"/";
   NSString *matchedPath = [context.stash[ALNContextRoutePolicyMatchedPathStashKey] isKindOfClass:[NSString class]]
                               ? context.stash[ALNContextRoutePolicyMatchedPathStashKey] : path;
+  NSString *additionalPath = [context.stash[ALNContextRoutePolicyAdditionalPathStashKey] isKindOfClass:[NSString class]]
+                                 ? context.stash[ALNContextRoutePolicyAdditionalPathStashKey] : nil;
   NSArray *routeNames = [context.stash[ALNContextRoutePolicyNamesStashKey] isKindOfClass:[NSArray class]]
                             ? context.stash[ALNContextRoutePolicyNamesStashKey] : @[];
-  return ALNPolicyNamesForPath([context application].config ?: @{}, path, matchedPath, routeNames);
+  return ALNPolicyNamesForPath([context application].config ?: @{}, path, matchedPath, additionalPath, routeNames);
 }
 
 static NSDictionary *ALNResolvedClientIP(ALNContext *context, BOOL trustForwardedClientIP) {
@@ -219,7 +223,7 @@ static NSDictionary *ALNRoutePolicyDenial(NSString *policyName,
   NSDictionary *config = [context application].config ?: @{};
   NSDictionary *policies = ALNRoutePoliciesDictionary(config);
   NSString *path = route.pathPattern ?: @"/";
-  NSArray *names = ALNPolicyNamesForPath(config, path, path, route.policyNames ?: @[]);
+  NSArray *names = ALNPolicyNamesForPath(config, path, path, nil, route.policyNames ?: @[]);
   for (NSString *name in names) {
     NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : nil;
     if (policy == nil || ALNPolicyListFieldProblem(policy, @"sourceIPAllowlist") != nil) return NO;
