@@ -779,14 +779,9 @@ BOOL ALNEOCAppendYield(NSMutableString *out,
   if (!found) {
     return YES;
   }
-  if ([resolvedSlot isEqualToString:@"content"]) {
-    // The `content` context value is the rendered page body supplied by the
-    // layout renderer, so it keeps raw output like the content slot itself.
-    return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
-  }
-  // A named slot that no template filled falls back to the context value of
-  // the same name. That value is ordinary data, so it is HTML-escaped like a
-  // `<%= %>` expression.
+  // A slot that no template filled falls back to ordinary context data,
+  // including `content`. Only captured rendered output in the slot map is
+  // trusted HTML; context values are escaped like `<%= %>` expressions.
   return ALNEOCAppendEscapedChecked(out, value, templatePath, line, column, error);
 }
 

@@ -764,20 +764,20 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
   }
 }
 
-- (void)testAppendYieldUnnamedContentContextFallbackStaysRaw {
+- (void)testAppendYieldUnnamedContentContextFallbackIsEscaped {
   NSDictionary *token = ALNEOCPushCompositionState();
   @try {
     NSMutableString *out = [NSMutableString string];
     NSError *error = nil;
     XCTAssertTrue(ALNEOCAppendYield(out,
-                                    @{ @"content" : @"<p>body</p>" },
+                                    @{ @"content" : @"<script>alert(1)</script>" },
                                     @"",
                                     @"layouts/application.html.eoc",
                                     2,
                                     1,
                                     &error));
     XCTAssertNil(error);
-    XCTAssertEqualObjects(@"<p>body</p>", out);
+    XCTAssertEqualObjects(@"&lt;script&gt;alert(1)&lt;/script&gt;", out);
   } @finally {
     ALNEOCPopCompositionState(token);
   }
