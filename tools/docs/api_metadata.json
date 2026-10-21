@@ -294,6 +294,10 @@
       "purpose": "Insert middleware before the first middleware matching the supplied class, or append when none is present.",
       "usage": "Call during bootstrap before request dispatch. Nil middleware is ignored; a Nil class appends the middleware."
     },
+    "ALNController|renderNegotiatedTemplate:context:jsonObject:error:": {
+      "purpose": "Render template or JSON based on negotiated request format and add `Vary: Accept`.",
+      "usage": "Supply a separate JSON object; nil produces `{}` and never serializes template context."
+    },
     "ALNResponse|setHeadersIfMissing:": {
       "purpose": "Set only response header names that have no current value.",
       "usage": "Existing first and repeated values are preserved. Invalid header input is ignored."

@@ -541,6 +541,10 @@ See [propane's state contract](PROPANE.md#multi-worker-state-contract).
 
 An unfilled EOC `content` yield escapes its context fallback; `ALNView` still
 renders the captured page body as HTML in a filled content slot.
+
+`renderNegotiatedTemplate:context:jsonObject:error:` uses only `jsonObject` for
+JSON responses; nil produces `{}`. Responses include `Vary: Accept` so caches
+separate HTML and JSON variants.
 Template rendering restores thread-local options and composition slots when a
 body or layout throws. Exceptions still propagate to the caller; failed renders
 do not leave slot content available to later renders on the same worker thread.
