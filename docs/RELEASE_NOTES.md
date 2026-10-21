@@ -82,7 +82,10 @@
 - Parent `security.routePolicies` path prefixes apply to mounted child requests
   before forwarding. Parent session state is checked for `requireAuth`, and
   source IP rules use the original request path and peer. Exact mounted leaf
-  prefixes also cover format-suffixed requests and nested mounts.
+  prefixes also cover format-suffixed requests and nested mounts. Startup
+  rejects mounted parent/child sessions that use the same cookie name with
+  different secrets; shared-session child cookie writes take precedence over
+  parent legacy refresh cookies.
 
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
   cannot be reloaded. Backend exceptions release writer locks, discard
