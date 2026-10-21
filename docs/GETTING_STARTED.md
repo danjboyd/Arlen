@@ -469,10 +469,11 @@ Notifications 1.3.2 removes webhook URLs and headers from persisted outbox
 records; upgrade vendored modules and rotate older exports or backups that held
 webhook credentials.
 
-When mounting apps that both enable sessions, use distinct `session.cookieName`
-values if their secrets differ. Startup rejects a shared cookie name with
-different secrets. A shared cookie name and secret, as used by the admin UI
-child app, remains supported.
+Session cookies use `Path=/` across a mounted app tree. Use distinct
+`session.cookieName` values for any enabled sessions with different secrets,
+including siblings or descendants behind a session-disabled app. Startup
+rejects a shared name with different secrets. A shared name and secret, as used
+by the admin UI child app, remains supported.
 
 For company sign-in, add `auth`, configure an OIDC provider and an application
 identity resolver, and explicitly disable stub/password access if your copied

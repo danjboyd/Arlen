@@ -83,8 +83,9 @@
   before forwarding. Parent session state is checked for `requireAuth`, and
   source IP rules use the original request path and peer. Exact mounted leaf
   prefixes also cover format-suffixed requests and nested mounts. Startup
-  rejects mounted parent/child sessions that use the same cookie name with
-  different secrets; shared-session child cookie writes take precedence over
+  rejects enabled sessions anywhere in the mount tree that use the same cookie
+  name with different secrets, including siblings and descendants behind a
+  session-disabled app. Shared-session child cookie writes take precedence over
   parent legacy refresh cookies.
 
 - Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog

@@ -742,6 +742,44 @@ static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
   return ALNEnvironmentIsDevelopmentLike(environment);
 }
 
+static NSDictionary *ALNDictionaryConfigValue(NSDictionary *config, NSString *key);
+static BOOL ALNBoolConfigValue(id value, BOOL defaultValue);
+static NSString *ALNStringConfigValue(id value, NSString *defaultValue);
+
+// Session cookies use Path=/ across the mount tree, including siblings and
+// descendants behind a session-disabled intermediate application.
+static NSError *ALNMountSessionCookieConflict(ALNApplication *root) {
+  NSMutableArray *pending = [NSMutableArray arrayWithObject:@{ @"application" : root, @"path" : @"/" }];
+  NSMutableDictionary *seen = [NSMutableDictionary dictionary];
+  while ([pending count] > 0) {
+    NSDictionary *node = [pending lastObject];
+    [pending removeLastObject];
+    ALNApplication *app = node[@"application"];
+    NSString *path = node[@"path"];
+    NSDictionary *session = ALNDictionaryConfigValue(app.config, @"session");
+    if (ALNBoolConfigValue(session[@"enabled"], NO)) {
+      NSString *name = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
+      NSString *secret = ALNStringConfigValue(session[@"secret"], @"");
+      NSDictionary *previous = seen[name];
+      if (previous != nil && ![previous[@"secret"] isEqualToString:secret]) {
+        return [NSError errorWithDomain:ALNApplicationErrorDomain code:309
+                              userInfo:@{ NSLocalizedDescriptionKey :
+                                  [NSString stringWithFormat:@"mounted application at %@ shares session cookie %@ with %@ but uses a different secret; configure distinct session.cookieName values",
+                                      path, name, previous[@"path"]] }];
+      }
+      if (previous == nil) seen[name] = @{ @"secret" : secret, @"path" : path };
+    }
+    for (NSDictionary *entry in app.mutableMounts) {
+      ALNApplication *child = [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
+      if (child == nil) continue;
+      NSString *prefix = ALNStringConfigValue(entry[@"prefix"], @"/");
+      NSString *childPath = [path isEqualToString:@"/"] ? prefix : [path stringByAppendingString:prefix];
+      [pending addObject:@{ @"application" : child, @"path" : childPath }];
+    }
+  }
+  return nil;
+}
+
 @implementation ALNApplication
 
 static NSString *ALNTrimmedStringValue(id value) {
@@ -5456,31 +5494,16 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
+  NSError *cookieConflict = ALNMountSessionCookieConflict(self);
+  if (cookieConflict != nil) {
+    if (error != NULL) *error = cookieConflict;
+    return NO;
+  }
   for (NSDictionary *entry in self.mutableMounts) {
     ALNApplication *mounted =
         [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
     if (mounted == nil) {
       continue;
-    }
-    NSDictionary *parentSession = ALNDictionaryConfigValue(self.config, @"session");
-    NSDictionary *childSession = ALNDictionaryConfigValue(mounted.config, @"session");
-    if (ALNBoolConfigValue(parentSession[@"enabled"], NO) &&
-        ALNBoolConfigValue(childSession[@"enabled"], NO)) {
-      NSString *parentCookieName = ALNStringConfigValue(parentSession[@"cookieName"], @"arlen_session");
-      NSString *childCookieName = ALNStringConfigValue(childSession[@"cookieName"], @"arlen_session");
-      NSString *parentSecret = ALNStringConfigValue(parentSession[@"secret"], @"");
-      NSString *childSecret = ALNStringConfigValue(childSession[@"secret"], @"");
-      if ([parentCookieName isEqualToString:childCookieName] &&
-          ![parentSecret isEqualToString:childSecret]) {
-        if (error != NULL) {
-          NSString *prefix = ALNStringConfigValue(entry[@"prefix"], @"/");
-          *error = [NSError errorWithDomain:ALNApplicationErrorDomain code:309
-                                   userInfo:@{ NSLocalizedDescriptionKey :
-                                      [NSString stringWithFormat:@"mounted application at %@ shares session cookie %@ with parent but uses a different secret; configure distinct session.cookieName values",
-                                          prefix, parentCookieName] }];
-        }
-        return NO;
-      }
     }
     NSError *mountedError = nil;
     BOOL mountedStarted = [mounted startWithError:&mountedError];

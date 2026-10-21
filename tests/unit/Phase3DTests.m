@@ -486,6 +486,69 @@
   XCTAssertTrue([error.localizedDescription containsString:@"session.cookieName"]);
 }
 
+- (void)testNestedSessionCookieConflictAcrossDisabledIntermediate {
+  NSString *rootSecret = @"mounted-root-cookie-test-secret-0123456789";
+  NSString *otherSecret = @"mounted-other-cookie-test-secret-0123456789";
+  ALNApplication *root = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  ALNApplication *middle = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *leaf = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : otherSecret }
+  }];
+  XCTAssertTrue([middle mountApplication:leaf atPrefix:@"/leaf"]);
+  XCTAssertTrue([root mountApplication:middle atPrefix:@"/middle"]);
+  NSError *error = nil;
+  XCTAssertFalse([root startWithError:&error]);
+  XCTAssertEqual((NSInteger)309, error.code);
+  XCTAssertTrue([error.localizedDescription containsString:@"/middle/leaf"]);
+
+  ALNApplication *sharedLeaf = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  ALNApplication *sharedMiddle = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *sharedRoot = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  XCTAssertTrue([sharedMiddle mountApplication:sharedLeaf atPrefix:@"/leaf"]);
+  XCTAssertTrue([sharedRoot mountApplication:sharedMiddle atPrefix:@"/middle"]);
+  XCTAssertTrue([sharedRoot startWithError:&error], @"%@", error);
+}
+
+- (void)testSiblingSessionCookieConflictUnderDisabledRoot {
+  NSDictionary *firstSession = @{ @"enabled" : @YES,
+                                  @"secret" : @"mounted-first-cookie-test-secret-0123456789" };
+  NSDictionary *secondSession = @{ @"enabled" : @YES,
+                                   @"secret" : @"mounted-second-cookie-test-secret-0123456789" };
+  ALNApplication *root = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *first = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : firstSession }];
+  ALNApplication *second = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : secondSession }];
+  XCTAssertTrue([root mountApplication:first atPrefix:@"/first"]);
+  XCTAssertTrue([root mountApplication:second atPrefix:@"/second"]);
+  NSError *error = nil;
+  XCTAssertFalse([root startWithError:&error]);
+  XCTAssertEqual((NSInteger)309, error.code);
+  XCTAssertTrue([error.localizedDescription containsString:@"arlen_session"]);
+
+  ALNApplication *distinctRoot = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *distinctFirst = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : firstSession }];
+  ALNApplication *distinctSecond = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES,
+      @"secret" : @"mounted-second-cookie-test-secret-0123456789", @"cookieName" : @"second_session" }
+  }];
+  XCTAssertTrue([distinctRoot mountApplication:distinctFirst atPrefix:@"/first"]);
+  XCTAssertTrue([distinctRoot mountApplication:distinctSecond atPrefix:@"/second"]);
+  XCTAssertTrue([distinctRoot startWithError:&error], @"%@", error);
+}
+
 - (void)testMountedSharedSessionChildWriteWinsParentLegacyRefresh {
   NSString *secret = @"mounted-shared-cookie-test-secret-0123456789";
   NSDictionary *session = @{ @"enabled" : @YES, @"secret" : secret };
