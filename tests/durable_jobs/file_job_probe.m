@@ -14,6 +14,18 @@ int main(int argc, const char **argv) {
         if (!jobID) return 4;
         printf("%s\n", jobID.UTF8String);
       }
+    } else if ([@(argv[1]) isEqualToString:@"mixed"]) {
+      for (NSUInteger i = 0; i < 200; i++) {
+        NSString *jobID = [adapter enqueueJobNamed:@"test" payload:@{} options:nil error:&error];
+        if (!jobID) return 4;
+        printf("produced %s\n", jobID.UTF8String);
+        ALNJobEnvelope *job = [adapter dequeueDueJobAt:[NSDate dateWithTimeIntervalSinceNow:1] error:&error];
+        if (error) return 5;
+        if (job) {
+          if (![adapter acknowledgeJobID:job.jobID error:&error]) return 6;
+          printf("consumed %s\n", job.jobID.UTF8String);
+        }
+      }
     } else if ([@(argv[1]) isEqualToString:@"consume"]) {
       for (;;) {
         ALNJobEnvelope *job = [adapter dequeueDueJobAt:[NSDate dateWithTimeIntervalSinceNow:1] error:&error];
