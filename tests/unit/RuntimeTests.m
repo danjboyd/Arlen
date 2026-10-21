@@ -109,6 +109,22 @@ static NSString *RenderCollectionEmpty(id ctx, NSError **error) {
 
 @implementation RuntimeTests
 
+- (void)testSafeLinkURLRejectsExecutableSchemesAndObfuscation {
+  for (NSString *unsafe in @[ @"javascript:alert(1)", @"JaVaScRiPt:alert(1)",
+                             @"data:text/html,hi", @" javaScript:alert(1)",
+                             @"java\tscript:alert(1)", @"//example.test/path",
+                             @"\\\\example.test\\path" ]) {
+    XCTAssertEqualObjects(@"#", ALNEOCSafeLinkURL(unsafe), @"%@", unsafe);
+  }
+  XCTAssertEqualObjects(@"#", ALNEOCSafeLinkURL(nil));
+  XCTAssertEqualObjects(@"#", ALNEOCSafeLinkURL(@42));
+  for (NSString *safe in @[ @"/admin/resources", @"../orders/1", @"#details",
+                           @"?page=2", @"https://example.test/a", @"http://example.test/a",
+                           @"mailto:user@example.test" ]) {
+    XCTAssertEqualObjects(safe, ALNEOCSafeLinkURL(safe));
+  }
+}
+
 - (void)setUp {
   [super setUp];
   ALNEOCClearTemplateRegistry();

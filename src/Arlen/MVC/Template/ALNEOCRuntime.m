@@ -9,6 +9,24 @@ NSString *const ALNEOCErrorLocalNameKey = @"local";
 NSString *const ALNEOCErrorKeyPathKey = @"key_path";
 NSString *const ALNEOCErrorSegmentKey = @"segment";
 
+NSString *ALNEOCSafeLinkURL(id value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) return @"#";
+  NSString *url = value;
+  NSMutableCharacterSet *forbidden = [[NSCharacterSet whitespaceAndNewlineCharacterSet] mutableCopy];
+  [forbidden formUnionWithCharacterSet:[NSCharacterSet controlCharacterSet]];
+  if ([url rangeOfCharacterFromSet:forbidden].location != NSNotFound ||
+      [url rangeOfString:@"\\"].location != NSNotFound || [url hasPrefix:@"//"]) return @"#";
+  NSRange colon = [url rangeOfString:@":"];
+  NSRange separator = [url rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"/?#"]];
+  if (colon.location != NSNotFound &&
+      (separator.location == NSNotFound || colon.location < separator.location)) {
+    NSString *scheme = [[url substringToIndex:colon.location] lowercaseString];
+    if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"] &&
+        ![scheme isEqualToString:@"mailto"]) return @"#";
+  }
+  return url;
+}
+
 static NSString *const ALNEOCThreadOptionsKey = @"aln.eoc.render_options";
 static NSString *const ALNEOCThreadStrictLocalsKey = @"strict_locals";
 static NSString *const ALNEOCThreadStrictStringifyKey = @"strict_stringify";

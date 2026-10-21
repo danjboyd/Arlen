@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Admin UI 1.1.3 rejects executable and ambiguous resource link targets in
+  HTML list and detail pages. Unsafe targets render as `#`; upgrade vendored
+  `admin-ui` modules.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured

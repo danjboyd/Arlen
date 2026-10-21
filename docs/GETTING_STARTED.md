@@ -362,6 +362,8 @@ Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
+Admin UI resource link fields allow relative, HTTP(S), and mailto targets;
+unsafe targets render as `#` with admin-ui 1.1.3.
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
 search with tenant or other resource visibility filters.
 Route policies cover format-suffixed requests to a protected route, such as

@@ -762,6 +762,8 @@ First-party module surfaces after install:
 
 - `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support. SMS send and verification limits use PostgreSQL account counters; locked requests return 429 with `Retry-After`, and unavailable attempt-limit storage returns 503. A nonempty `authModule.mfa.sms.testVerificationCode` is accepted only in development and test; other environments reject it at startup.
 - `admin-ui`: HTML under `/admin/...`, JSON under `/admin/api/...`; built-in users list `q` and `roles` filters match literal text, including `%` and `_`.
+  Resource link fields use only relative, HTTP(S), and mailto targets in HTML
+  (`admin-ui` 1.1.3); unsafe targets become `#`.
 - Generated OpenAPI routes, including `/openapi.json`, are closed in production unless `openapi.publicInProduction = YES` is set explicitly.
 - Ops dashboard history uses a cross-process lock and atomic state replacement when `opsModule.persistence.path` is configured.
 - `POST /auth/api/register` returns a generic accepted response with no authenticated session for new and existing addresses. `authModule.registration.autoLogin = YES` restores the old sign-in flow only in `development` and `test`; other environments reject it at startup.
