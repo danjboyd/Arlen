@@ -5701,6 +5701,73 @@ static void ALNFinalizeResponse(ALNApplication *application,
                            ? mountedEntry[@"prefix"]
                            : @"";
     if (mountedApp != nil && [rewrittenPath length] > 0) {
+      NSDictionary *security = [self.config[@"security"] isKindOfClass:[NSDictionary class]]
+                                   ? self.config[@"security"] : @{};
+      NSDictionary *parentPolicies = [security[@"routePolicies"] isKindOfClass:[NSDictionary class]]
+                                         ? security[@"routePolicies"] : @{};
+      ALNResponse *parentPolicyResponse = nil;
+      if ([parentPolicies count] > 0) {
+        parentPolicyResponse = [[ALNResponse alloc] init];
+        NSMutableDictionary *policyStash = [NSMutableDictionary dictionaryWithObject:self
+                                                                               forKey:ALNContextApplicationStashKey];
+        ALNContext *policyContext = [[ALNContext alloc] initWithRequest:request
+                                                              response:parentPolicyResponse
+                                                                params:@{}
+                                                                 stash:policyStash
+                                                                logger:self.logger
+                                                             perfTrace:ALNDisabledPerfTrace()
+                                                             routeName:@""
+                                                        controllerName:@""
+                                                            actionName:@""];
+        id<ALNMiddleware> parentSession = nil;
+        id<ALNMiddleware> parentRefresh = nil;
+        id<ALNMiddleware> parentPolicy = nil;
+        Class refreshClass = NSClassFromString(@"ALNAuthModuleSessionMiddleware");
+        for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
+          if (parentSession == nil && [middleware isKindOfClass:[ALNSessionMiddleware class]]) {
+            parentSession = middleware;
+          } else if (parentRefresh == nil && refreshClass != Nil &&
+                     [middleware isKindOfClass:refreshClass]) {
+            parentRefresh = middleware;
+          } else if (parentPolicy == nil && [middleware isKindOfClass:[ALNRoutePolicyMiddleware class]]) {
+            parentPolicy = middleware;
+          }
+        }
+        if (parentPolicy == nil) {
+          parentPolicyResponse.statusCode = 500;
+          [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+          parentPolicyResponse.committed = YES;
+        }
+        @try {
+          NSMutableArray *policyMiddlewares = [NSMutableArray array];
+          if (parentSession != nil) [policyMiddlewares addObject:parentSession];
+          if (parentRefresh != nil) [policyMiddlewares addObject:parentRefresh];
+          if (parentPolicy != nil) [policyMiddlewares addObject:parentPolicy];
+          for (id<ALNMiddleware> middleware in policyMiddlewares) {
+            if (parentPolicyResponse.committed) {
+              continue;
+            }
+            NSError *policyError = nil;
+            if (![middleware processContext:policyContext error:&policyError] &&
+                !parentPolicyResponse.committed) {
+              parentPolicyResponse.statusCode = 500;
+              [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+              parentPolicyResponse.committed = YES;
+            }
+          }
+          if (parentSession != nil && [parentSession respondsToSelector:@selector(didProcessContext:)]) {
+            [parentSession didProcessContext:policyContext];
+          }
+        } @catch (NSException *exception) {
+          parentPolicyResponse.statusCode = 500;
+          [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+          parentPolicyResponse.committed = YES;
+        }
+        if (parentPolicyResponse.committed) {
+          ALNApplyBaselineSecurityHeaders(self, parentPolicyResponse);
+          return parentPolicyResponse;
+        }
+      }
       ALNRequest *forwarded =
           [[ALNRequest alloc] initWithMethod:request.method
                                         path:rewrittenPath
@@ -5715,6 +5782,9 @@ static void ALNFinalizeResponse(ALNApplication *application,
       forwarded.responseWriteDurationMilliseconds = request.responseWriteDurationMilliseconds;
 
       ALNResponse *forwardedResponse = [mountedApp dispatchRequest:forwarded];
+      for (NSString *cookie in [parentPolicyResponse headerValuesForName:@"Set-Cookie"] ?: @[]) {
+        [forwardedResponse appendHeader:@"Set-Cookie" value:cookie];
+      }
       if ([prefix length] > 0 && [forwardedResponse headerForName:@"X-Arlen-Mount-Prefix"] == nil) {
         [forwardedResponse setHeader:@"X-Arlen-Mount-Prefix" value:prefix];
       }

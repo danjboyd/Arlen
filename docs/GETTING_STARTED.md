@@ -360,6 +360,10 @@ verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
 Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
+Mounted child requests are checked against the parent application's matching
+`security.routePolicies` before the child receives them. A parent `requireAuth`
+policy uses the parent's session configuration.
+
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text

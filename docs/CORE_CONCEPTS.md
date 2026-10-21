@@ -109,7 +109,8 @@ If controller action returns an `NSDictionary` or `NSArray` and no explicit body
   - `ALNRealtimeHub`
 - App composition:
   - `mountApplication:atPrefix:`
-  - mounted requests are path-rewritten and dispatched into child app context.
+  - matching parent path prefix policies run before mounted requests are
+    path-rewritten and dispatched into the child app context.
 
 Cluster runtime contract:
 
