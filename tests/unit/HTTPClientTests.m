@@ -115,6 +115,18 @@
   XCTAssertEqual((NSUInteger)0, client.maxRedirects);
 }
 
+- (void)testContentEncodingDoesNotEnableImplicitBrotliDecoding {
+  ALNHTTPClient *client = [self clientWith:@{}];
+  for (NSDictionary *headers in @[ @{}, @{ @"Accept-Encoding" : @"br" } ]) {
+    NSError *error = nil;
+    ALNHTTPClientResult *result = [client GETURL:[self URLForPath:@"/encoded-br"]
+                                       headers:headers error:&error];
+    XCTAssertNotNil(result, @"%@", error);
+    XCTAssertNil(error);
+    XCTAssertEqualObjects(result.body, [@"raw-brotli-audit-marker" dataUsingEncoding:NSUTF8StringEncoding]);
+  }
+}
+
 - (void)testInvalidHeadersAreRejectedBeforeTransport {
   ALNHTTPClient *client = [self clientWith:@{}];
   NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%ld/", (long)_port]];

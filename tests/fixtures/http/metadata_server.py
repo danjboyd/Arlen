@@ -95,6 +95,11 @@ class Peer(socketserver.BaseRequestHandler):
                 wire = b"HTTP/1.1 302 Found\r\nLocation: /loop\r\nContent-Length: 0\r\n\r\n"
             elif path == b"/status":
                 wire = b"HTTP/1.1 503 Unavailable\r\nContent-Length: 2\r\n\r\n{}"
+            elif path == b"/encoded-br":
+                # Deliberately not a Brotli stream: an undecoded client must
+                # return these exact bytes even when Accept-Encoding is set.
+                payload = b"raw-brotli-audit-marker"
+                wire = headers + b"Content-Encoding: br\r\nContent-Length: %d\r\n\r\n" % len(payload) + payload
             elif path == b"/declared":
                 wire = headers + b"Content-Length: 999999\r\n\r\n"
             elif path == b"/chunked":

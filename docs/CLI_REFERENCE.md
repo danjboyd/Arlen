@@ -255,6 +255,7 @@ Generator behavior:
   `ALNTestClient` request test that GETs `--route` (default `/`) and expects `200`
 - `plugin`: `src/Plugins/<Name>Plugin.{h,m}` and class auto-registration in `config/app.plist` (`plugins.classes`), with optional `--preset` service templates
  - `redis-cache` preset uses `ALNRedisCacheAdapter` when `ARLEN_REDIS_URL` is configured
+   - Redis URLs containing a literal NUL or `%00` are rejected before URL parsing; correct the configured URL instead of relying on a truncated hostname or database path.
 - `frontend`: deterministic starter assets under `public/frontend/<name_slug>/` with `index.html`, `app.js`, `styles.css`, `starter_manifest.json`, and `README.md`
 - `search`: app-owned searchable resource/provider scaffold plus `config/app.plist` registration and engine migration notes
 
