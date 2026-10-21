@@ -1138,6 +1138,8 @@ build/eocc --template-root <dir> --output-dir <dir> [--manifest <file>] [--regis
 
 Behavior:
 
+- Runtime `yield` escapes an unfilled `content` context fallback. Content
+  captured from a rendered page by `ALNView` remains raw HTML in the filled slot.
 - `--template-root <dir>`: base tree used to compute deterministic logical template paths
 - `--output-dir <dir>`: destination root for generated Objective-C files (`<output-dir>/<logical_path>.m`)
 - `--manifest <file>`: enable manifest-backed incremental transpilation

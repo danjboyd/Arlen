@@ -406,11 +406,12 @@ Notes:
 - named `yield` targets that named slot
 - slot content filled by a page with `slot`/`endslot` is already-rendered
   template output and is emitted as-is
-- when no page fills a named slot, `yield "name"` falls back to the context
-  value with the same name; that fallback is HTML-escaped like `<%= %>`
+- when no page fills a slot, `yield` falls back to the context value with the
+  same name, including `content`; that fallback is HTML-escaped like `<%= %>`
   output, so a controller value such as `title` cannot inject markup into the
   layout (fill the slot from a page template if you need markup there)
-- plain `yield` (the `content` slot) emits the rendered page body raw
+- plain `yield` emits the captured rendered page body raw when `ALNView` filled
+  the `content` slot
 - layouts own the surrounding fallback markup
 
 ### 7.3 `slot` and `endslot`

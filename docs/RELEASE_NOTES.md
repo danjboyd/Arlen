@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- EOC `yield` escapes an unfilled `content` slot's context fallback. The
+  rendered page body captured by `ALNView` remains raw HTML in its filled slot.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured
