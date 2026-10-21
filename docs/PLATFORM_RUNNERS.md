@@ -1,11 +1,11 @@
 # Platform Runner Runbook
 
-Last updated: 2026-04-20
+Last updated: 2026-10-21
 
 This runbook defines the platform-runner contract for the non-required
 Apple and Windows confidence lanes.
 
-The authoritative merge gate remains:
+The documented merge-gate baseline remains:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
@@ -13,8 +13,15 @@ The authoritative merge gate remains:
 - `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
 
-`apple-baseline` and `windows-preview` stay visible and non-required under the
-current support statement.
+The configured `main` protection was verified on 2026-10-21 to require the
+Linux quality, Linux sanitizer, and docs contexts listed above. The static
+analysis entries remain part of the documented baseline; reconcile their
+enforcement through coordinated policy changes, preserving configured gates.
+
+`apple-baseline` and `windows-preview` are currently non-required in branch
+protection. Windows development is supported from 0.3.0; #200's promotion of
+the exact `windows-preview` job context remains separate from that support
+statement and from adding test coverage. See [CI Alignment](CI_ALIGNMENT.md).
 
 ## Windows Preview Runner
 

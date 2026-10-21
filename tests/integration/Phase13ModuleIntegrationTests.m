@@ -629,6 +629,14 @@
         ALNTestShellQuote([NSString stringWithFormat:@"%@/bin/jobs-worker --env production", repoRoot]),
         ALNTestShellQuote(pidFile)]
                                            exitCode:&code];
+#if defined(_WIN32)
+    // The portable boomhauer/jobs checks above still validate the module
+    // failure. Windows rejects unsupported propane hosting before loading it.
+    XCTAssertEqual(2, code, @"%@", propaneOutput);
+    XCTAssertTrue([propaneOutput containsString:@"Windows production hosting is not supported"],
+                  @"%@", propaneOutput);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:pidFile]);
+#else
     XCTAssertEqual(3, code, @"%@", propaneOutput);
     NSString *firstLine = @"propane: worker startup failed: boomhauer: startup failed: module broken failed to load";
     XCTAssertEqual((NSUInteger)2, [[propaneOutput componentsSeparatedByString:firstLine] count], @"%@", propaneOutput);
@@ -639,6 +647,7 @@
     XCTAssertTrue([propaneOutput containsString:@"consecutive worker startup failures; last: boomhauer: startup failed"],
                   @"%@", propaneOutput);
     XCTAssertTrue([propaneOutput containsString:@"next_respawn_delay_ms=200"], @"%@", propaneOutput);
+#endif
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:modulesRoot error:nil];

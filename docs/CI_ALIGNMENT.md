@@ -1,9 +1,18 @@
 # CI Alignment
 
-Last updated: 2026-10-17
+Last updated: 2026-10-21
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
+
+Configured `main` protection was verified on 2026-10-21: strict updates require
+`linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and
+`docs-quality / docs-gate`. The recommended baseline below also includes static
+analysis; that recommendation is distinct from currently configured enforcement.
+The actual Windows Actions job context is `windows-preview`, currently
+non-required. Its #200 promotion is coordinated separately after complete
+Windows evidence and the existing 90-minute budget are verified. Expanding test
+coverage does not itself change branch protection or remove configured gates.
 
 CI checkouts must include submodules. `vendor/tools-xctest` pins a tagged
 release of `danjboyd/tools-xctest`, the maintained fork of the dormant
@@ -47,6 +56,11 @@ multiworker reloads on independently bound Windows sockets; that depended on
 unsafe port sharing. The supported-development scope and existing required
 check names remain unchanged. Native exclusive-binding coverage stays enabled.
 
+Module startup-failure integration coverage retains the boomhauer and jobs
+checks on Windows. Its propane assertions require unsupported-hosting exit 2
+without a PID file; POSIX platforms retain startup retry/backoff assertions.
+This preserves coverage without skipping the whole module test.
+
 The ordinary unit suite builds `build/file-job-probe` and runs a four-process
 file-queue regression without PostgreSQL. This is part of existing unit lanes,
 including `windows-preview`; required check names and branch protection stay
@@ -54,8 +68,8 @@ unchanged. Focused execution: `make test-unit-filter TEST=Phase7DTests`.
 The same Windows job also runs
 `make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths`
 for native junction/stream/short-name containment, exclusive binding, Origin
-validation, and receive-only channels. This adds a step to an existing required
-check; branch-protection check names do not change.
+validation, and receive-only channels. This adds coverage to the existing Windows
+job; configured branch-protection checks do not change.
 `test-unit` also runs `llhttp-framing-tests` against the actual vendored C
 parser, even where Windows defaults to the legacy HTTP backend. It checks empty
 Transfer-Encoding rejection and a valid Content-Length control request.
