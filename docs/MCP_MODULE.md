@@ -274,9 +274,11 @@ tools have private paths, so attach policies by name instead of relying on an
 unrelated HTTP route's path-prefix rules. `tools/list` only shows a caller the
 tools whose `requiredRoles` and `requiredScopes` (the route's for route-backed
 tools, the registration's for custom tools) that caller holds. Named
-`policies`, assurance level and authentication age are checked only when the
-tool is called, so a listed tool can still be refused. Listing a tool never
-grants permission to call it, and `tools/call` keeps enforcing every route
+`policies`, assurance level and authentication age are also checked from route
+metadata and the caller's current request when listing. No tool handler or
+route guard runs during listing. A route with parameter-dependent path-prefix
+policies can still be refused for a specific argument value at call time.
+Listing a tool never grants permission to call it, and `tools/call` keeps enforcing every route
 check. A tool with no roles or scopes is listed for, and callable by, every
 authenticated endpoint user. Use endpoint permissions if the catalog itself is
 sensitive.

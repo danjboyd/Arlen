@@ -272,6 +272,9 @@ After ordinary routes and services work, install and explicitly enable the
 [MCP module](MCP_MODULE.md) to expose selected capabilities to MCP clients.
 OpenAPI inclusion does not expose tools. The [catalog example](../examples/mcp_app/README.md)
 shows route and service registration with bearer authentication.
+MCP 1.0.6 filters tool listings by roles, scopes, assurance, authentication
+age, and route policies without running handlers. Tool calls still enforce the
+full route checks.
 
 ## OAuth-protected MCP and REST
 

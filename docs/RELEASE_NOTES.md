@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- MCP 1.0.6 filters `tools/list` by route policy, assurance, and authentication
+  age metadata in addition to roles and scopes. Listing does not execute tool
+  handlers or guards; calls retain full route enforcement. Upgrade vendored
+  `mcp` modules.
+
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
   Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured
