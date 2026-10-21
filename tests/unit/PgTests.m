@@ -1506,6 +1506,7 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertNil(error);
   if (!database) return;
   for (NSString *value in @[ @"9999999999999999999999999999999999999999999999999",
+                             @"999999999999999999999999999999999999999",
                              @"1e50", @"-1e50", @"0.00000000000000000000000000000000000000000000000001" ]) {
     for (NSString *sql in @[ @"SELECT $1::numeric AS amount", @"SELECT ARRAY[$1::numeric] AS amounts" ]) {
       error = nil;
@@ -1517,11 +1518,14 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
       XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:@"19.75"], rows.firstObject[@"amount"]);
     }
   }
-  error = nil;
-  NSArray *rows = [database executeQuery:@"SELECT $1::numeric AS amount" parameters:
-      @[@"99999999999999999999999999999999999999"] error:&error];
-  XCTAssertNil(error);
-  XCTAssertTrue([rows.firstObject[@"amount"] isKindOfClass:[NSDecimalNumber class]]);
+  for (NSString *value in @[ @"99999999999999999999999999999999999999",
+                             @"-9999999999999999999.9999999999999999999",
+                             @"0.0000000000000000000000000000000000001" ]) {
+    error = nil;
+    NSArray *rows = [database executeQuery:@"SELECT $1::numeric AS amount" parameters:@[value] error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:value], rows.firstObject[@"amount"]);
+  }
 }
 
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
