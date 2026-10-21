@@ -55,6 +55,13 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
 
+      # Full development acceptance; explicit live-service and unsupported
+      # production skips remain in the tests. Keep focused security checks below.
+      - name: Run integration tests
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"
+
       - name: Run Windows static and realtime transport regressions
         shell: powershell
         run: |

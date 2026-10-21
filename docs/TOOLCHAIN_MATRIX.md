@@ -190,7 +190,7 @@ Current documented required checks for `main`:
 Current documented non-required checks:
 
 - `apple-baseline / apple-baseline`
-- `windows-preview / windows-preview`
+- `windows-preview` (exact Actions job context)
 - `release-certification / release-certification`
 
 Windows preview helpers:
@@ -243,10 +243,15 @@ Platform runner provisioning:
 - this pin supports the non-required Windows preview lane; it does not change
   the authoritative Linux/GNUstep merge gate
 
-Windows preview CI currently validates two layers:
+Windows preview CI validates these development layers serially:
 
 - runtime parity via `make phase24-windows-confidence`
 - the unit suite via `make test-unit`
+- the complete integration suite via `make test-integration`, with existing
+  platform and live-service skips reported explicitly
+- focused static/realtime transport security regressions
+
+The job retains its 90-minute budget and existing branch-protection policy.
 
 Packaged release/deploy parity (`make windows-confidence`) is a manual lane
 until Windows production support in 0.4.0.

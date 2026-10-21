@@ -30,7 +30,8 @@ Purpose:
 - run `.github/workflows/windows-preview.yml`
 - validate MSYS2 `CLANG64` runtime parity through
   `tools/ci/run_windows_preview.sh`
-- run the unit suite (`make test-unit`) on Windows
+- run the unit suite (`make test-unit`) and complete integration suite
+  (`make test-integration`) serially on Windows, retaining focused transport checks
 - `make windows-confidence` (packaged release/deploy parity) is not part of the
   workflow until Windows production support (0.4.0); run it by hand
 
@@ -82,6 +83,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "xctest --help"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_windows_preview.sh"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"
 ```
 
 Workflow contract:
@@ -90,8 +92,10 @@ Workflow contract:
 - the job must run on `[self-hosted, Windows, X64, arlen, msys2-clang64]`
 - failure artifacts must include `build/phase24`, `build/tests` and
   `test-results` (JUnit)
-- the workflow remains non-required until the Windows support statement is
-  deliberately promoted
+- retain the 90-minute job budget, unit/runtime/full-integration steps, and
+  focused static/realtime security checks; keep platform/service skips explicit
+- the exact `windows-preview` job context remains non-required until a
+  coordinated branch-protection change promotes it
 
 The first operational target is a dedicated or long-lived LAN runner. Ephemeral
 lease-backed registration and teardown are valid follow-up work, but are not

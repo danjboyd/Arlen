@@ -63,6 +63,12 @@ On macOS, `./bin/test --smoke-only` runs a fast smoke check. On Linux,
 `./bin/test` runs the full `make test`; use the targets above or a filter for
 something quicker.
 
+On Windows, activate the managed `CLANG64` toolchain with
+`scripts/run_clang64.ps1`. CI runs the full unit and integration suites serially,
+alongside runtime parity and focused transport checks, within the existing
+90-minute job budget. Keep live-service and unsupported-production skips
+explicit; see [Platform Runners](docs/PLATFORM_RUNNERS.md) for commands.
+
 For a single test method (XCTest filter syntax):
 
 ```bash
