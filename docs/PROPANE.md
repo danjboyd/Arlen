@@ -41,6 +41,10 @@ Existing deploy database contracts can also satisfy the first warning version.
 Without either signal, `arlen doctor --env production`, `arlen deploy doctor`,
 and production deploy planning warn when `propaneAccessories.workerCount > 1`.
 
+The manager reads merged configuration through a private inherited descriptor
+when parsing it in Python. Session and service credentials are kept out of that
+child process's argument list; worker settings still arrive unredacted.
+
 ## Usage
 
 ```bash

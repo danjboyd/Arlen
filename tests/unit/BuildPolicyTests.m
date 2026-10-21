@@ -110,6 +110,22 @@
   return ALNTestRunShellCapture(command, exitCode);
 }
 
+- (void)testPropaneKeepsMergedConfigurationOutOfProcessArguments {
+#if defined(_WIN32)
+  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  NSString *repoRoot = ALNTestRepoRoot();
+  NSString *command = [NSString stringWithFormat:@"bash %@ %@ 2>&1",
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:
+          @"tests/fixtures/propane/config_private_input_check.sh"]),
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/propane"])];
+  int exitCode = -1;
+  NSString *output = [self runShellCapture:command exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"private config input and unredacted worker settings preserved"], @"%@", output);
+}
+
 // Issue 222: propane's FD-pressure check used to build the per-target
 // breakdown (a readlink per descriptor) for every worker on every check, even
 // when nothing was logged, stalling the single-threaded manager loop.

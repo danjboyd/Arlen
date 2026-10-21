@@ -1425,6 +1425,9 @@ Environment:
 
 ## `propane` Script (`bin/propane`)
 
+`propane` passes merged configuration to its Python parser through an inherited
+file descriptor, keeping configuration secrets out of the parser process arguments.
+
 Descriptor samples that disappear as workers exit do not terminate the manager;
 startup failures still use the configured retry policy and exit status `3`.
 

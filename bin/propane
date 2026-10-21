@@ -375,11 +375,14 @@ fi
 
 # The heredoc lives in a function: bash 3.2 misparses one nested in < <(...).
 emit_config_values() {
-  python3 - "$1" <<'PY'
+  # Keep merged secrets out of the Python process's argument list. stdin is
+  # the program; a separate inherited descriptor carries the configuration.
+  python3 - 3<<<"$1" <<'PY'
 import json
-import sys
+import os
 
-cfg = json.loads(sys.argv[1])
+with os.fdopen(3) as config_input:
+    cfg = json.load(config_input)
 accessories = cfg.get("propaneAccessories") or {}
 cluster = cfg.get("cluster") or {}
 

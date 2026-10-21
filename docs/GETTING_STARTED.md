@@ -304,6 +304,9 @@ For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formP
 
 ## Background work in separate processes
 
+`propane` passes merged configuration to its Python parser through an inherited
+file descriptor, keeping configuration secrets out of the parser process arguments.
+
 Configure `ALNPostgresJobAdapter` before registering the jobs module when web
 processes enqueue work for a separate worker. Apply its initial migration, use
 the same database/namespace in each process, and launch `arlen jobs worker`.
