@@ -290,6 +290,10 @@
     }
   },
   "methods": {
+    "ALNApplication|addMiddleware:beforeMiddlewareOfClass:": {
+      "purpose": "Insert middleware before the first middleware matching the supplied class, or append when none is present.",
+      "usage": "Call during bootstrap before request dispatch. Nil middleware is ignored; a Nil class appends the middleware."
+    },
     "ALNResponse|setHeadersIfMissing:": {
       "purpose": "Set only response header names that have no current value.",
       "usage": "Existing first and repeated values are preserved. Invalid header input is ignored."
