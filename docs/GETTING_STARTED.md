@@ -351,6 +351,8 @@ verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
+Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
+search with tenant or other resource visibility filters.
 Production apps keep `/openapi.json` and its docs routes closed unless they set
 `openapi.publicInProduction = YES`; route metadata includes privileged API
 paths. Local development keeps the OpenAPI routes enabled.

@@ -276,6 +276,7 @@ Notes:
 - endpoint generator can create route + action + optional template in one command
 - when `templates/layouts/main.html.eoc` exists, generated HTML templates opt into it automatically unless the target logical path is under `layouts/` or `partials/`
 - `generate search` is the fastest way to stand up a search resource without reverse-engineering the `search` module internals
+- upgrade vendored `search` modules to 1.2.2 when PostgreSQL full-text search uses tenant, soft-delete, archived, or app-defined resource visibility filters
 
 ### `arlen deploy <list|dryrun|init|push|releases|release|status|rollback|doctor|logs|target sample> [target] [options]`
 

@@ -897,6 +897,22 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqualObjects(@"sku-102", [phrase[@"results"] firstObject][@"recordID"]);
 }
 
+- (void)testPostgresQueryHonorsResourceVisibilityFilters {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
+  NSDictionary *response = [runtime searchQuery:@"priority" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0
+      queryOptions:@{ @"resourceFilters" : @{ @"products" : @{ @"category" : @"not-visible" } } }
+      error:&error];
+  XCTAssertNotNil(response);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"results"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"promotedResults"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"autocomplete"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"suggestions"] ?: @[]) count]);
+}
+
 - (void)testPostgresFuzzyMatchesWordsInLongDocumentsWithMarkedHighlights {
   // Keep the typo-bearing word out of the title; document length must not dilute it.
   NSMutableDictionary *record = Phase27SearchProductStore()[@"sku-103"];
