@@ -378,14 +378,14 @@ TOTP and SMS step-up retain the validated session generation; a concurrent
 password reset or logout-all revocation makes step-up fail and clears that session.
 Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
 the auth module rejects this test-only bypass at startup.
-Upgrade vendored `jobs` to 1.1.4 and `auth` to 1.7.2 before relying on manual
+Upgrade vendored `jobs` to 1.1.4 and `auth` to 1.7.5 before relying on manual
 job restrictions and queued auth-mail link origins.
 
 Auth session refresh precedes `security.routePolicies` checks, so a revoked
 session cannot pass a `requireAuth` policy.
 
 If SMS is already verified, adding a TOTP authenticator requires a recent MFA
-step-up. Upgrade vendored `auth` modules to 1.7.4.
+step-up. Upgrade vendored `auth` modules to 1.7.5.
 
 Auth passwords preserve surrounding spaces on every path. If older registration
 flows removed those spaces, sign in with the stored form before changing the
@@ -398,7 +398,7 @@ policy uses the parent's session configuration.
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
 Admin UI CSV exports escape formula-like cells for spreadsheet use; JSON exports
-keep the original values. Upgrade vendored `admin-ui` modules to 1.1.2.
+keep the original values. Upgrade vendored `admin-ui` modules to 1.1.3.
 
 Admin UI resource link fields allow relative, HTTP(S), and mailto targets;
 unsafe targets render as `#` with admin-ui 1.1.3.

@@ -243,6 +243,20 @@ version in `config/modules.plist` tells you which module code an app vendors:
 - minor (`1.1.0`): new features, security fixes, or new required configuration
 - major (`2.0.0`): removed or incompatible APIs
 
+The v0.3.1 candidate includes these module versions. Upgrade vendored copies
+with `arlen module upgrade` and apply each module's migration instructions:
+
+| Module | Version |
+| --- | --- |
+| `auth` | `1.7.5` |
+| `admin-ui` | `1.1.3` |
+| `jobs` | `1.1.4` |
+| `notifications` | `1.3.2` |
+| `ops` | `1.1.1` |
+| `search` | `1.2.2` |
+| `storage` | `1.4.2` |
+| `mcp` | `1.0.6` |
+
 CI enforces this with `tools/ci/check_module_versions.py`. Framework
 contributors can run it locally before opening a PR:
 
@@ -315,8 +329,8 @@ filters. Its `1.2.0` change added shared-state transactions, replay protection,
 and the security fixes below. Upgrade vendored copies with `arlen module upgrade`.
 `search` moved to `1.2.2` so PostgreSQL full-text results honor resource
 visibility filters before facets and suggestions are built.
-`auth` remains at `1.6.0`, while `admin-ui`
-moved to `1.1.0` for the following security fixes and configuration:
+Earlier `auth` 1.6.0 and `admin-ui` 1.1.0 included the following security
+fixes and configuration:
 
 - `auth`: the stub provider is development/test only; password-reset and
   verification links are single-use; those links are built from the new
