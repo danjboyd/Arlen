@@ -33,6 +33,10 @@ Core resource responsibilities:
 - optional autocomplete hooks
 - optional policy hook
 
+CSV exports prefix formula-like header labels and record values with an
+apostrophe so spreadsheet applications treat them as text. JSON exports retain
+the original values.
+
 Useful metadata includes:
 
 - `fields` with typed `kind`, `choices`, and optional `autocomplete`
