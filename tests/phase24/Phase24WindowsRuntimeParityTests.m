@@ -275,6 +275,32 @@
   return output;
 }
 
+- (void)testBoomhauerWatchChildrenExitAfterForceKill {
+#if !defined(_WIN32)
+  XCTSkip(@"Windows native watch child lifetime");
+#else
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-phase24-lifetime"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    (void)[self scaffoldLiteAppAtPath:appRoot];
+    int code = -1;
+    NSString *fixture = [[self repoRoot] stringByAppendingPathComponent:@"tests/fixtures/windows_watch_lifetime.ps1"];
+    NSString *command = [NSString stringWithFormat:
+        @"powershell.exe -NoProfile -ExecutionPolicy Bypass -File %@ -FrameworkRoot %@ -AppRoot %@ -BashPath %@ -Port %d",
+        [self shellQuoted:fixture], [self shellQuoted:[self repoRoot]],
+        [self shellQuoted:appRoot], [self shellQuoted:[self resolvedBashLaunchPath]], [self randomPort]];
+    NSString *output = [self runShellCapture:command exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"watch-lifetime-passed: app"], @"%@", output);
+    XCTAssertTrue([output containsString:@"watch-lifetime-passed: build-error"], @"%@", output);
+  } @finally {
+    [self terminateWindowsProcessesContaining:appRoot];
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+#endif
+}
+
 - (void)testBoomhauerWatchRecoversFromBuildFailure {
 #if !ARLEN_WINDOWS_PREVIEW
   return;

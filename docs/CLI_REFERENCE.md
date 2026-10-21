@@ -2,6 +2,10 @@
 
 This document describes currently implemented command-line interfaces.
 
+Windows `boomhauer --watch` contains app and build-error children in native
+kill-on-close jobs. Terminating the watch process tree also releases the
+server's port; direct CLANG64 `bin/boomhauer` invocations use the same cleanup.
+
 On Windows, the CLI's application build path sets `_FILE_OFFSET_BITS=64`,
 matching the framework and test build. Keep this flag in custom CLANG64 builds
 and rebuild after upgrading; file-response size and Range metadata must remain

@@ -105,6 +105,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/release/package_framework.sh --version $version --kind windows-x64 --out build/release-assets"
 
       - name: Test Windows installer failure and retry contracts
+        # Fixtures share the per-user PATH lock with archive certification.
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
 

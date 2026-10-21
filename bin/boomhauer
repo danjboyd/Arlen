@@ -1279,15 +1279,30 @@ on_signal() {
 
 trap on_signal INT TERM
 
+start_windows_watch_child() {
+  local binary="$1"
+  local parent_winpid
+  ensure_error_server_built || return 1
+  parent_winpid="$(cat "/proc/$$/winpid")" || return 1
+  # A native helper owns a kill-on-close job and waits on this exact bash
+  # process. Killing the watch shell or helper ends its native server tree.
+  # Unlike setsid, this also works when bash is force-killed without a trap.
+  "$framework_boomhauer_target" --windows-watch-child "$parent_winpid" \
+    "$(cygpath -aw "$binary")" "${server_args[@]}" &
+  child_pid="$!"
+}
+
 start_app_child() {
   export ARLEN_APP_ROOT="$app_root"
   next_build_retry_at=0
-  if command -v setsid >/dev/null 2>&1; then
+  if [[ $windows_preview -eq 1 ]]; then
+    start_windows_watch_child "$app_binary" || return 1
+  elif command -v setsid >/dev/null 2>&1; then
     setsid bash -lc 'exec "$@"' _ "$app_binary" "${server_args[@]}" &
   else
     run_with_server_args "$app_binary" &
   fi
-  child_pid="$!"
+  if [[ $windows_preview -ne 1 ]]; then child_pid="$!"; fi
   child_mode="app"
 }
 
@@ -1306,12 +1321,14 @@ start_error_child() {
   else
     next_build_retry_at=0
   fi
-  if command -v setsid >/dev/null 2>&1; then
+  if [[ $windows_preview -eq 1 ]]; then
+    start_windows_watch_child "$framework_boomhauer_target" || return 1
+  elif command -v setsid >/dev/null 2>&1; then
     setsid bash -lc 'exec "$@"' _ "$framework_root/build/boomhauer" "${server_args[@]}" &
   else
     run_with_server_args "$framework_root/build/boomhauer" &
   fi
-  child_pid="$!"
+  if [[ $windows_preview -ne 1 ]]; then child_pid="$!"; fi
   child_mode="build_error"
 }
 

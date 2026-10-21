@@ -2,6 +2,11 @@
 
 This document defines Arlen release lifecycle operations.
 
+Windows installer contract tests and release certification temporarily modify
+the saved user PATH. Their shared per-user mutex serializes that interval
+across checkouts and runner sessions, preserving current-shell and fresh-shell
+validation. Do not run an unguarded installer fixture alongside certification.
+
 ## 1. Versioning Policy
 
 Arlen uses semantic versioning:

@@ -20,6 +20,16 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+The existing Windows runtime parity suite covers force-killed watch trees in
+both app and build-error modes. It asserts that the native server exits and
+its port closes, in addition to the existing rebuild/recovery coverage.
+
+The Windows installer contract fixture and release certification share a
+per-user cross-process mutex across checkouts. Each acquires it before saving
+the persisted user PATH and releases it after restoration. Keep current-shell
+and fresh-shell PATH checks enabled; serialize these fixtures rather than
+removing persisted-PATH assertions to avoid interference.
+
 Windows framework, generated-app and vendored-runner builds use
 `_FILE_OFFSET_BITS=64`. The existing unit job verifies a sparse file above
 2 GiB with stat, Range and HEAD checks without allocating or hashing its full

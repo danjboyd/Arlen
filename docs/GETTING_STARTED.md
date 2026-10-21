@@ -1,5 +1,9 @@
 # Getting Started
 
+On Windows, `boomhauer --watch` stops its app and build-error server when the
+watch process is terminated, including a forced process-tree termination.
+See [Windows setup](GETTING_STARTED_WINDOWS.md) for the supported CLANG64 path.
+
 Install Arlen, create an app, and run it locally. This page covers Linux;
 use [Getting Started on macOS](GETTING_STARTED_MACOS.md) or
 [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for those platforms.

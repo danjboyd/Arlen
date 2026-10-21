@@ -26,6 +26,12 @@ Current scope on `main`:
 Development is the supported scope. Production hosting stays out of scope
 until 0.4.0; see the support statement below.
 
+Windows watch mode contains each app or build-error server in a native
+kill-on-close job and monitors the watch shell. Force-killing the watch tree
+also stops its server and releases its listen port, including when invoking
+`bin/boomhauer` directly from CLANG64. Rebuild the framework tools after
+updating a source checkout so the shell and native watch helper match.
+
 ## 1. Host Entry Path
 
 Windows framework, application and test builds set `_FILE_OFFSET_BITS=64`.
