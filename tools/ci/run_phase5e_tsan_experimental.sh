@@ -97,6 +97,8 @@ if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then
 fi
 
 tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer} -shared-libsan -Wl,-rpath,$(dirname "$tsan_so") -Wno-unused-command-line-argument"
+# Overlay headers must precede gnustep-config's installed include paths.
+tsan_cc="${ARLEN_CC:-clang}${ARLEN_TSAN_EXTRA_FLAGS:+ $ARLEN_TSAN_EXTRA_FLAGS}"
 tsan_suppressions_file="${ARLEN_TSAN_SUPPRESSIONS_FILE:-$repo_root/tests/fixtures/sanitizers/phase9h_tsan.supp}"
 tsan_options="${TSAN_OPTIONS:-halt_on_error=1:history_size=7:second_deadlock_stack=1}"
 using_default_tsan_suppressions=0
@@ -106,6 +108,11 @@ if [[ -n "$tsan_suppressions_file" && -f "$tsan_suppressions_file" && "$tsan_opt
 fi
 export TSAN_OPTIONS="$tsan_options"
 export XCTEST_LD_PRELOAD="$tsan_so"
+# An isolated instrumented dependency overlay is only applied to test/runtime
+# processes. Build tools continue using the normal bootstrap environment.
+if [[ -n "${ARLEN_TSAN_LIBRARY_PATH:-}" ]]; then
+  export ARLEN_XCTEST_LD_LIBRARY_PATH="$repo_root/vendor/tools-xctest/XCTest/obj:$ARLEN_TSAN_LIBRARY_PATH${ARLEN_XCTEST_LD_LIBRARY_PATH:+:$ARLEN_XCTEST_LD_LIBRARY_PATH}"
+fi
 
 # Opt-in flake hunting for the TSAN unit run (issue #113). Off by default:
 # repeating the whole unit suite under TSAN multiplies the lane's runtime.
@@ -130,8 +137,9 @@ set +e
   echo "ci: tsan unit test repetition ${unit_repeat_args[*]:-none}"
   make clean || exit $?
   make EXTRA_OBJC_FLAGS= EOC_TOOL="$bootstrap_eocc" eocc transpile module-transpile || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" boomhauer runtime-concurrency-fixture arlen || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" ${unit_repeat_args[@]+"${unit_repeat_args[@]}"} test-unit || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" ARLEN_CC="$tsan_cc" -o "$bootstrap_eocc" boomhauer runtime-concurrency-fixture arlen || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" ARLEN_CC="$tsan_cc" -o "$bootstrap_eocc" ${unit_repeat_args[@]+"${unit_repeat_args[@]}"} test-unit || exit $?
+  LD_LIBRARY_PATH="${ARLEN_TSAN_LIBRARY_PATH:+$ARLEN_TSAN_LIBRARY_PATH:}${LD_LIBRARY_PATH:-}" \
   python3 ./tools/ci/runtime_concurrency_probe.py \
     --binary ./build/runtime-concurrency-fixture \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}" || exit $?

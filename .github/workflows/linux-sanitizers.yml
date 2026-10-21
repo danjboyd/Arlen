@@ -102,6 +102,16 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Build pinned thread-race dependencies
+        run: |
+          source ./tools/source_gnustep_env.sh
+          toolchain_env="$(python3 ./tools/ci/build_tsan_toolchain.py --mode thread)"
+          source "$toolchain_env"
+          {
+            echo "ARLEN_TSAN_LIBRARY_PATH=$ARLEN_TSAN_LIBRARY_PATH"
+            echo "ARLEN_TSAN_EXTRA_FLAGS=$ARLEN_TSAN_EXTRA_FLAGS"
+          } >>"$GITHUB_ENV"
+
       - name: Run nightly thread-race lane
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
@@ -115,7 +125,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-thread-race-nightly-${{ github.run_id }}
-          path: build/sanitizers/phase10m_thread_race/**
+          path: |
+            build/sanitizers/phase10m_thread_race/**
+            .cache/tsan-toolchain/**/identity.json
+            .cache/tsan-toolchain/**/manifest.json
+            .cache/tsan-toolchain/**/build.log
+          include-hidden-files: true
           if-no-files-found: warn
 
   # Issue 271: the integration suite under ASAN+UBSan. Nightly only (one

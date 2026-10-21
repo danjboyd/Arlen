@@ -1,0 +1,21 @@
+{
+  "libobjc2": {
+    "url": "https://github.com/gnustep/libobjc2.git",
+    "commit": "fab3df291a37fefdcc7b774c507ffb2ad5db6fb8",
+    "patch": "libobjc2.patch"
+  },
+  "libdispatch": {
+    "url": "https://github.com/apple/swift-corelibs-libdispatch.git",
+    "commit": "b2a1fad6b49a9394cf864b87ab0034ea8300e2de",
+    "patch": "libdispatch.patch"
+  },
+  "libs-base": {
+    "url": "https://github.com/gnustep/libs-base.git",
+    "commit": "d898f703e618b86f9b7ecb0f05a257cb6ed3ffac",
+    "patch": "libs-base.patch"
+  },
+  "icu": {
+    "url": "https://github.com/unicode-org/icu/releases/download/release-76-1/icu4c-76_1-src.tgz",
+    "sha256": "dfacb46bfe4747410472ce3e1144bf28a102feeaa4e3875bac9b4c6cf30f4f3e"
+  }
+}

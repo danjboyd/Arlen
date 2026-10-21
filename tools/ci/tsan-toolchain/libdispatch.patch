@@ -1,0 +1,300 @@
+diff --git a/dispatch/once.h b/dispatch/once.h
+index 19af4f9..df8e18c 100644
+--- a/dispatch/once.h
++++ b/dispatch/once.h
+@@ -80,12 +80,11 @@ void
+ _dispatch_once(dispatch_once_t *predicate,
+ 		DISPATCH_NOESCAPE dispatch_block_t block)
+ {
+-	if (DISPATCH_EXPECT(*predicate, ~0l) != ~0l) {
++	if (DISPATCH_EXPECT(__atomic_load_n(predicate, __ATOMIC_ACQUIRE), ~0l) != ~0l) {
+ 		dispatch_once(predicate, block);
+ 	} else {
+ 		dispatch_compiler_barrier();
+ 	}
+-	DISPATCH_COMPILER_CAN_ASSUME(*predicate == ~0l);
+ }
+ #undef dispatch_once
+ #define dispatch_once _dispatch_once
+@@ -107,12 +106,11 @@ void
+ _dispatch_once_f(dispatch_once_t *predicate, void *_Nullable context,
+ 		dispatch_function_t function)
+ {
+-	if (DISPATCH_EXPECT(*predicate, ~0l) != ~0l) {
++	if (DISPATCH_EXPECT(__atomic_load_n(predicate, __ATOMIC_ACQUIRE), ~0l) != ~0l) {
+ 		dispatch_once_f(predicate, context, function);
+ 	} else {
+ 		dispatch_compiler_barrier();
+ 	}
+-	DISPATCH_COMPILER_CAN_ASSUME(*predicate == ~0l);
+ }
+ #undef dispatch_once_f
+ #define dispatch_once_f _dispatch_once_f
+diff --git a/src/apply.c b/src/apply.c
+index 9c7d60f..69472dc 100644
+--- a/src/apply.c
++++ b/src/apply.c
+@@ -85,7 +85,8 @@ out:
+ 		_dispatch_thread_event_wait(&da->da_event);
+ 		_dispatch_thread_event_destroy(&da->da_event);
+ 	}
+-	if (os_atomic_dec2o(da, da_thr_cnt, release) == 0) {
++	// The final worker must acquire earlier workers before recycling da.
++	if (os_atomic_dec2o(da, da_thr_cnt, acq_rel) == 0) {
+ #if DISPATCH_INTROSPECTION
+ 		_dispatch_continuation_free(da->da_dc);
+ #endif
+diff --git a/src/inline_internal.h b/src/inline_internal.h
+index 67ecfc9..37caffe 100644
+--- a/src/inline_internal.h
++++ b/src/inline_internal.h
+@@ -1532,9 +1532,9 @@ _dispatch_queue_drain_try_unlock(dispatch_queue_t dq, uint64_t owned, bool done)
+ #define os_mpsc_push_update_prev(Q, prev, head, _o_next)  ({ \
+ 		os_mpsc_node_type(Q) _prev = (prev); \
+ 		if (likely(_prev)) { \
+-			(void)os_atomic_store2o(_prev, _o_next, (head), relaxed); \
++			(void)os_atomic_store2o(_prev, _o_next, (head), release); \
+ 		} else { \
+-			(void)os_atomic_store(_os_mpsc_head Q, (head), relaxed); \
++			(void)os_atomic_store(_os_mpsc_head Q, (head), release); \
+ 		} \
+ 	})
+ 
+@@ -1561,7 +1561,7 @@ _dispatch_queue_drain_try_unlock(dispatch_queue_t dq, uint64_t owned, bool done)
+ #define os_mpsc_get_head(Q)  ({ \
+ 		__typeof__(_os_mpsc_head Q) __n = _os_mpsc_head Q; \
+ 		os_mpsc_node_type(Q) _node; \
+-		_node = os_atomic_load(__n, dependency); \
++		_node = os_atomic_load(__n, acquire); \
+ 		if (unlikely(_node == NULL)) { \
+ 			_node = _dispatch_wait_for_enqueuer((void **)__n); \
+ 		} \
+@@ -1571,7 +1571,7 @@ _dispatch_queue_drain_try_unlock(dispatch_queue_t dq, uint64_t owned, bool done)
+ #define os_mpsc_get_next(_n, _o_next)  ({ \
+ 		__typeof__(_n) __n = (_n); \
+ 		_os_atomic_basetypeof(&__n->_o_next) _node; \
+-		_node = os_atomic_load(&__n->_o_next, dependency); \
++		_node = os_atomic_load(&__n->_o_next, acquire); \
+ 		if (unlikely(_node == NULL)) { \
+ 			_node = _dispatch_wait_for_enqueuer((void **)&__n->_o_next); \
+ 		} \
+diff --git a/src/object_internal.h b/src/object_internal.h
+index 6985dec..2043a00 100644
+--- a/src/object_internal.h
++++ b/src/object_internal.h
+@@ -584,7 +584,7 @@ size_t _dispatch_objc_debug(dispatch_object_t dou, char* buf, size_t bufsiz);
+  */
+ #define _os_atomic_refcnt_perform2o(o, f, op, n, m)   ({ \
+ 		__typeof__(o) _o = (o); \
+-		int _ref_cnt = _o->f; \
++		int _ref_cnt = os_atomic_load2o(_o, f, relaxed); \
+ 		if (likely(_ref_cnt != _OS_OBJECT_GLOBAL_REFCNT)) { \
+ 			_ref_cnt = os_atomic_##op##2o(_o, f, n, m); \
+ 		} \
+diff --git a/src/queue.c b/src/queue.c
+index 40f059c..bb37249 100644
+--- a/src/queue.c
++++ b/src/queue.c
+@@ -5893,7 +5893,7 @@ _dispatch_root_queue_drain_one(dispatch_queue_global_t dq)
+ start:
+ 	// The MEDIATOR value acts both as a "lock" and a signal
+ 	head = os_atomic_xchg2o(dq, dq_items_head,
+-			DISPATCH_ROOT_QUEUE_MEDIATOR, relaxed);
++			DISPATCH_ROOT_QUEUE_MEDIATOR, acquire);
+ 
+ 	if (unlikely(head == NULL)) {
+ 		// The first xchg on the tail will tell the enqueueing thread that it
+@@ -5903,7 +5903,7 @@ start:
+ 				DISPATCH_ROOT_QUEUE_MEDIATOR, NULL, relaxed))) {
+ 			goto start;
+ 		}
+-		if (unlikely(dq->dq_items_tail)) { // <rdar://problem/14416349>
++		if (unlikely(os_atomic_load2o(dq, dq_items_tail, relaxed))) { // <rdar://problem/14416349>
+ 			if (__DISPATCH_ROOT_QUEUE_CONTENDED_WAIT__(dq,
+ 					_dispatch_root_queue_head_tail_quiesced)) {
+ 				goto start;
+@@ -5924,7 +5924,7 @@ start:
+ 
+ 	// Restore the head pointer to a sane value before returning.
+ 	// If 'next' is NULL, then this item _might_ be the last item.
+-	next = head->do_next;
++	next = os_atomic_load2o(head, do_next, acquire);
+ 
+ 	if (unlikely(!next)) {
+ 		os_atomic_store2o(dq, dq_items_head, NULL, relaxed);
+@@ -5938,7 +5938,7 @@ start:
+ 		next = os_mpsc_get_next(head, do_next);
+ 	}
+ 
+-	os_atomic_store2o(dq, dq_items_head, next, relaxed);
++	os_atomic_store2o(dq, dq_items_head, next, release);
+ 	_dispatch_root_queue_poke(dq, 1, 0);
+ out:
+ 	return head;
+diff --git a/src/semaphore.c b/src/semaphore.c
+index 925c002..a687034 100644
+--- a/src/semaphore.c
++++ b/src/semaphore.c
+@@ -119,7 +119,7 @@ _dispatch_semaphore_wait_slow(dispatch_semaphore_t dsema,
+ 		// Try to undo what the fast path did to dsema->dsema_value
+ 		DISPATCH_FALLTHROUGH;
+ 	case DISPATCH_TIME_NOW:
+-		orig = dsema->dsema_value;
++		orig = os_atomic_load2o(dsema, dsema_value, relaxed);
+ 		while (orig < 0) {
+ 			if (os_atomic_cmpxchgvw2o(dsema, dsema_value, orig, orig + 1,
+ 					&orig, relaxed)) {
+@@ -212,7 +212,8 @@ _dispatch_group_wait_slow(dispatch_group_t dg, uint32_t gen,
+ {
+ 	for (;;) {
+ 		int rc = _dispatch_wait_on_address(&dg->dg_gen, gen, timeout, 0);
+-		if (likely(gen != os_atomic_load2o(dg, dg_gen, acquire))) {
++		// Pair with leave's full-width release, including its generation update.
++		if (likely(gen != _dg_state_gen(os_atomic_load2o(dg, dg_state, acquire)))) {
+ 			return 0;
+ 		}
+ 		if (rc == ETIMEDOUT) {
+@@ -226,18 +227,19 @@ dispatch_group_wait(dispatch_group_t dg, dispatch_time_t timeout)
+ {
+ 	uint64_t old_state, new_state;
+ 
+-	os_atomic_rmw_loop2o(dg, dg_state, old_state, new_state, relaxed, {
+-		if ((old_state & DISPATCH_GROUP_VALUE_MASK) == 0) {
+-			os_atomic_rmw_loop_give_up_with_fence(acquire, return 0);
+-		}
+-		if (unlikely(timeout == 0)) {
+-			os_atomic_rmw_loop_give_up(return _DSEMA4_TIMEOUT());
+-		}
++	// Observe completion with an acquire load of the same word leave publishes.
++	// This also makes the fast path visible to race detectors that cannot
++	// model a relaxed load followed by a standalone acquire fence.
++	for (;;) {
++		old_state = os_atomic_load2o(dg, dg_state, acquire);
++		if ((old_state & DISPATCH_GROUP_VALUE_MASK) == 0) return 0;
++		if (unlikely(timeout == 0)) return _DSEMA4_TIMEOUT();
+ 		new_state = old_state | DISPATCH_GROUP_HAS_WAITERS;
+-		if (unlikely(old_state & DISPATCH_GROUP_HAS_WAITERS)) {
+-			os_atomic_rmw_loop_give_up(break);
++		if ((old_state & DISPATCH_GROUP_HAS_WAITERS) ||
++				os_atomic_cmpxchg2o(dg, dg_state, old_state, new_state, relaxed)) {
++			break;
+ 		}
+-	});
++	}
+ 
+ 	return _dispatch_group_wait_slow(dg, _dg_state_gen(new_state), timeout);
+ }
+@@ -277,7 +279,7 @@ dispatch_group_leave(dispatch_group_t dg)
+ 	// The value is incremented on a 64bits wide atomic so that the carry for
+ 	// the -1 -> 0 transition increments the generation atomically.
+ 	uint64_t new_state, old_state = os_atomic_add_orig2o(dg, dg_state,
+-			DISPATCH_GROUP_VALUE_INTERVAL, release);
++			DISPATCH_GROUP_VALUE_INTERVAL, acq_rel);
+ 	uint32_t old_value = (uint32_t)(old_state & DISPATCH_GROUP_VALUE_MASK);
+ 
+ 	if (unlikely(old_value == DISPATCH_GROUP_VALUE_1)) {
+@@ -341,6 +343,7 @@ _dispatch_group_notify(dispatch_group_t dg, dispatch_queue_t dq,
+ 			new_state = old_state | DISPATCH_GROUP_HAS_NOTIFS;
+ 			if ((uint32_t)old_state == 0) {
+ 				os_atomic_rmw_loop_give_up({
++					(void)os_atomic_load2o(dg, dg_state, acquire);
+ 					return _dispatch_group_wake(dg, new_state, false);
+ 				});
+ 			}
+diff --git a/src/shims/lock.c b/src/shims/lock.c
+index 88fb8f8..af1bcba 100644
+--- a/src/shims/lock.c
++++ b/src/shims/lock.c
+@@ -666,6 +666,9 @@ _dispatch_once_wait(dispatch_once_gate_t dgo)
+ 	for (;;) {
+ 		os_atomic_rmw_loop(&dgo->dgo_once, old_v, new_v, relaxed, {
+ 			if (likely(old_v == DLOCK_ONCE_DONE)) {
++				// The RMW loop's initial load is relaxed. DONE is terminal;
++				// acquire it before returning the initialized client state.
++				(void)os_atomic_load(&dgo->dgo_once, acquire);
+ 				os_atomic_rmw_loop_give_up(return);
+ 			}
+ #if DISPATCH_ONCE_USE_QUIESCENT_COUNTER
+diff --git a/src/shims/lock.h b/src/shims/lock.h
+index 6bf825a..43f1f11 100644
+--- a/src/shims/lock.h
++++ b/src/shims/lock.h
+@@ -342,6 +342,17 @@ _dispatch_thread_event_destroy(dispatch_thread_event_t dte)
+ #endif
+ }
+ 
++// Linux PI futex handoffs happen in the kernel, outside TSan's atomic
++// instrumentation. Annotate the actual successful lock/unlock boundaries.
++#if __has_feature(thread_sanitizer) && HAVE_FUTEX
++#include <sanitizer/tsan_interface.h>
++#define _dispatch_tsan_lock_acquire(l) __tsan_acquire(l)
++#define _dispatch_tsan_lock_release(l) __tsan_release(l)
++#else
++#define _dispatch_tsan_lock_acquire(l) ((void)(l))
++#define _dispatch_tsan_lock_release(l) ((void)(l))
++#endif
++
+ #pragma mark - unfair lock
+ 
+ typedef struct dispatch_unfair_lock_s {
+@@ -361,9 +372,11 @@ _dispatch_unfair_lock_lock(dispatch_unfair_lock_t l)
+ 	dispatch_lock value_self = _dispatch_lock_value_for_self();
+ 	if (likely(os_atomic_cmpxchg(&l->dul_lock,
+ 			DLOCK_OWNER_NULL, value_self, acquire))) {
++		_dispatch_tsan_lock_acquire(l);
+ 		return;
+ 	}
+-	return _dispatch_unfair_lock_lock_slow(l, DLOCK_LOCK_DATA_CONTENTION);
++	_dispatch_unfair_lock_lock_slow(l, DLOCK_LOCK_DATA_CONTENTION);
++	_dispatch_tsan_lock_acquire(l);
+ }
+ 
+ DISPATCH_ALWAYS_INLINE
+@@ -381,6 +394,7 @@ _dispatch_unfair_lock_trylock(dispatch_unfair_lock_t l, dispatch_tid *owner)
+ 		}
+ 	});
+ 	if (owner) *owner = _dispatch_lock_owner(new_value);
++	if (!_dispatch_lock_is_locked(old_value)) _dispatch_tsan_lock_acquire(l);
+ 	return !_dispatch_lock_is_locked(old_value);
+ }
+ 
+@@ -388,6 +402,9 @@ DISPATCH_ALWAYS_INLINE
+ static inline bool
+ _dispatch_unfair_lock_tryunlock(dispatch_unfair_lock_t l)
+ {
++	// A failed tryunlock retains ownership; no other thread can acquire this
++	// publication until a later successful unlock publishes again.
++	_dispatch_tsan_lock_release(l);
+ 	dispatch_lock old_value, new_value;
+ 
+ 	os_atomic_rmw_loop(&l->dul_lock, old_value, new_value, release, {
+@@ -412,6 +429,7 @@ DISPATCH_ALWAYS_INLINE
+ static inline bool
+ _dispatch_unfair_lock_unlock_had_failed_trylock(dispatch_unfair_lock_t l)
+ {
++	_dispatch_tsan_lock_release(l);
+ 	dispatch_lock cur, value_self = _dispatch_lock_value_for_self();
+ #if HAVE_FUTEX
+ 	if (likely(os_atomic_cmpxchgv(&l->dul_lock,
+diff --git a/src/shims/yield.c b/src/shims/yield.c
+index cf1f5ce..5824d00 100644
+--- a/src/shims/yield.c
++++ b/src/shims/yield.c
+@@ -31,7 +31,7 @@ __DISPATCH_WAIT_FOR_ENQUEUER__(void **ptr)
+         (void)spins;
+ 
+ 	void *value;
+-	while ((value = os_atomic_load(ptr, relaxed)) == NULL) {
++	while ((value = os_atomic_load(ptr, acquire)) == NULL) {
+ 		_dispatch_preemption_yield(++spins);
+ 	}
+ 	return value;
+@@ -55,7 +55,7 @@ _dispatch_wait_for_enqueuer(void **ptr)
+ 	int spins = DISPATCH_WAIT_SPINS;
+ 	void *value;
+ 	while (unlikely(spins-- > 0)) {
+-		if (likely(value = os_atomic_load(ptr, relaxed))) {
++		if (likely(value = os_atomic_load(ptr, acquire))) {
+ 			return value;
+ 		}
+ 		dispatch_hardware_pause();
