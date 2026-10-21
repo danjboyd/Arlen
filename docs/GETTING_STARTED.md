@@ -538,3 +538,8 @@ continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
 Live keyed broadcasts require explicit server-selected container and key values.
 Publish helpers omit requester-specific metadata and tracing IDs; direct live
 responses retain request defaults. See [Live UI](LIVE_UI.md).
+
+PostgreSQL and MSSQL decimal result decoding rejects text longer than 40
+characters or containing more than 38 digits with a query error. This also
+applies to PostgreSQL numeric arrays. Select wider values as text when exact
+arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
