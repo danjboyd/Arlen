@@ -38,9 +38,14 @@
   whitespace exactly, matching password reset and policy validation. Upgrade
   vendored auth modules.
 
-- Ops 1.1.1 removes individual jobs and notification outbox/fanout records
-  from operator HTML and JSON summaries and drilldowns while keeping status
+- Ops 1.1.1 removes individual jobs, notification outbox/fanout, and storage
+  records from operator HTML and JSON summaries and drilldowns while keeping status
   metrics. Admins retain full detail. Upgrade vendored `ops` modules.
+
+- Notifications 1.3.2 omits webhook URLs, headers, bodies, and error text from
+  persisted outbox records and scrubs existing catalog rows at startup. Rotate
+  older exports and backups separately if they contain webhook credentials.
+  Upgrade vendored `notifications` modules.
 
 - Synchronous HTTP compatibility helpers now reject invalid header names and
   CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.

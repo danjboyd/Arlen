@@ -146,6 +146,12 @@ Values must be positive integers; anything else uses the default.
 
 ## Incremental persistence and upgrading
 
+Notifications 1.3.2 stores only the HTTP method in webhook outbox audit messages.
+Webhook target URLs, headers, bodies, and delivery error text are omitted from
+new records. Existing webhook outbox rows are scrubbed when the module opens
+its catalog. Previously exported copies and SQLite backups require separate
+rotation if they contain credentials. Upgrade vendored notification modules.
+
 Notifications 1.3 stores each outbox, inbox and fanout entry, and each recipient's
 preferences, in a separate SQLite row. `persistence.path` remains the legacy
 plist path; the live catalog is `<persistence.path>.sqlite3`. The summary reports

@@ -450,10 +450,13 @@ Search query filters also constrain promoted results, so a promoted record that
 does not match `filter.<field>` or a per-resource filter is omitted.
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
-With ops 1.1.1, operator views show queue and notification status without
-individual job or outbox records; admins retain the detailed views.
+With ops 1.1.1, operator views show queue, notification, and storage status
+without individual job, outbox, or storage records; admins retain detail.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.
+Notifications 1.3.2 removes webhook URLs and headers from persisted outbox
+records; upgrade vendored modules and rotate older exports or backups that held
+webhook credentials.
 
 For company sign-in, add `auth`, configure an OIDC provider and an application
 identity resolver, and explicitly disable stub/password access if your copied

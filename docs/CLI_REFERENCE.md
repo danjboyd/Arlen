@@ -789,8 +789,10 @@ First-party module surfaces after install:
   headers, including `Reply-To` and `Resent-*`; see [Notifications Module](NOTIFICATIONS_MODULE.md#queueing-over-http).
 - `storage`: protected HTML under `/storage/...`, JSON/OpenAPI under `/storage/api/...`, and signed download fetches under `/storage/api/download/:token`. Outside `development`/`test` it requires `ARLEN_STORAGE_SIGNING_SECRET` or `storageModule.signingSecret` (32+ characters); see [Storage Module](STORAGE_MODULE.md#signing-secret).
 - `ops`: protected HTML under `/ops/...`, JSON/OpenAPI under `/ops/api/...`
-  Operator views omit individual jobs and notification outbox/fanout records;
+  Operator views omit individual jobs, notification outbox/fanout, and storage records;
   admins retain the full dashboard and drilldowns (`ops` 1.1.1).
+  Notifications 1.3.2 keeps webhook URLs and headers out of persisted outbox
+  records and scrubs existing catalog rows at startup.
 - `search`: public query HTML/JSON under `/search/...` plus protected reindex routes under `/search/api/...`
   Shared reads refresh and state changes transact across processes. Concurrent
   stale results return `state_conflict`; retry against fresh state. External

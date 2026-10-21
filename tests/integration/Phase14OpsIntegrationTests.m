@@ -297,7 +297,7 @@
   NSString *html = [self stringFromResponse:htmlResponse];
   XCTAssertFalse([html containsString:@"private-job-payload-marker"]);
   XCTAssertFalse([html containsString:@"private-outbox-marker"]);
-  XCTAssertTrue([html containsString:@"phase14ops.txt"]);
+  XCTAssertFalse([html containsString:@"phase14ops.txt"]);
 
   ALNResponse *jsonResponse =
       [app dispatchRequest:[self requestWithMethod:@"GET"
@@ -314,9 +314,10 @@
   XCTAssertNil(summary[@"jobs"][@"recentRuns"]);
   XCTAssertNil(summary[@"notifications"][@"recentOutbox"]);
   XCTAssertNil(summary[@"notifications"][@"recentFanout"]);
-  XCTAssertEqual((NSUInteger)1, [summary[@"storage"][@"recentObjects"] count]);
-  XCTAssertEqualObjects(@"phase14ops.txt", summary[@"storage"][@"recentObjects"][0][@"name"]);
-  for (NSString *module in @[ @"jobs", @"notifications" ]) {
+  XCTAssertNil(summary[@"storage"][@"recentObjects"]);
+  XCTAssertNil(summary[@"storage"][@"recentActivity"]);
+  XCTAssertEqualObjects(@1, summary[@"storage"][@"recentObjectCount"]);
+  for (NSString *module in @[ @"jobs", @"notifications", @"storage" ]) {
     NSString *path = [@"/ops/api/modules/" stringByAppendingString:module];
     ALNResponse *drilldownResponse = [app dispatchRequest:[self requestWithMethod:@"GET" path:path
                                                       headers:@{ @"Accept" : @"application/json" } body:nil]];
@@ -324,12 +325,14 @@
     NSString *body = [self stringFromResponse:drilldownResponse];
     XCTAssertFalse([body containsString:@"private-job-payload-marker"]);
     XCTAssertFalse([body containsString:@"private-outbox-marker"]);
+    XCTAssertFalse([body containsString:@"phase14ops.txt"]);
     NSString *htmlPath = [@"/ops/modules/" stringByAppendingString:module];
     ALNResponse *htmlDrilldown = [app dispatchRequest:[self requestWithMethod:@"GET" path:htmlPath
                                                                  headers:@{} body:nil]];
     XCTAssertEqual((NSInteger)200, htmlDrilldown.statusCode);
     XCTAssertFalse([[self stringFromResponse:htmlDrilldown] containsString:@"private-job-payload-marker"]);
     XCTAssertFalse([[self stringFromResponse:htmlDrilldown] containsString:@"private-outbox-marker"]);
+    XCTAssertFalse([[self stringFromResponse:htmlDrilldown] containsString:@"phase14ops.txt"]);
   }
 
   auth.roles = @[ @"admin" ];
@@ -340,6 +343,7 @@
   NSDictionary *adminSummary = [self JSONObjectFromResponse:adminResponse][@"data"];
   XCTAssertEqual((NSUInteger)2, [adminSummary[@"notifications"][@"recentOutbox"] count]);
   XCTAssertTrue([adminSummary[@"jobs"][@"pendingJobs"] count] > 0);
+  XCTAssertEqualObjects(@"phase14ops.txt", adminSummary[@"storage"][@"recentObjects"][0][@"name"]);
   XCTAssertTrue([[self stringFromResponse:adminResponse] containsString:@"private-job-payload-marker"]);
   XCTAssertTrue([[self stringFromResponse:adminResponse] containsString:@"private-outbox-marker"]);
 }

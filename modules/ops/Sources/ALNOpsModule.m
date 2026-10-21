@@ -118,6 +118,8 @@ static NSArray *OTTailArray(NSArray *values, NSUInteger limit) {
   return [values subarrayWithRange:NSMakeRange([values count] - limit, limit)];
 }
 
+static NSArray *OTNormalizeArray(id value);
+
 static NSDictionary *OTOperatorModuleSummary(NSString *moduleID, NSDictionary *summary) {
   if (![summary isKindOfClass:[NSDictionary class]]) return @{};
   if ([moduleID isEqualToString:@"jobs"]) {
@@ -131,6 +133,13 @@ static NSDictionary *OTOperatorModuleSummary(NSString *moduleID, NSDictionary *s
               @"status" : summary[@"status"] ?: @"informational",
               @"cards" : summary[@"cards"] ?: @[] };
   }
+  if ([moduleID isEqualToString:@"storage"]) {
+    return @{ @"available" : summary[@"available"] ?: @NO,
+              @"status" : summary[@"status"] ?: @"informational",
+              @"cards" : summary[@"cards"] ?: @[],
+              @"collectionCount" : @([OTNormalizeArray(summary[@"collections"]) count]),
+              @"recentObjectCount" : @([OTNormalizeArray(summary[@"recentObjects"]) count]) };
+  }
   return summary;
 }
 
@@ -138,12 +147,14 @@ static NSDictionary *OTOperatorDashboardSummary(NSDictionary *summary) {
   NSMutableDictionary *visible = [summary mutableCopy] ?: [NSMutableDictionary dictionary];
   visible[@"jobs"] = OTOperatorModuleSummary(@"jobs", summary[@"jobs"]);
   visible[@"notifications"] = OTOperatorModuleSummary(@"notifications", summary[@"notifications"]);
+  visible[@"storage"] = OTOperatorModuleSummary(@"storage", summary[@"storage"]);
   return visible;
 }
 
 static NSDictionary *OTOperatorDrilldown(NSDictionary *drilldown) {
   NSString *moduleID = drilldown[@"identifier"];
-  if (![moduleID isEqualToString:@"jobs"] && ![moduleID isEqualToString:@"notifications"]) {
+  if (![moduleID isEqualToString:@"jobs"] && ![moduleID isEqualToString:@"notifications"] &&
+      ![moduleID isEqualToString:@"storage"]) {
     return drilldown;
   }
   NSMutableDictionary *visible = [drilldown mutableCopy];
