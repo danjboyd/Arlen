@@ -36,7 +36,7 @@
 
 - (void)testManifestTrustsMatchingTreeAndToolchainOnly {
   NSString *output = [self runScenario:
-      @"mkdir -p src build/lib; echo one > src/a.m; touch build/arlen.exe build/lib/libArlenFramework.a\n"
+      @"mkdir -p src build/lib tools; echo one > src/a.m; echo one > tools/ALNWindowsWatchChild.h; touch build/arlen.exe build/lib/libArlenFramework.a\n"
       @"state 0.1.0 aaa\n"
       @"check() { if aln_release_prebuilt_is_current . build/arlen.exe build/lib/libArlenFramework.a 2>/dev/null; then echo \"$1=trusted\"; else echo \"$1=rebuild\"; fi; }\n"
       @"check no-manifest\n"
@@ -51,6 +51,8 @@
       @"check source-edited\n"
       @"echo one > src/a.m\n"
       @"check source-restored\n"
+      @"aln_release_write_manifest .; echo two > tools/ALNWindowsWatchChild.h\n"
+      @"check watch-header-edited\n"
       @"aln_release_write_manifest .; rm build/arlen.exe\n"
       @"check output-missing\n"];
   XCTAssertEqualObjects(@"no-manifest=rebuild\n"
@@ -60,6 +62,7 @@
                         @"stale-manifest=removed\n"
                         @"source-edited=rebuild\n"
                         @"source-restored=rebuild\n"
+                        @"watch-header-edited=rebuild\n"
                         @"output-missing=rebuild\n",
                         output);
 }

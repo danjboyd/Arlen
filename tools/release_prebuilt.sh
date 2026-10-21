@@ -38,7 +38,7 @@ aln_release_source_digest() {
   (
     cd "$1" &&
       find src modules templates \
-        tools/eocc.m tools/arlen.m tools/boomhauer.m \
+        tools/eocc.m tools/arlen.m tools/boomhauer.m tools/ALNWindowsWatchChild.h \
         tools/resolve_gnustep.sh tools/release_prebuilt.sh \
         GNUmakefile bin/arlen bin/boomhauer \
         -type f 2>/dev/null |
