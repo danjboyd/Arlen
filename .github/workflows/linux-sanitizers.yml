@@ -106,6 +106,8 @@ jobs:
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
+          source ./tools/source_gnustep_env.sh
+          python3 ./tools/ci/test_clang_sanitizer_runtime.py
           bash ./tools/ci/run_linux_thread_race_nightly.sh
 
       - name: Upload thread-race nightly artifacts

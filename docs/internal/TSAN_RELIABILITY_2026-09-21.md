@@ -42,9 +42,14 @@ On this toolchain the queue probe fails the clean-run requirement.
 The installed toolchain was Debian clang 19.1.7 with GNUstep base 1.31 and
 libobjc 4.6. Base build ID: `7d8b1a2da0aa65efd2b9453dfe58e5b456e5085a`;
 libobjc build ID: `9a78da61cb3af8a76a7274420f415c19c7985055`.
-The executable probes use clang's linked TSAN runtime. XCTest loads the
-instrumented bundle with the existing `clang -print-file-name=libtsan.so`
-preload (GCC 14 libtsan on this installation); both paths remain visible.
+The September executable probes used clang's linked TSAN runtime, while
+XCTest preloaded `clang -print-file-name=libtsan.so` (GCC 14 libtsan on this
+installation). The v0.3.1 harness corrects this mismatch: XCTest preloads clang's
+architecture-specific shared runtime and instrumented children link the same
+runtime with `-shared-libsan`. `test_clang_sanitizer_runtime.py` exercises both
+dlopen and exec with deliberate races and verifies exit 66 plus the named
+application counter. This harness correction does not resolve or suppress the
+remaining dependency findings.
 
 | Finding | Evidence | Disposition |
 | --- | --- | --- |
