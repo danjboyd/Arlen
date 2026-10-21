@@ -2314,7 +2314,16 @@ static id ALNMSSQLFetchColumnValue(SQLHSTMT statement,
   }
 
   NSError *blockError = nil;
-  BOOL success = block(&blockError);
+  BOOL success = NO;
+  @try {
+    success = block(&blockError);
+  } @catch (NSException *exception) {
+    if (![self rollbackToSavepointNamed:name error:NULL] ||
+        ![self releaseSavepointNamed:name error:NULL]) {
+      [self close];
+    }
+    @throw;
+  }
   if (success) {
     NSError *releaseError = nil;
     if (![self releaseSavepointNamed:name error:&releaseError]) {

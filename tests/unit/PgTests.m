@@ -1861,6 +1861,20 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertFalse(savepointOK);
   XCTAssertNotNil(savepointError);
 
+  BOOL caught = NO;
+  @try {
+    ALNDatabaseWithSavepoint((id<ALNDatabaseConnection>)connection, @"phase20_throwing",
+                            ^BOOL(NSError **blockError) {
+      XCTAssertEqual((NSInteger)1, [connection executeCommand:insertSQL
+          parameters:@[ @"must-not-commit" ] error:blockError]);
+      [NSException raise:@"PgSavepointFailure" format:@"intentional inner exception"];
+      return NO;
+    }, NULL);
+  } @catch (NSException *exception) {
+    caught = [exception.name isEqualToString:@"PgSavepointFailure"];
+  }
+  XCTAssertTrue(caught);
+
   XCTAssertEqual((NSInteger)1,
                  [connection executeCommand:insertSQL parameters:@[ @"boomhauer" ] error:&error]);
   XCTAssertNil(error);
@@ -1876,10 +1890,29 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqualObjects(@3, [countResult scalarValueForColumn:@"count" error:&error]);
   XCTAssertNil(error);
 
-  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                        parameters:@[]
-                             error:nil];
+  // If the body invalidates its own savepoint and then throws, rollback cannot
+  // restore that scope. The adapter must close the unsafe connection.
+  XCTAssertTrue([connection beginTransaction:&error]);
+  caught = NO;
+  @try {
+    [connection withSavepointNamed:@"phase20_invalidated" usingBlock:^BOOL(NSError **blockError) {
+      XCTAssertEqual((NSInteger)1, [connection executeCommand:insertSQL
+          parameters:@[ @"must-not-commit-after-rollback-failure" ] error:blockError]);
+      XCTAssertTrue([connection releaseSavepointNamed:@"phase20_invalidated" error:blockError]);
+      [NSException raise:@"PgSavepointFailure" format:@"invalidated savepoint"];
+      return NO;
+    } error:NULL];
+  } @catch (NSException *exception) {
+    caught = [exception.name isEqualToString:@"PgSavepointFailure"];
+  }
+  XCTAssertTrue(caught);
+  XCTAssertFalse(connection.isOpen);
   [database releaseConnection:connection];
+  NSDictionary *row = [[database executeQuery:
+      [NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table] parameters:@[] error:&error] firstObject];
+  XCTAssertEqualObjects(@3, row[@"count"]);
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[] error:NULL];
 }
 
 - (void)testTransactionHelperCommitAndRollback {

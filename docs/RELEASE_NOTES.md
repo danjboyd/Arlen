@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- ORM transaction exceptions clear the context's borrowed connection. Savepoint
+  exceptions roll back inner writes before an outer transaction can continue;
+  PostgreSQL and MSSQL close connections when that cleanup fails.
+
 - Redis URLs containing literal or encoded NUL are rejected before parsing.
 - Template exceptions now restore per-thread render options and discard the
   failed render's composition slots, preserving any enclosing render state.

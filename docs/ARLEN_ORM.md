@@ -353,3 +353,11 @@ Related docs:
 - `docs/ARLEN_ORM_MIGRATIONS.md`
 - `docs/ARLEN_ORM_BACKEND_MATRIX.md`
 - `docs/ARLEN_ORM_SCORECARD.md`
+
+Transaction exceptions propagate after the ORM context clears its active
+connection and restores transaction depth. A later transaction on the context
+acquires a fresh adapter transaction. Throwing PostgreSQL and MSSQL savepoint
+blocks roll back their inner writes before propagating the exception, so an
+outer transaction can catch it and continue. Native connections close when
+savepoint cleanup fails. Custom adapters that implement their own savepoint
+helper must provide the same exception-cleanup contract.

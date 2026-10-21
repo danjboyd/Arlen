@@ -1888,3 +1888,8 @@ Template rendering restores thread-local options and composition slots when a
 body or layout throws. Exceptions still propagate to the caller; failed renders
 do not leave slot content available to later renders on the same worker thread.
 Nested rendering preserves the enclosing render state.
+
+ORM transaction exceptions now restore context connection state. Throwing
+savepoint blocks roll back their writes before an enclosing transaction can
+continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
+[Arlen ORM](ARLEN_ORM.md) for the adapter contract.
