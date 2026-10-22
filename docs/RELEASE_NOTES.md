@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-22
+
+This patch release corrects authorization, request handling, persistence and
+runtime behavior. Upgrade affected vendored modules as described below.
+Linux setup now builds and selects Arlen's pinned patched GNUstep runtime in
+an Arlen-owned versioned prefix. Keep that prefix in place while installations
+or services use it; see [Getting Started](GETTING_STARTED.md#manual-toolchain-setup).
+
+Release qualification and remaining limitations are documented in the
+[Known Risk Register](KNOWN_RISK_REGISTER.md).
+
 - GNUstep app tests build and use the bundled XCTest library and headers
   together, including on clean toolchains without system XCTest.
 
