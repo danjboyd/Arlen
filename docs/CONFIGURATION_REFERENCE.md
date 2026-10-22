@@ -158,6 +158,11 @@ route's limit. Decoded bodies above `spoolThresholdBytes` stream to private spoo
 files while the upload is still arriving; success transfers file ownership to
 the request, and rejection, malformed framing, disconnects, and exceptions clean
 up incomplete files. Only the request head counts toward `maxHeaderBytes`.
+
+Windows parser rejections use a bounded graceful connection close to preserve
+the HTTP error response when later input is already queued. Cleanup discards
+at most 64 KiB within a 100 ms budget before releasing the socket.
+
 The existing encoded envelope cap (maximum configured body allowance plus header
 allowance) also bounds chunk framing and trailers. Pipelined requests remain
 separate. On Windows, each chunked spool is created exclusively with a protected

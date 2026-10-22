@@ -1981,3 +1981,7 @@ arrive, including buffered and spooled `Content-Length` bodies on both parsers.
 An expired body receives `408`; following pipelined bytes cannot increase its
 rate, and the next keep-alive request gets a separate clock.
 The documented zero values disable the corresponding body deadline or rate.
+
+Windows uses a bounded graceful close after HTTP parser rejection to preserve
+the error response when pipelined input is queued. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).
