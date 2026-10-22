@@ -142,6 +142,17 @@ def builder(work):
     return dest / ("gnustep-cli-new-" + BUILDER_COMMIT)
 
 
+def patch_source(component, patch):
+    # Existing race patches remain single-source in CI. Only the Ubuntu lock
+    # declares the separately pinned clang 21 source-compatibility patch.
+    canonical = f"patches/{component['name']}/{component['name']}.patch"
+    if patch["path"] == canonical:
+        return ROOT / "tools/ci/tsan-toolchain" / (component["name"] + ".patch")
+    if component["name"] == "libdispatch" and patch["path"] == "patches/libdispatch/libdispatch-clang21.patch":
+        return ROOT / "tools/runtime/patches/libdispatch-clang21.patch"
+    raise ValueError(f"unsupported runtime patch path: {patch['path']}")
+
+
 def stage_lock(work):
     original = lock_for_host()
     dest = work / "lock" / original.name
@@ -149,7 +160,7 @@ def stage_lock(work):
     shutil.copy2(original, dest)
     for component in json.loads(dest.read_text())["components"]:
         for patch in component["patches"]:
-            source = ROOT / "tools/ci/tsan-toolchain" / (component["name"] + ".patch")
+            source = patch_source(component, patch)
             if digest(source) != patch["sha256"]:
                 raise ValueError(f"repository patch checksum mismatch: {source}")
             copy = dest.parent / patch["path"]

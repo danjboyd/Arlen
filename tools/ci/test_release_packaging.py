@@ -32,6 +32,8 @@ class SourceArchiveTests(unittest.TestCase):
             self.assertIn("arlen-9.8.7/tools/setup_runtime.py", names)
             self.assertIn("arlen-9.8.7/tools/ci/setup_normal_runtime.sh", names)
             self.assertIn("arlen-9.8.7/tests/fixtures/runtime/icu_runtime_contract.m", names)
+            self.assertIn("arlen-9.8.7/tools/runtime/patches/libdispatch-clang21.patch", names)
+            self.assertIn("arlen-9.8.7/tests/fixtures/runtime/epoll_mask_contract.c", names)
             for target in ("debian-13-amd64", "debian-13-arm64", "ubuntu-26.04-amd64"):
                 self.assertIn(f"arlen-9.8.7/tools/runtime/{target}.lock.json", names)
             for component in ("libobjc2", "libdispatch", "libs-base"):

@@ -30,6 +30,10 @@
         {
           "path": "patches/libdispatch/libdispatch.patch",
           "sha256": "26cf8bc213e0196c9c0398dbf784d0b210b8d5e620d7efc8c4babf7c49011924"
+        },
+        {
+          "path": "patches/libdispatch/libdispatch-clang21.patch",
+          "sha256": "ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d"
         }
       ]
     },

@@ -64,8 +64,8 @@ Linux releases require Arlen's pinned, patched clang/libobjc2, libdispatch and
 GNUstep Base runtime. Generic clang GNUstep and GCC-built distro packages do
 not satisfy the release contract. Automatic setup builds the existing custom
 [gnustep-cli builder](https://github.com/danjboyd/gnustep-cli-new) natively,
-using the target lock in `tools/runtime/` and the checked patches in
-`tools/ci/tsan-toolchain/`. It supports Debian 13 amd64/arm64 and Ubuntu 26.04
+using the target lock in `tools/runtime/` and the three race patches plus the Ubuntu clang compatibility patch in
+`tools/ci/tsan-toolchain/` and `tools/runtime/patches/`. It supports Debian 13 amd64/arm64 and Ubuntu 26.04
 amd64, using each distribution's ICU and clang. Debian 12, Ubuntu 24.04 and
 Ubuntu arm64 are outside this automatic path.
 

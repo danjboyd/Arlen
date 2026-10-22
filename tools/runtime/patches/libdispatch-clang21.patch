@@ -1,0 +1,12 @@
+diff --git a/src/event/event_epoll.c b/src/event/event_epoll.c
+--- a/src/event/event_epoll.c
++++ b/src/event/event_epoll.c
+@@ -89,7 +89,7 @@
+ static inline uint32_t
+ _dispatch_muxnote_armed_events(dispatch_muxnote_t dmn)
+ {
+-	return dmn->dmn_events & ~dmn->dmn_disarmed_events;
++	return dmn->dmn_events & (uint32_t)~dmn->dmn_disarmed_events;
+ }
+ 
+ DISPATCH_ALWAYS_INLINE

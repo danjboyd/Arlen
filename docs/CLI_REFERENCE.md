@@ -80,7 +80,8 @@ On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), setup installs native
 build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
 patched normal GNUstep runtime using the checksum-pinned custom builder.
 Each target has a lock under `tools/runtime/`, sharing the same component
-pins, compiler flags and three patch digests. Builds use the host's ICU and
+pins, compiler flags and three race-patch digests. Ubuntu adds one pinned
+clang 21 epoll-mask compatibility patch. Builds use the host's ICU and
 clang and at most four jobs. Existing matching runtimes are verified and reused.
 The runtime lives at its final immutable `<prefix>/runtimes/<target>-<lock-id>`;
 `ARLEN_RUNTIME_ROOT` overrides its parent directory. Paths must have no
