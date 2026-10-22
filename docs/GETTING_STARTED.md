@@ -606,3 +606,9 @@ arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
 Synchronous HTTP compatibility helpers reject invalid header names and values
 before transport, including CR/LF injection and embedded NUL. They return
 `NSURLErrorDomain/NSURLErrorBadURL`; see [HTTP Client](HTTP_CLIENT.md).
+
+With llhttp enabled, chunked uploads enforce the selected route's decoded body
+limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
+processed incrementally within the existing encoded envelope cap. The legacy
+backend continues to reject chunked transfer coding. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).

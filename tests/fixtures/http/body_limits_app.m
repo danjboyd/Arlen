@@ -25,7 +25,12 @@
     [uploads addObject:@{ @"size" : @(upload.size), @"fnv" : @(hash),
                           @"spooled" : @(upload.temporaryFilePath != nil) }];
   }
-  return @{ @"uploads" : uploads };
+  const uint8_t *bodyBytes = ctx.request.body.bytes;
+  uint32_t bodyHash = 2166136261u;
+  for (NSUInteger i = 0; i < ctx.request.body.length; i++) {
+    bodyHash = (bodyHash ^ bodyBytes[i]) * 16777619u;
+  }
+  return @{ @"uploads" : uploads, @"bodyLength" : @(ctx.request.body.length), @"bodyFnv" : @(bodyHash) };
 }
 - (id)explode:(ALNContext *)ctx {
   (void)ctx.request.uploads;
