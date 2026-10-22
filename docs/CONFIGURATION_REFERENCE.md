@@ -122,6 +122,8 @@ Generated apps start with:
   and chunked bodies, and bodies that stream to the spool file. A slower body
   gets `408`, the connection closes and any spool file is removed. `0` turns it
   off. Raise it with `maxBodyBytes` for very large uploads over slow links.
+  The deadline is checked again when the final body bytes arrive, before the
+  request is accepted; completing the body does not bypass an expired clock.
 - `requestBodyMinBytesPerSecond` (default `1024`; env
   `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND`) and
   `requestBodyMinRateGraceSeconds` (default `10`; env
@@ -130,6 +132,9 @@ Generated apps start with:
   second, or the request gets `408`. A client trickling a body is closed long
   before the total deadline; slow but real uploads (1 KiB/s is far below any
   mobile link) are not. `0` turns the rate check off.
+  This check also applies to the final fragment. Bytes from a following
+  pipelined request do not count toward the preceding body's rate, and each
+  keep-alive request starts its own body clock.
 
 Raise these only for real application needs. The defaults are intentionally
 bounded.

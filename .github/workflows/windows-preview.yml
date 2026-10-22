@@ -73,7 +73,7 @@ jobs:
       - name: Validate opt-in llhttp request parsing and body limits
         shell: powershell
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "export ARLEN_ENABLE_LLHTTP=1 && make test-unit-filter TEST=HTTPBodyStreamingTests && make test-unit-filter TEST=RequestTests && make test-integration-filter TEST=HTTPIntegrationTests/testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends"
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "export ARLEN_ENABLE_LLHTTP=1 && make boomhauer && make test-unit-filter TEST=HTTPBodyStreamingTests && make test-unit-filter TEST=RequestTests && make test-integration-filter TEST=HTTPIntegrationTests/testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends && make test-integration-filter TEST=HTTPIntegrationTests/testFinalBodyBytesRespectDeadlineAndRateOnBothBackends"
 
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

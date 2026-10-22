@@ -19,7 +19,10 @@ Windows defaults to the legacy HTTP backend. For chunked-body changes, also
 validate the opt-in parser with `ARLEN_ENABLE_LLHTTP=1`; the managed toolchain
 provides winpthreads for its thread-local parser state. The existing Windows
 job runs focused llhttp request-parser and body-limit checks after default
-acceptance. Keep both backends and the existing job budget covered.
+acceptance, including final-fragment deadline/rate checks on both backends.
+Build the server with the same opt-in flags as the test bundles; the clock
+regression runs that binary directly and remains eligible for sanitizer integration.
+Keep both backends and the existing job budget covered.
 
 - File or comment on an issue first if the change is non-trivial. This lets us
   surface design considerations before you invest implementation time.

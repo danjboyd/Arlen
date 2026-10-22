@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Request body deadlines and minimum rates are rechecked before accepting the
+  final fragment on chunked and `Content-Length` readers. This closes a gap
+  where late completion bypassed the clock; pipelined bytes do not increase
+  the preceding body's rate, and failed uploads remove their spool files.
+  Body clock settings also honor their documented zero values instead of
+  silently restoring defaults.
+
 - Linux automatic prerequisite setup pins the GNUstep bootstrap executable
   digest instead of trusting a checksum downloaded with the script.
 

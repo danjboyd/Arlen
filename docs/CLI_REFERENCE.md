@@ -1975,3 +1975,9 @@ backend continues to reject chunked transfer coding. See
 Legacy storage plist catalogs use private temporary creation and atomic replacement
 on Windows; the parent directory ACL is unchanged. See
 [Storage Module](STORAGE_MODULE.md) for upgrade and filesystem guidance.
+
+Request body deadlines and minimum rates are checked when the final bytes
+arrive, including buffered and spooled `Content-Length` bodies on both parsers.
+An expired body receives `408`; following pipelined bytes cannot increase its
+rate, and the next keep-alive request gets a separate clock.
+The documented zero values disable the corresponding body deadline or rate.
