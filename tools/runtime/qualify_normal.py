@@ -41,14 +41,29 @@ def main():
                           ("linkage", ["ldd", str(out / "normal-probe")])):
         metadata[name] = subprocess.check_output(command, text=True)
     prefix = Path(os.environ["ARLEN_RUNTIME_PREFIX"]).resolve()
-    for library in ("libobjc.so", "libdispatch.so", "libgnustep-base.so"):
+    for library in ("libobjc.so", "libdispatch.so", "libgnustep-base.so", "libBlocksRuntime.so"):
         paths = [line.split("=>", 1)[1].split()[0] for line in metadata["linkage"].splitlines()
                  if line.strip().startswith(library) and "=>" in line]
         if not paths or not all(Path(p).resolve().is_relative_to(prefix) for p in paths):
             raise RuntimeError(f"native probe loaded {library} outside selected prefix: {paths}")
-    metadata["status"] = "pass" if all(r["exit_code"] == 0 and r["complete"] for r in records) else "fail"
+    icu_flags = shlex.split(subprocess.check_output(
+        ["pkg-config", "--cflags", "--libs", "icu-i18n", "icu-uc"], text=True))
+    icu_command = ["clang", *flags, "-O2", "-g", str(ROOT / "tests/fixtures/runtime/icu_runtime_contract.m"),
+                   "-o", str(out / "icu-runtime-contract"), *libs, *icu_flags]
+    result = subprocess.run(icu_command, capture_output=True, text=True)
+    (out / "icu-build.log").write_text(result.stdout + result.stderr)
+    metadata["icu_compile_command"] = icu_command
+    metadata["icu_build_exit_code"] = result.returncode
+    if result.returncode == 0:
+        result = subprocess.run([str(out / "icu-runtime-contract")], capture_output=True, text=True, timeout=30)
+        (out / "icu-runtime.log").write_text(result.stdout + result.stderr)
+        metadata["icu_exit_code"] = result.returncode
+        metadata["icu_output"] = result.stdout + result.stderr
+    metadata["icu_valid"] = (metadata.get("icu_exit_code") == 0 and
+                             "pass:ICU-and-Foundation-timezone-formatting" in metadata.get("icu_output", ""))
+    metadata["status"] = "pass" if metadata["icu_valid"] and all(r["exit_code"] == 0 and r["complete"] for r in records) else "fail"
     (out / "summary.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    print(f"native normal runtime controls: {metadata['status']} ({len(records)} modes)")
+    print(f"native normal runtime controls: {metadata['status']} ({len(records)} modes, ICU date contract)")
     return 0 if metadata["status"] == "pass" else 1
 
 

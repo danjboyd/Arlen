@@ -289,7 +289,7 @@ setup_linux() {
   consent "Install native build prerequisites and build Arlen's pinned patched GNUstep runtime at its final versioned prefix? (No managed GNUstep installation is replaced.)"
   root_command apt-get update
   root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates curl git tar gzip make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
+    ca-certificates curl git tar gzip tzdata make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
     libblocksruntime-dev libssl-dev libsqlite3-0 zlib1g-dev libxml2-dev libxslt1-dev libicu-dev \
     libavahi-client-dev libcurl4-gnutls-dev libgnutls28-dev libffi-dev
   runtime_prefix="${ARLEN_RUNTIME_ROOT:-$prefix/runtimes}"

@@ -184,6 +184,59 @@ class RuntimeDeliveryTests(unittest.TestCase):
         self.assertEqual(os.readlink(prefix / "current"), "1.2.3")
         self.assertFalse((self.work / "network-called").exists())
 
+    def test_packaged_jobs_worker_selects_runtime_in_its_parent_before_exec(self):
+        prov = self.fixture()
+        release = runtime.platform.freedesktop_os_release()
+        prov["build_host"]["os_version"] = release["ID"] + "-" + release["VERSION_ID"]
+        (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
+        (self.prefix / "System/Library/Makefiles/GNUstep.sh").write_text(":\n")
+        framework = self.work / "worker-framework"
+        (framework / "bin").mkdir(parents=True)
+        (framework / "build").mkdir()
+        shutil.copy2(ROOT / "bin/jobs-worker", framework / "bin/jobs-worker")
+        tools = framework / "tools"
+        tools.mkdir()
+        for name in ("setup_runtime.py", "source_gnustep_env.sh", "resolve_gnustep.sh"):
+            shutil.copy2(ROOT / "tools" / name, tools / name)
+        shutil.copytree(ROOT / "tools/runtime", tools / "runtime")
+        (framework / runtime.SELECTOR).write_text(str(self.prefix) + "\n")
+        app = self.work / "packaged-app"
+        binary = app / ".boomhauer/build/boomhauer-app"
+        binary.parent.mkdir(parents=True)
+        binary.write_text('#!/bin/sh\nprintf "%s|%s\\n" "$ARLEN_RUNTIME_PREFIX" "$LD_LIBRARY_PATH"\n')
+        binary.chmod(0o755)
+        arlen = framework / "build/arlen"
+        arlen.write_text("#!/bin/sh\nexit 0\n")
+        arlen.chmod(0o755)
+        env = dict(os.environ)
+        env.pop("ARLEN_RUNTIME_PREFIX", None)
+        result = subprocess.run([str(framework / "bin/jobs-worker"), "--app-root", str(app), "--framework-root", str(framework)],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith(str(self.prefix) + "|" + str(self.prefix) + "/lib:"), result.stdout)
+
+    def test_functional_ci_selects_prefix_and_private_defaults_without_setup(self):
+        prov = self.fixture()
+        release = runtime.platform.freedesktop_os_release()
+        prov["build_host"]["os_version"] = release["ID"] + "-" + release["VERSION_ID"]
+        (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
+        (self.prefix / "System/Library/Makefiles/GNUstep.sh").write_text(":\n")
+        conf = self.prefix / "etc/GNUstep/GNUstep.conf"
+        conf.parent.mkdir(parents=True)
+        conf.write_text('GNUSTEP_SYSTEM_ROOT=' + str(self.prefix / "System") + '\n')
+        env = dict(os.environ, ARLEN_RUNTIME_PREFIX=str(self.prefix), ARLEN_NORMAL_RUNTIME_STATE=str(self.work / "ci-state"),
+                   GITHUB_ENV=str(self.work / "github-env"))
+        result = subprocess.run(["bash", str(ROOT / "tools/ci/setup_normal_runtime.sh")], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        saved = (self.work / "github-env").read_text()
+        self.assertIn("ARLEN_RUNTIME_PREFIX=" + str(self.prefix), saved)
+        self.assertIn("ARLEN_GNUSTEP_CONFIG_FILE=" + str(self.work / "ci-state/GNUstep.conf"), saved)
+        config = self.work / "ci-state/GNUstep.conf"
+        self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+        self.assertIn(str(self.work / "ci-state/Defaults"), config.read_text())
+        self.assertIn(str(self.work / "ci-state/absent-user.conf"), config.read_text())
+        self.assertIn(str(self.prefix / "System"), config.read_text())
+
     def test_unconfigured_release_refuses_ambient_fallback_without_installing(self):
         framework = self.work / "framework"
         tools = framework / "tools"

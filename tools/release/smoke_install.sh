@@ -21,6 +21,7 @@ mkdir -p "$install_home"
 cleanup() {
   if [[ -n "${ARLEN_RUNTIME_EVIDENCE_DIR:-}" ]]; then
     mkdir -p "$ARLEN_RUNTIME_EVIDENCE_DIR"
+    cp -a "$work/native-runtime-controls" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
     cp "$work/boomhauer.log" "$work/arlen/last-build-failure.log" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
     local attempt
     for attempt in "$work/arlen/runtimes"/.*-build-*; do

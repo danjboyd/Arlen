@@ -106,7 +106,7 @@ verifies an existing prefix and saves selection without fetching or building;
 
 `ARLEN_RUNTIME_PREFIX` overrides `.arlen-runtime`; selected runtime headers,
 `gnustep-config` and loader directories are used by `arlen`, generated app
-builds, `boomhauer`, and `propane`. Runtime libraries precede ambient loader
+builds, `boomhauer`, `propane`, and `jobs-worker`. Runtime libraries precede ambient loader
 paths. Services call the same helper and need access to that final prefix.
 For another deployment host, provision its own matching runtime and set
 `ARLEN_RUNTIME_PREFIX` in `/etc/arlen/<site>.env`; deployment archives carry no
@@ -2022,3 +2022,11 @@ The documented zero values disable the corresponding body deadline or rate.
 Windows uses a bounded graceful close after HTTP parser rejection to preserve
 the error response when pipelined input is queued. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.

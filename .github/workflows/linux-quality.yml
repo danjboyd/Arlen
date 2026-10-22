@@ -47,6 +47,9 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Select Arlen patched normal runtime for functional checks
+        run: bash tools/ci/setup_normal_runtime.sh --install-dependencies
+
       - name: Install PostgreSQL server tools for isolated acceptance
         run: |
           if ! bash tools/ci/resolve_postgres_test_bin.sh; then
@@ -112,6 +115,17 @@ jobs:
         run: |
           source tools/source_gnustep_env.sh
           make test-unit-filter TEST=LazyStaticColdStartTests
+
+      - name: Upload patched runtime provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-quality-normal-runtime-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/arlen-normal-runtime/gnustep-toolchain-provenance.json
+            ${{ runner.temp }}/arlen-normal-runtime/verified-prefix.txt
+            ${{ runner.temp }}/arlen-normal-runtime/GNUstep.conf
+          if-no-files-found: warn
 
       - name: Summarize XCTest results
         if: always()

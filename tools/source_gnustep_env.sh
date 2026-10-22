@@ -18,7 +18,7 @@ _aln_source_gnustep_env_main() {
   script_dir="$(cd "$(dirname "$script_path")" && pwd)"
 
   runtime_prefix=""
-  if [[ "$(uname -s)" == Linux && -f "$script_dir/setup_runtime.py" ]]; then
+  if [[ "${OSTYPE:-}" == linux* && -f "$script_dir/setup_runtime.py" ]]; then
     runtime_prefix="$(python3 "$script_dir/setup_runtime.py" selected)" || return 1
     if [[ -n "$runtime_prefix" ]]; then
       runtime_prefix="$(python3 "$script_dir/setup_runtime.py" check --prefix "$runtime_prefix")" || return 1

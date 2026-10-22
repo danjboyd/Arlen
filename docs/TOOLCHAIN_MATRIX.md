@@ -38,7 +38,7 @@ Native build dependencies on supported Debian/Ubuntu hosts:
 
 ```bash
 sudo apt-get update
-sudo apt-get install --no-install-recommends ca-certificates curl git tar gzip \
+sudo apt-get install --no-install-recommends ca-certificates curl git tar gzip tzdata \
   make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
   libblocksruntime-dev libssl-dev libsqlite3-0 zlib1g-dev libxml2-dev libxslt1-dev \
   libicu-dev libavahi-client-dev libcurl4-gnutls-dev libgnutls28-dev libffi-dev
@@ -327,3 +327,11 @@ Update this matrix when:
 Apple builds additionally link the system libcurl for the received HTTP result
 API. HTTP/data contract confidence uses Apple XCTest and a disposable PostgreSQL
 cluster; GNUstep runs equivalent coverage with the vendored tools-xctest runner.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.

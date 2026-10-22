@@ -896,3 +896,46 @@ Linux PI-futex synchronization
 receives TSan acquire/release
 annotations at actual successful lock and unlock boundaries; non-sanitized
 builds omit those annotations. No library-wide suppression is added.
+
+## Patched normal runtime in functional CI
+
+`linux-quality`, Linux `release-certification`, and the Linux `release-assets`
+source-archive job explicitly run `tools/ci/setup_normal_runtime.sh
+--install-dependencies` before native functional checks. Existing `preinstalled`
+validation remains a bootstrap check; it does not establish patched runtime
+qualification. The helper builds or verifies an Arlen-owned immutable prefix
+under `$HOME/.cache/arlen/normal-runtimes`, outside the managed GNUstep roots,
+and exports `ARLEN_RUNTIME_PREFIX` to later steps through `GITHUB_ENV`.
+`ARLEN_CI_NORMAL_RUNTIME_ROOT` chooses another final cache location. A failed
+partial prefix is preserved for diagnosis and explicit repair, never overwritten.
+The shared prefix build is locked, so concurrent jobs cannot replace it.
+
+The helper writes a mode-0600 private GNUstep config under
+`$RUNNER_TEMP/arlen-normal-runtime`, retains actual runtime domain paths,
+and assigns absolute per-job defaults and absent user-config paths. It exports
+`ARLEN_GNUSTEP_CONFIG_FILE`; setting `HOME` alone cannot isolate Foundation
+preferences. Runtime provenance, verification and private config are uploaded in a separate
+normal-runtime artifact, preserving existing archive artifact layouts. The source-archive job's budget is 90 minutes to cover
+a native cache miss. Required check names and branch protection do not change.
+The public native matrix still verifies clean provisioning independently.
+
+The dedicated sanitizer and thread-race jobs retain their existing bootstrap,
+thread overlay, diagnostics, suppressions and acceptance contract. Their
+integration classifier excludes app/deploy builder tests; they do not call
+Linux deployment packaging that requires normal-runtime provenance. Static
+analysis and docs jobs also do not create Linux deployment packages. The
+certification job's existing ASan subpack inherits the selected normal runtime;
+this does not alter the separately owned TSan bootstrap or thread recipe.
+Normal linkage controls independently require Base, objc, dispatch and
+BlocksRuntime to resolve inside the selected prefix. `jobs-worker`, like
+`propane`, sources the helper in its own parent shell before executing a
+packaged app; an environment selected by its child build cannot update its
+parent process.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.
