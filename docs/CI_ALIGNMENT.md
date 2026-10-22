@@ -832,6 +832,10 @@ group completion and notifications, and atomic queue-tail, reference-count, and
 semaphore-timeout reads. The Objective-C weak registry lives for the process
 lifetime so detached workers cannot race its destructor at exit. Standalone
 group and notification stress probes retain coverage of these handoffs.
+A serial-queue probe alternates asynchronous submissions and synchronous drains
+to exercise producer checks while workers release queue references. Global-object
+reference-count checks and queue-tail predicates use atomic loads, matching the
+concurrent atomic writes; queue initialization and disposal semantics are unchanged.
 Linux PI-futex synchronization
 receives TSan acquire/release
 annotations at actual successful lock and unlock boundaries; non-sanitized

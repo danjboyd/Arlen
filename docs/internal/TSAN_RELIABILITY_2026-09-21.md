@@ -127,7 +127,8 @@ No upstream library modification or TSAN gate promotion is part of this change.
 The isolated dependency recipe and reviewable patches are documented in
 `docs/CI_ALIGNMENT.md`. It builds the same pinned sources in normal and thread
 modes without installing into the host toolchain. Expanded diagnostics exercise
-Foundation caches, idle queue retirement, dispatch once/apply, semaphore handoff,
+Foundation caches, idle queue retirement, serial-queue enqueue/drain contention,
+dispatch once/apply, semaphore handoff,
 group wait/notification publication, concurrent task signals, and KVC cache
 refresh during method replacement, and autoreleased buffers, alongside the unchanged deliberate-race
 canary. This follow-up does not promote the gate or relax the two consecutive

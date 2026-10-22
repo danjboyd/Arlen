@@ -45,9 +45,36 @@ index 9c7d60f..69472dc 100644
  		_dispatch_continuation_free(da->da_dc);
  #endif
 diff --git a/src/inline_internal.h b/src/inline_internal.h
-index 67ecfc9..37caffe 100644
+index 67ecfc9..8fc39f0 100644
 --- a/src/inline_internal.h
 +++ b/src/inline_internal.h
+@@ -104,7 +104,7 @@ DISPATCH_ALWAYS_INLINE
+ static inline bool
+ _dispatch_object_is_global(dispatch_object_t dou)
+ {
+-	return dou._do->do_ref_cnt == DISPATCH_OBJECT_GLOBAL_REFCNT;
++	return os_atomic_load2o(dou._do, do_ref_cnt, relaxed) == DISPATCH_OBJECT_GLOBAL_REFCNT;
+ }
+ 
+ DISPATCH_ALWAYS_INLINE
+@@ -236,7 +236,7 @@ _os_object_release_internal_n_inline(_os_object_t obj, int n)
+ 		_OS_OBJECT_CLIENT_CRASH("Over-release of an object");
+ 	}
+ #if DISPATCH_DEBUG
+-	int xref_cnt = obj->os_obj_xref_cnt;
++	int xref_cnt = os_atomic_load2o(obj, os_obj_xref_cnt, relaxed);
+ 	if (unlikely(xref_cnt >= 0)) {
+ 		DISPATCH_INTERNAL_CRASH(xref_cnt,
+ 				"Release while external references exist");
+@@ -1373,7 +1373,7 @@ _dispatch_queue_try_reserve_sync_width(dispatch_lane_t dq)
+ 	// doesn't fail if only the ENQUEUED bit is set (unlike its barrier width
+ 	// equivalent), so we have to check that this thread hasn't enqueued
+ 	// anything ahead of this call or we can break ordering
+-	if (unlikely(dq->dq_items_tail)) {
++	if (unlikely(os_atomic_load2o(dq, dq_items_tail, relaxed))) {
+ 		return false;
+ 	}
+ 
 @@ -1532,9 +1532,9 @@ _dispatch_queue_drain_try_unlock(dispatch_queue_t dq, uint64_t owned, bool done)
  #define os_mpsc_push_update_prev(Q, prev, head, _o_next)  ({ \
  		os_mpsc_node_type(Q) _prev = (prev); \
@@ -78,6 +105,94 @@ index 67ecfc9..37caffe 100644
  		if (unlikely(_node == NULL)) { \
  			_node = _dispatch_wait_for_enqueuer((void **)&__n->_o_next); \
  		} \
+diff --git a/src/io.c b/src/io.c
+index e31e28c..5550b90 100644
+--- a/src/io.c
++++ b/src/io.c
+@@ -1167,7 +1167,7 @@ _dispatch_operation_enqueue(dispatch_operation_t op,
+ 			handler(true, d, err);
+ 			_dispatch_io_data_release(data);
+ 		});
+-		_dispatch_op_debug("release -> %d, err %d", op, op->do_ref_cnt, err);
++		_dispatch_op_debug("release -> %d, err %d", op, os_atomic_load2o(op, do_ref_cnt, relaxed), err);
+ 		_dispatch_release(op);
+ 		return;
+ 	}
+@@ -1202,7 +1202,7 @@ _dispatch_operation_should_enqueue(dispatch_operation_t op,
+ 	if (err) {
+ 		op->err = err;
+ 		// Final release
+-		_dispatch_op_debug("release -> %d, err %d", op, op->do_ref_cnt, err);
++		_dispatch_op_debug("release -> %d, err %d", op, os_atomic_load2o(op, do_ref_cnt, relaxed), err);
+ 		_dispatch_release(op);
+ 		return false;
+ 	}
+@@ -1869,7 +1869,7 @@ _dispatch_stream_complete_operation(dispatch_stream_t stream,
+ 		dispatch_source_cancel(op->timer);
+ 	}
+ 	// Final release will deliver any pending data
+-	_dispatch_op_debug("release -> %d (stream complete)", op, op->do_ref_cnt);
++	_dispatch_op_debug("release -> %d (stream complete)", op, os_atomic_load2o(op, do_ref_cnt, relaxed));
+ 	_dispatch_release(op);
+ }
+ 
+@@ -1897,7 +1897,7 @@ _dispatch_disk_complete_operation(dispatch_disk_t disk, dispatch_operation_t op)
+ 		dispatch_source_cancel(op->timer);
+ 	}
+ 	// Final release will deliver any pending data
+-	_dispatch_op_debug("release -> %d (disk complete)", op, op->do_ref_cnt);
++	_dispatch_op_debug("release -> %d (disk complete)", op, os_atomic_load2o(op, do_ref_cnt, relaxed));
+ 	_dispatch_release(op);
+ }
+ 
+@@ -2171,7 +2171,7 @@ _dispatch_disk_handler(void *ctx)
+ 				continue;
+ 			}
+ 			_dispatch_retain(op);
+-			_dispatch_op_debug("retain -> %d", op, op->do_ref_cnt + 1);
++			_dispatch_op_debug("retain -> %d", op, os_atomic_load2o(op, do_ref_cnt, relaxed) + 1);
+ 			disk->advise_list[i%disk->advise_list_depth] = op;
+ 			op->active = true;
+ 			_dispatch_op_debug("activate: disk %p", op, disk);
+@@ -2268,7 +2268,7 @@ _dispatch_disk_perform(void *ctxt)
+ 		// released at the very end, since it might hold the last reference to
+ 		// the disk
+ 		_dispatch_op_debug("release -> %d (disk perform complete)", op,
+-				op->do_ref_cnt);
++				os_atomic_load2o(op, do_ref_cnt, relaxed));
+ 		_dispatch_release(op);
+ 	});
+ }
+diff --git a/src/object.c b/src/object.c
+index 91841c0..a401409 100644
+--- a/src/object.c
++++ b/src/object.c
+@@ -26,7 +26,7 @@
+ unsigned long
+ _os_object_retain_count(_os_object_t obj)
+ {
+-	int xref_cnt = obj->os_obj_xref_cnt;
++	int xref_cnt = os_atomic_load2o(obj, os_obj_xref_cnt, relaxed);
+ 	if (unlikely(xref_cnt == _OS_OBJECT_GLOBAL_REFCNT)) {
+ 		return ULONG_MAX; // global object
+ 	}
+@@ -124,7 +124,7 @@ overrelease:
+ bool
+ _os_object_allows_weak_reference(_os_object_t obj)
+ {
+-	int xref_cnt = obj->os_obj_xref_cnt;
++	int xref_cnt = os_atomic_load2o(obj, os_obj_xref_cnt, relaxed);
+ 	if (unlikely(xref_cnt == -1)) {
+ 		return false;
+ 	}
+@@ -339,5 +339,6 @@ size_t
+ _dispatch_object_debug_attr(dispatch_object_t dou, char* buf, size_t bufsiz)
+ {
+ 	return dsnprintf(buf, bufsiz, "xref = %d, ref = %d, ",
+-			dou._do->do_xref_cnt + 1, dou._do->do_ref_cnt + 1);
++			os_atomic_load2o(dou._do, do_xref_cnt, relaxed) + 1,
++			os_atomic_load2o(dou._do, do_ref_cnt, relaxed) + 1);
+ }
 diff --git a/src/object_internal.h b/src/object_internal.h
 index 6985dec..2043a00 100644
 --- a/src/object_internal.h
@@ -92,9 +207,74 @@ index 6985dec..2043a00 100644
  			_ref_cnt = os_atomic_##op##2o(_o, f, n, m); \
  		} \
 diff --git a/src/queue.c b/src/queue.c
-index 40f059c..bb37249 100644
+index 40f059c..7feae3c 100644
 --- a/src/queue.c
 +++ b/src/queue.c
+@@ -1051,7 +1051,7 @@ _dispatch_lane_barrier_sync_invoke_and_complete(dispatch_lane_t dq,
+ {
+ 	_dispatch_sync_function_invoke_inline(dq, ctxt, func);
+ 	_dispatch_trace_item_complete(dc);
+-	if (unlikely(dq->dq_items_tail || dq->dq_width > 1)) {
++	if (unlikely(os_atomic_load2o(dq, dq_items_tail, relaxed) || dq->dq_width > 1)) {
+ 		return _dispatch_lane_barrier_complete(dq, 0, 0);
+ 	}
+ 
+@@ -1494,7 +1494,7 @@ _dispatch_lane_barrier_complete(dispatch_lane_class_t dqu, dispatch_qos_t qos,
+ 	dispatch_queue_wakeup_target_t target = DISPATCH_QUEUE_WAKEUP_NONE;
+ 	dispatch_lane_t dq = dqu._dl;
+ 
+-	if (dq->dq_items_tail && !DISPATCH_QUEUE_IS_SUSPENDED(dq)) {
++	if (os_atomic_load2o(dq, dq_items_tail, relaxed) && !DISPATCH_QUEUE_IS_SUSPENDED(dq)) {
+ 		struct dispatch_object_s *dc = _dispatch_queue_get_head(dq);
+ 		if (likely(dq->dq_width == 1 || _dispatch_object_is_barrier(dc))) {
+ 			if (_dispatch_object_is_waiter(dc)) {
+@@ -2858,8 +2858,8 @@ _dispatch_lane_class_dispose(dispatch_lane_class_t dqu, bool *allow_free)
+ 				"Release of a queue with corrupt state");
+ 	}
+ 
+-	if (unlikely(dq->dq_items_tail)) {
+-		DISPATCH_CLIENT_CRASH(dq->dq_items_tail,
++	if (unlikely(os_atomic_load2o(dq, dq_items_tail, relaxed))) {
++		DISPATCH_CLIENT_CRASH(os_atomic_load2o(dq, dq_items_tail, relaxed),
+ 				"Release of a queue while items are enqueued");
+ 	}
+ 	dq->dq_items_head = (void *)0x200;
+@@ -3571,7 +3571,7 @@ _dispatch_lane_drain(dispatch_lane_t dq, dispatch_invoke_context_t dic,
+ 	struct dispatch_object_s *dc = NULL, *next_dc;
+ 	uint64_t dq_state, owned = *owned_ptr;
+ 
+-	if (unlikely(!dq->dq_items_tail)) return NULL;
++	if (unlikely(!os_atomic_load2o(dq, dq_items_tail, relaxed))) return NULL;
+ 
+ 	_dispatch_thread_frame_push(&dtf, dq);
+ 	if (serial_drain || _dq_state_is_in_barrier(owned)) {
+@@ -3590,7 +3590,7 @@ _dispatch_lane_drain(dispatch_lane_t dq, dispatch_invoke_context_t dic,
+ 		dispatch_assert(dic->dic_barrier_waiter == NULL);
+ 		dc = next_dc;
+ 		if (unlikely(!dc)) {
+-			if (!dq->dq_items_tail) {
++			if (!os_atomic_load2o(dq, dq_items_tail, relaxed)) {
+ 				break;
+ 			}
+ 			dc = _dispatch_queue_get_head(dq);
+@@ -5077,7 +5077,7 @@ _dispatch_lane_concurrent_push(dispatch_lane_t dq, dispatch_object_t dou,
+ 	// doesn't fail if only the ENQUEUED bit is set (unlike its barrier
+ 	// width equivalent), so we have to check that this thread hasn't
+ 	// enqueued anything ahead of this call or we can break ordering
+-	if (dq->dq_items_tail == NULL &&
++	if (os_atomic_load2o(dq, dq_items_tail, relaxed) == NULL &&
+ 			!_dispatch_object_is_waiter(dou) &&
+ 			!_dispatch_object_is_barrier(dou) &&
+ 			_dispatch_queue_try_acquire_async(dq)) {
+@@ -5351,7 +5351,7 @@ _dispatch_mgr_queue_drain(void)
+ 	struct dispatch_queue_static_s *dq = &_dispatch_mgr_q;
+ 	uint64_t owned = DISPATCH_QUEUE_SERIAL_DRAIN_OWNED;
+ 
+-	if (dq->dq_items_tail) {
++	if (os_atomic_load2o(dq, dq_items_tail, relaxed)) {
+ 		_dispatch_perfmon_start();
+ 		_dispatch_set_basepri_override_qos(DISPATCH_QOS_SATURATED);
+ 		if (unlikely(_dispatch_lane_serial_drain(dq, &dic, flags, &owned))) {
 @@ -5893,7 +5893,7 @@ _dispatch_root_queue_drain_one(dispatch_queue_global_t dq)
  start:
  	// The MEDIATOR value acts both as a "lock" and a signal
@@ -131,6 +311,24 @@ index 40f059c..bb37249 100644
  	_dispatch_root_queue_poke(dq, 1, 0);
  out:
  	return head;
+@@ -6762,7 +6762,7 @@ _dispatch_main_queue_drain(dispatch_queue_main_t dq)
+ {
+ 	dispatch_thread_frame_s dtf;
+ 
+-	if (!dq->dq_items_tail) {
++	if (!os_atomic_load2o(dq, dq_items_tail, relaxed)) {
+ 		return;
+ 	}
+ 
+@@ -6820,7 +6820,7 @@ _dispatch_main_queue_drain(dispatch_queue_main_t dq)
+ static bool
+ _dispatch_runloop_queue_drain_one(dispatch_lane_t dq)
+ {
+-	if (!dq->dq_items_tail) {
++	if (!os_atomic_load2o(dq, dq_items_tail, relaxed)) {
+ 		return false;
+ 	}
+ 	_dispatch_perfmon_start_notrace();
 diff --git a/src/semaphore.c b/src/semaphore.c
 index 925c002..a687034 100644
 --- a/src/semaphore.c
@@ -298,3 +496,17 @@ index cf1f5ce..5824d00 100644
  			return value;
  		}
  		dispatch_hardware_pause();
+diff --git a/src/voucher.c b/src/voucher.c
+index f8ce0c8..227e5d6 100644
+--- a/src/voucher.c
++++ b/src/voucher.c
+@@ -1595,7 +1595,8 @@ _voucher_debug(voucher_t v, char *buf, size_t bufsiz)
+ {
+ 	size_t offset = 0;
+ 	bufprintf("voucher[%p] = { xref = %d, ref = %d", v,
+-			v->os_obj_xref_cnt + 1, v->os_obj_ref_cnt + 1);
++			os_atomic_load2o(v, os_obj_xref_cnt, relaxed) + 1,
++			os_atomic_load2o(v, os_obj_ref_cnt, relaxed) + 1);
+ 
+ 	if (v->v_kvbase) {
+ 		bufprintf(", base voucher %p", v->v_kvbase);

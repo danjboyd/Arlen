@@ -89,6 +89,17 @@ int main(int argc, char **argv) {
     semaphore = dispatch_semaphore_create(1);
     values = @[ @"value" ];
     sharedString = [NSString stringWithFormat:@"shared-%d", 123];
+    if (strcmp(mode, "serial-queue") == 0) {
+      dispatch_queue_t queue = dispatch_queue_create("arlen.tsan.serial", DISPATCH_QUEUE_SERIAL);
+      for (int i = 0; i < 10000; i++) {
+        dispatch_async(queue, ^{ protectedCounter++; });
+        // Alternate enqueueing with drains so worker reference-count releases
+        // overlap the producer's global-object checks on subsequent pushes.
+        dispatch_sync(queue, ^{});
+      }
+      printf("probe-complete:serial-queue protected=%d\n", protectedCounter);
+      return protectedCounter == 10000 ? 0 : 4;
+    }
     if (strcmp(mode, "kvc") == 0) {
       kvcProbe = [ALNTSANKVCProbe new];
       Method method = class_getInstanceMethod([ALNTSANKVCProbe class], @selector(value));
