@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Windows preserves HTTP parser error responses with a bounded graceful close
+  when rejected spooled requests leave pipelined input queued in the socket.
+
 - Request body deadlines and minimum rates are rechecked before accepting the
   final fragment on chunked and `Content-Length` readers. This closes a gap
   where late completion bypassed the clock; pipelined bytes do not increase

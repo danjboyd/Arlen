@@ -2234,6 +2234,42 @@ static BOOL ALNAwaitRequestBodyBytes(ALNSocketHandle clientFd,
   return NO;
 }
 
+#if defined(_WIN32)
+// Closing Winsock with unread pipelined bytes can reset the connection and
+// truncate an error response already sent. Finish the send side and discard
+// rejected input only within fixed byte/time bounds; no bytes are dispatched.
+// The caller still owns and closes the socket after this best-effort shutdown.
+static void ALNFinishRejectedClientOutput(ALNSocketHandle clientFd) {
+  SOCKET native = ALNNativeSocketHandle(clientFd);
+  u_long nonblocking = 1;
+  if (ioctlsocket(native, FIONBIO, &nonblocking) != 0 || shutdown(native, SD_SEND) != 0) {
+    return;
+  }
+  const size_t discardLimit = 65536;
+  const uint64_t deadline = ALNMonotonicMilliseconds() + 100;
+  size_t discarded = 0;
+  char bytes[4096];
+  while (discarded < discardLimit) {
+    uint64_t now = ALNMonotonicMilliseconds();
+    if (now >= deadline) return;
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(native, &readable);
+    struct timeval timeout = {0, (long)((deadline - now) * 1000)};
+    int ready = select(0, &readable, NULL, NULL, &timeout);
+    if (ready <= 0) return;
+    int received = recv(native, bytes, (int)MIN(sizeof(bytes), discardLimit - discarded), 0);
+    if (received == 0) return;
+    if (received == SOCKET_ERROR) {
+      int failure = WSAGetLastError();
+      if (failure == WSAEWOULDBLOCK || failure == WSAEINTR) continue;
+      return;
+    }
+    discarded += (size_t)received;
+  }
+}
+#endif
+
 // Reads one frame (GitHub issue 214). Rejects, with the RFC 6455 close code:
 // unmasked client frames, nonzero RSV bits (no extension is negotiated),
 // reserved opcodes and control frames that are fragmented or longer than 125
@@ -5207,6 +5243,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                       parseMs,
                                       ALNNowMilliseconds() - requestStartMs);
           (void)ALNSendResponse(clientFd, self.application, errorResponse, performanceHeaders, YES);
+#if defined(_WIN32)
+          ALNFinishRejectedClientOutput(clientFd);
+#endif
           return NO;
         }
         request.parseDurationMilliseconds = parseMs;

@@ -620,3 +620,7 @@ on Windows; the parent directory ACL is unchanged. See
 Request body deadlines and minimum rates also apply to the final body fragment,
 including uploads spooled to disk. A late completion receives `408` and its
 incomplete spool is removed. Each keep-alive request starts its own body clock.
+
+Windows uses a bounded graceful close after HTTP parser rejection to preserve
+the error response when pipelined input is queued. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).
