@@ -1446,6 +1446,12 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
   if (middleware == nil) {
     return;
   }
+  // A session added after initialization must still decode the cookie before
+  // route policy (and an auth module refresh inserted ahead of that policy).
+  if ([middleware isKindOfClass:[ALNSessionMiddleware class]]) {
+    [self addMiddleware:middleware beforeMiddlewareOfClass:[ALNRoutePolicyMiddleware class]];
+    return;
+  }
   [self.mutableMiddlewares addObject:middleware];
 }
 

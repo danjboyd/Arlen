@@ -450,6 +450,12 @@ replaces the session's roles for the request with the current ones, so
 and the admin-ui, jobs, ops and other module API guards all see the user's
 current roles:
 
+When application code adds session middleware after creating the app and before
+registering the auth module, Arlen places it before route policy middleware.
+The auth module then installs its
+session refresh between cookie decoding and route policy checks. This order
+also applies to OIDC resolver roles on protected routes.
+
 - Module sign-ins (local password, email link, the stub provider) are looked up
   in `auth_users` by subject: one indexed query per request, with no cache
   between requests. Roles come from `roles_json`, passed through the session
