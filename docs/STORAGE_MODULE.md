@@ -64,6 +64,17 @@ before copying it and any journal. Do not restore only the obsolete plist.
 format for unmigrated installations. There is no automatic fallback when SQLite
 is unavailable, and switching a migrated path back to plist is refused.
 
+Storage module 1.4.3 creates each Windows legacy plist temporary file exclusively
+with a protected DACL granting access only to the current process token user,
+before writing catalog bytes. The handle is not inherited by child processes.
+A same-directory atomic replacement carries that private DACL to the catalog;
+failed writes retain the previous catalog and remove their temporary file.
+The parent directory ACL is unchanged. POSIX retains owner-only `0600` creation
+independently of the process umask. Keep the parent private for catalog integrity
+and availability as well as protecting backup files from older versions.
+A private file DACL does not prevent catalog pathname replacement by an actor
+allowed to delete or replace entries in the parent directory.
+
 Processes sharing a catalog must run on one host and use a local filesystem:
 
 - Changes take `<persistence.path>.lock` (`flock` on POSIX, `LockFileEx` on
