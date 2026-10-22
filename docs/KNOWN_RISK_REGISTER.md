@@ -1,18 +1,18 @@
 # Known Risk Register
 
-This register tracks active release risks that are accepted temporarily with explicit ownership and target dates. The v0.3.1 release is held on the active TSan finding until its closure criteria pass; the historical risk identifier does not waive that requirement.
+This register tracks active release risks that are accepted temporarily with explicit ownership and target dates. Publishing v0.3.1 requires the qualification criteria below; the historical risk identifier also tracks continuing patched-runtime maintenance and does not waive those criteria.
 
 Source of truth fixture:
 
 - `tests/fixtures/release/phase9j_known_risks.json`
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
 
 ## Active Risks
 
 | ID | Title | Severity | Owner | Target Date | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `phase9j-risk-tsan-nonblocking` | TSAN runtime findings remain unresolved after coverage repair | medium | runtime-core | 2026-12-31 | Reviewed 2026-10-21: the v0.3.1 shared clang TSan harness detects the deliberate application race, and isolated normal/instrumented dependency recipes now use the shipped GNUstep Base d898f703 pin. Six affected Base groups passed 2359 assertions with 21 upstream dashed hopes and no failures; libobjc passed 200 tests and libdispatch previously passed 22. Full diagnostic unit runs still expose dependency races, most recently dispatch group publication; zero clean full runs are recorded. The historical risk ID and 2026-12-31 runtime-core target remain unchanged. Although the nightly job remains informational in configured branch protection, v0.3.1 release is held until confirmed findings are fixed and two consecutive full unit plus HTTP-concurrency runs pass with a detecting application canary, retained artifacts, and no new broad suppressions or test exclusions. Existing function-scoped exceptions still require evidence review; see docs/internal/TSAN_RELIABILITY_2026-09-21.md. |
+| `phase9j-risk-tsan-nonblocking` | Patched GNUstep runtime qualification and maintenance | medium | runtime-core | 2026-12-31 | Reviewed 2026-10-22: corrections for the observed GNUstep Base, libobjc2 and libdispatch findings are integrated with pinned source revisions and checked patches. The new normal-runtime inputs restore production O2 defaults while retaining GNUstep debug filtering; their fresh prefix requires independent functional, performance, ICU and supported-native-target qualification. The 2026-10-21 review recorded dependency races and zero clean full TSan runs; those are historical observations that motivated the corrections. Prior component checks recorded 2359 Base assertions with 21 upstream dashed hopes and no failures, 200 libobjc tests and 22 libdispatch tests; these bounded checks do not replace full acceptance. Although the configured nightly check remains informational in branch protection, publishing v0.3.1 remains held until two consecutive full unit plus HTTP-concurrency runs pass on the frozen candidate with a detecting application canary, retained artifacts, and no new broad suppressions or test exclusions. Existing function-scoped exceptions still require evidence review under docs/internal/TSAN_RELIABILITY_2026-09-21.md. The historical risk ID, runtime-core owner and 2026-12-31 target remain to track pinned-patch maintenance and continuing runtime validation. Active status does not authorize releasing an unresolved confirmed finding or bypassing any qualification gate; actual acceptance is recorded in the release evidence. |
 
 ## Mitigated Risks
 
