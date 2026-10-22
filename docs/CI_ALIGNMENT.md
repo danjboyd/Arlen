@@ -351,8 +351,9 @@ creates an unprivileged user with sudo, packages a source archive, and runs
 preinstalled; the installer itself provisions build dependencies and the
 pinned patched normal GNUstep runtime natively with `--yes`, using the existing
 custom builder at `5469b5d` and target-specific locks under `tools/runtime/`.
-The normal runtime shares all source pins and patch digests with the diagnostic
-recipe; its compiler/ICU come from each target distribution. The container has
+The normal runtime shares all source pins and three race-patch digests with the
+diagnostic recipe; Ubuntu additionally has a separately pinned clang 21
+epoll-mask compatibility patch, without changing the diagnostic recipe; its compiler/ICU come from each target distribution. The container has
 no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
 app. It then compiles and runs fourteen native runtime concurrency controls, including
@@ -939,3 +940,12 @@ summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
 Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
 without an external timezone-data override. Native-control and ICU failure logs
 are retained by the installer smoke's artifact cleanup path.
+
+The Ubuntu target lock includes only one extra source compatibility patch:
+`tools/runtime/patches/libdispatch-clang21.patch`. It explicitly preserves
+libdispatch's 32-bit epoll complement conversion for clang 21 while keeping
+`-Werror` and signedness diagnostics enabled. The Debian locks and dedicated
+TSan source recipe do not change. Runtime-delivery regressions verify the
+Ubuntu-only lock delta, strict staging/checksum rejection, and 786,432 mask
+cases; the existing native public matrix performs the actual Ubuntu build.
+No lane, classifier, suppression or branch-protection context changes.

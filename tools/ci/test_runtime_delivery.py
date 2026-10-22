@@ -28,9 +28,14 @@ class RuntimeDeliveryTests(unittest.TestCase):
         self.target_patch.start()
         self.addCleanup(self.target_patch.stop)
 
-    def fixture(self):
+    def fixture(self, native=False):
         self.prefix.mkdir()
-        lock = json.loads(self.lock.read_text())
+        lock_path = self.lock
+        if native:
+            release = runtime.platform.freedesktop_os_release()
+            arch = {"x86_64": "amd64", "aarch64": "arm64"}[runtime.platform.machine()]
+            lock_path = ROOT / "tools/runtime" / (release["ID"] + "-" + release["VERSION_ID"] + "-" + arch + ".lock.json")
+        lock = json.loads(lock_path.read_text())
         for relative in ("System/Library/Makefiles/GNUstep.sh", "System/Tools/gnustep-config",
                          "include/objc/runtime.h", "include/dispatch/dispatch.h",
                          "Local/Library/Headers/Foundation/Foundation.h",
@@ -38,14 +43,14 @@ class RuntimeDeliveryTests(unittest.TestCase):
             p = self.prefix / relative
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("fixture\n")
-        copy = self.prefix / "gnustep-toolchain-lock/debian-13-amd64.lock.json"
+        copy = self.prefix / "gnustep-toolchain-lock" / lock_path.name
         copy.parent.mkdir()
-        shutil.copy2(self.lock, copy)
+        shutil.copy2(lock_path, copy)
         for c in lock["components"]:
             for p in c["patches"]:
                 dest = copy.parent / p["path"]
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(ROOT / "tools/ci/tsan-toolchain" / (c["name"] + ".patch"), dest)
+                shutil.copy2(runtime.patch_source(c, p), dest)
         prov = {"prefix": str(self.prefix), "build_host": {"os_version": "debian-13", "machine": runtime.platform.machine()},
                 "lock": {"copy": str(copy.relative_to(self.prefix)), "sha256": runtime.digest(copy)},
                 "components": [dict(c, resolved_commit=c["revision"], applied_patches=c["patches"]) for c in lock["components"]],
@@ -54,18 +59,68 @@ class RuntimeDeliveryTests(unittest.TestCase):
         (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
         return prov
 
-    def test_each_target_lock_has_identical_component_pins_flags_and_patches(self):
+    def test_target_locks_preserve_pins_flags_and_three_race_patches(self):
         canonical = json.loads(self.lock.read_text())
         self.assertEqual(runtime.digest(self.lock), "2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058")
         for p in (ROOT / "tools/runtime").glob("*.lock.json"):
             lock = json.loads(p.read_text())
-            self.assertEqual(canonical["components"], lock["components"])
+            components = lock["components"]
+            if p.name == "ubuntu-26.04-amd64.lock.json":
+                compatibility = components[1]["patches"].pop()
+                self.assertEqual(compatibility, {
+                    "path": "patches/libdispatch/libdispatch-clang21.patch",
+                    "sha256": "ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d"})
+            self.assertEqual(canonical["components"], components)
             self.assertIn(p.stem.removesuffix(".lock").split("-")[-1], ("amd64", "arm64"))
         staged = runtime.stage_lock(self.work)
         self.assertEqual(runtime.digest(staged), runtime.digest(self.lock))
         for c in canonical["components"]:
             for p in c["patches"]:
                 self.assertEqual(runtime.digest(staged.parent / p["path"]), p["sha256"])
+
+    def test_ubuntu_compatibility_patch_stages_exact_bytes_and_rejects_tampering(self):
+        ubuntu_work = self.work / "ubuntu-build"
+        ubuntu_work.mkdir()
+        with patch.object(runtime, "target", return_value="ubuntu-26.04-amd64"):
+            staged = runtime.stage_lock(ubuntu_work)
+        lock = json.loads(staged.read_text())
+        self.assertEqual(runtime.digest(staged), "ed30aa89dde7829534146ff36d6f5c206ecd8e0ad1c14909b19fe3fe9f931112")
+        for component in lock["components"]:
+            for entry in component["patches"]:
+                self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])
+        copied_repo = self.work / "tampered-repo"
+        shutil.copytree(ROOT / "tools/runtime", copied_repo / "tools/runtime")
+        shutil.copytree(ROOT / "tools/ci/tsan-toolchain", copied_repo / "tools/ci/tsan-toolchain")
+        (copied_repo / "tools/runtime/patches/libdispatch-clang21.patch").write_text("substituted patch")
+        bad_work = self.work / "tampered-build"
+        bad_work.mkdir()
+        with patch.object(runtime, "ROOT", copied_repo), patch.object(runtime, "target", return_value="ubuntu-26.04-amd64"):
+            with self.assertRaisesRegex(ValueError, "repository patch checksum mismatch"):
+                runtime.stage_lock(bad_work)
+        with self.assertRaisesRegex(ValueError, "unsupported runtime patch path"):
+            runtime.patch_source({"name": "libdispatch"}, {"path": "../libdispatch-clang21.patch"})
+
+    def test_ubuntu_validation_rejects_old_prefix_without_compatibility_patch(self):
+        prov = self.fixture()
+        prov["build_host"]["os_version"] = "ubuntu-26.04"
+        (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
+        with patch.object(runtime, "target", return_value="ubuntu-26.04-amd64"):
+            with self.assertRaisesRegex(ValueError, "patch/pin mismatch"):
+                runtime.validate(self.prefix, full=True)
+
+    def test_pinned_epoll_complement_preserves_all_disarmed_masks_and_high_event_bits(self):
+        text = (ROOT / "tools/runtime/patches/libdispatch-clang21.patch").read_text()
+        additions = [line[1:] for line in text.splitlines() if line.startswith("+") and not line.startswith("+++")]
+        self.assertEqual(len(additions), 1)
+        header = self.work / "epoll_mask_under_test.h"
+        header.write_text("static uint32_t armed_events_under_test(dispatch_muxnote_t dmn) {\n" + additions[0] + "\n}\n")
+        command = ["clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wconversion", "-Wsign-conversion",
+                   "-I" + str(self.work), str(ROOT / "tests/fixtures/runtime/epoll_mask_contract.c"), "-o", str(self.work / "epoll-contract")]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([str(self.work / "epoll-contract")], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("pass:epoll-mask-preserves-32-bit-events 786432 cases", result.stdout)
 
     def test_full_validation_rejects_changed_binary_and_never_overwrites_selector(self):
         self.fixture()
@@ -115,7 +170,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
                 runtime.build(p, 1)
 
     def test_selector_overrides_ambient_toolchain_but_explicit_runtime_wins(self):
-        prov = self.fixture()
+        prov = self.fixture(native=True)
         release = runtime.platform.freedesktop_os_release()
         prov["build_host"]["os_version"] = release["ID"] + "-" + release["VERSION_ID"]
         (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
@@ -185,7 +240,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         self.assertFalse((self.work / "network-called").exists())
 
     def test_packaged_jobs_worker_selects_runtime_in_its_parent_before_exec(self):
-        prov = self.fixture()
+        prov = self.fixture(native=True)
         release = runtime.platform.freedesktop_os_release()
         prov["build_host"]["os_version"] = release["ID"] + "-" + release["VERSION_ID"]
         (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))
@@ -216,7 +271,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         self.assertTrue(result.stdout.startswith(str(self.prefix) + "|" + str(self.prefix) + "/lib:"), result.stdout)
 
     def test_functional_ci_selects_prefix_and_private_defaults_without_setup(self):
-        prov = self.fixture()
+        prov = self.fixture(native=True)
         release = runtime.platform.freedesktop_os_release()
         prov["build_host"]["os_version"] = release["ID"] + "-" + release["VERSION_ID"]
         (self.prefix / runtime.PROVENANCE).write_text(json.dumps(prov))

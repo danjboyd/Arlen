@@ -243,7 +243,7 @@ coverage. No additional branch-protection check name is needed for this step.
 ### Linux patched runtime delivery qualification
 
 Source archives ship `tools/setup_runtime.py`, all three target locks and the
-three checked runtime patches. They fetch the SHA256-pinned existing custom
+three checked race patches and Ubuntu's pinned clang 21 compatibility patch. They fetch the SHA256-pinned existing custom
 builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
 Ubuntu 26.04 amd64 install/app/concurrency evidence from
 `linux-public-toolchain` before release. The runtime is compiled at its final

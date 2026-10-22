@@ -28,11 +28,14 @@ Linux release setup builds a normal, uninstrumented runtime with the existing
 custom builder at commit `5469b5dfd442f1091475fa6600cfd487af878e8f`. Its source
 archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03197`.
 Locks under `tools/runtime/` identify Debian 13 amd64/arm64 and Ubuntu 26.04
-amd64 independently. All use identical component revisions and patch digests;
+amd64 independently. All use identical component revisions and three race-patch digests;
+Ubuntu additionally pins one clang 21 compatibility patch.
 Debian amd64 retains the original lock SHA256
 `2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`.
 The patches are shared with the diagnostic toolchain in
 `tools/ci/tsan-toolchain/`; production output has no TSan instrumentation.
+Ubuntu's extra `tools/runtime/patches/libdispatch-clang21.patch` preserves the
+32-bit epoll complement conversion explicitly, with `-Werror` retained.
 
 Native build dependencies on supported Debian/Ubuntu hosts:
 
@@ -57,6 +60,22 @@ memory paths; race-detector acceptance remains the separate instrumented TSan
 gate. A successful amd64 run alone does not establish arm64 qualification.
 See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) for selection
 and service paths.
+
+Ubuntu's compatibility patch SHA256 is
+`ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d`;
+its target lock SHA256 is
+`ed30aa89dde7829534146ff36d6f5c206ecd8e0ad1c14909b19fe3fe9f931112`.
+It applies after the unchanged libdispatch race patch. The field being masked
+is `uint32_t`; the disarmed mask is `uint16_t`. Casting the promoted signed
+complement back to `uint32_t` explicitly preserves high event bits and the
+original arithmetic while satisfying clang 21's signedness diagnostics.
+The Debian locks and dedicated TSan recipe remain unchanged. Runtime staging
+checks each exact patch path and SHA256; Ubuntu prefix validation requires the
+additional patch in its installed provenance. The no-build regression suite
+compiles the exact new return expression with `-Werror`, `-Wconversion` and
+`-Wsign-conversion`, then checks all 65,536 disarmed masks against twelve
+32-bit event masks (786,432 cases). Native Ubuntu build/install/runtime
+qualification is still required; this arithmetic control cannot replace it.
 
 ## Known-Good Baseline (2026-02-20)
 

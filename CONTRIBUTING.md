@@ -255,3 +255,11 @@ summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
 Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
 without an external timezone-data override. Native-control and ICU failure logs
 are retained by the installer smoke's artifact cleanup path.
+
+Ubuntu 26.04's lock additionally pins a narrow libdispatch epoll-mask source
+compatibility patch for clang 21. Preserve the shared three race-patch digests,
+Debian lock bytes, and dedicated TSan recipe when updating it. Run
+`python3 tools/ci/test_runtime_delivery.py` to verify target-only lock/staging
+rules, substitution rejection, and the exhaustive 32-bit mask contract with
+strict signedness diagnostics. Native Ubuntu CI must also build and run the
+installed app and normal/ICU controls; no warning category is disabled.
