@@ -61,7 +61,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
 
     def test_target_locks_preserve_pins_flags_and_three_race_patches(self):
         canonical = json.loads(self.lock.read_text())
-        self.assertEqual(runtime.digest(self.lock), "2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058")
+        self.assertEqual(runtime.digest(self.lock), "df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34")
         for p in (ROOT / "tools/runtime").glob("*.lock.json"):
             lock = json.loads(p.read_text())
             components = lock["components"]
@@ -78,13 +78,41 @@ class RuntimeDeliveryTests(unittest.TestCase):
             for p in c["patches"]:
                 self.assertEqual(runtime.digest(staged.parent / p["path"]), p["sha256"])
 
+    def test_normal_locks_require_optimized_configure_inputs_without_duplicate_objc_optimization(self):
+        hashes = {
+            "debian-13-amd64": "df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34",
+            "debian-13-arm64": "ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e",
+            "ubuntu-26.04-amd64": "89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125"}
+        for target, sha in hashes.items():
+            path = ROOT / "tools/runtime" / (target + ".lock.json")
+            self.assertEqual(runtime.digest(path), sha)
+            lock = json.loads(path.read_text())
+            for component in lock["components"]:
+                if component["name"] in ("tools-make", "libs-base"):
+                    # O2 is supplied by OPTFLAG to C and ObjC; no extra ObjC O2
+                    # remains after GNUstep debug=yes filters OPTFLAG.
+                    self.assertEqual(component["configure_args"], ["CFLAGS=-O2", "OBJCFLAGS="])
+
+    def test_validation_rejects_an_old_unoptimized_component_without_relabeling_it(self):
+        original = self.fixture()
+        for name in ("tools-make", "libs-base"):
+            with self.subTest(component=name):
+                prov = json.loads(json.dumps(original))
+                next(c for c in prov["components"] if c["name"] == name)["configure_args"] = []
+                path = self.prefix / runtime.PROVENANCE
+                path.write_text(json.dumps(prov))
+                before = path.read_bytes()
+                with self.assertRaisesRegex(ValueError, name + " configure_args does not match"):
+                    runtime.validate(self.prefix, full=True)
+                self.assertEqual(path.read_bytes(), before)
+
     def test_ubuntu_compatibility_patch_stages_exact_bytes_and_rejects_tampering(self):
         ubuntu_work = self.work / "ubuntu-build"
         ubuntu_work.mkdir()
         with patch.object(runtime, "target", return_value="ubuntu-26.04-amd64"):
             staged = runtime.stage_lock(ubuntu_work)
         lock = json.loads(staged.read_text())
-        self.assertEqual(runtime.digest(staged), "ed30aa89dde7829534146ff36d6f5c206ecd8e0ad1c14909b19fe3fe9f931112")
+        self.assertEqual(runtime.digest(staged), "89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125")
         for component in lock["components"]:
             for entry in component["patches"]:
                 self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])

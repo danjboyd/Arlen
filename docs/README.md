@@ -27,7 +27,8 @@ Before running repo-local build/test/doc commands, source
 toolchain env directly for the Linux/GNUstep path. On macOS, use
 `GETTING_STARTED_MACOS.md`; on Windows, use `GETTING_STARTED_WINDOWS.md`.
 
-Linux releases use a pinned patched GNUstep runtime built at a fixed prefix.
+Linux releases use a pinned patched GNUstep runtime built at a fixed prefix,
+with normal `-O2` client defaults and GNUstep debug controls.
 See [runtime setup and manual installation](GETTING_STARTED.md#manual-toolchain-setup)
 for setup, offline selection, and service deployment requirements.
 

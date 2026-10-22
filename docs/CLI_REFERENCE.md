@@ -82,7 +82,13 @@ patched normal GNUstep runtime using the checksum-pinned custom builder.
 Each target has a lock under `tools/runtime/`, sharing the same component
 pins, compiler flags and three race-patch digests. Ubuntu adds one pinned
 clang 21 epoll-mask compatibility patch. Builds use the host's ICU and
-clang and at most four jobs. Existing matching runtimes are verified and reused.
+clang and at most four jobs. Existing matching runtimes are verified and reused. The normal
+locks set `CFLAGS=-O2` and empty `OBJCFLAGS` for tools-make and Base, supplying
+normal C/ObjC optimization through GNUstep's `OPTFLAG` while preserving debug
+filtering. Prefix includes remain in `CPPFLAGS`. Older include-only prefixes
+fail the new configure-input provenance check and are preserved; setup builds
+a new versioned prefix. No installed `config.make`, global `MAKEFLAGS`, or
+Arlen app compiler policy is rewritten.
 The runtime lives at its final immutable `<prefix>/runtimes/<target>-<lock-id>`;
 `ARLEN_RUNTIME_ROOT` overrides its parent directory. Paths must have no
 whitespace. GNUstep embeds the prefix, so moving it requires a new build.

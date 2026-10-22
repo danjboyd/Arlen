@@ -30,8 +30,26 @@ archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03
 Locks under `tools/runtime/` identify Debian 13 amd64/arm64 and Ubuntu 26.04
 amd64 independently. All use identical component revisions and three race-patch digests;
 Ubuntu additionally pins one clang 21 compatibility patch.
-Debian amd64 retains the original lock SHA256
-`2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`.
+The normal production locks configure `CFLAGS=-O2` and explicit empty
+`OBJCFLAGS` for tools-make and Base. GNUstep's `OPTFLAG` then supplies `-O2`
+to C and Objective-C clients by default. Keeping optimization out of
+`OBJCFLAGS` lets `--debug-flags` / `debug=yes` remove it normally. Prefix
+headers remain in the builder's `CPPFLAGS`; component revisions and runtime
+patches are unchanged.
+
+| Normal target | Lock SHA256 |
+| --- | --- |
+| Debian 13 amd64 | `df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34` |
+| Debian 13 arm64 | `ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e` |
+| Ubuntu 26.04 amd64 | `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125` |
+
+The earlier Debian lock `2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`
+produced include-only default client flags. Its existing prefix remains an
+immutable diagnostic/performance control; it is not an optimized production
+prefix. New lock identities build into new final versioned prefixes rather
+than changing the old installation. Qualification must verify the new actual
+flags, ELF hashes, functional behavior, native concurrency, ICU and performance;
+old-prefix results do not establish those new-prefix results.
 The patches are shared with the diagnostic toolchain in
 `tools/ci/tsan-toolchain/`; production output has no TSan instrumentation.
 Ubuntu's extra `tools/runtime/patches/libdispatch-clang21.patch` preserves the
@@ -64,12 +82,13 @@ and service paths.
 Ubuntu's compatibility patch SHA256 is
 `ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d`;
 its target lock SHA256 is
-`ed30aa89dde7829534146ff36d6f5c206ecd8e0ad1c14909b19fe3fe9f931112`.
+`89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125`.
 It applies after the unchanged libdispatch race patch. The field being masked
 is `uint32_t`; the disarmed mask is `uint16_t`. Casting the promoted signed
 complement back to `uint32_t` explicitly preserves high event bits and the
 original arithmetic while satisfying clang 21's signedness diagnostics.
-The Debian locks and dedicated TSan recipe remain unchanged. Runtime staging
+The compatibility patch does not change the dedicated TSan recipe. The
+normal locks separately include the explicit optimization inputs above. Runtime staging
 checks each exact patch path and SHA256; Ubuntu prefix validation requires the
 additional patch in its installed provenance. The no-build regression suite
 compiles the exact new return expression with `-Werror`, `-Wconversion` and

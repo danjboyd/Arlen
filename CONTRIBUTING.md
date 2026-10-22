@@ -263,3 +263,11 @@ Debian lock bytes, and dedicated TSan recipe when updating it. Run
 rules, substitution rejection, and the exhaustive 32-bit mask contract with
 strict signedness diagnostics. Native Ubuntu CI must also build and run the
 installed app and normal/ICU controls; no warning category is disabled.
+
+Normal production optimization comes from tools-make/Base configure inputs in
+the target locks (`CFLAGS=-O2`, empty `OBJCFLAGS`), with prefix includes kept
+in `CPPFLAGS`. This retains GNUstep debug filtering and existing caller flags;
+do not replace it with global `MAKEFLAGS`, installed config edits, warning
+suppression, or an unconditional Arlen compiler override. Old include-only
+prefixes are preserved controls and fail the new normal configure-input check.
+Fresh-prefix native/performance qualification is required after a lock change.
