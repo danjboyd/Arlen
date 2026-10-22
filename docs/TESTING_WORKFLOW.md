@@ -12,6 +12,10 @@ and dispatches requests without a socket. New apps ship one such test; run all
 of `tests/**/*.m` with `arlen test --app` (see
 [CLI Reference](CLI_REFERENCE.md) (`arlen test --app`)).
 
+GNUstep app tests use the framework's vendored XCTest headers, library and
+runner together. `boomhauer --build-tests` builds that library before linking
+the app bundle, including with a fresh toolchain that has no system XCTest.
+
 ```objc
 #import <XCTest/XCTest.h>
 #import "ALNTestClient.h"

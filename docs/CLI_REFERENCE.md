@@ -1084,6 +1084,9 @@ through `tools/run_app_tests.sh`:
   can capture the app's route registration; app code needs no changes
 - runs the framework's vendored `xctest` (built on first use), else `xctest`
   from `PATH`, with an isolated GNUstep defaults home under `.boomhauer/test-home`
+- on GNUstep, builds the vendored XCTest library before linking the app test
+  bundle and uses its headers and library together; a system XCTest
+  installation is unnecessary when the vendored runner is available
 - `--only`/`--skip` map to `-only-testing:AppTests/...`/`-skip-testing:AppTests/...`;
   an `--only` that matches no test fails the run (`No tests matched '...'`)
 - exit status is the runner's: non-zero when any test fails

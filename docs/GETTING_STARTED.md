@@ -218,6 +218,8 @@ arlen generate test Hello --request --route /hello
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
 `ALNTestClient` API. `arlen test --app` also works on Windows (MSYS2
 `CLANG64`); see [Windows CLANG64](WINDOWS_CLANG64.md).
+On GNUstep, Arlen builds its bundled XCTest library before the app test bundle
+and uses the matching headers, so no system XCTest installation is needed.
 
 These commands also work on macOS, where they build with the Apple toolchain
 instead of `make`. `arlen check` runs the Apple verification lane there, and

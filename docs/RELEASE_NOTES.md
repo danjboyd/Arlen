@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- GNUstep app tests build and use the bundled XCTest library and headers
+  together, including on clean toolchains without system XCTest.
+
+- Session middleware added before auth-module registration now decodes cookies
+  before session refresh and route policy, preserving current OIDC roles and
+  sign-out enforcement on protected routes.
+
 - Windows preserves HTTP parser error responses with a bounded graceful close
   when rejected spooled requests leave pipelined input queued in the socket.
 

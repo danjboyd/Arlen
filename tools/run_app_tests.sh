@@ -86,13 +86,11 @@ fi
 # shellcheck source=tools/source_gnustep_env.sh
 source "$framework_root/tools/source_gnustep_env.sh" >/dev/null
 
-# Prefer the framework's vendored runner (Apple-style -only-testing filters),
-# building or refreshing it as needed; fall back to the toolchain's xctest.
+# boomhauer built the vendored library and runner before the app test bundle.
+# Prefer that runner (Apple-style -only-testing filters); fall back to the
+# toolchain's xctest when the framework has no vendored runner.
 runner="$framework_root/vendor/tools-xctest/obj/xctest"
 runner_lib_dir=""
-if [[ -f "$framework_root/vendor/tools-xctest/GNUmakefile" ]]; then
-  make -C "$framework_root" vendored-xctest >/dev/null
-fi
 if [[ -x "$runner" ]]; then
   runner_lib_dir="$framework_root/vendor/tools-xctest/XCTest/obj"
 else

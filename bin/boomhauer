@@ -563,6 +563,8 @@ if aln_platform_is_macos; then
   exit 0
 fi
 
+# Select the framework's runtime before resolving flags or executing tools.
+source "$framework_root/tools/source_gnustep_env.sh" >/dev/null
 gnustep_sh="$(bash "$framework_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
 if [[ -z "$gnustep_sh" ]]; then
   gnustep_sh="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"
@@ -847,10 +849,10 @@ emit_app_test_rules() {
   local entry="$test_root/aln_app_test_entry.m"
   local -a test_sources main_sources linked_objects test_objects
   local source_path object_path dep_path relative_path
-  # No XCTest ships in the Windows toolchain: compile and link against the
-  # framework's vendored tools-xctest, the library run_app_tests.sh's runner loads.
+  # Match run_app_tests.sh's vendored runner on every GNUstep toolchain,
+  # including clean prefixes that do not install XCTest system-wide.
   local xctest_compile_flags="" xctest_link_dirs=""
-  if [[ $windows_preview -eq 1 ]]; then
+  if [[ -f "$framework_root/vendor/tools-xctest/GNUmakefile" ]]; then
     xctest_compile_flags="-I$framework_root/vendor/tools-xctest "
     xctest_link_dirs="-L$framework_root/vendor/tools-xctest/XCTest/obj "
   fi
@@ -1348,6 +1350,11 @@ run_once() {
     if [[ -z "$(find "$app_root/tests" -type f -name '*.m' -print -quit 2>/dev/null)" ]]; then
       echo "boomhauer: no tests found under $app_root/tests (add one with: arlen generate test Home --request)" >&2
       exit 1
+    fi
+    if [[ -f "$framework_root/vendor/tools-xctest/GNUmakefile" ]]; then
+      # Build the library before linking the app bundle. Keep the vendored
+      # runner's clean-build prerequisites serial, even under inherited -j.
+      framework_make -j1 vendored-xctest >/dev/null
     fi
     if run_app_make_target "$build_root/tests/AppTests.xctest/$app_test_binary_name" \
         "boomhauer: app test bundle is current" \
