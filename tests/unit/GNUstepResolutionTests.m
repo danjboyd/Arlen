@@ -9,7 +9,16 @@
 @implementation GNUstepResolutionTests
 
 - (NSString *)resolverPath {
-  return ALNTestPathFromRepoRoot(@"tools/resolve_gnustep.sh");
+  // Legacy-resolution controls need an unconfigured framework. A developer's
+  // local .arlen-runtime intentionally takes precedence in the real checkout.
+  NSString *directory = ALNTestTemporaryDirectory(@"gnustep_resolver_unconfigured");
+  NSString *path = [directory stringByAppendingPathComponent:@"resolve_gnustep.sh"];
+  NSError *error = nil;
+  XCTAssertTrue([[NSFileManager defaultManager]
+      copyItemAtPath:ALNTestPathFromRepoRoot(@"tools/resolve_gnustep.sh")
+              toPath:path error:&error]);
+  XCTAssertNil(error);
+  return path;
 }
 
 - (NSString *)shellQuoted:(NSString *)value {

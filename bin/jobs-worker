@@ -135,6 +135,10 @@ done
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
 
+if [[ "$(uname -s)" == Linux && -f "$framework_root/tools/source_gnustep_env.sh" ]]; then
+  source "$framework_root/tools/source_gnustep_env.sh" >/dev/null || exit 1
+fi
+
 app_root="$(normalize_host_path "$app_root")"
 app_root="$(cd "$app_root" && pwd -P)"
 

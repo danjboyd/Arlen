@@ -13,6 +13,7 @@ on:
       - "tools/runtime/**"
       - "tools/ci/tsan-toolchain/**"
       - "tests/fixtures/sanitizers/tsan_runtime_probe.m"
+      - "tests/fixtures/runtime/**"
       - "bin/**"
       - "tools/release/**"
       - "tools/source_gnustep_env.sh"

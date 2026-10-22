@@ -111,7 +111,10 @@ selection takes precedence over stale ambient `GNUSTEP_SH`, makefile and
 `gnustep-config` settings. With no selection, contributor bootstrap retains
 its existing explicit GNUstep and `/usr/GNUstep` resolution. `arlen doctor`
 warns that such an unpatched contributor environment is not release-qualified;
-installed releases require the patched runtime.
+installed releases require the patched runtime. Production `propane` and
+`jobs-worker` source the same selected environment before running native
+binaries. A packaged service on another host needs that host's matching final
+runtime prefix in `ARLEN_RUNTIME_PREFIX` and permission to read/execute it.
 
 ### From a git checkout
 
@@ -669,3 +672,11 @@ incomplete spool is removed. Each keep-alive request starts its own body clock.
 Windows uses a bounded graceful close after HTTP parser rejection to preserve
 the error response when pipelined input is queued. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.

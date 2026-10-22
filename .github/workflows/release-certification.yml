@@ -51,12 +51,26 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Select Arlen patched normal runtime for functional checks
+        run: bash tools/ci/setup_normal_runtime.sh --install-dependencies
+
       - name: Run release certification pack
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
           ARLEN_PHASE9J_RELEASE_ID: ${{ github.event.release.tag_name || github.run_id }}
         run: |
           bash ./tools/ci/run_release_certification.sh
+
+      - name: Upload patched runtime provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-certification-normal-runtime-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/arlen-normal-runtime/gnustep-toolchain-provenance.json
+            ${{ runner.temp }}/arlen-normal-runtime/verified-prefix.txt
+            ${{ runner.temp }}/arlen-normal-runtime/GNUstep.conf
+          if-no-files-found: warn
 
       - name: Summarize XCTest results
         if: always()

@@ -32,9 +32,12 @@ candidate_from_makefiles() {
 
 # A selected Arlen runtime takes precedence over ambient toolchain variables.
 # Explicit ARLEN_RUNTIME_PREFIX overrides the framework's saved selection.
-if [[ "$(uname -s)" == Linux ]]; then
-  runtime_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/setup_runtime.py"
-  if [[ -n "${ARLEN_RUNTIME_PREFIX:-}" || -f "$(dirname "$runtime_helper")/../.arlen-runtime" ]]; then
+if [[ "${OSTYPE:-}" == linux* ]]; then
+  runtime_script_dir="${BASH_SOURCE[0]%/*}"
+  [[ "$runtime_script_dir" != "${BASH_SOURCE[0]}" ]] || runtime_script_dir=.
+  runtime_script_dir="$(cd "$runtime_script_dir" && pwd)"
+  runtime_helper="$runtime_script_dir/setup_runtime.py"
+  if [[ -n "${ARLEN_RUNTIME_PREFIX:-}" || -f "$runtime_script_dir/../.arlen-runtime" ]]; then
     runtime_prefix="$(python3 "$runtime_helper" selected)" || exit 1
     candidate="$runtime_prefix/System/Library/Makefiles/GNUstep.sh"
     [[ -f "$candidate" ]] || { echo "Arlen: selected runtime is unavailable: $runtime_prefix" >&2; exit 1; }

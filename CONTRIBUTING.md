@@ -238,3 +238,20 @@ are untracked. Manual `--no-setup` installs require matching patched runtime
 provenance; generic clang GNUstep is insufficient for release qualification.
 Public native target jobs retain their existing names and optional branch
 protection status; all three are required release evidence.
+
+Functional CI selects the patched runtime explicitly with
+`bash tools/ci/setup_normal_runtime.sh --install-dependencies`, retaining the
+preinstalled toolchain only as bootstrap. For a local no-fetch verification of
+an existing prefix, set `ARLEN_RUNTIME_PREFIX` and
+`ARLEN_NORMAL_RUNTIME_STATE=/absolute/owned/state`, then run the helper without
+`--install-dependencies`. It verifies the runtime and creates a private GNUstep
+config; it never modifies the prefix. Dedicated TSan jobs keep their existing
+bootstrap and instrumented overlay.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.
