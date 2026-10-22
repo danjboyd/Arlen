@@ -5,6 +5,7 @@ _aln_source_gnustep_env_main() {
   local script_dir
   local resolved_gnustep_sh
   local restore_nounset=0
+  local resolved runtime_prefix runtime_variable
 
   if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     echo "source_gnustep_env.sh must be sourced, not executed" >&2
@@ -15,6 +16,24 @@ _aln_source_gnustep_env_main() {
     script_path="$resolved"
   fi
   script_dir="$(cd "$(dirname "$script_path")" && pwd)"
+
+  runtime_prefix=""
+  if [[ "$(uname -s)" == Linux && -f "$script_dir/setup_runtime.py" ]]; then
+    runtime_prefix="$(python3 "$script_dir/setup_runtime.py" selected)" || return 1
+    if [[ -n "$runtime_prefix" ]]; then
+      runtime_prefix="$(python3 "$script_dir/setup_runtime.py" check --prefix "$runtime_prefix")" || return 1
+      # Remove stale GNUstep domain/host variables before sourcing another
+      # prefix. A private config is explicit and must retain the prefix domains.
+      for runtime_variable in ${!GNUSTEP_@}; do unset "$runtime_variable"; done
+      export ARLEN_RUNTIME_PREFIX="$runtime_prefix"
+      export GNUSTEP_MAKEFILES="$runtime_prefix/System/Library/Makefiles"
+      export GNUSTEP_CONFIG_FILE="${ARLEN_GNUSTEP_CONFIG_FILE:-$runtime_prefix/etc/GNUstep/GNUstep.conf}"
+      export PATH="$runtime_prefix/System/Tools:$runtime_prefix/Local/Tools:$runtime_prefix/bin:$PATH"
+    elif [[ -f "$script_dir/../.arlen-dist" ]]; then
+      echo "Arlen: this Linux release requires its patched runtime. Run python3 $script_dir/setup_runtime.py build, or select --prefix /final/patched/prefix." >&2
+      return 1
+    fi
+  fi
 
   resolved_gnustep_sh="$(bash "$script_dir/resolve_gnustep.sh" 2>/dev/null || true)"
   if [[ -z "$resolved_gnustep_sh" ]]; then
@@ -35,7 +54,10 @@ _aln_source_gnustep_env_main() {
 
   set +u
   # shellcheck disable=SC1090
-  source "$resolved_gnustep_sh"
+  if ! source "$resolved_gnustep_sh"; then
+    [[ $restore_nounset -eq 0 ]] || set -u
+    return 1
+  fi
 
   # gnustep-cli managed toolchains keep libdispatch and other non-GNUstep
   # libraries in <root>/lib, which GNUstep.sh does not add to the search path.
@@ -48,10 +70,18 @@ _aln_source_gnustep_env_main() {
     esac
   fi
 
+  if [[ -n "$runtime_prefix" ]]; then
+    # Put all selected runtime libraries ahead of ambient/user library domains.
+    export LD_LIBRARY_PATH="$runtime_prefix/lib:$runtime_prefix/Local/Library/Libraries:$runtime_prefix/System/Library/Libraries${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+
   if [[ $restore_nounset -eq 1 ]]; then
     set -u
   fi
 }
 
-_aln_source_gnustep_env_main "$@"
+_aln_source_gnustep_env_main "$@" || {
+  unset -f _aln_source_gnustep_env_main
+  return 1
+}
 unset -f _aln_source_gnustep_env_main

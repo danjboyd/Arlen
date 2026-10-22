@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "custom-toolchain-lock",
+  "name": "arlen-normal-debian-13-arm64",
+  "based_on": "linux-arm64-clang",
+  "components": [
+    {
+      "name": "libobjc2",
+      "url": "https://github.com/gnustep/libobjc2.git",
+      "revision": "fab3df291a37fefdcc7b774c507ffb2ad5db6fb8",
+      "configure_args": [
+        "-DCMAKE_C_FLAGS=-fno-omit-frame-pointer",
+        "-DCMAKE_CXX_FLAGS=-fno-omit-frame-pointer",
+        "-DCMAKE_OBJC_FLAGS=-fno-omit-frame-pointer",
+        "-DCMAKE_OBJCXX_FLAGS=-fno-omit-frame-pointer"
+      ],
+      "patches": [
+        {
+          "path": "patches/libobjc2/libobjc2.patch",
+          "sha256": "c2d4e6a569497d448b36758396b46cb027dbb4f648fe54d080dc6b38c528b70f"
+        }
+      ]
+    },
+    {
+      "name": "libdispatch",
+      "url": "https://github.com/apple/swift-corelibs-libdispatch.git",
+      "revision": "b2a1fad6b49a9394cf864b87ab0034ea8300e2de",
+      "configure_args": [],
+      "patches": [
+        {
+          "path": "patches/libdispatch/libdispatch.patch",
+          "sha256": "26cf8bc213e0196c9c0398dbf784d0b210b8d5e620d7efc8c4babf7c49011924"
+        }
+      ]
+    },
+    {
+      "name": "tools-make",
+      "url": "https://github.com/gnustep/tools-make.git",
+      "revision": "50cf9619e672fb2ff6825f239b5a172c5dc55630",
+      "configure_args": [],
+      "patches": []
+    },
+    {
+      "name": "libs-base",
+      "url": "https://github.com/gnustep/libs-base.git",
+      "revision": "d898f703e618b86f9b7ecb0f05a257cb6ed3ffac",
+      "configure_args": [],
+      "patches": [
+        {
+          "path": "patches/libs-base/libs-base.patch",
+          "sha256": "1e2bf8d22eb91c683454ab43430c570058080055698b443203c42d598e768f6d"
+        }
+      ]
+    }
+  ],
+  "container": {
+    "recipe": "linux-arm64-clang",
+    "apt_packages": []
+  }
+}

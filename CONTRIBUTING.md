@@ -46,6 +46,7 @@ At a minimum you will need:
 Start every session with:
 
 ```bash
+python3 tools/setup_runtime.py build  # Linux: native patched runtime; prerequisites in docs/TOOLCHAIN_MATRIX.md
 source tools/source_gnustep_env.sh   # Linux/GNUstep
 ./bin/arlen doctor
 ```
@@ -227,3 +228,13 @@ Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
 need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
 CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](docs/STORAGE_MODULE.md) for migration and backup rules.
+
+Linux release runtime delivery is owned by Arlen's target locks in
+`tools/runtime/` and the existing pinned custom builder. Run
+`python3 tools/ci/test_runtime_delivery.py` for no-build bootstrap regressions;
+run `tools/release/smoke_install.sh` in each clean supported native target for
+actual setup/app/concurrency qualification. Local `.arlen-runtime` selectors
+are untracked. Manual `--no-setup` installs require matching patched runtime
+provenance; generic clang GNUstep is insufficient for release qualification.
+Public native target jobs retain their existing names and optional branch
+protection status; all three are required release evidence.

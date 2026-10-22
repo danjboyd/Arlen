@@ -349,17 +349,30 @@ containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
 creates an unprivileged user with sudo, packages a source archive, and runs
 `tools/release/smoke_install.sh`. Only download/checkout prerequisites are
 preinstalled; the installer itself provisions build dependencies and the
-pinned gnustep-cli `v0.1.0` managed toolchain with `--yes`. The container has
+pinned patched normal GNUstep runtime natively with `--yes`, using the existing
+custom builder at `5469b5d` and target-specific locks under `tools/runtime/`.
+The normal runtime shares all source pins and patch digests with the diagnostic
+recipe; its compiler/ICU come from each target distribution. The container has
 no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
-app. This verifies the setup path instead of bypassing it with preprovisioning.
+app. It then compiles and runs fourteen native runtime concurrency controls, including
+arm64, recording compiler, loader linkage, source/patch/ELF provenance and
+per-control logs. Those normal controls do not substitute for TSan acceptance.
+The existing matrix/job names remain unchanged; source builds have a 90-minute
+budget. Artifacts are uploaded as `native-runtime-<arch>-<index>`.
+`linux-quality` also runs `tools/ci/test_runtime_delivery.py` to verify pinned
+builder rejection, lock equality, immutable-prefix failure preservation,
+selected headers/loader precedence and failure without implicit setup.
+This verifies the setup path instead of bypassing it with preprovisioning.
 `ReleasePrebuiltTests` also exercises installer failure, retry, and PATH
 behavior using deterministic fixtures in the normal unit lane.
 
 It runs on pull requests that touch the installer, packaging, GNUstep env
 helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
 a merge-gate lane; the self-hosted lanes stay the authoritative Linux
-baseline.
+baseline. Required check names and branch protection remain unchanged. Release
+qualification must nevertheless check all three native runtime targets; do
+not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback
 
