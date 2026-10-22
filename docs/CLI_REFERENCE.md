@@ -1971,3 +1971,9 @@ limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
 processed incrementally within the existing encoded envelope cap. The legacy
 backend continues to reject chunked transfer coding. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Request body deadlines and minimum rates are checked when the final bytes
+arrive, including buffered and spooled `Content-Length` bodies on both parsers.
+An expired body receives `408`; following pipelined bytes cannot increase its
+rate, and the next keep-alive request gets a separate clock.
+The documented zero values disable the corresponding body deadline or rate.

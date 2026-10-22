@@ -612,3 +612,7 @@ limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
 processed incrementally within the existing encoded envelope cap. The legacy
 backend continues to reject chunked transfer coding. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Request body deadlines and minimum rates also apply to the final body fragment,
+including uploads spooled to disk. A late completion receives `408` and its
+incomplete spool is removed. Each keep-alive request starts its own body clock.
