@@ -79,6 +79,10 @@ Verification:
 - The integration bundle discovers every test in
   `tests/fixtures/test_inventory/ArlenIntegrationTests.tests.txt`. Tests of
   GNUstep-only lanes report as skipped through `ALNSkipOnApple()`.
+- Apple CI (`apple-baseline`) runs the full unit and integration bundles with
+  disposable PostgreSQL clusters and inventory checks, followed by the
+  durable-jobs bundle against its own cluster. Review reported skips: the
+  launchd status/logs test can skip if the runner refuses a per-user bootstrap.
 
 ## Known Characterized Gaps
 
@@ -86,8 +90,7 @@ These areas are still Linux-only or narrower on macOS:
 
 - Test lanes: the `tests/phase20` focused bundles, the browser error audit, and
   the sanitizer, fault-injection, fuzz, soak and perf-pack generators run only
-  on GNUstep. Apple CI (`apple-baseline`, non-required) does not run the
-  integration or durable-jobs bundles yet (GitHub issue 158).
+  on GNUstep.
 - PostgreSQL- and MSSQL-backed tests skip unless `ARLEN_PG_TEST_DSN` or the
   MSSQL test DSN is set. The tests pass the DSN to `psql` unquoted, so use the
   URI form (`postgresql://user@/db?host=/socket/dir`).
