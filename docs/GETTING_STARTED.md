@@ -383,6 +383,9 @@ job restrictions and queued auth-mail link origins.
 
 Auth session refresh precedes `security.routePolicies` checks, so a revoked
 session cannot pass a `requireAuth` policy.
+If you add session middleware in code after creating the app and before
+registering the auth module, it is placed before route policies so auth can
+refresh the loaded session before authorization.
 
 If SMS is already verified, adding a TOTP authenticator requires a recent MFA
 step-up. Upgrade vendored `auth` modules to 1.7.5.

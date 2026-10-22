@@ -1305,6 +1305,9 @@ Behavior:
 - when `webSocket.allowedOrigins` is configured, websocket upgrades require a matching `Origin` header or return `403`
 - the legacy HTTP parser backend rejects duplicate `Content-Length` headers and all `Transfer-Encoding` requests
 - session middleware stores cookies as encrypted and authenticated tokens by default
+- session middleware added after app initialization runs before route policy
+  middleware; when added before auth module registration, auth session refresh
+  uses the decoded cookie before route authorization
 - route-level auth assurance can be configured with `configureAuthAssuranceForRouteNamed:minimumAuthAssuranceLevel:maximumAuthenticationAgeSeconds:stepUpPath:error:`
 - assurance and authentication-age limits apply to compiled fast routes; path-prefix policies apply to the dispatched route path even when the URL includes a format suffix
 - browser requests that fail an auth-assurance requirement return `302` to the configured step-up path with:
