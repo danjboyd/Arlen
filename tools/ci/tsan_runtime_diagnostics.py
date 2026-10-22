@@ -75,7 +75,7 @@ def main():
     summary = {"status": "fail", "build_exit_code": rc, "runs": records}
     if rc == 0:
         for suppressed in (False, True):
-            for mode in ("startup", "monitor", "lock", "queue", "queue-idle", "foundation", "dispatch", "semaphore", "group", "group-notify", "task-signal", "kvc", "buffer", "canary"):
+            for mode in ("startup", "monitor", "lock", "queue", "queue-idle", "serial-queue", "foundation", "dispatch", "semaphore", "group", "group-notify", "task-signal", "kvc", "buffer", "canary"):
                 options = "halt_on_error=0:exitcode=66:second_deadlock_stack=1"
                 if suppressed:
                     options += f":suppressions={args.suppressions.resolve()}"
