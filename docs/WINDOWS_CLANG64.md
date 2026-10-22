@@ -300,7 +300,8 @@ llhttp enabled; this does not expand Windows production support.
 
 ## Rejected HTTP requests
 
-Parser rejections send their HTTP error response before a bounded graceful
-close. Pending input is discarded under a 64 KiB/100 ms budget, preventing an
-unread pipelined tail from truncating an ordinary rejection response with a
+Parser rejections and HTTP session/worker queue admission rejections send their
+HTTP error response before a bounded graceful close. Pending input is discarded
+under a 64 KiB/100 ms budget per rejected connection, preventing an unread
+pipelined tail from truncating an ordinary rejection response with a
 Winsock reset. The body-clock matrix covers spooled and in-memory requests.

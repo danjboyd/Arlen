@@ -5772,6 +5772,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                           value:@"http_session_limit"];
         [busyResponse setHeader:@"Connection" value:@"close"];
         (void)ALNSendResponse(clientFd, self.application, busyResponse, NO, YES);
+#if defined(_WIN32)
+        ALNFinishRejectedClientOutput(clientFd);
+#endif
         ALNSocketClose(clientFd);
         continue;
       }
@@ -5789,6 +5792,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
           [busyResponse setHeader:@"Connection" value:@"close"];
           (void)ALNSendResponse(clientFd, self.application, busyResponse, NO, YES);
           [self releaseHTTPSessionReservation];
+#if defined(_WIN32)
+          ALNFinishRejectedClientOutput(clientFd);
+#endif
           ALNSocketClose(clientFd);
         }
       } else {

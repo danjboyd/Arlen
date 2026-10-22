@@ -20,8 +20,9 @@ Release qualification and remaining limitations are documented in the
   before session refresh and route policy, preserving current OIDC roles and
   sign-out enforcement on protected routes.
 
-- Windows preserves HTTP parser error responses with a bounded graceful close
-  when rejected spooled requests leave pipelined input queued in the socket.
+- Windows preserves HTTP parser errors and session/worker queue overload `503`
+  responses with a bounded graceful close when rejected requests leave unread
+  input queued in the socket.
 
 - Request body deadlines and minimum rates are rechecked before accepting the
   final fragment on chunked and `Content-Length` readers. This closes a gap
