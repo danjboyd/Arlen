@@ -1464,6 +1464,73 @@
   }];
 }
 
+- (void)testFinalBodyBytesRespectDeadlineAndRateOnBothBackends {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-body-clock-app"];
+  NSString *spoolRoot = [self createTempDirectoryWithPrefix:@"arlen-body-clock-spool"];
+  XCTAssertNotNil(appRoot);
+  XCTAssertNotNil(spoolRoot);
+  if (!appRoot || !spoolRoot) return;
+  @try {
+    NSString *config = [NSString stringWithFormat:
+        @"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; connectionTimeoutSeconds = 8; "
+         "csrf = { enabled = NO; }; runtimeLimits = { maxConcurrentHTTPWorkers = 8; }; "
+         "requestLimits = { maxBodyBytes = 16384; spoolThresholdBytes = 32; spoolDirectory = \"%@\"; }; }",
+        spoolRoot];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"] content:config]);
+    for (NSString *backend in @[@"llhttp", @"legacy"]) {
+      for (NSString *policy in @[@"deadline", @"rate", @"disabled"]) {
+        int port = [self randomPort];
+        NSTask *server = [[NSTask alloc] init];
+        // Run the existing server binary, including in sanitizer integration;
+        // this fixture writes only configuration and never rebuilds an app.
+        server.launchPath = [repoRoot stringByAppendingPathComponent:@"build/boomhauer"];
+        server.arguments = @[@"--port", [NSString stringWithFormat:@"%d", port]];
+        server.currentDirectoryPath = appRoot;
+        NSMutableDictionary *environment = [NSMutableDictionary dictionaryWithDictionary:
+            [[NSProcessInfo processInfo] environment]];
+        environment[@"ARLEN_HTTP_PARSER_BACKEND"] = backend;
+        environment[@"ARLEN_REQUEST_BODY_TIMEOUT_SECONDS"] = [policy isEqualToString:@"deadline"] ? @"1" : @"0";
+        environment[@"ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND"] = [policy isEqualToString:@"rate"] ? @"1024" : @"0";
+        environment[@"ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS"] = @"1";
+        server.environment = environment;
+        server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+        server.standardError = server.standardOutput;
+        [server launch];
+        @try {
+          BOOL ready = NO;
+          (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+          XCTAssertTrue(ready, @"%@ %@", backend, policy);
+          if (!ready) continue;
+          NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/body_clock_probe.py"
+              encoding:NSUTF8StringEncoding error:NULL];
+          script = [script stringByReplacingOccurrencesOfString:@"__PORT__"
+              withString:[NSString stringWithFormat:@"%d", port]];
+          script = [script stringByReplacingOccurrencesOfString:@"__SPOOL__"
+              withString:[NSString stringWithFormat:@"'%@'", spoolRoot]];
+          script = [script stringByReplacingOccurrencesOfString:@"__POLICY__"
+              withString:[NSString stringWithFormat:@"'%@'", policy]];
+          script = [script stringByReplacingOccurrencesOfString:@"__CHUNKED__"
+              withString:([backend isEqualToString:@"llhttp"] && [ALNRequest isLLHTTPAvailable]) ? @"True" : @"False"];
+          int code = 0;
+          NSString *output = [self runPythonScript:script exitCode:&code];
+          XCTAttachment *attachment = [XCTAttachment attachmentWithString:output];
+          attachment.name = [NSString stringWithFormat:@"body-clock-%@-%@", backend, policy];
+          attachment.lifetime = XCTAttachmentLifetimeKeepAlways;
+          [self addAttachment:attachment];
+          XCTAssertEqual(code, 0, @"%@ %@: %@", backend, policy, output);
+          XCTAssertTrue([output containsString:@"body clock checks passed"], @"%@ %@: %@", backend, policy, output);
+        } @finally {
+          XCTAssertTrue([self terminateTask:server timeoutSeconds:5.0]);
+        }
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:spoolRoot error:NULL];
+  }
+}
+
 - (void)testSlowRequestBodiesHitTheBodyDeadline {
   [self assertSlowRequestBodiesDoNotStarveWorkersWithLimits:@{
     @"ARLEN_REQUEST_BODY_TIMEOUT_SECONDS" : @"3",

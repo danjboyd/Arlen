@@ -616,3 +616,7 @@ backend continues to reject chunked transfer coding. See
 Legacy storage plist catalogs use private temporary creation and atomic replacement
 on Windows; the parent directory ACL is unchanged. See
 [Storage Module](STORAGE_MODULE.md) for upgrade and filesystem guidance.
+
+Request body deadlines and minimum rates also apply to the final body fragment,
+including uploads spooled to disk. A late completion receives `408` and its
+incomplete spool is removed. Each keep-alive request starts its own body clock.

@@ -602,6 +602,19 @@ static NSUInteger ALNConfigUInt(NSDictionary *dict, NSString *key, NSUInteger de
   return value != nil ? value.unsignedIntegerValue : defaultValue;
 }
 
+// Body clocks document zero as a disable/no-grace value. Keep strict positive
+// parsing for other inputs, rather than truncating fractions or malformed text.
+static NSUInteger ALNConfigClockUInt(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
+  id value = dict[key];
+  if ([value isKindOfClass:[NSNumber class]] && [value isEqualToNumber:@0]) return 0;
+  if ([value isKindOfClass:[NSString class]]) {
+    NSString *text = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (text.length > 0 && [text rangeOfCharacterFromSet:
+        [[NSCharacterSet characterSetWithCharactersInString:@"0"] invertedSet]].location == NSNotFound) return 0;
+  }
+  return ALNConfigUInt(dict, key, defaultValue);
+}
+
 static NSUInteger ALNConfigUIntAllowZero(NSDictionary *dict, NSString *key, NSUInteger defaultValue) {
   id value = dict[key];
   if ([value respondsToSelector:@selector(integerValue)]) {
@@ -625,10 +638,10 @@ static ALNRequestLimits ALNLimitsFromConfig(NSDictionary *config) {
   NSUInteger headTimeoutSeconds = ALNConfigUInt(limits, @"requestHeadTimeoutSeconds", 15);
   out.headTimeoutMilliseconds = (headTimeoutSeconds > 86400) ? 86400000 : headTimeoutSeconds * 1000;
   out.firstRequestHeadDeadline = 0;
-  NSUInteger bodyTimeoutSeconds = ALNConfigUInt(limits, @"requestBodyTimeoutSeconds", 300);
+  NSUInteger bodyTimeoutSeconds = ALNConfigClockUInt(limits, @"requestBodyTimeoutSeconds", 300);
   out.bodyTimeoutMilliseconds = (bodyTimeoutSeconds > 86400) ? 86400000 : bodyTimeoutSeconds * 1000;
-  out.bodyMinBytesPerSecond = ALNConfigUInt(limits, @"requestBodyMinBytesPerSecond", 1024);
-  NSUInteger graceSeconds = ALNConfigUInt(limits, @"requestBodyMinRateGraceSeconds", 10);
+  out.bodyMinBytesPerSecond = ALNConfigClockUInt(limits, @"requestBodyMinBytesPerSecond", 1024);
+  NSUInteger graceSeconds = ALNConfigClockUInt(limits, @"requestBodyMinRateGraceSeconds", 10);
   out.bodyMinRateGraceMilliseconds = (graceSeconds > 86400) ? 86400000 : graceSeconds * 1000;
   out.application = nil;
   return out;
@@ -2357,7 +2370,11 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
   FILE *file = NULL;
   NSInteger failure = 503;
   ALNRequest *request = nil;
+  ALNRequestBodyClock bodyClock = {0, 0};
   @try {
+    // Count all body bytes from the completed head, including bytes that
+    // arrived in the head's packet. Do not reset the clock after each read.
+    (void)ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, 0, &failure);
     if ([[NSFileManager defaultManager] createFileAtPath:path contents:nil
                                               attributes:@{NSFilePosixPermissions : @0600}]) {
       file = ALNPlatformOpenFile(path, "wb");
@@ -2369,7 +2386,6 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
     ALNConnectionReadStateConsumePrefix(readState, headerBytes + buffered);
     NSUInteger remaining = contentLength - buffered;
     char chunk[65536];
-    ALNRequestBodyClock bodyClock = {0, 0};
     while (failure == 0 && remaining > 0) {
       NSInteger waitStatus = 0;
       if (!ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, (size_t)(contentLength - remaining),
@@ -2385,6 +2401,11 @@ static ALNRequest *ALNReadSpooledRequest(ALNSocketHandle clientFd,
         failure = (errno == EAGAIN || errno == EWOULDBLOCK) ? 408 : 400;
       } else if (readBytes == 0) {
         failure = 400;  // client went away mid-body
+      } else if (!ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock,
+                                            (size_t)(contentLength - remaining) + (size_t)readBytes,
+                                            &failure)) {
+        // A final read can complete the body after its clock expired. Check
+        // before writing or accepting it, even when no further read is needed.
       } else if (fwrite(chunk, 1, (size_t)readBytes, file) != (size_t)readBytes) {
         failure = 503;
       } else {
@@ -2546,6 +2567,10 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
         readState->metadata = parsedMetadata;
         readState->expectedTotalBytes =
             (size_t)parsedMetadata.headerBytes + (size_t)parsedMetadata.contentLength;
+        if (parsedMetadata.contentLength > 0) {
+          (void)ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock,
+                                        parsedMetadata.headerBytes, statusCode);
+        }
       } else {
         readState->scanOffset = readState->length;
       }
@@ -2586,6 +2611,13 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
         return nil;
       }
       if (readState->length >= readState->expectedTotalBytes) {
+        // Exclude following pipelined bytes from this body's rate. A body
+        // already complete with its initial head starts no earlier clock.
+        if (readState->metadata.contentLength > 0 &&
+            !ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock,
+                                      readState->expectedTotalBytes, statusCode)) {
+          return nil;
+        }
         NSData *requestData =
             [NSData dataWithBytes:readState->bytes length:readState->expectedTotalBytes];
         if (requestData == nil) {
@@ -2832,6 +2864,7 @@ static ALNRequest *ALNReadChunkedRequest(ALNSocketHandle clientFd,
                                      readState->length, &continueSent, &state->_status)) {
       return nil;
     }
+    (void)ALNAwaitRequestBodyBytes(clientFd, limits, &clock, headerBytes, &state->_status);
     while (!state->_complete) {
       if (readState->length > 0) {
         const char *bytes = (const char *)readState->bytes;
@@ -2852,7 +2885,12 @@ static ALNRequest *ALNReadChunkedRequest(ALNSocketHandle clientFd,
           if (state->_status == 0) state->_status = 400;
           break;
         }
-        if (state->_complete) break;
+        if (state->_complete) {
+          // Completion must not skip the clock that guarded the blocking read.
+          // encodedBytes stops at this message, excluding a pipelined request.
+          (void)ALNAwaitRequestBodyBytes(clientFd, limits, &clock, encodedBytes, &state->_status);
+          break;
+        }
       }
       if (!ALNAwaitRequestBodyBytes(clientFd, limits, &clock, encodedBytes, &state->_status)) {
         break;
@@ -2926,6 +2964,9 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
           return nil;
         }
         checkedHead = YES;
+        // Initialize at the head boundary so an initial body burst is counted
+        // toward its average rate, without crediting the headers themselves.
+        (void)ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, headerBytes, statusCode);
         NSData *head = [NSData dataWithBytes:readState->bytes length:headerBytes];
         ALNRequest *headRequest = [ALNRequest requestFromHeadData:head
             backend:ALNHTTPParserBackendLLHTTP error:NULL];
@@ -3064,6 +3105,10 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
       }
       if (consumedLength == 0 || consumedLength > readState->length) {
         consumedLength = readState->length;
+      }
+      if ([request.body length] > 0 &&
+          !ALNAwaitRequestBodyBytes(clientFd, limits, &bodyClock, consumedLength, statusCode)) {
+        return nil;
       }
       ALNConnectionReadStateConsumePrefix(readState, consumedLength);
       return request;

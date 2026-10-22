@@ -31,7 +31,13 @@ runners; it is not a new required merge-gate lane by itself.
 
 The existing Windows job retains default-backend acceptance and adds an
 explicit `ARLEN_ENABLE_LLHTTP=1` check for `HTTPBodyStreamingTests`, `RequestTests`, and the per-route
-body-limit/spooling integration regression. This exercises chunked decoding,
+body-limit/spooling integration regression, plus
+`testFinalBodyBytesRespectDeadlineAndRateOnBothBackends`. The latter covers
+late final fragments, buffered/spooled bodies, independent keep-alive clocks,
+and disabled-limit/on-time/healthy-rate controls; the regular Linux integration
+suite also discovers it. It runs the prebuilt server directly, so the existing
+sanitizer integration skip list is unchanged. The Windows step rebuilds the
+server with the same opt-in parser flags as its test bundles. This exercises chunked decoding,
 which the default legacy backend rejects. The managed winpthreads dependency
 is linked only for the opt-in build. Keep the same job context, fork guard,
 artifacts, 90-minute timeout, and configured branch-protection gates.
