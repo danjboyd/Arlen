@@ -103,6 +103,10 @@
   modules before using tenant, soft-delete, or app-defined visibility rules
   with the PostgreSQL search engine.
 
+- Storage module 1.4.3 creates Windows legacy plist catalogs with an owner-only
+  protected DACL before writing and retains the last catalog on failed replacement.
+  The canonical storage privacy regression now runs on Windows and POSIX.
+
 - Chunked uploads on llhttp now enforce per-route decoded-byte limits and spool
   while receiving. Incremental decoding avoids repeated body parsing; encoded
   framing limits, body deadlines, and legacy rejection remain in force.
