@@ -253,3 +253,12 @@ on another host requires that host's own patched runtime and an explicit
 `ARLEN_RUNTIME_PREFIX`; source archives contain no prebuilt Linux runtime.
 Normal native controls and full functional qualification complement the
 separate unchanged two-run TSan acceptance gate.
+
+Normal runtime production locks also require explicit optimization inputs for
+tools-make/Base. Record `gnustep-config --objc-flags` from the fresh prefix: it
+must default to `-O2` and retain its own include paths. Check `--debug-flags`
+removes optimization. Preserve the earlier 2bc prefix as a separate control;
+its artifacts and timing results do not certify a new normal prefix. Use the
+new qualified prefix/lock/ELF manifest for final normal qualification and the
+TSan driver's normal-source provenance comparison, while retaining the
+unchanged dedicated thread recipe and actual TSan bootstrap conditions.

@@ -69,6 +69,12 @@ using the target lock in `tools/runtime/` and the three race patches plus the Ub
 amd64, using each distribution's ICU and clang. Debian 12, Ubuntu 24.04 and
 Ubuntu arm64 are outside this automatic path.
 
+Normal runtime setup restores GNUstep's `-O2` default for framework and generated
+app builds through explicit tools-make/Base configure inputs. GNUstep debug
+flags can still remove optimization, and existing explicit client flags keep
+their precedence. An older prefix with include-only defaults must be rebuilt
+at a new versioned prefix; setup never changes that older prefix in place.
+
 The runtime is built directly at `<install-prefix>/runtimes/<target>-<lock-id>`.
 GNUstep embeds that absolute path: keep it in place for every release that
 uses it. The framework can move through the installer's staging/activation

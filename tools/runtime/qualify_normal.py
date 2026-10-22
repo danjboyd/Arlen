@@ -24,6 +24,15 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run(["python3", str(ROOT / "tools/setup_runtime.py"), "check", "--full"], check=True)
     flags = shlex.split(subprocess.check_output(["gnustep-config", "--objc-flags"], text=True))
+    prefix = Path(os.environ["ARLEN_RUNTIME_PREFIX"]).resolve()
+    optimization = [flag for flag in flags if flag.startswith("-O") and flag != "-ObjC"]
+    if not optimization or optimization[-1] != "-O2":
+        raise RuntimeError(f"normal GNUstep client flags must default to -O2: {flags}")
+    if "-I" + str(prefix / "include") not in flags:
+        raise RuntimeError("normal GNUstep CPPFLAGS lost the selected runtime include directory")
+    debug_flags = shlex.split(subprocess.check_output(["gnustep-config", "--debug-flags"], text=True))
+    if any(flag.startswith("-O") and flag != "-ObjC" for flag in debug_flags):
+        raise RuntimeError(f"GNUstep debug client flags must remove default optimization: {debug_flags}")
     libs = shlex.split(subprocess.check_output(["gnustep-config", "--base-libs"], text=True))
     command = ["clang", *flags, "-Wno-nullability-completeness", "-O2", "-g", "-fno-omit-frame-pointer",
                str(ROOT / "tests/fixtures/sanitizers/tsan_runtime_probe.m"), "-o", str(out / "normal-probe"), *libs, "-ldispatch"]
@@ -36,11 +45,13 @@ def main():
         (out / (mode + ".log")).write_text(result.stdout + result.stderr)
         records.append({"mode": mode, "exit_code": result.returncode,
                         "complete": "probe-complete:" + mode in result.stdout + result.stderr})
-    metadata = {"command": command, "runtime_prefix": os.environ.get("ARLEN_RUNTIME_PREFIX"), "runs": records}
+    metadata = {"command": command, "runtime_prefix": os.environ.get("ARLEN_RUNTIME_PREFIX"), "runs": records,
+                "normal_default_client_flags": flags, "normal_default_optimization": optimization,
+                "prefix_CPPFLAGS_preserved": True, "normal_debug_client_flags": debug_flags,
+                "debug_removes_default_optimization": True}
     for name, command in (("machine", ["uname", "-m"]), ("compiler", ["clang", "--version"]),
                           ("linkage", ["ldd", str(out / "normal-probe")])):
         metadata[name] = subprocess.check_output(command, text=True)
-    prefix = Path(os.environ["ARLEN_RUNTIME_PREFIX"]).resolve()
     for library in ("libobjc.so", "libdispatch.so", "libgnustep-base.so", "libBlocksRuntime.so"):
         paths = [line.split("=>", 1)[1].split()[0] for line in metadata["linkage"].splitlines()
                  if line.strip().startswith(library) and "=>" in line]

@@ -41,14 +41,20 @@
       "name": "tools-make",
       "url": "https://github.com/gnustep/tools-make.git",
       "revision": "50cf9619e672fb2ff6825f239b5a172c5dc55630",
-      "configure_args": [],
+      "configure_args": [
+        "CFLAGS=-O2",
+        "OBJCFLAGS="
+      ],
       "patches": []
     },
     {
       "name": "libs-base",
       "url": "https://github.com/gnustep/libs-base.git",
       "revision": "d898f703e618b86f9b7ecb0f05a257cb6ed3ffac",
-      "configure_args": [],
+      "configure_args": [
+        "CFLAGS=-O2",
+        "OBJCFLAGS="
+      ],
       "patches": [
         {
           "path": "patches/libs-base/libs-base.patch",

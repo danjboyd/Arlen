@@ -949,3 +949,27 @@ TSan source recipe do not change. Runtime-delivery regressions verify the
 Ubuntu-only lock delta, strict staging/checksum rejection, and 786,432 mask
 cases; the existing native public matrix performs the actual Ubuntu build.
 No lane, classifier, suppression or branch-protection context changes.
+
+## Normal runtime optimization inputs
+
+The three normal target locks explicitly configure tools-make and Base with
+`CFLAGS=-O2` and empty `OBJCFLAGS`. This supplies GNUstep `OPTFLAG=-O2` to C
+and Objective-C builds without leaving a second ObjC optimization flag after
+GNUstep's debug filtering. Required prefix includes remain in the pinned
+builder's `CPPFLAGS`. Revisions, the three race patches, Ubuntu's epoll-mask
+compatibility patch, builder 5469 and the separate TSan recipe stay unchanged.
+These are intentional configure-input and normal lock hash changes; the old
+2bc prefix remains an immutable control with include-only default client flags.
+
+`qualify_normal.py` records and requires the actual new prefix's default client
+optimization and prefix include path before its fourteen unchanged native
+controls and ICU contract. Strict provenance checks reject old tools-make or
+Base configure inputs without rewriting them. Runtime-delivery regressions
+cover all three new lock hashes and explicit input rejection. Fresh prefix
+builds must independently establish default `-O2`, debug filtering, artifact
+hashes, functional/concurrency/ICU/install behavior and unchanged performance
+gates. No result on the old prefix is relabeled as new optimized evidence.
+No compiler-warning category, benchmark baseline, threshold, classifier,
+required check name or branch-protection context changes. The two full TSan
+runs remain a separate final-source gate using the existing bootstrap/thread
+recipe; its normal provenance reference must name the newly qualified prefix.
