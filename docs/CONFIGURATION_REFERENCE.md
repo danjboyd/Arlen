@@ -146,12 +146,19 @@ and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
 stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)).
 
 Chunked request bodies (`Transfer-Encoding: chunked`) are accepted by the
-default `llhttp` parser. They are buffered in memory, never spooled, and their
-decoded size is held to `requestLimits.maxBodyBytes`; a per-route override
-can't be checked before the body arrives, because there is no
-`Content-Length`. Only the request head (request line and headers) counts
-toward `maxHeaderBytes`, not the chunk-size lines. The legacy parser
-(`ARLEN_HTTP_PARSER_BACKEND=legacy`) rejects chunked bodies with `400`.
+`llhttp` parser. The server decodes each received byte once, applies the selected
+route's body limit to decoded bytes as they arrive, and returns `413` before
+storing bytes beyond that limit. A larger upload route does not raise another
+route's limit. Decoded bodies above `spoolThresholdBytes` stream to private spool
+files while the upload is still arriving; success transfers file ownership to
+the request, and rejection, malformed framing, disconnects, and exceptions clean
+up incomplete files. Only the request head counts toward `maxHeaderBytes`.
+The existing encoded envelope cap (maximum configured body allowance plus header
+allowance) also bounds chunk framing and trailers. Pipelined requests remain
+separate. On Windows, each chunked spool is created exclusively with a protected
+DACL granting access only to the process token user before any payload is written;
+the file handle is not inherited by child processes. The legacy parser (`ARLEN_HTTP_PARSER_BACKEND=legacy`) continues to
+reject chunked bodies with `400`; it is Windows' default build backend.
 
 Other request-head rules:
 

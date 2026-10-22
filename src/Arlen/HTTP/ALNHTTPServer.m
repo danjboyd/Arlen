@@ -1,3 +1,8 @@
+// Parse llhttp enums before Foundation imports WinInet status macros.
+#if !defined(ARLEN_ENABLE_LLHTTP) || ARLEN_ENABLE_LLHTTP
+#import "third_party/llhttp/llhttp.h"
+#endif
+
 #import "ALNHTTPServer.h"
 #import "ALNResponseHeaderInternal.h"
 
@@ -18,6 +23,7 @@
 
 #if defined(_WIN32)
 #include <io.h>
+#include <aclapi.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -2638,6 +2644,254 @@ static NSData *ALNReadHTTPRequestDataLegacy(ALNSocketHandle clientFd,
   }
 }
 
+// One decoder for this request, fed only new bytes. Body callbacks count
+// decoded bytes against this route's limit and spill before the heap grows
+// beyond its threshold. No callback retains pointers into the read buffer.
+@interface ALNChunkedReadState : NSObject {
+@public
+  NSMutableData *_body;
+  NSString *_path;
+  FILE *_file;
+  NSUInteger _decodedBytes;
+  NSUInteger _bodyLimit;
+  NSUInteger _threshold;
+  NSInteger _status;
+  BOOL _complete;
+  BOOL _createdFile;
+}
+- (instancetype)initWithLimit:(NSUInteger)limit threshold:(NSUInteger)threshold path:(NSString *)path;
+- (BOOL)appendBytes:(const void *)bytes length:(NSUInteger)length;
+- (BOOL)finish;
+- (void)discard;
+@end
+#if defined(_WIN32)
+// Supply the protected token-user DACL to CREATE_NEW: a shared temp directory
+// must never expose payload bytes between file creation and an ACL update.
+static int ALNCreatePrivateChunkSpool(NSString *path) {
+  HANDLE token = NULL;
+  PACL acl = NULL;
+  HANDLE file = INVALID_HANDLE_VALUE;
+  NSMutableData *tokenData = nil;
+  NSMutableData *wide = nil;
+  SECURITY_DESCRIPTOR security;
+  SECURITY_ATTRIBUTES attributes;
+  EXPLICIT_ACCESSW entry;
+  DWORD size = 0;
+  int descriptor = -1;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) goto done;
+  GetTokenInformation(token, TokenUser, NULL, 0, &size);
+  if (size == 0) goto done;
+  tokenData = [NSMutableData dataWithLength:size];
+  if (!GetTokenInformation(token, TokenUser, tokenData.mutableBytes, size, &size)) goto done;
+  memset(&entry, 0, sizeof(entry));
+  entry.grfAccessPermissions = FILE_ALL_ACCESS;
+  entry.grfAccessMode = SET_ACCESS;
+  entry.grfInheritance = NO_INHERITANCE;
+  BuildTrusteeWithSidW(&entry.Trustee, ((TOKEN_USER *)tokenData.mutableBytes)->User.Sid);
+  if (SetEntriesInAclW(1, &entry, NULL, &acl) != ERROR_SUCCESS ||
+      !InitializeSecurityDescriptor(&security, SECURITY_DESCRIPTOR_REVISION) ||
+      !SetSecurityDescriptorDacl(&security, TRUE, acl, FALSE) ||
+      !SetSecurityDescriptorControl(&security, SE_DACL_PROTECTED, SE_DACL_PROTECTED)) goto done;
+  attributes.nLength = sizeof(attributes);
+  attributes.lpSecurityDescriptor = &security;
+  attributes.bInheritHandle = FALSE;
+  wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  file = CreateFileW((const wchar_t *)wide.bytes, GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_DELETE, &attributes, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) goto done;
+  descriptor = _open_osfhandle((intptr_t)file, _O_WRONLY | _O_BINARY | _O_NOINHERIT);
+  if (descriptor >= 0) {
+    file = INVALID_HANDLE_VALUE; // CRT now owns the handle.
+  } else {
+    // No payload was written and no existing path was opened.
+    CloseHandle(file);
+    file = INVALID_HANDLE_VALUE;
+    DeleteFileW((const wchar_t *)wide.bytes);
+  }
+done:
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  if (acl != NULL) LocalFree(acl);
+  if (token != NULL) CloseHandle(token);
+  return descriptor;
+}
+#endif
+
+@implementation ALNChunkedReadState
+- (instancetype)initWithLimit:(NSUInteger)limit threshold:(NSUInteger)threshold path:(NSString *)path {
+  self = [super init];
+  if (self != nil) {
+    _body = [NSMutableData data];
+    _bodyLimit = limit;
+    _threshold = threshold;
+    _path = [path copy];
+  }
+  return self;
+}
+- (BOOL)appendBytes:(const void *)bytes length:(NSUInteger)length {
+  if (_status != 0) return NO;
+  if (length > _bodyLimit - _decodedBytes) {
+    _status = 413;
+    return NO;
+  }
+  if (_file == NULL && _decodedBytes + length > _threshold) {
+    // Exclusive creation prevents replacing an existing path or following a
+    // pre-existing symlink; descriptors never pass into spawned children.
+#if defined(_WIN32)
+    int descriptor = ALNCreatePrivateChunkSpool(_path);
+#else
+    int descriptor = open([_path fileSystemRepresentation],
+        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+#endif
+    if (descriptor >= 0) {
+      _createdFile = YES;
+      _file = fdopen(descriptor, "wb");
+      if (_file == NULL) {
+        close(descriptor);
+      }
+    }
+    if (_file == NULL ||
+        fwrite(_body.bytes, 1, _body.length, _file) != _body.length) {
+      _status = 503;
+      return NO;
+    }
+    _body = nil;
+  }
+  if (_file != NULL) {
+    if (fwrite(bytes, 1, length, _file) != length) {
+      _status = 503;
+      return NO;
+    }
+  } else {
+    [_body appendBytes:bytes length:length];
+  }
+  _decodedBytes += length;
+  return YES;
+}
+- (BOOL)finish {
+  if (_file != NULL) {
+    if (fclose(_file) != 0) _status = 503;
+    _file = NULL;
+  }
+  return _status == 0;
+}
+- (void)discard {
+  [self finish];
+  if (_createdFile) {
+    [[NSFileManager defaultManager] removeItemAtPath:_path error:NULL];
+    _createdFile = NO;
+  }
+}
+- (void)dealloc {
+  [self discard];
+}
+@end
+
+#if ARLEN_ENABLE_LLHTTP
+static int ALNChunkedBody(llhttp_t *parser, const char *bytes, size_t length) {
+  ALNChunkedReadState *state = (__bridge ALNChunkedReadState *)parser->data;
+  return [state appendBytes:bytes length:length] ? 0 : HPE_USER;
+}
+
+static int ALNChunkedComplete(llhttp_t *parser) {
+  ALNChunkedReadState *state = (__bridge ALNChunkedReadState *)parser->data;
+  state->_complete = YES;
+  return HPE_PAUSED;
+}
+
+static ALNRequest *ALNReadChunkedRequest(ALNSocketHandle clientFd,
+                                        ALNRequestLimits limits,
+                                        ALNRequest *headRequest,
+                                        size_t headerBytes,
+                                        NSInteger *statusCode,
+                                        ALNConnectionReadState *readState) {
+  NSString *directory = [limits.spoolDirectory length] > 0 ? limits.spoolDirectory : NSTemporaryDirectory();
+  NSString *path = [directory stringByAppendingPathComponent:
+      [@"arlen-body-" stringByAppendingString:[[NSUUID UUID] UUIDString]]];
+  ALNChunkedReadState *state = [[ALNChunkedReadState alloc]
+      initWithLimit:ALNRequestBodyLimit(limits, readState->bytes, headerBytes)
+      threshold:limits.spoolThresholdBytes path:path];
+  llhttp_settings_t settings;
+  llhttp_settings_init(&settings);
+  settings.on_body = ALNChunkedBody;
+  settings.on_message_complete = ALNChunkedComplete;
+  llhttp_t parser;
+  llhttp_init(&parser, HTTP_REQUEST, &settings);
+  parser.data = (__bridge void *)state;
+  BOOL continueSent = NO;
+  ALNRequestBodyClock clock = {0, 0};
+  size_t encodedBytes = 0;
+  // Preserve the existing encoded envelope bound, including chunk extensions
+  // and trailers; spooling does not permit unlimited framing traffic.
+  size_t encodedLimit = limits.maxBodyBytes > SIZE_MAX - limits.maxHeaderBytes
+                            ? SIZE_MAX : limits.maxHeaderBytes + limits.maxBodyBytes;
+  ALNRequest *request = nil;
+  @try {
+    if (!ALNAnswerRequestExpectation(clientFd, readState->bytes, headerBytes,
+                                     readState->length, &continueSent, &state->_status)) {
+      return nil;
+    }
+    while (!state->_complete) {
+      if (readState->length > 0) {
+        const char *bytes = (const char *)readState->bytes;
+        size_t available = readState->length;
+        llhttp_errno_t result = llhttp_execute(&parser, bytes, available);
+        size_t consumed = available;
+        const char *end = llhttp_get_error_pos(&parser);
+        if (result != HPE_OK && end != NULL && end >= bytes && end <= bytes + available) {
+          consumed = (size_t)(end - bytes);
+        }
+        if (consumed > encodedLimit - encodedBytes) {
+          state->_status = 413;
+          break;
+        }
+        encodedBytes += consumed;
+        ALNConnectionReadStateConsumePrefix(readState, consumed);
+        if (result != HPE_OK && !(result == HPE_PAUSED && state->_complete)) {
+          if (state->_status == 0) state->_status = 400;
+          break;
+        }
+        if (state->_complete) break;
+      }
+      if (!ALNAwaitRequestBodyBytes(clientFd, limits, &clock, encodedBytes, &state->_status)) {
+        break;
+      }
+      char bytes[8192];
+      ssize_t received = ALNRecvWithFaults(clientFd, bytes, sizeof(bytes), 0);
+      if (received < 0 && errno == EINTR) continue;
+      if (received <= 0) {
+        state->_status = (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) ? 408 : 400;
+        break;
+      }
+      if (!ALNConnectionReadStateAppend(readState, bytes, (size_t)received)) {
+        state->_status = (errno == ENOMEM) ? 503 : 413;
+        break;
+      }
+    }
+    if (state->_complete && state->_status == 0) {
+      if (state->_file != NULL) {
+        [state finish];
+        if (state->_status == 0 && [headRequest adoptSpooledBodyAtPath:state->_path error:NULL]) {
+          state->_createdFile = NO;  // The request now owns the spool.
+          request = headRequest;
+        } else {
+          state->_status = 503;
+        }
+      } else {
+        request = [[ALNRequest alloc] initWithMethod:headRequest.method path:headRequest.path
+            queryString:headRequest.queryString httpVersion:headRequest.httpVersion
+            headers:headRequest.headers body:state->_body];
+      }
+    }
+  } @finally {
+    [state discard];
+    if (statusCode != NULL) *statusCode = state->_status;
+  }
+  return request;
+}
+#endif
+
 static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
                                             ALNRequestLimits limits,
                                             NSInteger *statusCode,
@@ -2652,10 +2906,35 @@ static ALNRequest *ALNReadHTTPRequestLLHTTP(ALNSocketHandle clientFd,
     return nil;
   }
 
+#if ARLEN_ENABLE_LLHTTP
+  BOOL checkedHead = NO;
+#endif
   BOOL continueAnswered = NO;
   uint64_t headDeadline = limits.firstRequestHeadDeadline;
   ALNRequestBodyClock bodyClock = {0, 0};
   while (1) {
+#if ARLEN_ENABLE_LLHTTP
+    if (!checkedHead) {
+      size_t terminator = ALNFindHeaderTerminator(readState->bytes, readState->length, 0);
+      if (terminator != SIZE_MAX) {
+        size_t headerBytes = terminator + 4;
+        size_t lineBytes = 0;
+        while (lineBytes < terminator && readState->bytes[lineBytes] != '\r' &&
+               readState->bytes[lineBytes] != '\n') lineBytes++;
+        if (headerBytes > limits.maxHeaderBytes || lineBytes > limits.maxRequestLineBytes) {
+          if (statusCode != NULL) *statusCode = 431;
+          return nil;
+        }
+        checkedHead = YES;
+        NSData *head = [NSData dataWithBytes:readState->bytes length:headerBytes];
+        ALNRequest *headRequest = [ALNRequest requestFromHeadData:head
+            backend:ALNHTTPParserBackendLLHTTP error:NULL];
+        if (headRequest != nil && [[headRequest headerValueForName:@"transfer-encoding"] length] > 0) {
+          return ALNReadChunkedRequest(clientFd, limits, headRequest, headerBytes, statusCode, readState);
+        }
+      }
+    }
+#endif
     NSUInteger consumedLength = 0;
     BOOL headersComplete = NO;
     NSInteger contentLength = 0;

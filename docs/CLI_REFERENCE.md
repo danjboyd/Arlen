@@ -1965,3 +1965,9 @@ Negotiated controller rendering uses only the explicit `jsonObject` for JSON.
 When that argument is nil it renders `{}`; template context is never copied to
 the JSON response. Successful HTML and JSON representations include
 `Vary: Accept` so shared caches distinguish them.
+
+With llhttp enabled, chunked uploads enforce the selected route's decoded body
+limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
+processed incrementally within the existing encoded envelope cap. The legacy
+backend continues to reject chunked transfer coding. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).

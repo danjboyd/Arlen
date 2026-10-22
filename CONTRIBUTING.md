@@ -15,6 +15,12 @@ After changing this contract, clean-rebuild the framework, apps and vendored
 XCTest runner; do not mix cached objects built with 32-bit `off_t`. The build-flags
 sentinel also invalidates runner artifacts. See [Windows CLANG64](docs/WINDOWS_CLANG64.md).
 
+Windows defaults to the legacy HTTP backend. For chunked-body changes, also
+validate the opt-in parser with `ARLEN_ENABLE_LLHTTP=1`; the managed toolchain
+provides winpthreads for its thread-local parser state. The existing Windows
+job runs focused llhttp request-parser and body-limit checks after default
+acceptance. Keep both backends and the existing job budget covered.
+
 - File or comment on an issue first if the change is non-trivial. This lets us
   surface design considerations before you invest implementation time.
 - For security-sensitive issues, do **not** open a public issue. Follow

@@ -287,3 +287,13 @@ then scaffolds, builds and serves a generated app. Use
 exit. See [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for setup,
 offline options, and the distinction between an in-process installer and a
 child PowerShell process.
+
+## Opt-in llhttp validation
+
+Windows keeps llhttp disabled by default. Set `ARLEN_ENABLE_LLHTTP=1` explicitly
+to build the alternative parser; its headers precede Foundation's WinInet status
+macros, and both framework tools and generated apps link the managed toolchain's
+winpthreads library. Changing this flag invalidates the existing build sentinel
+and rebuilds the vendored XCTest runner. CI retains default-backend acceptance
+and separately runs request-parser and body-limit security regressions with
+llhttp enabled; this does not expand Windows production support.

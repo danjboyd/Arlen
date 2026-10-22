@@ -293,6 +293,9 @@ endif
 ARLEN_PLATFORM_LINK_LIBS := -ldl
 ifeq ($(ARLEN_WINDOWS_PREVIEW),1)
 ARLEN_PLATFORM_LINK_LIBS := -lws2_32 -lbcrypt
+ifeq ($(ARLEN_ENABLE_LLHTTP),1)
+ARLEN_PLATFORM_LINK_LIBS += -lwinpthread
+endif
 endif
 BASE_LINK_LIBS := $(ARLEN_PLATFORM_LINK_DIRS) $$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl $(ARLEN_PLATFORM_LINK_LIBS)
 XCTEST_LINK_LIBS := $(XCTEST_LINK_DIRS) $(BASE_LINK_LIBS) -lXCTest
