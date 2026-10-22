@@ -239,3 +239,17 @@ The required `linux-quality / quality-gate` includes the isolated PostgreSQL
 regression step (`tools/ci/run_postgres_regressions.sh`). Release validation must
 include its generated-client, migration, search, and repeated server cleanup
 coverage. No additional branch-protection check name is needed for this step.
+
+### Linux patched runtime delivery qualification
+
+Source archives ship `tools/setup_runtime.py`, all three target locks and the
+three checked runtime patches. They fetch the SHA256-pinned existing custom
+builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
+Ubuntu 26.04 amd64 install/app/concurrency evidence from
+`linux-public-toolchain` before release. The runtime is compiled at its final
+versioned prefix; the framework install stage may move, the runtime may not.
+Keep old runtime prefixes while any framework or service uses them. A service
+on another host requires that host's own patched runtime and an explicit
+`ARLEN_RUNTIME_PREFIX`; source archives contain no prebuilt Linux runtime.
+Normal native controls and full functional qualification complement the
+separate unchanged two-run TSan acceptance gate.

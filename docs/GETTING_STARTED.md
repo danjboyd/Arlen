@@ -60,23 +60,63 @@ working release. For the complete options, see [CLI Reference](CLI_REFERENCE.md)
 
 ### Manual toolchain setup
 
-Arlen requires clang, `libobjc2`, and `gnustep-base`; GCC-built distro GNUstep
-packages are not compatible. The automatic setup uses the managed
-[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) Linux `v0.1.0`
-toolchain. Its supported distribution/architecture combinations are listed
-above; Debian 12, Ubuntu 24.04, and Ubuntu arm64 are not covered by that path.
+Linux releases require Arlen's pinned, patched clang/libobjc2, libdispatch and
+GNUstep Base runtime. Generic clang GNUstep and GCC-built distro packages do
+not satisfy the release contract. Automatic setup builds the existing custom
+[gnustep-cli builder](https://github.com/danjboyd/gnustep-cli-new) natively,
+using the target lock in `tools/runtime/` and the checked patches in
+`tools/ci/tsan-toolchain/`. It supports Debian 13 amd64/arm64 and Ubuntu 26.04
+amd64, using each distribution's ICU and clang. Debian 12, Ubuntu 24.04 and
+Ubuntu arm64 are outside this automatic path.
 
-For an existing clang-built GNUstep installation, use `--no-setup`.
-Include `make`, `python3`, OpenSSL development headers (`libssl-dev` on
-Debian/Ubuntu), and the SQLite runtime (`libsqlite3-0`). For PostgreSQL,
-install `libpq5` as well, or `libpq-dev` if you need headers. Arlen discovers
-the managed toolchain when `/usr/GNUstep` is absent. See the
-[Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the build contract.
+The runtime is built directly at `<install-prefix>/runtimes/<target>-<lock-id>`.
+GNUstep embeds that absolute path: keep it in place for every release that
+uses it. The framework can move through the installer's staging/activation
+steps; the runtime cannot. `ARLEN_RUNTIME_ROOT=/absolute/path` chooses another
+Arlen-owned runtime root before installation. Runtime paths must have no
+whitespace. Setup leaves managed GNUstep installations and system loader
+configuration alone. Native compilation requires network access, disk space
+for sources/builds, and several minutes; the installer asks before installing
+apt prerequisites or starting it.
+
+For manual or offline installation, provision the same patched runtime at its
+final prefix first, then select it explicitly:
+
+```bash
+export ARLEN_RUNTIME_PREFIX=/absolute/final/patched-prefix
+bash tools/install.sh --archive /path/to/arlen-X.Y.Z.tar.gz --no-setup
+```
+
+`--no-setup` never downloads or builds a runtime. It verifies the supplied
+runtime's component pins, patch digests and ELF checksums, and requires `make`,
+`python3`, clang, OpenSSL development headers and the SQLite runtime. Use
+`libpq5` for PostgreSQL apps. `--no-build` only unpacks; run runtime setup or
+selection before using native tools. A missing/invalid selected runtime fails
+with instructions instead of falling back to a generic installation.
+
+For a source checkout, build or select the runtime with:
+
+```bash
+python3 tools/setup_runtime.py build
+# Or, for an already built matching prefix (no fetch/build):
+python3 tools/setup_runtime.py select --prefix /absolute/final/patched-prefix
+source tools/source_gnustep_env.sh
+```
+
+The explicit `build` command uses the existing pinned builder backend; it does
+not install apt packages. See [Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the
+prerequisite list. The selected prefix is saved in the local, untracked
+`.arlen-runtime` file. `ARLEN_RUNTIME_PREFIX` overrides that file; either
+selection takes precedence over stale ambient `GNUSTEP_SH`, makefile and
+`gnustep-config` settings. With no selection, contributor bootstrap retains
+its existing explicit GNUstep and `/usr/GNUstep` resolution. `arlen doctor`
+warns that such an unpatched contributor environment is not release-qualified;
+installed releases require the patched runtime.
 
 ### From a git checkout
 
 Use a checkout to work on Arlen itself or to track `main`. Provision the
-clang GNUstep toolchain above first; use `./bin/arlen` in place of the installed
+patched clang GNUstep runtime above first; use `./bin/arlen` in place of the installed
 `arlen` command in this guide:
 
 ```bash

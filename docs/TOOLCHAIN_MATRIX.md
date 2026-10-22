@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-10-16
+Last updated: 2026-10-22
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -22,6 +22,42 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 Windows is supported for development from 0.3.0. Production (`propane`,
 `jobs-worker`, service deploys) is planned for 0.4.0.
 
+## Linux release runtime
+
+Linux release setup builds a normal, uninstrumented runtime with the existing
+custom builder at commit `5469b5dfd442f1091475fa6600cfd487af878e8f`. Its source
+archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03197`.
+Locks under `tools/runtime/` identify Debian 13 amd64/arm64 and Ubuntu 26.04
+amd64 independently. All use identical component revisions and patch digests;
+Debian amd64 retains the original lock SHA256
+`2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`.
+The patches are shared with the diagnostic toolchain in
+`tools/ci/tsan-toolchain/`; production output has no TSan instrumentation.
+
+Native build dependencies on supported Debian/Ubuntu hosts:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends ca-certificates curl git tar gzip \
+  make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
+  libblocksruntime-dev libssl-dev libsqlite3-0 zlib1g-dev libxml2-dev libxslt1-dev \
+  libicu-dev libavahi-client-dev libcurl4-gnutls-dev libgnutls28-dev libffi-dev
+python3 tools/setup_runtime.py build
+source tools/source_gnustep_env.sh
+```
+
+The helper builds directly at its final absolute prefix and records source,
+patch, build-host and ELF provenance. It refuses system/managed roots and
+existing invalid prefixes. It never replaces a managed gnustep-cli pin or
+changes `ld.so.conf`. Native target qualification must cover the actual CPU,
+compiler and ICU: Debian uses clang 19/ICU 76, Ubuntu uses clang 21/ICU 78.
+The public install CI runs the installed app and fourteen concurrency controls
+on each native target, including arm64. These normal controls exercise weak
+memory paths; race-detector acceptance remains the separate instrumented TSan
+gate. A successful amd64 run alone does not establish arm64 qualification.
+See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) for selection
+and service paths.
+
 ## Known-Good Baseline (2026-02-20)
 
 | Component | Command | Observed baseline |
@@ -35,7 +71,7 @@ Windows is supported for development from 0.3.0. Production (`propane`,
 | GNUstep bootstrap helper | `source /path/to/Arlen/tools/source_gnustep_env.sh` | Present in repo |
 | GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present on current known-good baseline |
 | GNUstep config tool | `source /path/to/Arlen/tools/source_gnustep_env.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
-| XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
+| XCTest runner | `make test-unit` | Vendored `vendor/tools-xctest` v0.5.0 |
 
 ## Apple Baseline (2026-10-08)
 

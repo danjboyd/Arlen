@@ -1,15 +1,19 @@
 name: linux-public-toolchain
 
-# Runs the README's public Linux install path in clean containers: install the
-# installer provisions the pinned gnustep-cli managed toolchain, then installs Arlen
-# from a source archive with tools/install.sh and serve a new app. It runs as
-# an ordinary user with no /usr/GNUstep, so Arlen must find the managed
-# toolchain on its own. It is not a merge-gate lane; see docs/CI_ALIGNMENT.md.
+# Runs the public Linux installer in clean containers. It builds the pinned
+# patched runtime natively at its final prefix, installs a source archive, serves
+# a new app and runs native concurrency controls. The ordinary user has no
+# /usr/GNUstep. It is not a merge-gate lane; see docs/CI_ALIGNMENT.md.
 
 on:
   pull_request:
     paths:
       - "tools/install.sh"
+      - "tools/setup_runtime.py"
+      - "tools/runtime/**"
+      - "tools/ci/tsan-toolchain/**"
+      - "tests/fixtures/sanitizers/tsan_runtime_probe.m"
+      - "bin/**"
       - "tools/release/**"
       - "tools/source_gnustep_env.sh"
       - "tools/resolve_gnustep.sh"
@@ -30,7 +34,7 @@ jobs:
     name: linux-public-toolchain / ${{ matrix.image }} ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -63,5 +67,17 @@ jobs:
             cd "$0"
             test ! -e /usr/GNUstep
             bash tools/release/package_framework.sh --version 0.0.0 --kind source --out "$HOME/dist"
+            export ARLEN_RUNTIME_EVIDENCE_DIR="$0/build/native-runtime-evidence"
             bash tools/release/smoke_install.sh "$HOME/dist/arlen-0.0.0.tar.gz"' \
             "$GITHUB_WORKSPACE"
+
+      - name: Runtime delivery regression checks
+        run: python3 tools/ci/test_runtime_delivery.py
+
+      - name: Upload native runtime provenance and controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-runtime-${{ matrix.arch }}-${{ strategy.job-index }}
+          path: build/native-runtime-evidence
+          if-no-files-found: warn

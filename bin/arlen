@@ -21,6 +21,10 @@ if [[ "$build_platform" == "apple" ]]; then
   exec "$repo_root/build/apple/arlen" "$@"
 fi
 
+if [[ "$(uname -s)" == Linux ]]; then
+  source "$repo_root/tools/source_gnustep_env.sh" >/dev/null || exit 1
+fi
+
 # A release archive without build/obj (Windows) is trusted while its
 # build/.release-prebuilt still matches; otherwise make keeps arlen current.
 arlen_binary="$repo_root/build/arlen"

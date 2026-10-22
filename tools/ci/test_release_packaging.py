@@ -29,6 +29,12 @@ class SourceArchiveTests(unittest.TestCase):
             self.assertTrue(all(n == "arlen-9.8.7" or n.startswith("arlen-9.8.7/") for n in names))
             self.assertIn("arlen-9.8.7/bin/arlen", names)
             self.assertIn("arlen-9.8.7/tools/install.sh", names)
+            self.assertIn("arlen-9.8.7/tools/setup_runtime.py", names)
+            for target in ("debian-13-amd64", "debian-13-arm64", "ubuntu-26.04-amd64"):
+                self.assertIn(f"arlen-9.8.7/tools/runtime/{target}.lock.json", names)
+            for component in ("libobjc2", "libdispatch", "libs-base"):
+                self.assertIn(f"arlen-9.8.7/tools/ci/tsan-toolchain/{component}.patch", names)
+            self.assertNotIn("arlen-9.8.7/.arlen-runtime", names)
             self.assertIn("arlen-9.8.7/vendor/tools-xctest/GNUmakefile", names)
             self.assertFalse(any("/.git/" in n or n.endswith("/.git") for n in names))
             self.assertFalse(any(n.startswith("arlen-9.8.7/vendor/gnustep-cli-new/") for n in names))

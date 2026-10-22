@@ -393,6 +393,21 @@ else
     add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"
   fi
 
+  if [[ "$(uname -s)" == Linux && -f "$repo_root/tools/setup_runtime.py" ]]; then
+    if runtime_result="$(python3 "$repo_root/tools/setup_runtime.py" check --full 2>&1)"; then
+      if source "$repo_root/tools/source_gnustep_env.sh" >/dev/null; then
+        add_check "patched_runtime" "pass" "Arlen patched runtime verified: $runtime_result"
+      else
+        add_check "patched_runtime" "fail" "Failed to select patched runtime environment"
+      fi
+    else
+      runtime_severity=warn
+      [[ ! -f "$repo_root/.arlen-dist" && ! -f "$repo_root/.arlen-runtime" && -z "${ARLEN_RUNTIME_PREFIX:-}" ]] || runtime_severity=fail
+      add_check "patched_runtime" "$runtime_severity" "$runtime_result" \
+        "Run python3 $repo_root/tools/setup_runtime.py build; manual/offline hosts can select --prefix /final/patched/prefix. Generic unpatched GNUstep is not release-qualified."
+    fi
+  fi
+
   gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"
   if [[ -z "$gnustep_script" ]]; then
     gnustep_script="${GNUSTEP_SH:-/usr/GNUstep/System/Library/Makefiles/GNUstep.sh}"

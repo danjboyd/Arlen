@@ -76,14 +76,44 @@ Options:
 - `--no-modify-path`: do not edit shell startup files
 - `--yes`: consent to prerequisite installation without an interactive prompt
 
-On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), missing Linux
-prerequisites trigger a consent prompt. With consent, the installer uses apt
-for build packages and the SQLite runtime (`libsqlite3-0`; sudo may prompt),
-and the checksum-verified gnustep-cli
-`v0.1.0` bootstrap for a managed clang/libobjc2 toolchain in your home. Other
-Linux distributions require manual prerequisites and `--no-setup`. Framework
-builds use at most four jobs. `--no-setup` also prevents network prerequisite
-setup for local archives; downloading an Arlen release still requires network.
+On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), setup installs native
+build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
+patched normal GNUstep runtime using the checksum-pinned custom builder.
+Each target has a lock under `tools/runtime/`, sharing the same component
+pins, compiler flags and three patch digests. Builds use the host's ICU and
+clang and at most four jobs. Existing matching runtimes are verified and reused.
+The runtime lives at its final immutable `<prefix>/runtimes/<target>-<lock-id>`;
+`ARLEN_RUNTIME_ROOT` overrides its parent directory. Paths must have no
+whitespace. GNUstep embeds the prefix, so moving it requires a new build.
+
+`--no-setup` never fetches or builds prerequisites or a runtime. Supply a
+matching `ARLEN_RUNTIME_PREFIX` (or `GNUSTEP_SH` pointing into one) and existing
+build dependencies. `--no-build` only extracts and leaves native tools
+unconfigured until runtime setup/selection. Downloading an Arlen release
+still requires network unless `--archive` is supplied. Failed runtime builds
+retain diagnostic logs and never replace the previous release or runtime.
+An incomplete existing runtime prefix is preserved and rejected; inspect it
+before explicitly removing the failed prefix and retrying.
+
+For source checkout setup, `python3 tools/setup_runtime.py build` downloads the
+pinned builder and component sources, builds in a final Arlen-owned prefix,
+and saves `.arlen-runtime`. `--runtime-root DIR`, `--jobs N` and
+`--select-for FRAMEWORK` control those locations. `select --prefix PREFIX`
+verifies an existing prefix and saves selection without fetching or building;
+`check --full --prefix PREFIX` verifies pins, patches and ELF hashes.
+`selected` only prints configuration. apt dependencies are listed in
+[Toolchain Matrix](TOOLCHAIN_MATRIX.md).
+
+`ARLEN_RUNTIME_PREFIX` overrides `.arlen-runtime`; selected runtime headers,
+`gnustep-config` and loader directories are used by `arlen`, generated app
+builds, `boomhauer`, and `propane`. Runtime libraries precede ambient loader
+paths. Services call the same helper and need access to that final prefix.
+For another deployment host, provision its own matching runtime and set
+`ARLEN_RUNTIME_PREFIX` in `/etc/arlen/<site>.env`; deployment archives carry no
+runtime ELF payload. For an explicit private GNUstep configuration, set
+`ARLEN_GNUSTEP_CONFIG_FILE` to its absolute path and retain the selected
+prefix's domain paths. Foundation defaults isolation requires that config's
+absolute defaults/user-config settings; setting `HOME` alone is insufficient.
 
 The installer adds its bin directory idempotently to bash's `.bashrc` and
 active login profile, or zsh's `.zprofile` and `.zshrc` (respecting `ZDOTDIR`).
@@ -92,7 +122,7 @@ A child installer cannot modify the current shell: run its printed PATH export
 or open a new terminal before using bare `arlen`. Custom `--bin-dir` paths need
 the matching export.
 
-Downloads and builds complete in a staging directory before replacing an
+Framework downloads and builds complete in a staging directory before replacing an
 existing release. Failed downloads, checksums, prerequisite setup, and builds
 preserve the working release and launcher. Archive kind and required executable
 files are checked before activation; handled termination signals during
@@ -210,7 +240,11 @@ as well as MSYS paths; bootstrap doctor normalizes them before validation.
 
 - delegated by `bin/arlen` directly to `bin/arlen-doctor` before any `make arlen`
 - intended for first-run toolchain validation (GNUstep/tooling presence)
-- resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
+- verifies a selected Linux runtime (pins, patches and ELF hashes); a missing
+  patched runtime fails installed-release checks and warns in an unconfigured
+  contributor checkout
+- selects `ARLEN_RUNTIME_PREFIX`, then the local `.arlen-runtime` prefix; with
+  neither configured, resolves GNUstep shell init in this order: `GNUSTEP_SH`, `GNUSTEP_MAKEFILES`,
  `gnustep-config --variable=GNUSTEP_MAKEFILES`, `/usr/GNUstep`, then a
  gnustep-cli managed toolchain (`~/.local/share/gnustep-cli`, `/opt/gnustep-cli`)
 - reports the vendored `tools-xctest` runner as the test runner when

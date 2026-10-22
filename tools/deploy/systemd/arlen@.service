@@ -21,6 +21,9 @@ Environment=ARLEN_RESPONSE_IDENTITY_HEADERS_ENABLED=1
 Environment=ARLEN_HEALTH_DETAILS_ENABLED=1
 Environment=ARLEN_READINESS_REQUIRES_STARTUP=1
 Environment=ARLEN_METRICS_ENABLED=1
+# For a different target host, provision its matching patched runtime first;
+# set ARLEN_RUNTIME_PREFIX=/absolute/final/prefix in /etc/arlen/%i.env.
+# propane sources the shared runtime helper before launching native binaries.
 EnvironmentFile=-/etc/arlen/%i.env
 
 ExecStart=/srv/arlen/%i/releases/current/framework/bin/propane --env production

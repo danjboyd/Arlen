@@ -63,3 +63,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Local immutable GNUstep runtime selection (never archive host paths).
+/.arlen-runtime
