@@ -355,7 +355,8 @@ The normal runtime shares all source pins and patch digests with the diagnostic
 recipe; its compiler/ICU come from each target distribution. The container has
 no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
-app. It then compiles and runs fourteen native runtime concurrency controls, including
+app. Linux smoke also runs the generated app's request tests through the installed
+`arlen test --app` launcher. It then compiles and runs fourteen native runtime concurrency controls, including
 arm64, recording compiler, loader linkage, source/patch/ELF provenance and
 per-control logs. Those normal controls do not substitute for TSan acceptance.
 The existing matrix/job names remain unchanged; source builds have a 90-minute

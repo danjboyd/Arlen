@@ -22,7 +22,7 @@ cleanup() {
   if [[ -n "${ARLEN_RUNTIME_EVIDENCE_DIR:-}" ]]; then
     mkdir -p "$ARLEN_RUNTIME_EVIDENCE_DIR"
     cp -a "$work/native-runtime-controls" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
-    cp "$work/boomhauer.log" "$work/arlen/last-build-failure.log" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
+    cp "$work/boomhauer.log" "$work/app-tests.log" "$work/arlen/last-build-failure.log" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
     local attempt
     for attempt in "$work/arlen/runtimes"/.*-build-*; do
       [[ -d "$attempt" ]] || continue
@@ -56,6 +56,14 @@ cd "$work"
 arlen new SmokeApp
 cd SmokeApp
 arlen build
+
+if [[ "$(uname -s)" == Linux && -f "$work/arlen/current/tools/setup_runtime.py" ]]; then
+  if ! arlen test --app >"$work/app-tests.log" 2>&1; then
+    echo "smoke_install: installed app request tests failed" >&2
+    cat "$work/app-tests.log" >&2
+    exit 1
+  fi
+fi
 
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 if command -v setsid >/dev/null 2>&1; then

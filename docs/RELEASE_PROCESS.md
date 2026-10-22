@@ -248,6 +248,8 @@ builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
 Ubuntu 26.04 amd64 install/app/concurrency evidence from
 `linux-public-toolchain` before release. The runtime is compiled at its final
 versioned prefix; the framework install stage may move, the runtime may not.
+The Linux archive smoke also runs the generated app's request tests
+through the installed launcher before checking HTTP and native runtime controls.
 Keep old runtime prefixes while any framework or service uses them. A service
 on another host requires that host's own patched runtime and an explicit
 `ARLEN_RUNTIME_PREFIX`; source archives contain no prebuilt Linux runtime.
