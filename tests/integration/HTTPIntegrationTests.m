@@ -4326,6 +4326,19 @@
         NSString *output = [self runPythonScript:script exitCode:&code];
         XCTAssertEqual(code, 0, @"%@: %@", backend, output);
         XCTAssertTrue([output containsString:@"body limit checks passed"], @"%@: %@", backend, output);
+        if (code == 0) {
+          NSString *chunkedScript = [NSString stringWithContentsOfFile:@"tests/fixtures/http/chunked_limits_probe.py"
+              encoding:NSUTF8StringEncoding error:NULL];
+          chunkedScript = [chunkedScript stringByReplacingOccurrencesOfString:@"__PORT__"
+              withString:[NSString stringWithFormat:@"%d", port]];
+          chunkedScript = [chunkedScript stringByReplacingOccurrencesOfString:@"__SPOOL__"
+              withString:[NSString stringWithFormat:@"'%@'", spoolRoot]];
+          chunkedScript = [chunkedScript stringByReplacingOccurrencesOfString:@"__CHUNKED__"
+              withString:([backend isEqualToString:@"llhttp"] && [ALNRequest isLLHTTPAvailable]) ? @"True" : @"False"];
+          output = [self runPythonScript:chunkedScript exitCode:&code];
+          XCTAssertEqual(code, 0, @"%@: %@", backend, output);
+          XCTAssertTrue([output containsString:@"chunked limit checks passed"], @"%@: %@", backend, output);
+        }
         if (code != 0) {
           NSString *log = [NSString stringWithContentsOfFile:serverLog encoding:NSUTF8StringEncoding error:NULL] ?: @"";
           XCTFail(@"%@ server log tail:\n%@", backend,

@@ -61,6 +61,13 @@ jobs:
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths"
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testStaticHTTPValidatorsHeadAndRanges"
 
+      # Windows defaults to legacy parsing. Exercise the affected chunked path
+      # explicitly as well; keep the default unit/runtime/integration coverage.
+      - name: Validate opt-in llhttp request parsing and body limits
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "export ARLEN_ENABLE_LLHTTP=1 && make test-unit-filter TEST=HTTPBodyStreamingTests && make test-unit-filter TEST=RequestTests && make test-integration-filter TEST=HTTPIntegrationTests/testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends"
+
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

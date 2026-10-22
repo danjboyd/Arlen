@@ -1,3 +1,8 @@
+// llhttp status enums must precede Foundation's Windows wininet macros.
+#if !defined(ARLEN_ENABLE_LLHTTP) || ARLEN_ENABLE_LLHTTP
+#import "third_party/llhttp/llhttp.h"
+#endif
+
 #import "ALNRequest.h"
 #import "ALNPercentDecoding.h"
 #import "../Support/ALNPlatform.h"
@@ -5,7 +10,6 @@
 #import <dispatch/dispatch.h>
 
 #if ARLEN_ENABLE_LLHTTP
-#import "third_party/llhttp/llhttp.h"
 #include <pthread.h>
 #endif
 #include <errno.h>

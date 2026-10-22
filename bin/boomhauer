@@ -136,6 +136,9 @@ if [[ $windows_preview -eq 1 ]]; then
   default_enable_llhttp=0
   platform_objc_flags="-UGNUSTEP_WITH_DLL -DGNUSTEP_WITHOUT_DLL=1 -DHAVE_MODE_T=1 -D_FILE_OFFSET_BITS=64 -DARLEN_WINDOWS_PREVIEW=1"
   platform_link_libs="-lws2_32 -lbcrypt"
+  if [[ "${ARLEN_ENABLE_LLHTTP:-0}" == 1 ]]; then
+    platform_link_libs+=" -lwinpthread"
+  fi
 fi
 # App test bundle binary (--build-tests): GNUstep on Windows loads <name>.dll.
 app_test_binary_name="AppTests"

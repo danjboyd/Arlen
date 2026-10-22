@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Chunked uploads on llhttp now enforce per-route decoded-byte limits and spool
+  while receiving. Incremental decoding avoids repeated body parsing; encoded
+  framing limits, body deadlines, and legacy rejection remain in force.
+
 - Live keyed publishing requires explicit container and key arguments; broadcast
   payloads omit requester-specific live metadata and tracing IDs.
 

@@ -20,6 +20,13 @@ runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
 
+The existing Windows job retains default-backend acceptance and adds an
+explicit `ARLEN_ENABLE_LLHTTP=1` check for `HTTPBodyStreamingTests`, `RequestTests`, and the per-route
+body-limit/spooling integration regression. This exercises chunked decoding,
+which the default legacy backend rejects. The managed winpthreads dependency
+is linked only for the opt-in build. Keep the same job context, fork guard,
+artifacts, 90-minute timeout, and configured branch-protection gates.
+
 The existing Windows runtime parity suite covers force-killed watch trees in
 both app and build-error modes. It asserts that the native server exits and
 its port closes, in addition to the existing rebuild/recovery coverage.

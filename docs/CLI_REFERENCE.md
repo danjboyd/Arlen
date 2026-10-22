@@ -1897,3 +1897,9 @@ continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
 Live keyed broadcasts require explicit server-selected container and key values.
 Publish helpers omit requester-specific metadata and tracing IDs; direct live
 responses retain request defaults. See [Live UI](LIVE_UI.md).
+
+With llhttp enabled, chunked uploads enforce the selected route's decoded body
+limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
+processed incrementally within the existing encoded envelope cap. The legacy
+backend continues to reject chunked transfer coding. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).
