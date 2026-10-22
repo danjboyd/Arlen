@@ -524,3 +524,7 @@ limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
 processed incrementally within the existing encoded envelope cap. The legacy
 backend continues to reject chunked transfer coding. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Legacy storage plist catalogs use private temporary creation and atomic replacement
+on Windows; the parent directory ACL is unchanged. See
+[Storage Module](STORAGE_MODULE.md) for upgrade and filesystem guidance.

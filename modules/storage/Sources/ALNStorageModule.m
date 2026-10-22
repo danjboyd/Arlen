@@ -21,7 +21,10 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#include <aclapi.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
 #endif
@@ -110,11 +113,88 @@ static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictio
 static NSString *SMRandomHexString(NSUInteger byteCount);
 
 // Writes data to path through a temporary file and a rename, with the file
-// readable only by its owner (0600) whatever the process umask: the catalog
-// names every object and its signed-token nonce.
+// readable only by its owner (0600 on POSIX; protected token-user DACL on
+// Windows): the catalog names every object and its signed-token nonce.
 static BOOL SMWritePrivateFileAtomically(NSString *path, NSData *data, NSError **error) {
 #if defined(_WIN32)
-  return [data writeToFile:path options:NSDataWritingAtomic error:error];
+  NSString *temporaryPath = [NSString stringWithFormat:@"%@.%@.tmp", path, SMRandomHexString(8) ?: @"tmp"];
+  NSMutableData *temporaryWide = [[[temporaryPath stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [temporaryWide appendBytes:"\0\0" length:2];
+  NSMutableData *destinationWide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [destinationWide appendBytes:"\0\0" length:2];
+  HANDLE token = NULL;
+  HANDLE file = INVALID_HANDLE_VALUE;
+  PACL acl = NULL;
+  NSMutableData *tokenData = nil;
+  SECURITY_DESCRIPTOR security;
+  SECURITY_ATTRIBUTES attributes;
+  EXPLICIT_ACCESSW entry;
+  DWORD failure = ERROR_SUCCESS;
+  DWORD size = 0;
+  BOOL created = NO;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    failure = GetLastError(); goto done;
+  }
+  GetTokenInformation(token, TokenUser, NULL, 0, &size);
+  if (size == 0) { failure = GetLastError(); goto done; }
+  tokenData = [NSMutableData dataWithLength:size];
+  if (!GetTokenInformation(token, TokenUser, tokenData.mutableBytes, size, &size)) {
+    failure = GetLastError(); goto done;
+  }
+  memset(&entry, 0, sizeof(entry));
+  entry.grfAccessPermissions = FILE_ALL_ACCESS;
+  entry.grfAccessMode = SET_ACCESS;
+  entry.grfInheritance = NO_INHERITANCE;
+  BuildTrusteeWithSidW(&entry.Trustee, ((TOKEN_USER *)tokenData.mutableBytes)->User.Sid);
+  failure = SetEntriesInAclW(1, &entry, NULL, &acl);
+  if (failure != ERROR_SUCCESS) goto done;
+  if (!InitializeSecurityDescriptor(&security, SECURITY_DESCRIPTOR_REVISION) ||
+      !SetSecurityDescriptorDacl(&security, TRUE, acl, FALSE) ||
+      !SetSecurityDescriptorControl(&security, SE_DACL_PROTECTED, SE_DACL_PROTECTED)) {
+    failure = GetLastError(); goto done;
+  }
+  attributes.nLength = sizeof(attributes);
+  attributes.lpSecurityDescriptor = &security;
+  attributes.bInheritHandle = FALSE;
+  // Private at creation, exclusive, and never inherited by a spawned worker.
+  // A collision must fail without modifying or removing the existing path.
+  file = CreateFileW((const wchar_t *)temporaryWide.bytes, GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_DELETE, &attributes, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (file == INVALID_HANDLE_VALUE) { failure = GetLastError(); goto done; }
+  created = YES;
+  for (NSUInteger offset = 0; offset < data.length;) {
+    DWORD count = (DWORD)MIN(data.length - offset, (NSUInteger)MAXDWORD);
+    DWORD written = 0;
+    if (!WriteFile(file, (const uint8_t *)data.bytes + offset, count, &written, NULL)) {
+      failure = GetLastError(); goto done;
+    }
+    if (written == 0) { failure = ERROR_WRITE_FAULT; goto done; }
+    offset += written;
+  }
+  if (!FlushFileBuffers(file)) { failure = GetLastError(); goto done; }
+  if (!CloseHandle(file)) {
+    failure = GetLastError(); goto done;
+  }
+  file = INVALID_HANDLE_VALUE;
+  // Same-directory rename keeps the private source DACL when replacing an
+  // older permissive catalog; the old file survives a failed replacement.
+  if (!MoveFileExW((const wchar_t *)temporaryWide.bytes, (const wchar_t *)destinationWide.bytes,
+          MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    failure = GetLastError(); goto done;
+  }
+  created = NO;
+done:
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  if (created) DeleteFileW((const wchar_t *)temporaryWide.bytes);
+  if (acl != NULL) LocalFree(acl);
+  if (token != NULL) CloseHandle(token);
+  if (failure != ERROR_SUCCESS && error != NULL) {
+    *error = [NSError errorWithDomain:NSOSStatusErrorDomain code:failure
+        userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"could not write private storage catalog %@", path]}];
+  }
+  return failure == ERROR_SUCCESS;
 #else
   NSString *suffix = SMRandomHexString(8) ?: @"tmp";
   NSString *temporaryPath = [NSString stringWithFormat:@"%@.%@.tmp", path, suffix];
