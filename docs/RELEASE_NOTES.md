@@ -147,7 +147,9 @@ Release qualification and remaining limitations are documented in the
 
 - Search 1.2.3 bounds repeated fuzzy token and field scoring work to one query
   on the default in-memory engine. It retains ranking, highlighting, resource
-  filters, and the existing query limits.
+  filters, and the existing query limits. Query history updates now copy only
+  their bounded history for rollback while retaining state reload and atomic
+  persistence behavior.
 
 - Storage module 1.4.3 creates Windows legacy plist catalogs with an owner-only
   protected DACL before writing and retains the last catalog on failed replacement.

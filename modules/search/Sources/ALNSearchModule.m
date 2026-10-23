@@ -802,6 +802,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 @property(nonatomic, strong) NSRecursiveLock *lock;
 
 - (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error;
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block
+                   write:(BOOL)write
+ rollbackRecentQueriesOnly:(BOOL)rollbackRecentQueriesOnly
+                   error:(NSError **)error;
 - (NSDictionary *)stateDocument;
 - (void)restoreStateDocument:(NSDictionary *)state;
 - (nullable NSDictionary *)normalizedMetadataForDefinition:(id<ALNSearchResourceDefinition>)definition
@@ -4547,6 +4551,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 
 // Never run engine, provider, job-adapter or network work in this block.
 - (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error {
+  return [self stateTransaction:block write:write rollbackRecentQueriesOnly:NO error:error];
+}
+
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block
+                   write:(BOOL)write
+ rollbackRecentQueriesOnly:(BOOL)rollbackRecentQueriesOnly
+                   error:(NSError **)error {
   [self.lock lock];
   int descriptor = -1;
   @try {
@@ -4571,12 +4582,20 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       }
     }
     NSDictionary *before = nil;
+    NSMutableArray *recentQueriesBefore = nil;
     if (write) {
-      NSData *data = [NSPropertyListSerialization dataWithPropertyList:[self stateDocument]
-          format:NSPropertyListBinaryFormat_v1_0 options:0 error:error];
-      if (!data) return NO;
-      before = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:error];
-      if (!before) return NO;
+      if (rollbackRecentQueriesOnly) {
+        // The query transaction only appends/removes complete history entries.
+        // Keep the same lock, reload, write and error path without copying the
+        // indexed documents and engine state solely to roll back this array.
+        recentQueriesBefore = [self.recentQueries mutableCopy];
+      } else {
+        NSData *data = [NSPropertyListSerialization dataWithPropertyList:[self stateDocument]
+            format:NSPropertyListBinaryFormat_v1_0 options:0 error:error];
+        if (!data) return NO;
+        before = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:error];
+        if (!before) return NO;
+      }
     }
     self.stateTransactionDepth++;
     BOOL ok = NO;
@@ -4584,8 +4603,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       ok = block ? block(error) : YES;
       if (ok && write && shared) ok = STWritePropertyListAtPath(self.statePath, [self stateDocument], error);
       if (!ok && before) [self restoreStateDocument:before];
+      if (!ok && recentQueriesBefore) self.recentQueries = recentQueriesBefore;
     } @catch (NSException *exception) {
       if (before) [self restoreStateDocument:before];
+      if (recentQueriesBefore) self.recentQueries = recentQueriesBefore;
       @throw;
     } @finally { self.stateTransactionDepth--; }
     return ok;
@@ -6508,7 +6529,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
   }];
     return YES;
-  } write:YES error:error]) return nil;
+  } write:YES rollbackRecentQueriesOnly:YES error:error]) return nil;
   return response;
 }
 

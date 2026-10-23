@@ -101,6 +101,8 @@ Search 1.2.3 also avoids repeating fuzzy token similarity and edit calculations
 for the same word and fuzzy scores for repeated field text within one query on
 the default in-memory engine. Each query cache is bounded to 512 entries;
 ranking weights, highlights, and the 256-character query limit are unchanged.
+Query history updates retain the same state lock, reload, and atomic persistence
+behavior while copying only the bounded history needed to undo a failed update.
 Upgrade a vendored `search` module to receive this improvement.
 
 `ALNPostgresSearchEngine` reads
