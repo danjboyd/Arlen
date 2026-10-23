@@ -1,0 +1,20 @@
+{
+  "frozen_commit": "6ac2e0cb76930d55926bc753a02b9eb80479d8e0",
+  "inventory_sha256": "a85b68bef13905a39f385064f9b2dd1a2df6ce3355d610b2513645ed5bc9b881",
+  "methods": 266,
+  "passed": 264,
+  "skips": [
+    {
+      "id": "ArlenIntegrationTests/DeploymentIntegrationTests/testArlenDeployStatusAndLogsReadLaunchdJobOnMacOS",
+      "reason_fragment": "launchd is macOS-only",
+      "source": "tests/integration/DeploymentIntegrationTests.m",
+      "source_sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474"
+    },
+    {
+      "id": "ArlenIntegrationTests/DeploymentIntegrationTests/testArlenShellCommandsWriteToARealConsoleOnWindows",
+      "reason_fragment": "console handles are a Windows concern",
+      "source": "tests/integration/DeploymentIntegrationTests.m",
+      "source_sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474"
+    }
+  ]
+}

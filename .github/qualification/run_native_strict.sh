@@ -38,7 +38,7 @@ from pathlib import Path
 thread,out,normal,ref=sys.argv[1:];thread=Path(thread);out=Path(out);normal=Path(normal)
 m=json.loads((thread/'manifest.json').read_text());p=json.loads((normal/'gnustep-toolchain-provenance.json').read_text());digest=lambda f:hashlib.sha256(Path(f).read_bytes()).hexdigest()
 supported={('aarch64','ubuntu-24.04'):'a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d',
-           ('x86_64','debian-13'):'df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34'}
+           ('x86_64','debian-13'):'df809d9d55a613736dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34'}
 assert p['lock']['sha256']==supported[(p['build_host']['machine'],p['build_host']['os_version'])]
 assert all(digest(f)==h for f,h in m['artifacts'].items())
 assert json.loads(Path('tools/ci/tsan-toolchain/sources.json').read_text())==m['sources']
@@ -61,7 +61,7 @@ trap cleanup EXIT
 "$pg_bin/initdb" -D "$pg_root/data" --no-locale --encoding=UTF8 --auth=trust --username=arlen_v032 > "$out/pg-init.log"
 mkdir "$pg_root/socket"
 "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$out/pg-server.log" -o "-k $pg_root/socket -c listen_addresses=''" -w start
-export ARLEN_PG_TEST_DSN="host=$pg_root/socket dbname=postgres user=arlen_v032"
+export ARLEN_PG_TEST_DSN="postgresql://arlen_v032@/postgres?host=$pg_root/socket"
 python3 tools/ci/check_sanitizer_suppressions.py > "$out/suppression-classifier.log"
 python3 tools/ci/classify_sanitizer_integration_skips.py --check > "$out/integration-classifier.log"
 for number in 1 2; do
@@ -80,7 +80,7 @@ if p.exists() or p.is_symlink():
  dest=out/'test-generated-var/module_state/jobs-production.plist.lock';dest.parent.mkdir(parents=True);p.rename(dest);p.parent.rmdir();Path('var').rmdir()
 s=json.loads((out/'summary.json').read_text());u=json.loads((out/'tsan/summary.json').read_text());d=json.loads((out/'diagnostics/summary.json').read_text())
 assert s['status']=='pass' and s['engine']=='tsan' and s['exit_code']==0
-assert u['status']=='pass' and u['runtime_probe_completed'] and u['unit_methods_started']==1372 and u['unit_assertion_failures']==0 and u['sanitizer_warnings']==0 and u['tsan_excluded_tests']==[]
+assert u['status']=='pass' and u['runtime_probe_completed'] and u['unit_methods_started']==1373 and u['unit_assertion_failures']==0 and u['sanitizer_warnings']==0 and u['tsan_excluded_tests']==[]
 assert d['status']=='pass' and len(d['runs'])==30 and all(x['valid'] for x in d['runs'])
 c=[x for x in d['runs'] if x['mode']=='canary'];assert len(c)==2 and all(x['exit_code']==66 and x['canary_detected'] for x in c)
 import re
@@ -91,7 +91,7 @@ assert not any(re.search(pattern,p.read_text(errors='replace')) for p in logs)
 (out/'server-receipt.json').write_text(json.dumps({'actual_exit_codes':[0,0,0,0],'distinct_full_logs':4,'logs_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in logs}},indent=2)+'\n')
 PY
  [[ -z "$(git status --porcelain)" ]]
- python3 "$harness/verify_complete_unit_run_1372.py" --contract "$harness/candidate-unit-contract.json" --inventory "$root/tests/fixtures/test_inventory/ArlenUnitTests.tests.txt" --junit "$ARLEN_TEST_RESULTS_DIR/ArlenUnitTests.xml" --log "$ARLEN_PHASE10M_THREAD_ARTIFACT_DIR/tsan/tsan.log" --lane-summary "$ARLEN_PHASE10M_THREAD_ARTIFACT_DIR/tsan/summary.json" --output "$out/run-$number-complete-unit-receipt.json"
+ python3 "$harness/verify_complete_unit_run.py" --contract "$harness/candidate-unit-contract.json" --inventory "$root/tests/fixtures/test_inventory/ArlenUnitTests.tests.txt" --junit "$ARLEN_TEST_RESULTS_DIR/ArlenUnitTests.xml" --log "$ARLEN_PHASE10M_THREAD_ARTIFACT_DIR/tsan/tsan.log" --lane-summary "$ARLEN_PHASE10M_THREAD_ARTIFACT_DIR/tsan/summary.json" --output "$out/run-$number-complete-unit-receipt.json"
  for kind in http unit; do
   binary=build/runtime-concurrency-fixture
   [[ "$kind" == http ]] || binary=build/tests/ArlenUnitTests.xctest/ArlenUnitTests

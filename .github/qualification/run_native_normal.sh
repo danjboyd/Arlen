@@ -18,7 +18,7 @@ trap '"$pg_bin/pg_ctl" -D "$pg_root/data" -m immediate -w stop >/dev/null 2>&1 |
 "$pg_bin/initdb" -D "$pg_root/data" --no-locale --encoding=UTF8 --auth=trust --username=arlen_v032 > "$out/pg-init.log"
 mkdir "$pg_root/socket"
 "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$out/pg-server.log" -o "-k $pg_root/socket -c listen_addresses=''" -w start
-export ARLEN_PG_TEST_DSN="host=$pg_root/socket dbname=postgres user=arlen_v032"
+export ARLEN_PG_TEST_DSN="postgresql://arlen_v032@/postgres?host=$pg_root/socket"
 make vendored-xctest > "$out/xctest-bootstrap.log" 2>&1
 make -j4 test-unit > "$out/unit.log" 2>&1
 make -j4 test-integration > "$out/integration.log" 2>&1
