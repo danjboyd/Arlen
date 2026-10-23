@@ -14,6 +14,9 @@
 - Drain HTTP workers and the idle connection watcher before server return and
   application teardown, including native thread-local cleanup. This prevents
   process-wide OpenSSL cleanup racing an in-flight request during shutdown.
+- Storage 1.4.4 reduces overhead when normalizing large legacy plist catalogs
+  before writing XML, preserving metadata conversions and older binary reads.
+  Upgrade vendored copies with `arlen module upgrade storage`.
 - Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
   defaults, explicit application compiler flags, and existing release gates.
   See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) and the

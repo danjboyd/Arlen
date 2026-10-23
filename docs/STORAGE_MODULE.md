@@ -64,6 +64,11 @@ before copying it and any journal. Do not restore only the obsolete plist.
 format for unmigrated installations. There is no automatic fallback when SQLite
 is unavailable, and switching a migrated path back to plist is refused.
 
+Storage module 1.4.4 reduces allocation and repeated type/key normalization work
+when rewriting a legacy plist catalog. XML output, metadata conversions, private
+atomic writes, and support for reading older binary catalogs are unchanged.
+Upgrade a vendored storage module with `arlen module upgrade storage`.
+
 Storage module 1.4.3 creates each Windows legacy plist temporary file exclusively
 with a protected DACL granting access only to the current process token user,
 before writing catalog bytes. The handle is not inherited by child processes.

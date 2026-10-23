@@ -54,33 +54,71 @@ static NSArray *SMNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
 }
 
-static id SMPropertyListValue(id value) {
-  if (value == nil || value == [NSNull null]) {
+typedef struct {
+  __unsafe_unretained Class stringClass;
+  __unsafe_unretained Class numberClass;
+  __unsafe_unretained Class dataClass;
+  __unsafe_unretained Class dateClass;
+  __unsafe_unretained Class arrayClass;
+  __unsafe_unretained Class dictionaryClass;
+  __unsafe_unretained id nullValue;
+} SMPropertyListContext;
+
+// Most catalog keys have no surrounding whitespace. Keep Unicode and control
+// boundaries on the existing Foundation trimming path.
+static NSString *SMPropertyListKey(id value, const SMPropertyListContext *context) {
+  if (![value isKindOfClass:context->stringClass]) {
     return @"";
   }
-  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
-      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
+  NSString *key = value;
+  NSUInteger length = [key length];
+  if (length > 0) {
+    unichar first = [key characterAtIndex:0];
+    unichar last = [key characterAtIndex:length - 1];
+    if (first > 0x20 && first < 0x7f && last > 0x20 && last < 0x7f) {
+      return key;
+    }
+  }
+  return SMTrimmedString(key);
+}
+
+static id SMPropertyListValueWithContext(id value, const SMPropertyListContext *context) {
+  if (value == nil || value == context->nullValue) {
+    return @"";
+  }
+  if ([value isKindOfClass:context->stringClass] || [value isKindOfClass:context->numberClass] ||
+      [value isKindOfClass:context->dataClass] || [value isKindOfClass:context->dateClass]) {
     return value;
   }
-  if ([value isKindOfClass:[NSArray class]]) {
-    NSMutableArray *items = [NSMutableArray array];
+  if ([value isKindOfClass:context->arrayClass]) {
+    NSMutableArray *items = [NSMutableArray arrayWithCapacity:[(NSArray *)value count]];
     for (id entry in (NSArray *)value) {
-      [items addObject:SMPropertyListValue(entry)];
+      [items addObject:SMPropertyListValueWithContext(entry, context)];
     }
     return items;
   }
-  if ([value isKindOfClass:[NSDictionary class]]) {
-    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+  if ([value isKindOfClass:context->dictionaryClass]) {
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionaryWithCapacity:[(NSDictionary *)value count]];
     for (id rawKey in [(NSDictionary *)value allKeys]) {
-      NSString *key = SMTrimmedString(rawKey);
+      NSString *key = SMPropertyListKey(rawKey, context);
       if ([key length] == 0) {
         continue;
       }
-      dictionary[key] = SMPropertyListValue([(NSDictionary *)value objectForKey:rawKey]);
+      dictionary[key] = SMPropertyListValueWithContext([(NSDictionary *)value objectForKey:rawKey], context);
     }
     return dictionary;
   }
   return [value description] ?: @"";
+}
+
+static id SMPropertyListValue(id value) {
+  // Resolve immutable type/sentinel objects once per catalog, rather than once
+  // per value. Containers still receive independent copies for XML writers.
+  SMPropertyListContext context = {
+    [NSString class], [NSNumber class], [NSData class], [NSDate class],
+    [NSArray class], [NSDictionary class], [NSNull null],
+  };
+  return SMPropertyListValueWithContext(value, &context);
 }
 
 static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictionary *moduleConfig) {

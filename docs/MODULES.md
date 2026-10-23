@@ -243,7 +243,7 @@ version in `config/modules.plist` tells you which module code an app vendors:
 - minor (`1.1.0`): new features, security fixes, or new required configuration
 - major (`2.0.0`): removed or incompatible APIs
 
-The v0.3.1 candidate includes these module versions. Upgrade vendored copies
+The v0.3.2 release includes these module versions. Upgrade vendored copies
 with `arlen module upgrade` and apply each module's migration instructions:
 
 | Module | Version |
@@ -254,7 +254,7 @@ with `arlen module upgrade` and apply each module's migration instructions:
 | `notifications` | `1.3.2` |
 | `ops` | `1.1.1` |
 | `search` | `1.2.3` |
-| `storage` | `1.4.3` |
+| `storage` | `1.4.4` |
 | `mcp` | `1.0.6` |
 
 CI enforces this with `tools/ci/check_module_versions.py`. Framework
