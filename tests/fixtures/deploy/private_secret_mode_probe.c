@@ -55,7 +55,8 @@ int chmod(const char *path, mode_t mode) {
     }
   }
   errno = saved;
-  return syscall(SYS_chmod, path, mode);
+  // aarch64 has fchmodat, but no legacy chmod syscall.
+  return syscall(SYS_fchmodat, AT_FDCWD, path, mode);
 }
 
 int fchmod(int fd, mode_t mode) {

@@ -24,9 +24,12 @@ FOUNDATION_EXPORT void ALNReportStartupFailure(NSString *prefix, NSString *_Null
                          publicRoot:(NSString *)publicRoot;
 
 - (void)printRoutesToFile:(FILE *)stream;
+// Returns after HTTP workers and the idle watcher have exited, including
+// native thread-local cleanup. Active requests drain before application shutdown.
 - (int)runWithHost:(nullable NSString *)host
       portOverride:(NSInteger)portOverride
               once:(BOOL)once;
+// Requests shutdown without waiting; runWithHost:portOverride:once: drains workers.
 - (void)requestStop;
 
 @end

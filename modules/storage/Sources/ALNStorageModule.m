@@ -83,6 +83,48 @@ static id SMPropertyListValue(id value) {
   return [value description] ?: @"";
 }
 
+#if defined(GNUSTEP)
+// GNUstep's XML writer accepts shared containers. A catalog that needs no key
+// or value conversions can be serialized directly instead of copying its tree.
+static BOOL SMPropertyListIsCanonical(id value) {
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
+    return YES;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    for (id entry in (NSArray *)value) {
+      if (!SMPropertyListIsCanonical(entry)) {
+        return NO;
+      }
+    }
+    return YES;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    for (id rawKey in (NSDictionary *)value) {
+      if (![rawKey isKindOfClass:[NSString class]]) {
+        return NO;
+      }
+      NSString *key = rawKey;
+      NSUInteger length = [key length];
+      if (length == 0) {
+        return NO;
+      }
+      unichar first = [key characterAtIndex:0];
+      unichar last = [key characterAtIndex:length - 1];
+      if (!(first > 0x20 && first < 0x7f && last > 0x20 && last < 0x7f) &&
+          ![SMTrimmedString(key) isEqualToString:key]) {
+        return NO;
+      }
+      if (!SMPropertyListIsCanonical([(NSDictionary *)value objectForKey:rawKey])) {
+        return NO;
+      }
+    }
+    return YES;
+  }
+  return NO;
+}
+#endif
+
 static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictionary *moduleConfig) {
   NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]]
                                   ? moduleConfig[@"persistence"]
@@ -275,7 +317,12 @@ static BOOL SMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   // XML, not binary: GNUstep's binary writer takes time quadratic in the
   // number of objects (seconds past a few thousand, all under the state
   // lock). Reading detects the format, so older binary files still load.
-  NSData *data = [NSPropertyListSerialization dataWithPropertyList:SMPropertyListValue(payload)
+#if defined(GNUSTEP)
+  id propertyList = SMPropertyListIsCanonical(payload) ? payload : SMPropertyListValue(payload);
+#else
+  id propertyList = SMPropertyListValue(payload);
+#endif
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:propertyList
                                                             format:NSPropertyListXMLFormat_v1_0
                                                            options:0
                                                              error:error];

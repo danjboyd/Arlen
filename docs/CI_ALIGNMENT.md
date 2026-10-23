@@ -1,6 +1,6 @@
 # CI Alignment
 
-Last updated: 2026-10-21
+Last updated: 2026-10-23
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
@@ -345,22 +345,27 @@ user's machine instead.
 
 `linux-public-toolchain` runs the README's Linux install path in clean
 containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
-(`ubuntu-24.04-arm`), and `ubuntu:26.04` on amd64. Each job
+(`ubuntu-24.04-arm`), `ubuntu:26.04` on amd64, and `ubuntu:24.04` on native
+arm64 (`ubuntu-24.04-arm`). Each job
 creates an unprivileged user with sudo, packages a source archive, and runs
 `tools/release/smoke_install.sh`. Only download/checkout prerequisites are
 preinstalled; the installer itself provisions build dependencies and the
 pinned patched normal GNUstep runtime natively with `--yes`, using the existing
 custom builder at `5469b5d` and target-specific locks under `tools/runtime/`.
 The normal runtime shares all source pins and three race-patch digests with the
-diagnostic recipe; Ubuntu additionally has a separately pinned clang 21
+diagnostic recipe; Ubuntu 26.04 additionally has a separately pinned clang 21
 epoll-mask compatibility patch, without changing the diagnostic recipe; its compiler/ICU come from each target distribution. The container has
-no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
+no `/usr/GNUstep`. Ubuntu 24.04 additionally pins a tools-make query patch
+that removes only the inherited directory-display short flag within
+`gnustep-config`, retaining other make options and variable assignments.
+Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
 app. Linux smoke also runs the generated app's request tests through the installed
 `arlen test --app` launcher. It then compiles and runs fourteen native runtime concurrency controls, including
 arm64, recording compiler, loader linkage, source/patch/ELF provenance and
 per-control logs. Those normal controls do not substitute for TSan acceptance.
-The existing matrix/job names remain unchanged; source builds have a 90-minute
+Existing matrix entries remain, with one new Ubuntu 24.04 arm64 entry in the
+same job. Required check names and branch protection remain unchanged; source builds have a 90-minute
 budget. Artifacts are uploaded as `native-runtime-<arch>-<index>`.
 `linux-quality` also runs `tools/ci/test_runtime_delivery.py` to verify pinned
 builder rejection, lock equality, immutable-prefix failure preservation,
@@ -373,7 +378,7 @@ It runs on pull requests that touch the installer, packaging, GNUstep env
 helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
 a merge-gate lane; the self-hosted lanes stay the authoritative Linux
 baseline. Required check names and branch protection remain unchanged. Release
-qualification must nevertheless check all three native runtime targets; do
+qualification must nevertheless check all four native runtime targets; do
 not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback
@@ -956,18 +961,18 @@ Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
 without an external timezone-data override. Native-control and ICU failure logs
 are retained by the installer smoke's artifact cleanup path.
 
-The Ubuntu target lock includes only one extra source compatibility patch:
+The Ubuntu 26.04 target lock includes only one extra source compatibility patch:
 `tools/runtime/patches/libdispatch-clang21.patch`. It explicitly preserves
 libdispatch's 32-bit epoll complement conversion for clang 21 while keeping
 `-Werror` and signedness diagnostics enabled. The Debian locks and dedicated
 TSan source recipe do not change. Runtime-delivery regressions verify the
-Ubuntu-only lock delta, strict staging/checksum rejection, and 786,432 mask
+Ubuntu 26.04 lock delta, strict staging/checksum rejection, and 786,432 mask
 cases; the existing native public matrix performs the actual Ubuntu build.
 No lane, classifier, suppression or branch-protection context changes.
 
 ## Normal runtime optimization inputs
 
-The three normal target locks explicitly configure tools-make and Base with
+The normal target locks explicitly configure tools-make and Base with
 `CFLAGS=-O2` and empty `OBJCFLAGS`. This supplies GNUstep `OPTFLAG=-O2` to C
 and Objective-C builds without leaving a second ObjC optimization flag after
 GNUstep's debug filtering. Required prefix includes remain in the pinned
@@ -994,3 +999,12 @@ Qualification checks both real signal/console shutdown and the instrumented
 probe's initial and restarted processes; handler code must not acquire a lock
 or call Foundation. Native Windows console checks create a real process group
 before targeting a console-control event.
+
+### Native Linux shutdown qualification
+
+The HTTP runtime probe retains initial and restarted server logs and rejects
+shutdown errors or sanitizer reports. HTTP workers and the idle watcher use
+joinable native threads so application/process teardown follows thread-local
+library cleanup. The unit inventory includes a blocked-worker and thread-local
+cleanup regression. The Linux deploy permission fault probe uses `fchmodat`,
+available on aarch64, without changing the permission assertions.

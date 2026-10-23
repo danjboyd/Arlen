@@ -76,12 +76,15 @@ Options:
 - `--no-modify-path`: do not edit shell startup files
 - `--yes`: consent to prerequisite installation without an interactive prompt
 
-On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), setup installs native
+On Debian 13 (amd64/arm64), Ubuntu 24.04 (arm64/aarch64), and
+Ubuntu 26.04 (amd64), setup installs native
 build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
 patched normal GNUstep runtime using the checksum-pinned custom builder.
 Each target has a lock under `tools/runtime/`, sharing the same component
-pins, compiler flags and three race-patch digests. Ubuntu adds one pinned
-clang 21 epoll-mask compatibility patch. Builds use the host's ICU and
+pins, compiler flags and three race-patch digests. Ubuntu 26.04 adds one pinned
+clang 21 epoll-mask compatibility patch. Ubuntu 24.04 adds a scoped
+`gnustep-config` compatibility patch for GNU Make 4.3; global make flags and
+explicit client compiler flags are preserved. Builds use the host's ICU and
 clang and at most four jobs. Existing matching runtimes are verified and reused. The normal
 locks set `CFLAGS=-O2` and empty `OBJCFLAGS` for tools-make and Base, supplying
 normal C/ObjC optimization through GNUstep's `OPTFLAG` while preserving debug
