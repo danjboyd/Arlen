@@ -72,6 +72,9 @@ Ubuntu 24.04 arm64 (aarch64), and Ubuntu 26.04 amd64, using each distribution's
 ICU and clang. Debian 12, Ubuntu 24.04 amd64, and Ubuntu 26.04 arm64 remain
 outside this automatic path. A runtime built on another distribution cannot
 be reused: its libraries and provenance must match the actual host.
+Ubuntu 24.04 uses its packaged GNU Make 4.3. The target lock patches only
+`gnustep-config` queries to keep make's directory messages out of compiler flags;
+setup does not upgrade make or rewrite global `MAKEFLAGS`.
 
 Normal runtime setup restores GNUstep's `-O2` default for framework and generated
 app builds through explicit tools-make/Base configure inputs. GNUstep debug

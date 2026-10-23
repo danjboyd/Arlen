@@ -30,7 +30,10 @@ archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03
 Locks under `tools/runtime/` identify Debian 13 amd64/arm64, Ubuntu 24.04
 arm64 (aarch64), and Ubuntu 26.04 amd64 independently. All use identical
 component revisions and three race-patch digests; Ubuntu 26.04 additionally
-pins one clang 21 compatibility patch.
+pins one clang 21 compatibility patch. Ubuntu 24.04 adds a tools-make
+configuration-query patch for GNU Make 4.3: it removes only the inherited
+directory-display flag within `gnustep-config`, preserving jobserver settings,
+variable assignments, debug controls, and explicit app compiler flags.
 The normal production locks configure `CFLAGS=-O2` and explicit empty
 `OBJCFLAGS` for tools-make and Base. GNUstep's `OPTFLAG` then supplies `-O2`
 to C and Objective-C clients by default. Keeping optimization out of
@@ -42,7 +45,7 @@ patches are unchanged.
 | --- | --- |
 | Debian 13 amd64 | `df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34` |
 | Debian 13 arm64 | `ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e` |
-| Ubuntu 24.04 arm64 | `2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3` |
+| Ubuntu 24.04 arm64 | `a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d` |
 | Ubuntu 26.04 amd64 | `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125` |
 
 The earlier Debian lock `2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`
@@ -74,8 +77,8 @@ patch, build-host and ELF provenance. It refuses system/managed roots and
 existing invalid prefixes. It never replaces a managed gnustep-cli pin or
 changes `ld.so.conf`. Native target qualification must cover the actual CPU,
 compiler and ICU: Debian uses clang 19/ICU 76 and Ubuntu 26.04 uses
-clang 21/ICU 78. Ubuntu 24.04 arm64 uses its own distribution packages; native
-qualification records their exact versions. Runtimes built for Debian or a
+clang 21/ICU 78. Ubuntu 24.04 arm64 uses clang 18/ICU 74.2; native
+qualification records their exact package versions. Runtimes built for Debian or a
 newer Ubuntu release cannot be selected on Ubuntu 24.04.
 The public install CI runs the installed app and fourteen concurrency controls
 on each native target, including arm64. These normal controls exercise weak

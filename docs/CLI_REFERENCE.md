@@ -82,7 +82,9 @@ build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
 patched normal GNUstep runtime using the checksum-pinned custom builder.
 Each target has a lock under `tools/runtime/`, sharing the same component
 pins, compiler flags and three race-patch digests. Ubuntu 26.04 adds one pinned
-clang 21 epoll-mask compatibility patch. Builds use the host's ICU and
+clang 21 epoll-mask compatibility patch. Ubuntu 24.04 adds a scoped
+`gnustep-config` compatibility patch for GNU Make 4.3; global make flags and
+explicit client compiler flags are preserved. Builds use the host's ICU and
 clang and at most four jobs. Existing matching runtimes are verified and reused. The normal
 locks set `CFLAGS=-O2` and empty `OBJCFLAGS` for tools-make and Base, supplying
 normal C/ObjC optimization through GNUstep's `OPTFLAG` while preserving debug

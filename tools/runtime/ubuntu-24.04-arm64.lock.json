@@ -41,7 +41,12 @@
         "CFLAGS=-O2",
         "OBJCFLAGS="
       ],
-      "patches": []
+      "patches": [
+        {
+          "path": "patches/tools-make/gnustep-config-make43.patch",
+          "sha256": "f1cf8562f3e11998100da78f0397c5fcf31e51673f2541dbbfd6d8c6ff991135"
+        }
+      ]
     },
     {
       "name": "libs-base",

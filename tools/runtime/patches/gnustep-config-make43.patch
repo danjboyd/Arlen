@@ -1,0 +1,20 @@
+--- a/gnustep-config.in
++++ b/gnustep-config.in
+@@ -23,6 +23,17 @@
+ #   If not, write to the Free Software Foundation,
+ #   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ #
++
++# GNU make 4.3 can re-enable inherited -w during recursive recipe queries,
++# even with --no-print-directory. Remove only that display flag from make's
++# normalized short-option group; preserve jobserver options and assignments.
++gs_makeflags_options=${MAKEFLAGS-}
++gs_makeflags_options=${gs_makeflags_options%% *}
++case "$gs_makeflags_options" in
++  ""|*[!a-zA-Z]*) ;;
++  *) MAKEFLAGS="`printf '%s' "$gs_makeflags_options" | tr -d w`${MAKEFLAGS#"$gs_makeflags_options"}"
++     export MAKEFLAGS ;;
++esac
+ 
+ # Check that we are given a valid option.
+ if [ -z "$1" ]; then

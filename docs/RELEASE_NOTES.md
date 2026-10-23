@@ -8,6 +8,9 @@
   using a distinct native runtime lock and the distribution's ICU and clang.
   The public installer CI adds this native target while retaining Debian 13
   amd64/arm64 and Ubuntu 26.04 amd64 coverage.
+- Fix GNU Make 4.3 directory-message contamination of `gnustep-config`
+  output on Ubuntu 24.04. The target-specific query patch preserves other
+  make options, debug filtering, and explicit application compiler flags.
 - Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
   defaults, explicit application compiler flags, and existing release gates.
   See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) and the

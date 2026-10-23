@@ -143,13 +143,15 @@ def builder(work):
 
 
 def patch_source(component, patch):
-    # Existing race patches remain single-source in CI. Only the Ubuntu lock
-    # declares the separately pinned clang 21 source-compatibility patch.
+    # Existing race patches remain single-source in CI. Target locks declare
+    # separately pinned compiler and make-query compatibility patches.
     canonical = f"patches/{component['name']}/{component['name']}.patch"
     if patch["path"] == canonical:
         return ROOT / "tools/ci/tsan-toolchain" / (component["name"] + ".patch")
     if component["name"] == "libdispatch" and patch["path"] == "patches/libdispatch/libdispatch-clang21.patch":
         return ROOT / "tools/runtime/patches/libdispatch-clang21.patch"
+    if component["name"] == "tools-make" and patch["path"] == "patches/tools-make/gnustep-config-make43.patch":
+        return ROOT / "tools/runtime/patches/gnustep-config-make43.patch"
     raise ValueError(f"unsupported runtime patch path: {patch['path']}")
 
 

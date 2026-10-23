@@ -97,6 +97,11 @@ class RuntimeDeliveryTests(unittest.TestCase):
                 self.assertEqual(compatibility, {
                     "path": "patches/libdispatch/libdispatch-clang21.patch",
                     "sha256": "ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d"})
+            if p.name == "ubuntu-24.04-arm64.lock.json":
+                compatibility = components[2]["patches"].pop()
+                self.assertEqual(compatibility, {
+                    "path": "patches/tools-make/gnustep-config-make43.patch",
+                    "sha256": "f1cf8562f3e11998100da78f0397c5fcf31e51673f2541dbbfd6d8c6ff991135"})
             self.assertEqual(canonical["components"], components)
             self.assertIn(p.stem.removesuffix(".lock").split("-")[-1], ("amd64", "arm64"))
         staged = runtime.stage_lock(self.work)
@@ -109,7 +114,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         hashes = {
             "debian-13-amd64": "df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34",
             "debian-13-arm64": "ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e",
-            "ubuntu-24.04-arm64": "2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3",
+            "ubuntu-24.04-arm64": "a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d",
             "ubuntu-26.04-amd64": "89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125"}
         for target, sha in hashes.items():
             path = ROOT / "tools/runtime" / (target + ".lock.json")
@@ -121,17 +126,38 @@ class RuntimeDeliveryTests(unittest.TestCase):
                     # remains after GNUstep debug=yes filters OPTFLAG.
                     self.assertEqual(component["configure_args"], ["CFLAGS=-O2", "OBJCFLAGS="])
 
-    def test_noble_stages_only_the_existing_three_runtime_race_patches(self):
+    def test_noble_stages_existing_race_patches_and_scoped_make_query_compatibility(self):
         with patch.object(runtime, "target", return_value="ubuntu-24.04-arm64"):
             staged = runtime.stage_lock(self.work)
         lock = json.loads(staged.read_text())
         self.assertEqual(staged.name, "ubuntu-24.04-arm64.lock.json")
-        self.assertEqual(runtime.digest(staged), "2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3")
-        self.assertEqual(lock["components"], json.loads(self.lock.read_text())["components"])
+        self.assertEqual(runtime.digest(staged), "a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d")
         patches = [entry for component in lock["components"] for entry in component["patches"]]
-        self.assertEqual(len(patches), 3)
+        self.assertEqual(len(patches), 4)
         for entry in patches:
             self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])
+        compatibility = lock["components"][2]["patches"].pop()
+        self.assertEqual(compatibility["path"], "patches/tools-make/gnustep-config-make43.patch")
+        self.assertEqual(lock["components"], json.loads(self.lock.read_text())["components"])
+
+    def test_make43_query_patch_preserves_jobserver_assignments_and_explicit_client_flags(self):
+        text = (ROOT / "tools/runtime/patches/gnustep-config-make43.patch").read_text()
+        additions = [line[1:] for line in text.splitlines() if line.startswith("+") and not line.startswith("+++")]
+        script = "\n".join(additions) + '\nprintf "%s" "${MAKEFLAGS-<unset>}"\n'
+        cases = (("w -j4 --jobserver-auth=3,4 -- debug=yes OBJCFLAGS=-ffp-contract=off", " -j4 --jobserver-auth=3,4 -- debug=yes OBJCFLAGS=-ffp-contract=off"),
+                 ("ksw -j4 -- CFLAGS=-Dwindow", "ks -j4 -- CFLAGS=-Dwindow"),
+                 ("w", ""), ("s -j4 -- debug=yes", "s -j4 -- debug=yes"),
+                 ("--warn-undefined-variables", "--warn-undefined-variables"),
+                 ("CFLAGS=-Dwindow", "CFLAGS=-Dwindow"), (None, "<unset>"))
+        for before, expected in cases:
+            with self.subTest(makeflags=before):
+                env = dict(os.environ)
+                env.pop("MAKEFLAGS", None)
+                if before is not None:
+                    env["MAKEFLAGS"] = before
+                result = subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
 
     def test_noble_rejects_another_distribution_or_architecture_without_rewriting_provenance(self):
         original = self.fixture()

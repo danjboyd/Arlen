@@ -355,7 +355,10 @@ custom builder at `5469b5d` and target-specific locks under `tools/runtime/`.
 The normal runtime shares all source pins and three race-patch digests with the
 diagnostic recipe; Ubuntu 26.04 additionally has a separately pinned clang 21
 epoll-mask compatibility patch, without changing the diagnostic recipe; its compiler/ICU come from each target distribution. The container has
-no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
+no `/usr/GNUstep`. Ubuntu 24.04 additionally pins a tools-make query patch
+that removes only the inherited directory-display short flag within
+`gnustep-config`, retaining other make options and variable assignments.
+Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
 app. Linux smoke also runs the generated app's request tests through the installed
 `arlen test --app` launcher. It then compiles and runs fourteen native runtime concurrency controls, including
