@@ -3,6 +3,11 @@
 
 #import <sys/stat.h>
 #import <unistd.h>
+#if defined(_WIN32)
+#include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
+#endif
 
 #import "ALNApplication.h"
 #import "ALNJobsModule.h"
@@ -816,25 +821,155 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:bobPath]);
 }
 
-#if !defined(_WIN32)
-- (void)testStateFileIsOwnerOnlyWhateverTheUmask {
-  NSString *tempDir = [self temporaryDirectory];
-  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
-  mode_t previous = umask(0);
-  ALNStorageModuleRuntime *worker =
-      [self workerRuntimeWithStatePath:statePath
-                        attachmentRoot:[tempDir stringByAppendingPathComponent:@"attachments"]
-                                shared:NO];
-  [self storeObjectNamed:@"private.png" body:@"private" inRuntime:worker];
-  umask(previous);
-  struct stat info;
-  XCTAssertEqual(0, stat([statePath fileSystemRepresentation], &info));
-  XCTAssertEqual((mode_t)0600, (mode_t)(info.st_mode & 0777));
-  NSArray *leftovers = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:tempDir error:NULL]
-      filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH '.tmp'"]];
-  XCTAssertEqualObjects(@[], leftovers);
+#if defined(_WIN32)
+- (NSString *)nativeDACLStringAtPath:(NSString *)path {
+  NSMutableData *wide = [[[path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [wide appendBytes:"\0\0" length:2];
+  PSECURITY_DESCRIPTOR security = NULL;
+  LPWSTR text = NULL;
+  NSString *result = nil;
+  XCTAssertEqual((DWORD)ERROR_SUCCESS, GetNamedSecurityInfoW((LPWSTR)wide.mutableBytes,
+      SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, NULL, NULL, &security));
+  if (security != NULL) {
+    XCTAssertTrue(ConvertSecurityDescriptorToStringSecurityDescriptorW(security, SDDL_REVISION_1,
+        DACL_SECURITY_INFORMATION, &text, NULL));
+    if (text != NULL) {
+      result = [[NSString alloc] initWithCharacters:(const unichar *)text length:wcslen(text)];
+      LocalFree(text);
+    }
+    LocalFree(security);
+  }
+  return result;
 }
 #endif
+
+- (void)testStateFileIsOwnerOnlyWhateverTheUmask {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state-\u03bb.plist"];
+#if defined(_WIN32)
+  // Deliberately permissive dummy parent: inherited Everyone access must not
+  // become access to catalog object names or signed-token nonces.
+  PSECURITY_DESCRIPTOR broad = NULL;
+  XCTAssertTrue(ConvertStringSecurityDescriptorToSecurityDescriptorW(
+      L"D:P(A;OICI;FA;;;WD)", SDDL_REVISION_1, &broad, NULL));
+  XCTAssertTrue(broad != NULL);
+  if (broad == NULL) return;
+  WINBOOL present = FALSE, defaulted = FALSE;
+  PACL broadACL = NULL;
+  XCTAssertTrue(GetSecurityDescriptorDacl(broad, &present, &broadACL, &defaulted));
+  NSMutableData *directoryWide = [[[tempDir stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+      dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  [directoryWide appendBytes:"\0\0" length:2];
+  DWORD changed = SetNamedSecurityInfoW((LPWSTR)directoryWide.mutableBytes, SE_FILE_OBJECT,
+      DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, broadACL, NULL);
+  LocalFree(broad);
+  XCTAssertEqual((DWORD)ERROR_SUCCESS, changed);
+  if (changed != ERROR_SUCCESS) return;
+  NSString *originalParentDACL = [self nativeDACLStringAtPath:tempDir];
+  XCTAssertNotNil(originalParentDACL);
+#else
+  mode_t previous = umask(0);
+#endif
+  @try {
+#if defined(_WIN32)
+    // Exercise replacement of a pre-existing permissive legacy catalog too.
+    XCTAssertTrue([@{ @"version" : @1 } writeToFile:statePath atomically:NO]);
+#endif
+    ALNStorageModuleRuntime *worker =
+        [self workerRuntimeWithStatePath:statePath
+                          attachmentRoot:[tempDir stringByAppendingPathComponent:@"attachments"]
+                                  shared:NO];
+    [self storeObjectNamed:@"dummy-private.png" body:@"dummy privacy fixture" inRuntime:worker];
+    XCTAssertNotNil([self stateAtPath:statePath][@"objectsByIdentifier"]);
+#if defined(_WIN32)
+    NSMutableData *wide = [[[statePath stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]
+        dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+    [wide appendBytes:"\0\0" length:2];
+    PSECURITY_DESCRIPTOR security = NULL;
+    PACL acl = NULL;
+    DWORD result = GetNamedSecurityInfoW((LPWSTR)wide.mutableBytes, SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION, NULL, NULL, &acl, NULL, &security);
+    XCTAssertEqual((DWORD)ERROR_SUCCESS, result);
+    HANDLE token = NULL;
+    @try {
+      if (result != ERROR_SUCCESS) return;
+      LPWSTR description = NULL;
+      if (ConvertSecurityDescriptorToStringSecurityDescriptorW(security, SDDL_REVISION_1,
+              DACL_SECURITY_INFORMATION, &description, NULL)) {
+        NSLog(@"dummy legacy plist DACL: %@", [[NSString alloc] initWithCharacters:(const unichar *)description length:wcslen(description)]);
+        LocalFree(description);
+      }
+      SECURITY_DESCRIPTOR_CONTROL control = 0;
+      DWORD revision = 0;
+      XCTAssertTrue(GetSecurityDescriptorControl(security, &control, &revision));
+      XCTAssertTrue((control & SE_DACL_PROTECTED) != 0);
+      XCTAssertTrue(acl != NULL);
+      if (acl == NULL) return;
+      XCTAssertEqual((WORD)1, acl->AceCount);
+      XCTAssertTrue(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token));
+      if (token == NULL) return;
+      DWORD size = 0;
+      GetTokenInformation(token, TokenUser, NULL, 0, &size);
+      NSMutableData *user = [NSMutableData dataWithLength:size];
+      XCTAssertTrue(GetTokenInformation(token, TokenUser, user.mutableBytes, size, &size));
+      for (DWORD index = 0; index < acl->AceCount; index++) {
+        void *rawAce = NULL;
+        XCTAssertTrue(GetAce(acl, index, &rawAce));
+        if (rawAce == NULL) continue;
+        ACCESS_ALLOWED_ACE *ace = rawAce;
+        XCTAssertEqual((BYTE)ACCESS_ALLOWED_ACE_TYPE, ace->Header.AceType);
+        XCTAssertEqual((BYTE)0, ace->Header.AceFlags);
+        XCTAssertEqual((DWORD)FILE_ALL_ACCESS, ace->Mask);
+        XCTAssertTrue(EqualSid(&ace->SidStart, ((TOKEN_USER *)user.mutableBytes)->User.Sid));
+      }
+    } @finally {
+      if (token != NULL) CloseHandle(token);
+      if (security != NULL) LocalFree(security);
+    }
+    // Deny replacement while allowing reads: the failed write must retain the
+    // last complete catalog and remove only its own private temporary file.
+    NSData *before = [NSData dataWithContentsOfFile:statePath];
+    HANDLE held = CreateFileW((const wchar_t *)wide.bytes, GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    XCTAssertTrue(held != INVALID_HANDLE_VALUE);
+    @try {
+      if (held != INVALID_HANDLE_VALUE) {
+        NSError *writeError = nil;
+        NSDictionary *blocked = [worker storeObjectInCollection:@"gallery" name:@"blocked.png"
+            contentType:@"image/png" data:[@"dummy" dataUsingEncoding:NSUTF8StringEncoding]
+            metadata:nil error:&writeError];
+        XCTAssertNil(blocked);
+        XCTAssertNotNil(writeError);
+        XCTAssertEqualObjects(NSOSStatusErrorDomain, writeError.domain);
+        // MoveFileEx reports access denied for this open-without-delete-sharing target.
+        XCTAssertEqual((NSInteger)ERROR_ACCESS_DENIED, writeError.code);
+        XCTAssertEqualObjects(before, [NSData dataWithContentsOfFile:statePath]);
+      }
+    } @finally {
+      if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
+    }
+    NSArray *failedLeftovers = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:tempDir error:NULL]
+        filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH '.tmp'"]];
+    XCTAssertEqualObjects(@[], failedLeftovers);
+    [self storeObjectNamed:@"retry.png" body:@"dummy retry" inRuntime:worker];
+    XCTAssertEqual((NSUInteger)2, [[self stateAtPath:statePath][@"objectsByIdentifier"] count]);
+    // Compare the actual pre-write ACL, including Windows auto-inheritance flags.
+    XCTAssertEqualObjects(originalParentDACL, [self nativeDACLStringAtPath:tempDir]);
+#else
+    struct stat info;
+    XCTAssertEqual(0, stat([statePath fileSystemRepresentation], &info));
+    XCTAssertEqual((mode_t)0600, (mode_t)(info.st_mode & 0777));
+#endif
+    NSArray *leftovers = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:tempDir error:NULL]
+        filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF ENDSWITH '.tmp'"]];
+    XCTAssertEqualObjects(@[], leftovers);
+  } @finally {
+#if !defined(_WIN32)
+    umask(previous);
+#endif
+  }
+}
 
 - (void)testStartupCompletesWhenTheStateLockIsBusy {
   NSString *tempDir = [self temporaryDirectory];

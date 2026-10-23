@@ -2030,6 +2030,11 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
                                   exitCode:&exitCode];
     csrfToken = [self parseJSONDictionary:sessionResponse[@"body"]][@"csrf_token"] ?: @"";
 
+    // Preserve a signed cookie from before the SMS flow. Replaying it must
+    // still consume the account's PostgreSQL send budget.
+    NSString *preSMSCookieJar = [self createTempFilePathWithPrefix:@"phase18-sms-pre-send-cookie" suffix:@".txt"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:cookieJar toPath:preSMSCookieJar error:NULL]);
+
     NSDictionary *smsStart = [self curlJSONAtPort:port
                                              path:@"/auth/api/mfa/sms/start"
                                            method:@"POST"
@@ -2044,6 +2049,39 @@ static const NSTimeInterval ALNTestServerPollInterval = 0.2;
     XCTAssertEqual(0, exitCode);
     XCTAssertEqual((NSInteger)200, [smsStart[@"status"] integerValue]);
     XCTAssertTrue([[self parseJSONDictionary:smsStart[@"body"]][@"message"] containsString:@"We sent a code"]);
+    NSString *firstSendCookieJar = [self createTempFilePathWithPrefix:@"phase18-sms-first-send-cookie" suffix:@".txt"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:cookieJar toPath:firstSendCookieJar error:NULL]);
+
+    for (NSUInteger attempt = 1; attempt < 5U; attempt++) {
+      XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:cookieJar error:NULL]);
+      XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:preSMSCookieJar toPath:cookieJar error:NULL]);
+      NSDictionary *sent = [self curlJSONAtPort:port path:@"/auth/api/mfa/sms/start" method:@"POST"
+                                            cookieJar:cookieJar csrfToken:csrfToken
+                                              payload:@{ @"phone_number" : phoneNumber }
+                                      followRedirects:NO exitCode:&exitCode];
+      XCTAssertEqual(0, exitCode);
+      XCTAssertEqual((NSInteger)200, [sent[@"status"] integerValue]);
+    }
+    NSString *sendCount = [self sqlScalar:[NSString stringWithFormat:
+        @"SELECT failure_count::text FROM auth_attempt_limits WHERE scope = 'sms_send_enrollment' AND user_id = "
+         "(SELECT id FROM auth_users WHERE lower(email) = lower('%@'));",
+        [userEmail stringByReplacingOccurrencesOfString:@"'" withString:@"''"]] dsn:dsn];
+    XCTAssertEqualObjects(@"5", [sendCount stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    NSString *freshCookieJar = [self createTempFilePathWithPrefix:@"phase18-sms-fresh-client-cookie" suffix:@".txt"];
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:preSMSCookieJar toPath:freshCookieJar error:NULL]);
+    NSDictionary *blockedSend = [self curlJSONAtPort:port path:@"/auth/api/mfa/sms/start" method:@"POST"
+                                               cookieJar:freshCookieJar csrfToken:csrfToken
+                                                 payload:@{ @"phone_number" : phoneNumber }
+                                         followRedirects:NO exitCode:&exitCode];
+    XCTAssertEqual(0, exitCode);
+    XCTAssertEqual((NSInteger)429, [blockedSend[@"status"] integerValue]);
+    [[NSFileManager defaultManager] removeItemAtPath:freshCookieJar error:NULL];
+    [[NSFileManager defaultManager] removeItemAtPath:preSMSCookieJar error:NULL];
+
+    // Restore the first successful flow's cookie before exercising verification.
+    XCTAssertTrue([[NSFileManager defaultManager] removeItemAtPath:cookieJar error:NULL]);
+    XCTAssertTrue([[NSFileManager defaultManager] copyItemAtPath:firstSendCookieJar toPath:cookieJar error:NULL]);
+    [[NSFileManager defaultManager] removeItemAtPath:firstSendCookieJar error:NULL];
 
     // Replaying the cookie from before failed checks must not reset the SMS
     // verification budget. The authoritative count belongs in PostgreSQL.

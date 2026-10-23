@@ -424,6 +424,10 @@ cleanup:
 #endif
 }
 
+BOOL ALNWritePrivateDataAtomically(NSData *data, NSString *path, NSError **error) {
+  return ALNWriteDataAtomicallyWithMode(data, path, 0600, error);
+}
+
 static NSArray *ALNNormalizeStringArray(NSArray *values) {
   NSMutableArray *normalized = [NSMutableArray array];
   for (id value in values ?: @[]) {
@@ -2648,6 +2652,19 @@ static BOOL ALNRedisErrorIsRetryableIO(NSError *error) {
     return nil;
   }
 
+  // Check the original string: Foundation implementations may truncate a raw
+  // or percent-encoded NUL before exposing the parsed host or database path.
+  // Validating only components.host is therefore too late.
+  unichar zero = 0;
+  NSString *nul = [NSString stringWithCharacters:&zero length:1];
+  if ([urlString isKindOfClass:[NSString class]] &&
+      ([urlString rangeOfString:nul].location != NSNotFound ||
+       [urlString rangeOfString:@"%00"].location != NSNotFound)) {
+    if (error != NULL) {
+      *error = ALNRedisClientError(2217, @"redis URL must not contain NUL characters", nil);
+    }
+    return nil;
+  }
   NSString *normalizedURL = ALNNonEmptyString(urlString, @"");
   NSURLComponents *components = [NSURLComponents componentsWithString:normalizedURL];
   NSString *scheme = [[components.scheme lowercaseString] copy];

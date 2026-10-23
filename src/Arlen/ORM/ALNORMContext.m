@@ -320,11 +320,13 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
         __strong typeof(self) strongSelf = weakSelf;
         strongSelf.activeConnection = connection;
         strongSelf.transactionDepth = 1;
-        BOOL result = block(blockError);
-        strongSelf.transactionDepth = 0;
-        strongSelf.activeConnection = nil;
-        outerResult = result;
-        return result;
+        @try {
+          outerResult = block(blockError);
+          return outerResult;
+        } @finally {
+          strongSelf.transactionDepth = 0;
+          strongSelf.activeConnection = nil;
+        }
       }
                                  error:error];
   return transactionResult && outerResult;
@@ -352,14 +354,16 @@ static NSString *ALNORMContextIdentityKey(NSString *classKey,
   }
 
   self.transactionDepth += 1;
-  BOOL result = ALNDatabaseWithSavepoint(self.activeConnection,
-                                         savepointName,
-                                         ^BOOL(NSError **innerError) {
-                                           return block(innerError);
-                                         },
-                                         error);
-  self.transactionDepth -= 1;
-  return result;
+  @try {
+    return ALNDatabaseWithSavepoint(self.activeConnection,
+                                    savepointName,
+                                    ^BOOL(NSError **innerError) {
+                                      return block(innerError);
+                                    },
+                                    error);
+  } @finally {
+    self.transactionDepth -= 1;
+  }
 }
 
 - (BOOL)withQueryBudget:(NSUInteger)maximum

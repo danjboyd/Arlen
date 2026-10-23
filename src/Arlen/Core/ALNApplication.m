@@ -502,7 +502,9 @@ static BOOL ALNRoutePolicyMiddlewareIsTransparentForFastRoute(ALNApplication *ap
                                 : @{};
   for (NSString *name in [policies allKeys]) {
     NSDictionary *policy = [policies[name] isKindOfClass:[NSDictionary class]] ? policies[name] : nil;
-    NSArray *prefixes = [policy[@"pathPrefixes"] isKindOfClass:[NSArray class]] ? policy[@"pathPrefixes"] : @[];
+    id configuredPrefixes = policy[@"pathPrefixes"];
+    NSArray *prefixes = [configuredPrefixes isKindOfClass:[NSArray class]] ? configuredPrefixes
+                         : [configuredPrefixes isKindOfClass:[NSString class]] ? @[ configuredPrefixes ] : @[];
     for (id prefix in prefixes) {
       if (ALNRoutePolicyPrefixCouldMatchFastRoute(route, [prefix isKindOfClass:[NSString class]] ? prefix : @"")) {
         return NO;
@@ -530,6 +532,9 @@ static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRou
     }
   }
   if (route.guardSelector != NULL) {
+    return NO;
+  }
+  if (route.minimumAuthAssuranceLevel > 0 || route.maximumAuthenticationAgeSeconds > 0) {
     return NO;
   }
   if ([route.requestSchema count] > 0 || [route.responseSchema count] > 0) {
@@ -735,6 +740,44 @@ static BOOL ALNInvokeRouteAction(id controller,
 // start rather than serve without the module.
 static BOOL ALNModuleLoadFailureIsTolerated(NSString *environment) {
   return ALNEnvironmentIsDevelopmentLike(environment);
+}
+
+static NSDictionary *ALNDictionaryConfigValue(NSDictionary *config, NSString *key);
+static BOOL ALNBoolConfigValue(id value, BOOL defaultValue);
+static NSString *ALNStringConfigValue(id value, NSString *defaultValue);
+
+// Session cookies use Path=/ across the mount tree, including siblings and
+// descendants behind a session-disabled intermediate application.
+static NSError *ALNMountSessionCookieConflict(ALNApplication *root) {
+  NSMutableArray *pending = [NSMutableArray arrayWithObject:@{ @"application" : root, @"path" : @"/" }];
+  NSMutableDictionary *seen = [NSMutableDictionary dictionary];
+  while ([pending count] > 0) {
+    NSDictionary *node = [pending lastObject];
+    [pending removeLastObject];
+    ALNApplication *app = node[@"application"];
+    NSString *path = node[@"path"];
+    NSDictionary *session = ALNDictionaryConfigValue(app.config, @"session");
+    if (ALNBoolConfigValue(session[@"enabled"], NO)) {
+      NSString *name = ALNStringConfigValue(session[@"cookieName"], @"arlen_session");
+      NSString *secret = ALNStringConfigValue(session[@"secret"], @"");
+      NSDictionary *previous = seen[name];
+      if (previous != nil && ![previous[@"secret"] isEqualToString:secret]) {
+        return [NSError errorWithDomain:ALNApplicationErrorDomain code:309
+                              userInfo:@{ NSLocalizedDescriptionKey :
+                                  [NSString stringWithFormat:@"mounted application at %@ shares session cookie %@ with %@ but uses a different secret; configure distinct session.cookieName values",
+                                      path, name, previous[@"path"]] }];
+      }
+      if (previous == nil) seen[name] = @{ @"secret" : secret, @"path" : path };
+    }
+    for (NSDictionary *entry in app.mutableMounts) {
+      ALNApplication *child = [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
+      if (child == nil) continue;
+      NSString *prefix = ALNStringConfigValue(entry[@"prefix"], @"/");
+      NSString *childPath = [path isEqualToString:@"/"] ? prefix : [path stringByAppendingString:prefix];
+      [pending addObject:@{ @"application" : child, @"path" : childPath }];
+    }
+  }
+  return nil;
 }
 
 @implementation ALNApplication
@@ -1403,7 +1446,27 @@ static NSArray<NSString *> *ALNDataverseTargetNamesFromConfigAndEnvironment(NSDi
   if (middleware == nil) {
     return;
   }
+  // A session added after initialization must still decode the cookie before
+  // route policy (and an auth module refresh inserted ahead of that policy).
+  if ([middleware isKindOfClass:[ALNSessionMiddleware class]]) {
+    [self addMiddleware:middleware beforeMiddlewareOfClass:[ALNRoutePolicyMiddleware class]];
+    return;
+  }
   [self.mutableMiddlewares addObject:middleware];
+}
+
+- (void)addMiddleware:(id<ALNMiddleware>)middleware beforeMiddlewareOfClass:(Class)middlewareClass {
+  if (middleware == nil) return;
+  NSUInteger index = [self.mutableMiddlewares count];
+  if (middlewareClass != Nil) {
+    for (NSUInteger candidateIndex = 0; candidateIndex < [self.mutableMiddlewares count]; candidateIndex++) {
+      if ([self.mutableMiddlewares[candidateIndex] isKindOfClass:middlewareClass]) {
+        index = candidateIndex;
+        break;
+      }
+    }
+  }
+  [self.mutableMiddlewares insertObject:middleware atIndex:index];
 }
 
 - (void)setJobsAdapter:(id<ALNJobAdapter>)adapter {
@@ -1961,6 +2024,25 @@ static NSError *ALNInsecureSigningSecretError(NSInteger code,
 }
 
 static NSError *ALNValidateSecurityConfiguration(NSDictionary *config, NSString *environment) {
+  NSDictionary *rateLimit = ALNDictionaryConfigValue(config, @"rateLimit");
+  NSDictionary *accessories = ALNDictionaryConfigValue(config, @"propaneAccessories");
+  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
+  // Propane exports the actual count after applying --workers. Read the live
+  // environment; NSProcessInfo may retain the process's initial environment.
+  const char *rawWorkers = getenv("ARLEN_PROPANE_WORKERS");
+  if (rawWorkers == NULL || rawWorkers[0] == '\0') {
+    rawWorkers = getenv("MOJOOBJC_PROPANE_WORKERS");
+  }
+  NSString *workerOverride = rawWorkers ? [NSString stringWithUTF8String:rawWorkers] : nil;
+  if ([workerOverride integerValue] > 0) workers = [workerOverride integerValue];
+  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
+    return ALNSecurityConfigValidationError(
+        343,
+        @"Invalid security configuration: rateLimit.enabled requires one worker because the built-in "
+         "rate limiter is process-local. Set propaneAccessories.workerCount = 1 (or propane --workers 1), "
+         "or disable rateLimit.enabled and enforce the request budget at ingress.",
+        @"rateLimit.enabled", @"multi_worker_rate_limit", nil);
+  }
   BOOL allowsInsecureSecrets = ALNEnvironmentAllowsInsecureSigningSecrets(environment);
   NSDictionary *session = ALNDictionaryConfigValue(config, @"session");
   NSDictionary *csrf = ALNDictionaryConfigValue(config, @"csrf");
@@ -5382,17 +5464,6 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
     return NO;
   }
-  NSDictionary *rateLimit = ALNDictionaryConfigValue(self.config, @"rateLimit");
-  NSDictionary *accessories = ALNDictionaryConfigValue(self.config, @"propaneAccessories");
-  NSUInteger workers = ALNUIntConfigValue(accessories[@"workerCount"], 1, 1);
-  NSString *workerEnvironment = [[[NSProcessInfo processInfo] environment] objectForKey:@"ARLEN_PROPANE_WORKERS"];
-  if ([workerEnvironment integerValue] > 0) workers = [workerEnvironment integerValue];
-  if (workers > 1 && ALNBoolConfigValue(rateLimit[@"enabled"], NO)) {
-    [self.logger warn:@"rate limit is per worker"
-               fields:@{ @"worker_count" : @(workers),
-                         @"requests_per_worker" : rateLimit[@"requests"] ?: @120,
-                         @"hint" : @"Use an ingress rate limiter for a deployment-wide request budget." }];
-  }
   if (self.spaFallback != nil) {
     // A missing shell is expected while a frontend dev server serves the app.
     if (![[NSFileManager defaultManager] fileExistsAtPath:self.spaFallback[@"file"]]) {
@@ -5429,6 +5500,11 @@ static void ALNFinalizeResponse(ALNApplication *application,
     }
   }
 
+  NSError *cookieConflict = ALNMountSessionCookieConflict(self);
+  if (cookieConflict != nil) {
+    if (error != NULL) *error = cookieConflict;
+    return NO;
+  }
   for (NSDictionary *entry in self.mutableMounts) {
     ALNApplication *mounted =
         [entry[@"application"] isKindOfClass:[ALNApplication class]] ? entry[@"application"] : nil;
@@ -5693,6 +5769,78 @@ static void ALNFinalizeResponse(ALNApplication *application,
                            ? mountedEntry[@"prefix"]
                            : @"";
     if (mountedApp != nil && [rewrittenPath length] > 0) {
+      NSDictionary *security = [self.config[@"security"] isKindOfClass:[NSDictionary class]]
+                                   ? self.config[@"security"] : @{};
+      NSDictionary *parentPolicies = [security[@"routePolicies"] isKindOfClass:[NSDictionary class]]
+                                         ? security[@"routePolicies"] : @{};
+      ALNResponse *parentPolicyResponse = nil;
+      if ([parentPolicies count] > 0) {
+        parentPolicyResponse = [[ALNResponse alloc] init];
+        NSMutableDictionary *policyStash = [NSMutableDictionary dictionaryWithObject:self
+                                                                               forKey:ALNContextApplicationStashKey];
+        NSString *policyStrippedPath = nil;
+        (void)ALNExtractPathFormat(request.path, &policyStrippedPath);
+        if ([policyStrippedPath length] > 0 && ![policyStrippedPath isEqualToString:request.path]) {
+          policyStash[ALNContextRoutePolicyAdditionalPathStashKey] = policyStrippedPath;
+        }
+        ALNContext *policyContext = [[ALNContext alloc] initWithRequest:request
+                                                              response:parentPolicyResponse
+                                                                params:@{}
+                                                                 stash:policyStash
+                                                                logger:self.logger
+                                                             perfTrace:ALNDisabledPerfTrace()
+                                                             routeName:@""
+                                                        controllerName:@""
+                                                            actionName:@""];
+        id<ALNMiddleware> parentSession = nil;
+        id<ALNMiddleware> parentRefresh = nil;
+        id<ALNMiddleware> parentPolicy = nil;
+        Class refreshClass = NSClassFromString(@"ALNAuthModuleSessionMiddleware");
+        for (id<ALNMiddleware> middleware in self.mutableMiddlewares) {
+          if (parentSession == nil && [middleware isKindOfClass:[ALNSessionMiddleware class]]) {
+            parentSession = middleware;
+          } else if (parentRefresh == nil && refreshClass != Nil &&
+                     [middleware isKindOfClass:refreshClass]) {
+            parentRefresh = middleware;
+          } else if (parentPolicy == nil && [middleware isKindOfClass:[ALNRoutePolicyMiddleware class]]) {
+            parentPolicy = middleware;
+          }
+        }
+        if (parentPolicy == nil) {
+          parentPolicyResponse.statusCode = 500;
+          [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+          parentPolicyResponse.committed = YES;
+        }
+        @try {
+          NSMutableArray *policyMiddlewares = [NSMutableArray array];
+          if (parentSession != nil) [policyMiddlewares addObject:parentSession];
+          if (parentRefresh != nil) [policyMiddlewares addObject:parentRefresh];
+          if (parentPolicy != nil) [policyMiddlewares addObject:parentPolicy];
+          for (id<ALNMiddleware> middleware in policyMiddlewares) {
+            if (parentPolicyResponse.committed) {
+              continue;
+            }
+            NSError *policyError = nil;
+            if (![middleware processContext:policyContext error:&policyError] &&
+                !parentPolicyResponse.committed) {
+              parentPolicyResponse.statusCode = 500;
+              [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+              parentPolicyResponse.committed = YES;
+            }
+          }
+          if (parentSession != nil && [parentSession respondsToSelector:@selector(didProcessContext:)]) {
+            [parentSession didProcessContext:policyContext];
+          }
+        } @catch (NSException *exception) {
+          parentPolicyResponse.statusCode = 500;
+          [parentPolicyResponse setTextBody:@"mounted parent policy check failed\n"];
+          parentPolicyResponse.committed = YES;
+        }
+        if (parentPolicyResponse.committed) {
+          ALNApplyBaselineSecurityHeaders(self, parentPolicyResponse);
+          return parentPolicyResponse;
+        }
+      }
       ALNRequest *forwarded =
           [[ALNRequest alloc] initWithMethod:request.method
                                         path:rewrittenPath
@@ -5707,6 +5855,18 @@ static void ALNFinalizeResponse(ALNApplication *application,
       forwarded.responseWriteDurationMilliseconds = request.responseWriteDurationMilliseconds;
 
       ALNResponse *forwardedResponse = [mountedApp dispatchRequest:forwarded];
+      for (NSString *cookie in [parentPolicyResponse headerValuesForName:@"Set-Cookie"] ?: @[]) {
+        NSString *name = [[cookie componentsSeparatedByString:@"="] firstObject];
+        NSString *namePrefix = [name stringByAppendingString:@"="];
+        BOOL childWroteSameCookie = NO;
+        for (NSString *childCookie in [forwardedResponse headerValuesForName:@"Set-Cookie"] ?: @[]) {
+          if ([childCookie hasPrefix:namePrefix]) {
+            childWroteSameCookie = YES;
+            break;
+          }
+        }
+        if (!childWroteSameCookie) [forwardedResponse appendHeader:@"Set-Cookie" value:cookie];
+      }
       if ([prefix length] > 0 && [forwardedResponse headerForName:@"X-Arlen-Mount-Prefix"] == nil) {
         [forwardedResponse setHeader:@"X-Arlen-Mount-Prefix" value:prefix];
       }
@@ -6180,6 +6340,7 @@ static void ALNFinalizeResponse(ALNApplication *application,
   baseStash[ALNContextEOCStrictStringifyStashKey] = @(self.eocStrictStringifyEnabled);
   baseStash[ALNContextPageStateEnabledStashKey] = @(self.pageStateEnabled);
   baseStash[ALNContextRoutePolicyNamesStashKey] = matchedRoute.policyNames ?: @[];
+  baseStash[ALNContextRoutePolicyMatchedPathStashKey] = routePath;
   NSMutableDictionary *stash =
       (NSMutableDictionary *)[[ALNRequestLazyStash alloc] initWithBaseValues:baseStash
                                                              requestIdentity:requestIdentity

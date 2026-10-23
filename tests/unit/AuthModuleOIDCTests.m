@@ -957,8 +957,28 @@ static void RegisterOIDCLoginTemplates(void) {
   }];
   [app addMiddleware:[[ALNSessionMiddleware alloc] initWithSecret:@"test-oidc-session-secret-long-enough-for-signing"
       cookieName:@"oidc_session" maxAgeSeconds:3600 secure:NO sameSite:@"Lax"]];
+  NSUInteger sessionIndex = NSNotFound;
+  NSUInteger policyIndex = NSNotFound;
+  for (NSUInteger index = 0; index < [[app middlewares] count]; index++) {
+    id middleware = [app middlewares][index];
+    if ([middleware isKindOfClass:[ALNSessionMiddleware class]]) sessionIndex = index;
+    if ([middleware isKindOfClass:NSClassFromString(@"ALNRoutePolicyMiddleware")]) policyIndex = index;
+  }
+  XCTAssertNotEqual(NSNotFound, sessionIndex);
+  XCTAssertNotEqual(NSNotFound, policyIndex);
+  XCTAssertLessThan(sessionIndex, policyIndex);
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  NSUInteger refreshIndex = NSNotFound;
+  policyIndex = NSNotFound;
+  for (NSUInteger index = 0; index < [[app middlewares] count]; index++) {
+    id middleware = [app middlewares][index];
+    if ([middleware isKindOfClass:NSClassFromString(@"ALNAuthModuleSessionMiddleware")]) refreshIndex = index;
+    if ([middleware isKindOfClass:NSClassFromString(@"ALNRoutePolicyMiddleware")]) policyIndex = index;
+  }
+  XCTAssertNotEqual(NSNotFound, refreshIndex);
+  XCTAssertLessThan(sessionIndex, refreshIndex);
+  XCTAssertLessThan(refreshIndex, policyIndex);
   [app registerRouteMethod:@"GET" path:@"/staff" name:@"oidc_refresh_staff"
            controllerClass:[OIDCRefreshProbeController class] action:@"roles"];
   XCTAssertTrue([app configureRouteNamed:@"oidc_refresh_staff" requestSchema:nil responseSchema:nil summary:nil

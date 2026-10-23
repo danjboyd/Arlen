@@ -797,6 +797,10 @@ else
   # again; both need the GNUstep runtime libraries on the loader path. Source
   # the env like tools/ci/* do instead of assuming the caller did (issue 181).
   if [[ "$(uname -s)" == "Linux" ]]; then
+    if [[ -f "$framework_root/tools/setup_runtime.py" ]]; then
+      export ARLEN_RUNTIME_PREFIX="$(python3 "$framework_root/tools/setup_runtime.py" check --full)"
+      [[ -n "$ARLEN_RUNTIME_PREFIX" ]] || exit 1
+    fi
     source "$framework_root/tools/source_gnustep_env.sh"
   fi
   make -C "$framework_root" arlen boomhauer >/dev/null
@@ -835,6 +839,17 @@ fi
 copy_path_if_exists "$framework_root/bin" "$release_dir/framework/bin"
 # bin/boomhauer sources it.
 copy_path_if_exists "$framework_root/tools/platform.sh" "$release_dir/framework/tools/platform.sh"
+# A Linux service must select its own fixed-prefix runtime before executing
+# binaries. Copy selection/validation resources, never a build-host selector.
+for runtime_file in source_gnustep_env.sh resolve_gnustep.sh setup_runtime.py; do
+  copy_path_if_exists "$framework_root/tools/$runtime_file" "$release_dir/framework/tools/$runtime_file"
+done
+copy_path_if_exists "$framework_root/tools/runtime" "$release_dir/framework/tools/runtime"
+if [[ "$(uname -s)" == Linux && -n "${ARLEN_RUNTIME_PREFIX:-}" ]]; then
+  # Same-host releases retain their validated prefix; cross-host deployment
+  # explicitly supplies ARLEN_RUNTIME_PREFIX in the service environment.
+  printf '%s\n' "$ARLEN_RUNTIME_PREFIX" > "$release_dir/framework/.arlen-runtime"
+fi
 packaged_framework_boomhauer="$release_dir/framework/build/boomhauer"
 if packaged_framework_boomhauer="$(copy_compiled_binary_if_exists "$framework_binary_dir/boomhauer" \
   "$release_dir/framework/build/boomhauer" 2>/dev/null)"; then

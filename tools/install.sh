@@ -231,7 +231,7 @@ linux_toolchain_ready() {
   ( source "$dest/tools/source_gnustep_env.sh" >/dev/null 2>&1 &&
     gnustep-config --objc-flags 2>/dev/null | grep -q -- '-fobjc-runtime=gnustep-2.2' )
 }
-setup_linux() {
+setup_linux_legacy() {
   local missing=0 package os_id os_version
   for package in make python3 clang; do command -v "$package" >/dev/null 2>&1 || missing=1; done
   if [[ $missing -eq 0 ]]; then
@@ -257,12 +257,45 @@ setup_linux() {
   fi
   if ! linux_toolchain_ready; then
     local bootstrap_url="https://github.com/danjboyd/gnustep-cli-new/releases/download/v0.1.0/gnustep-bootstrap.sh"
+    # Pin executable bytes independently of checksums served with the download.
+    local bootstrap_sha256="3bdfa7a29a6442ce1bb994b027bfcba78beec649ae820391f009ac9eeb40ba63"
     curl -fsSL "$bootstrap_url" -o "$work_dir/gnustep-bootstrap.sh" || die "GNUstep bootstrap download failed"
-    curl -fsSL "$bootstrap_url.sha256" -o "$work_dir/bootstrap.sha256" || die "GNUstep bootstrap checksum download failed"
-    [[ "$(sha256_of "$work_dir/gnustep-bootstrap.sh")" == "$(awk 'NR==1 {print $1}' "$work_dir/bootstrap.sha256")" ]] || die "GNUstep bootstrap checksum mismatch"
+    [[ "$(sha256_of "$work_dir/gnustep-bootstrap.sh")" == "$bootstrap_sha256" ]] || die "GNUstep bootstrap checksum mismatch"
     sh "$work_dir/gnustep-bootstrap.sh" --yes setup --user || die "GNUstep setup failed; existing Arlen installation preserved"
   fi
   linux_toolchain_ready || die "GNUstep setup completed but a clang GNUstep 2.2 toolchain is still unavailable"
+}
+
+# New archives carry the locked normal runtime; historical --version archives
+# retain their existing setup helper rather than downloading newer instructions.
+setup_linux() {
+  if [[ ! -f "$dest/tools/setup_runtime.py" ]]; then setup_linux_legacy; return; fi
+  local missing=0 package runtime_prefix
+  for package in make python3 clang; do command -v "$package" >/dev/null 2>&1 || missing=1; done
+  if [[ $missing -eq 0 ]]; then
+    printf '#include <openssl/ssl.h>\nint main(void) { return OPENSSL_init_ssl(0, 0) == 0; }\n' |
+      clang -x c - -lssl -lcrypto -o "$work_dir/openssl-check" >/dev/null 2>&1 || missing=1
+    python3 -c 'import ctypes; ctypes.CDLL("libsqlite3.so.0")' >/dev/null 2>&1 || missing=1
+  fi
+  # A manually supplied, matching custom prefix is accepted without rebuilding.
+  if [[ $missing -eq 0 ]] && python3 "$dest/tools/setup_runtime.py" select --select-for "$dest" >/dev/null 2>&1; then return; fi
+  [[ $do_setup -eq 1 ]] || die "patched Arlen runtime or build prerequisites unavailable; --no-setup never downloads/builds a runtime. Select a matching prefix with ARLEN_RUNTIME_PREFIX or GNUSTEP_SH; see docs/GETTING_STARTED.md."
+  command -v python3 >/dev/null 2>&1 || {
+    consent "Install native runtime/build prerequisites with apt?"
+    root_command apt-get update
+    root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3
+  }
+  python3 "$dest/tools/setup_runtime.py" target >/dev/null || die "unsupported automatic runtime target; see docs/GETTING_STARTED.md"
+  consent "Install native build prerequisites and build Arlen's pinned patched GNUstep runtime at its final versioned prefix? (No managed GNUstep installation is replaced.)"
+  root_command apt-get update
+  root_command env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl git tar gzip tzdata make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
+    libblocksruntime-dev libssl-dev libsqlite3-0 zlib1g-dev libxml2-dev libxslt1-dev libicu-dev \
+    libavahi-client-dev libcurl4-gnutls-dev libgnutls28-dev libffi-dev
+  runtime_prefix="${ARLEN_RUNTIME_ROOT:-$prefix/runtimes}"
+  # This prefix is final: only the framework stage moves during activation.
+  python3 "$dest/tools/setup_runtime.py" build --runtime-root "$runtime_prefix" --select-for "$dest" ||
+    die "patched runtime setup failed; previous framework/current and runtimes preserved"
 }
 
 if [[ "$platform" == "macos" ]]; then
@@ -312,7 +345,7 @@ arlen_home="\${ARLEN_HOME:-\$default_arlen_home}"
 # Apps live outside the install, so arlen cannot find the framework by walking
 # up from the app directory.
 export ARLEN_FRAMEWORK_ROOT="\${ARLEN_FRAMEWORK_ROOT:-\$arlen_home}"
-if [[ "\$(uname -s)" != "Darwin" ]]; then
+if [[ "\$(uname -s)" != "Darwin" && "\${1:-}" != "doctor" ]]; then
   # shellcheck disable=SC1091
   source "\$arlen_home/tools/source_gnustep_env.sh" >/dev/null || exit 1
 fi

@@ -28,7 +28,7 @@ jobs:
   source-archive:
     name: release-assets / source-archive
     runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +58,9 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Select Arlen patched normal runtime for functional checks
+        run: bash tools/ci/setup_normal_runtime.sh --install-dependencies
+
       - name: Package source archive
         run: |
           bash ./tools/release/package_framework.sh --version "${RELEASE_TAG#v}" --kind source --out build/release-assets
@@ -66,6 +69,17 @@ jobs:
         run: |
           source tools/source_gnustep_env.sh
           bash ./tools/release/smoke_install.sh "build/release-assets/arlen-${RELEASE_TAG#v}.tar.gz"
+
+      - name: Upload patched runtime provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-normal-runtime-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/arlen-normal-runtime/gnustep-toolchain-provenance.json
+            ${{ runner.temp }}/arlen-normal-runtime/verified-prefix.txt
+            ${{ runner.temp }}/arlen-normal-runtime/GNUstep.conf
+          if-no-files-found: warn
 
       - name: Upload source archive
         uses: actions/upload-artifact@v4

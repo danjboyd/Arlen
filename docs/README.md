@@ -3,6 +3,8 @@
 For upgrades, review [Getting Started](GETTING_STARTED.md), the
 [plugin service guide](PLUGIN_SERVICE_GUIDE.md), and [Live UI](LIVE_UI.md) for
 module re-vendoring, bounded default adapters, and receive-only channels.
+The [request-limiter migration note](GETTING_STARTED.md#request-limits-with-multiple-workers)
+explains startup validation for apps configured with multiple workers.
 
 This is the curated documentation index for Arlen. It is organized by reader
 intent: getting started, building apps, modules, data layer, operations,
@@ -24,6 +26,11 @@ Before running repo-local build/test/doc commands, source
 `/path/to/Arlen/tools/source_gnustep_env.sh` or source your active GNUstep
 toolchain env directly for the Linux/GNUstep path. On macOS, use
 `GETTING_STARTED_MACOS.md`; on Windows, use `GETTING_STARTED_WINDOWS.md`.
+
+Linux releases use a pinned patched GNUstep runtime built at a fixed prefix,
+with normal `-O2` client defaults and GNUstep debug controls.
+See [runtime setup and manual installation](GETTING_STARTED.md#manual-toolchain-setup)
+for setup, offline selection, and service deployment requirements.
 
 ## Start Here
 

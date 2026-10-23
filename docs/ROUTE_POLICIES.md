@@ -87,6 +87,18 @@ uses only the hops your trusted proxies appended.
 
 ## `/admin`
 
+Path prefix policies configured on a parent application also apply to mounted
+child requests before path rewriting and child dispatch. Source IP checks use
+the parent request's peer, and `requireAuth` uses the parent's session and
+current auth state. Child policies continue to run in the child application.
+For mounted requests with a format suffix, parent policies match both the
+original path and the path without the suffix. This includes exact leaf
+prefixes and nested mounts. Parent and child sessions may share a cookie name
+when they share the same secret. If both are enabled with the same cookie name
+but different secrets, startup fails; configure distinct `session.cookieName`
+values. When a shared-session child writes its cookie during a parent legacy
+cookie refresh, the child value takes precedence so the update is retained.
+
 The admin UI is the first framework-owned route-policy consumer. If
 `security.routePolicies.admin` is configured, every mounted admin route is
 attached to the `admin` policy. Apps without `security.routePolicies.admin`

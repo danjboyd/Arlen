@@ -1,5 +1,6 @@
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNSearchModule.h"
 
 #import "ALNDataCompat.h"
@@ -23,6 +24,7 @@ static NSUInteger const ALNSearchHistoryLimit = 30;
 static NSUInteger const ALNSearchGenerationHistoryLimit = 6;
 // Queries longer than this are rejected with a validation error (HTTP 422).
 static NSUInteger const ALNSearchMaxQueryLength = 256;
+static NSUInteger const ALNSearchFuzzyCacheMaxEntries = 512;
 // "Did you mean" suggestions are skipped for queries longer than this; they
 // compare the whole query against single indexed terms.
 static NSUInteger const ALNSearchSuggestionsMaxQueryLength = 64;
@@ -565,7 +567,11 @@ static BOOL STWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   if (data == nil) {
     return NO;
   }
-  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  BOOL written = [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  if (!written && error != NULL && *error == nil) {
+    *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not write search state", nil);
+  }
+  return written;
 }
 
 // Where to send a user who needs higher assurance: the auth module's configurable
@@ -638,8 +644,7 @@ static NSDictionary *STJSONParametersFromBody(NSData *body) {
 }
 
 static NSString *STQueryDecodeComponent(NSString *component) {
-  NSString *value = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding];
-  return value ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *STFormParametersFromBody(NSData *body) {
@@ -801,6 +806,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 @property(nonatomic, strong) NSRecursiveLock *lock;
 
 - (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error;
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block
+                   write:(BOOL)write
+ rollbackRecentQueriesOnly:(BOOL)rollbackRecentQueriesOnly
+                   error:(NSError **)error;
 - (NSDictionary *)stateDocument;
 - (void)restoreStateDocument:(NSDictionary *)state;
 - (nullable NSDictionary *)normalizedMetadataForDefinition:(id<ALNSearchResourceDefinition>)definition
@@ -823,6 +832,8 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (nullable NSArray<NSDictionary *> *)promotedResultsForQuery:(NSString *)query
                                               resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
                                            snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                                       filters:(NSDictionary *)filters
+                                                  queryOptions:(NSDictionary *)queryOptions
                                                          error:(NSError **)error;
 - (NSArray<NSDictionary *> *)facetSummariesForMatchedDocuments:(NSArray<NSDictionary *> *)matchedDocuments
                                                resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
@@ -878,6 +889,10 @@ static NSDictionary *STStatusCard(NSString *label, NSString *value, NSString *st
 - (NSDictionary *)effectiveFilters:(NSDictionary *)filters
                            metadata:(NSDictionary *)metadata
                             options:(NSDictionary *)options;
+- (BOOL)document:(NSDictionary *)document
+    matchesFilters:(NSDictionary *)filters
+          metadata:(NSDictionary *)metadata
+             error:(NSError **)error;
 - (nullable id)searchModuleBeginBuildForMetadata:(NSDictionary *)metadata
                                       generation:(NSUInteger)generation
                                            error:(NSError **)error;
@@ -1398,7 +1413,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
               query:(NSString *)query
                mode:(NSString *)mode
           highlight:(NSString **)highlight {
-  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:nil highlight:highlight];
+  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:nil
+       fuzzyTokenMetrics:nil fuzzyFieldResults:nil highlight:highlight];
 }
 
 - (double)scoreText:(NSString *)text
@@ -1406,8 +1422,32 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
               query:(NSString *)query
                mode:(NSString *)mode
       queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+          highlight:(NSString **)highlight {
+  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:queryTrigrams
+       fuzzyTokenMetrics:fuzzyTokenMetrics fuzzyFieldResults:nil highlight:highlight];
+}
+
+- (double)scoreText:(NSString *)text
+             weight:(NSUInteger)weight
+              query:(NSString *)query
+               mode:(NSString *)mode
+      queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+  fuzzyFieldResults:(NSMutableDictionary<NSString *, NSArray *> *)fuzzyFieldResults
           highlight:(NSString **)highlight {
   NSString *source = STStringifyValue(text);
+  if (fuzzyFieldResults != nil && [mode isEqualToString:@"fuzzy"]) {
+    // A field's result depends on its text, weight, and this query. Keep the
+    // most recent weight for each text; a different weight recomputes exactly.
+    NSArray *cached = fuzzyFieldResults[source];
+    if (cached != nil && [cached[0] unsignedIntegerValue] == weight) {
+      if (highlight != NULL) {
+        *highlight = cached[2];
+      }
+      return [cached[1] doubleValue];
+    }
+  }
   NSString *needle = STLowerTrimmedString(query);
   NSString *lowerSource = [source lowercaseString];
   if ([needle length] == 0 || [lowerSource length] == 0) {
@@ -1432,8 +1472,21 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     } else {
       NSSet<NSString *> *needleTrigrams = queryTrigrams ?: [self trigramsForString:needle];
       for (NSString *token in [self tokensForText:source]) {
-        double trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
-        NSUInteger distance = [self fuzzyEditDistanceBetween:token and:needle];
+        NSArray<NSNumber *> *metrics = fuzzyTokenMetrics[token];
+        double trigram;
+        NSUInteger distance;
+        if (metrics != nil) {
+          trigram = [metrics[0] doubleValue];
+          distance = [metrics[1] unsignedIntegerValue];
+        } else {
+          trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
+          distance = [self fuzzyEditDistanceBetween:token and:needle];
+          if (fuzzyTokenMetrics != nil && [fuzzyTokenMetrics count] < ALNSearchFuzzyCacheMaxEntries) {
+            // Cache only query/token metrics; field weights and highlight choice
+            // still follow the original document and field traversal order.
+            fuzzyTokenMetrics[token] = @[ @(trigram), @(distance) ];
+          }
+        }
         if (trigram < 0.25 && distance > 2U) {
           continue;
         }
@@ -1464,6 +1517,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       resolvedHighlight = [self snippetForText:source query:needle];
     }
   }
+  if (fuzzyFieldResults != nil && [mode isEqualToString:@"fuzzy"] &&
+      (fuzzyFieldResults[source] != nil || [fuzzyFieldResults count] < ALNSearchFuzzyCacheMaxEntries)) {
+    fuzzyFieldResults[source] = @[ @(weight), @(score), resolvedHighlight ];
+  }
   if (highlight != NULL) {
     *highlight = resolvedHighlight;
   }
@@ -1480,7 +1537,9 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                            generation:generation
                                 query:query
                                  mode:mode
-                        queryTrigrams:nil];
+                        queryTrigrams:nil
+                    fuzzyTokenMetrics:nil
+                    fuzzyFieldResults:nil];
 }
 
 - (nullable NSDictionary *)rankedMatchForDocument:(NSDictionary *)document
@@ -1488,7 +1547,9 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                        generation:(NSNumber *)generation
                                             query:(NSString *)query
                                              mode:(NSString *)mode
-                                    queryTrigrams:(NSSet<NSString *> *)queryTrigrams {
+                                    queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+                                fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+                                fuzzyFieldResults:(NSMutableDictionary<NSString *, NSArray *> *)fuzzyFieldResults {
   NSString *needle = STTrimmedString(query);
   NSString *resolvedHighlight = @"";
   double score = 0.0;
@@ -1508,6 +1569,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                   query:needle
                                    mode:mode
                           queryTrigrams:queryTrigrams
+                      fuzzyTokenMetrics:fuzzyTokenMetrics
+                      fuzzyFieldResults:fuzzyFieldResults
                               highlight:&fieldHighlight];
     if (fieldScore > 0.0 && ![matchedFields containsObject:field]) {
       [matchedFields addObject:field];
@@ -1595,7 +1658,9 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
         continue;
       }
       NSString *lower = [value lowercaseString];
-      if (![self text:value containsQueryAtWordBoundary:needle] && [lower rangeOfString:needle].location == NSNotFound) {
+      // Word-boundary matches are a subset of substring matches. Check the
+      // latter once, after a length rejection, without normalizing twice.
+      if ([lower length] < [needle length] || [lower rangeOfString:needle].location == NSNotFound) {
         continue;
       }
       [suggestions addObject:value];
@@ -1834,6 +1899,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSUInteger suggestionsLimit = STClampedSuggestionLimit(options[@"suggestionsLimit"], 3U);
   NSString *rankingQuery = STLowerTrimmedString(normalizedQuery);
   NSSet<NSString *> *queryTrigrams = ([rankingQuery length] > 0) ? [self trigramsForString:rankingQuery] : nil;
+  // Shared only within this query; repeated field words need one fuzzy metric
+  // calculation regardless of document count or field weight.
+  NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *fuzzyTokenMetrics = [NSMutableDictionary dictionary];
+  // Repeated raw field text appears in many documents. Cache its exact fuzzy
+  // score/highlight per weight, still scoped and bounded to this query.
+  NSMutableDictionary<NSString *, NSArray *> *fuzzyFieldResults = [NSMutableDictionary dictionary];
 
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
@@ -1883,7 +1954,9 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                                generation:snapshot[@"generation"]
                                                     query:normalizedQuery
                                                      mode:queryMode
-                                            queryTrigrams:queryTrigrams];
+                                            queryTrigrams:queryTrigrams
+                                        fuzzyTokenMetrics:fuzzyTokenMetrics
+                                        fuzzyFieldResults:fuzzyFieldResults];
       if (ranked == nil && [normalizedQuery length] > 0) {
         continue;
       }
@@ -2364,12 +2437,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     if (rows == nil) {
       return nil;
     }
+    NSDictionary *effectiveFilters = [self effectiveFilters:filters metadata:metadata options:options];
     for (NSDictionary *row in rows) {
       NSDictionary *document = documentsByRecordID[STTrimmedString(row[@"record_id"])];
       if (document == nil) {
         continue;
       }
-      if (![self document:document matchesFilters:filters ?: @{} metadata:metadata error:error]) {
+      if (![self document:document matchesFilters:effectiveFilters metadata:metadata error:error]) {
         if (error != NULL && *error != NULL) {
           return nil;
         }
@@ -4481,6 +4555,13 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 
 // Never run engine, provider, job-adapter or network work in this block.
 - (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error {
+  return [self stateTransaction:block write:write rollbackRecentQueriesOnly:NO error:error];
+}
+
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block
+                   write:(BOOL)write
+ rollbackRecentQueriesOnly:(BOOL)rollbackRecentQueriesOnly
+                   error:(NSError **)error {
   [self.lock lock];
   int descriptor = -1;
   @try {
@@ -4505,12 +4586,20 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       }
     }
     NSDictionary *before = nil;
+    NSMutableArray *recentQueriesBefore = nil;
     if (write) {
-      NSData *data = [NSPropertyListSerialization dataWithPropertyList:[self stateDocument]
-          format:NSPropertyListBinaryFormat_v1_0 options:0 error:error];
-      if (!data) return NO;
-      before = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:error];
-      if (!before) return NO;
+      if (rollbackRecentQueriesOnly) {
+        // The query transaction only appends/removes complete history entries.
+        // Keep the same lock, reload, write and error path without copying the
+        // indexed documents and engine state solely to roll back this array.
+        recentQueriesBefore = [self.recentQueries mutableCopy];
+      } else {
+        NSData *data = [NSPropertyListSerialization dataWithPropertyList:[self stateDocument]
+            format:NSPropertyListBinaryFormat_v1_0 options:0 error:error];
+        if (!data) return NO;
+        before = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:NULL error:error];
+        if (!before) return NO;
+      }
     }
     self.stateTransactionDepth++;
     BOOL ok = NO;
@@ -4518,8 +4607,10 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       ok = block ? block(error) : YES;
       if (ok && write && shared) ok = STWritePropertyListAtPath(self.statePath, [self stateDocument], error);
       if (!ok && before) [self restoreStateDocument:before];
+      if (!ok && recentQueriesBefore) self.recentQueries = recentQueriesBefore;
     } @catch (NSException *exception) {
       if (before) [self restoreStateDocument:before];
+      if (recentQueriesBefore) self.recentQueries = recentQueriesBefore;
       @throw;
     } @finally { self.stateTransactionDepth--; }
     return ok;
@@ -6000,6 +6091,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
 - (nullable NSArray<NSDictionary *> *)promotedResultsForQuery:(NSString *)query
                                               resourceMetadata:(NSArray<NSDictionary *> *)resourceMetadata
                                            snapshotsByResource:(NSDictionary<NSString *, NSDictionary *> *)snapshotsByResource
+                                                       filters:(NSDictionary *)filters
+                                                  queryOptions:(NSDictionary *)queryOptions
                                                          error:(NSError **)error {
   NSString *normalizedQuery = STLowerTrimmedString(query);
   if ([normalizedQuery length] == 0) {
@@ -6007,9 +6100,15 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   }
   NSMutableArray<NSDictionary *> *promoted = [NSMutableArray array];
   NSMutableSet<NSString *> *seenKeys = [NSMutableSet set];
+  ALNDefaultSearchEngine *filterEngine = [self.engine isKindOfClass:[ALNDefaultSearchEngine class]]
+                                             ? (ALNDefaultSearchEngine *)self.engine
+                                             : [[ALNDefaultSearchEngine alloc] init];
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *resourceIdentifier = STLowerTrimmedString(metadata[@"identifier"]);
     NSDictionary *snapshot = STNormalizeDictionary(snapshotsByResource[resourceIdentifier]);
+    NSDictionary *effectiveFilters = [filterEngine effectiveFilters:filters
+                                                           metadata:metadata
+                                                            options:queryOptions];
     NSMutableDictionary *documentsByRecordID = [NSMutableDictionary dictionary];
     for (NSDictionary *document in STNormalizeArray(snapshot[@"documents"])) {
       NSString *recordID = STTrimmedString(document[@"recordID"]);
@@ -6025,6 +6124,12 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
       for (NSString *recordID in STTrimmedUniqueStringArray(promotion[@"recordIDs"])) {
         NSDictionary *document = documentsByRecordID[recordID];
         if (document == nil) {
+          continue;
+        }
+        if (![filterEngine document:document matchesFilters:effectiveFilters metadata:metadata error:error]) {
+          if (error != NULL && *error != nil) {
+            return nil;
+          }
           continue;
         }
         NSString *dedupeKey = [NSString stringWithFormat:@"%@:%@", resourceIdentifier, recordID];
@@ -6339,6 +6444,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSArray *promotedResults = [self promotedResultsForQuery:query
                                           resourceMetadata:candidateMetadata
                                        snapshotsByResource:snapshotsByResource
+                                                   filters:filters ?: @{}
+                                              queryOptions:queryOptions ?: @{}
                                                      error:error];
   if (promotedResults == nil) {
     return nil;
@@ -6426,7 +6533,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
   }];
     return YES;
-  } write:YES error:error]) return nil;
+  } write:YES rollbackRecentQueriesOnly:YES error:error]) return nil;
   return response;
 }
 

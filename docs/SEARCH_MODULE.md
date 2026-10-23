@@ -92,6 +92,21 @@ searchModule = {
 };
 ```
 
+`ALNPostgresSearchEngine` applies resource visibility filters to full-text
+results before building facets, autocomplete, and suggestions. Upgrade to
+search 1.2.2 when tenant, soft-delete, archived, or app-defined visibility
+filters are used with this engine.
+
+Search 1.2.3 also avoids repeating fuzzy token similarity and edit calculations
+for the same word and fuzzy scores for repeated field text within one query on
+the default in-memory engine. Each query cache is bounded to 512 entries;
+ranking weights, highlights, and the 256-character query limit are unchanged.
+Query history updates retain the same state lock, reload, and atomic persistence
+behavior while copying only the bounded history needed to undo a failed update.
+Failed state writes report an execution error even when Foundation supplies no
+underlying file error; the prior state remains available.
+Upgrade a vendored `search` module to receive this improvement.
+
 `ALNPostgresSearchEngine` reads
 `searchModule.engine.postgres.connectionString` first and falls back to
 `database.connectionString`.
@@ -274,6 +289,12 @@ engine/resource contract:
 - `pagination`
 - `resourceMetadata`
 - `engineCapabilities`
+
+Promotions match their configured query text, then pass through the same
+explicit `filter.<field>` constraints and per-resource filters as ordinary
+results. For example, `GET /search/api/resources/products/query?q=priority&filter.category=starter`
+omits a promoted product whose category is `priority`. This also applies to
+filters supplied in a JSON query body.
 
 They also expose:
 

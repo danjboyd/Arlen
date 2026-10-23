@@ -51,9 +51,15 @@ def main():
     binary = output / "tsan-runtime-probe"
     flags = shlex.split(subprocess.check_output(["gnustep-config", "--objc-flags"], text=True))
     libs = shlex.split(subprocess.check_output(["gnustep-config", "--base-libs"], text=True))
-    command = ["clang", *flags, "-Wno-nullability-completeness", "-fsanitize=thread",
+    arch = subprocess.check_output(["clang", "-dumpmachine"], text=True).strip().split("-")[0]
+    runtime = Path(subprocess.check_output(
+        ["clang", f"-print-file-name=libclang_rt.tsan-{arch}.so"], text=True).strip())
+    if not runtime.is_file():
+        raise RuntimeError("clang shared TSan runtime is unavailable")
+    command = ["clang", *shlex.split(env.get("ARLEN_TSAN_EXTRA_FLAGS", "")), *flags, "-Wno-nullability-completeness", "-fsanitize=thread",
+               "-shared-libsan", f"-Wl,-rpath,{runtime.parent}",
                "-fno-omit-frame-pointer", "-g", str(ROOT / "tests/fixtures/sanitizers/tsan_runtime_probe.m"),
-               "-o", str(binary), *libs]
+               "-o", str(binary), *libs, "-ldispatch"]
     rc, log = run(command, env)
     (output / "build.log").write_text(log)
     metadata = {}
@@ -61,6 +67,7 @@ def main():
                       ("libraries", ["ldd", str(binary)]),
                       ("kernel", ["uname", "-a"])):
         _, metadata[name] = run(cmd, env)
+    metadata["shared_tsan_runtime"] = str(runtime)
     metadata["compile_command"] = command
     metadata["suppressions"] = args.suppressions.read_text()
     (output / "toolchain.json").write_text(json.dumps(metadata, indent=2) + "\n")
@@ -68,7 +75,7 @@ def main():
     summary = {"status": "fail", "build_exit_code": rc, "runs": records}
     if rc == 0:
         for suppressed in (False, True):
-            for mode in ("startup", "monitor", "lock", "queue", "canary"):
+            for mode in ("startup", "monitor", "lock", "queue", "queue-idle", "serial-queue", "foundation", "dispatch", "semaphore", "group", "group-notify", "task-signal", "kvc", "buffer", "canary"):
                 options = "halt_on_error=0:exitcode=66:second_deadlock_stack=1"
                 if suppressed:
                     options += f":suppressions={args.suppressions.resolve()}"

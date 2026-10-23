@@ -7,6 +7,7 @@
 
 #import "ALNDataCompat.h"
 #import "ALNPlatform.h"
+#import "ALNPrivateStorage.h"
 #import "ALNConfig.h"
 #import "ALNDataverseClient.h"
 #import "ALNDataverseCodegen.h"
@@ -22,6 +23,9 @@
 #import "ALNSchemaCodegen.h"
 #import "ALNSecurityPrimitives.h"
 #import "ALNWebPush.h"
+
+// Private libpq readiness helper; the DSN never becomes a child argument.
+extern BOOL ALNPgServerIsReady(NSString *connectionString);
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -381,9 +385,7 @@ static NSString *DatabaseConnectionStringFromConfigForTarget(NSDictionary *confi
 static NSString *DatabaseAdapterNameFromConfigForTarget(NSDictionary *config, NSString *databaseTarget);
 static NSDictionary *Phase39StateContractFromConfig(NSDictionary *config);
 static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *config,
-                                                                NSString *environment,
-                                                                NSString *databaseMode,
-                                                                NSString *databaseTarget);
+                                                                NSString *environment);
 static void PrintDeployWarnings(NSArray<NSDictionary *> *warnings);
 
 static NSString *DefaultGNUstepScriptPath(void) {
@@ -1198,36 +1200,17 @@ static NSDictionary *Phase39StateContractFromConfig(NSDictionary *config) {
   };
 }
 
-static BOOL Phase39ConfigDeclaresDurableState(NSDictionary *config,
-                                              NSString *databaseMode,
-                                              NSString *databaseTarget) {
+static BOOL Phase39ConfigDeclaresDurableState(NSDictionary *config) {
   if (![config isKindOfClass:[NSDictionary class]]) {
     return NO;
   }
 
-  NSDictionary *state = Phase39StateContractFromConfig(config);
-  if ([state[@"durable"] boolValue]) {
-    return YES;
-  }
-
-  if ([Trimmed(databaseMode) length] > 0) {
-    return YES;
-  }
-
-  NSString *target = [Trimmed(databaseTarget) length] > 0 ? Trimmed(databaseTarget) : @"default";
-  if ([DatabaseConnectionStringFromEnvironmentForTarget(target) length] > 0 ||
-      [DatabaseConnectionStringFromConfigForTarget(config, target) length] > 0) {
-    return YES;
-  }
-
-  return NO;
+  return [Phase39StateContractFromConfig(config)[@"durable"] boolValue];
 }
 
 static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *config,
-                                                                NSString *environment,
-                                                                NSString *databaseMode,
-                                                                NSString *databaseTarget) {
-  if (![[Trimmed(environment) lowercaseString] isEqualToString:@"production"] ||
+                                                                NSString *environment) {
+  if (ALNEnvironmentIsDevelopmentLike(environment) ||
       ![config isKindOfClass:[NSDictionary class]]) {
     return @[];
   }
@@ -1237,8 +1220,7 @@ static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *co
   NSInteger workerCount = [propaneAccessories[@"workerCount"] respondsToSelector:@selector(integerValue)]
                                ? [propaneAccessories[@"workerCount"] integerValue]
                                : 4;
-  if (workerCount <= 1 ||
-      Phase39ConfigDeclaresDurableState(config, databaseMode, databaseTarget)) {
+  if (workerCount <= 1 || Phase39ConfigDeclaresDurableState(config)) {
     return @[];
   }
 
@@ -1246,9 +1228,9 @@ static NSArray<NSDictionary *> *Phase39MultiWorkerStateWarnings(NSDictionary *co
     @{
       @"id" : @"multi_worker_state",
       @"status" : @"warn",
-      @"message" : [NSString stringWithFormat:@"production uses %ld propane workers without a declared durable state signal",
-                                               (long)workerCount],
-      @"hint" : @"Each propane worker has isolated process-local memory. Declare state.durable=YES with a durable mode/target, or declare a database deploy contract for app-owned request-spanning state.",
+      @"message" : [NSString stringWithFormat:@"%@ uses %ld propane workers without declared durable app state",
+                                               environment ?: @"production", (long)workerCount],
+      @"hint" : @"Each propane worker has isolated process-local memory. Set state.durable=YES only after verifying request-spanning app state is shared; a database URL alone is insufficient.",
       @"worker_count" : @(workerCount),
     }
   ];
@@ -1280,12 +1262,20 @@ static NSDictionary *RunHostLocalDatabaseProbe(NSString *adapter, NSString *conn
   }
 
   if ([normalizedAdapter isEqualToString:@"postgresql"] || [normalizedAdapter isEqualToString:@"gdl2"]) {
+    if ([dsn length] > 0) {
+      BOOL ready = ALNPgServerIsReady(dsn);
+      return @{
+        @"status" : ready ? @"pass" : @"fail",
+        @"message" : ready ? @"host-local PostgreSQL probe succeeded"
+                            : @"host-local PostgreSQL probe failed",
+        @"hint" : ready ? @""
+                       : @"Ensure libpq is installed and the configured PostgreSQL host accepts connections.",
+      };
+    }
     int commandCode = 0;
     NSString *pgIsReady = Trimmed(RunShellCaptureCommand(@"command -v pg_isready 2>/dev/null", &commandCode));
     if (commandCode == 0 && [pgIsReady length] > 0) {
-      NSString *command = [dsn length] > 0
-                              ? [NSString stringWithFormat:@"pg_isready -q -d %@", ShellQuote(dsn)]
-                              : @"pg_isready -q";
+      NSString *command = @"pg_isready -q";
       int exitCode = 0;
       NSString *output = RunShellCaptureCommand(command, &exitCode);
       return @{
@@ -2552,7 +2542,12 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
   ];
   for (NSArray *file in files) {
     NSError *writeError = nil;
-    if (!WriteTextFile(file[0], file[1], YES, &writeError)) {
+    BOOL isSecretFile = [file[0] isEqualToString:envExamplePath];
+    BOOL written = isSecretFile
+        ? ALNWritePrivateDataAtomically([file[1] dataUsingEncoding:NSUTF8StringEncoding],
+                                        file[0], &writeError)
+        : WriteTextFile(file[0], file[1], YES, &writeError);
+    if (!written) {
       if (failureMessage != NULL) {
         *failureMessage = writeError.localizedDescription ?: file[3];
       }
@@ -2560,10 +2555,6 @@ static BOOL WriteDeployTargetGeneratedArtifacts(NSDictionary *target,
     }
     if ([file[2] boolValue]) {
       SetExecutablePermissions(file[0], NULL);
-    }
-    if ([file[0] isEqualToString:envExamplePath]) {
-      // Holds freshly generated signing secrets; keep it owner-only.
-      [fm setAttributes:@{ NSFilePosixPermissions : @(0600) } ofItemAtPath:envExamplePath error:NULL];
     }
     [writtenFiles addObject:file[0]];
   }
@@ -3124,14 +3115,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
                [NSString stringWithFormat:@"app config loads for %@ environment", environment ?: @"production"], @"");
       NSDictionary *databaseContract = DatabaseContractFromManifest(manifest, config);
       NSArray<NSDictionary *> *stateWarnings =
-          Phase39MultiWorkerStateWarnings(config,
-                                          environment ?: @"production",
-                                          [databaseContract[@"mode"] isKindOfClass:[NSString class]]
-                                              ? databaseContract[@"mode"]
-                                              : @"",
-                                          [databaseContract[@"target"] isKindOfClass:[NSString class]]
-                                              ? databaseContract[@"target"]
-                                              : @"default");
+          Phase39MultiWorkerStateWarnings(config, environment ?: @"production");
       if ([stateWarnings count] == 0) {
         NSDictionary *stateContract = Phase39StateContractFromConfig(config);
         addCheck(@"multi_worker_state", @"pass",
@@ -3139,7 +3123,7 @@ static NSArray<NSDictionary *> *DeployDoctorChecksForRelease(NSString *releaseDi
                                             [stateContract[@"durable"] boolValue] ? @"YES" : @"NO",
                                             stateContract[@"mode"] ?: @"",
                                             stateContract[@"target"] ?: @"default"],
-                 @"Production multi-worker state warnings are quiet when state is explicitly durable, a database contract is declared, a database URL is configured, or workerCount <= 1.");
+                 @"Multi-worker state warnings are quiet when state.durable=YES or workerCount <= 1.");
       } else {
         NSDictionary *warning = stateWarnings[0];
         addCheck(@"multi_worker_state",
@@ -6918,7 +6902,7 @@ static int CommandDeploy(NSArray *args) {
                                                environment:environment ?: @"production"
                                                      error:&loadedConfigError];
   NSArray<NSDictionary *> *multiWorkerStateWarnings =
-      Phase39MultiWorkerStateWarnings(loadedConfig, environment, databaseMode, databaseTarget);
+      Phase39MultiWorkerStateWarnings(loadedConfig, environment);
   NSDictionary *stateContract = Phase39StateContractFromConfig(loadedConfig ?: @{});
 
   NSMutableString *buildCommand =
@@ -8601,7 +8585,21 @@ static int CommandDoctor(NSArray *args) {
                      @"");
       passCount += 1;
 
-      if ([environment isEqualToString:@"production"]) {
+      if (!ALNEnvironmentIsDevelopmentLike(environment)) {
+        NSArray<NSDictionary *> *stateWarnings =
+            Phase39MultiWorkerStateWarnings(loadedConfig, environment);
+        if ([stateWarnings count] > 0) {
+          NSDictionary *warning = stateWarnings[0];
+          AddDoctorCheck(checks, @"multi_worker_state", @"warn",
+                         warning[@"message"], warning[@"hint"]);
+          warnCount += 1;
+        } else {
+          AddDoctorCheck(checks, @"multi_worker_state", @"pass",
+                         @"multi-worker state is declared durable or uses one worker",
+                         @"");
+          passCount += 1;
+        }
+
         NSDictionary *observability = [loadedConfig[@"observability"] isKindOfClass:[NSDictionary class]]
                                           ? loadedConfig[@"observability"]
                                           : @{};

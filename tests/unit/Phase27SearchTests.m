@@ -195,6 +195,17 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
 @interface NSObject (Phase27SearchEngineDistanceInternals)
 - (NSUInteger)levenshteinDistanceBetween:(NSString *)lhs and:(NSString *)rhs;
 - (NSUInteger)fuzzyEditDistanceBetween:(NSString *)token and:(NSString *)needle;
+- (double)scoreText:(NSString *)text weight:(NSUInteger)weight query:(NSString *)query
+               mode:(NSString *)mode highlight:(NSString **)highlight;
+- (double)scoreText:(NSString *)text weight:(NSUInteger)weight query:(NSString *)query
+               mode:(NSString *)mode queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+          highlight:(NSString **)highlight;
+- (double)scoreText:(NSString *)text weight:(NSUInteger)weight query:(NSString *)query
+               mode:(NSString *)mode queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+  fuzzyFieldResults:(NSMutableDictionary<NSString *, NSArray *> *)fuzzyFieldResults
+          highlight:(NSString **)highlight;
 @end
 
 // The boxed implementation the default engine used before it moved to a scalar buffer.
@@ -500,6 +511,37 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqualObjects(@2, tenantMetadata[@"syncPolicy"][@"bulkBatchSize"]);
 }
 
+- (void)testPromotedResultsRespectExplicitAndResourceFilters {
+  ALNApplication *app = [self applicationWithConfig:nil database:nil];
+  [self registerModulesForApplication:app];
+
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedSearchIndexesForRuntime:runtime];
+
+  NSArray<NSDictionary *> *cases = @[
+    @{ @"filters" : @{ @"category" : @"priority" }, @"promotedCount" : @1 },
+    @{ @"filters" : @{ @"category" : @"starter" }, @"promotedCount" : @0 },
+    @{ @"filters" : @{ @"inventory_count__gte" : @5 }, @"promotedCount" : @0 },
+    @{ @"options" : @{ @"resourceFilters" : @{ @"products" : @{ @"category" : @"starter" } } },
+       @"promotedCount" : @0 },
+  ];
+  for (NSDictionary *testCase in cases) {
+    NSError *error = nil;
+    NSDictionary *response = [runtime searchQuery:@"priority"
+                               resourceIdentifier:@"products"
+                                          filters:testCase[@"filters"]
+                                             sort:nil
+                                            limit:10
+                                           offset:0
+                                     queryOptions:testCase[@"options"]
+                                            error:&error];
+    XCTAssertNotNil(response, @"%@", testCase);
+    XCTAssertNil(error, @"%@", testCase);
+    XCTAssertEqual([testCase[@"promotedCount"] unsignedIntegerValue],
+                   [(NSArray *)(response[@"promotedResults"] ?: @[]) count], @"%@", testCase);
+  }
+}
+
 - (void)testEmptyAllowedResourceSetMatchesNothing {
   ALNApplication *app = [self applicationWithConfig:nil database:nil];
   [self registerModulesForApplication:app];
@@ -723,6 +765,38 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertEqual((NSUInteger)1, [engine levenshteinDistanceBetween:@"pririty" and:@"priority"]);
 }
 
+- (void)testFuzzyTokenMetricReusePreservesWeightedScoresAndHighlights {
+  Class engineClass = NSClassFromString(@"ALNDefaultSearchEngine");
+  XCTAssertNotNil(engineClass);
+  id engine = [[engineClass alloc] init];
+  NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *metrics = [NSMutableDictionary dictionary];
+  NSMutableDictionary<NSString *, NSArray *> *fieldResults = [NSMutableDictionary dictionary];
+  for (NSString *text in @[ @"Warehouse shelves", @"Warehouse inventory", @"Caf\u00e9 warehouse" ]) {
+    for (NSNumber *weight in @[ @1, @9 ]) {
+      NSString *originalHighlight = nil;
+      NSString *cachedHighlight = nil;
+      double original = [engine scoreText:text weight:[weight unsignedIntegerValue]
+                                   query:@"wharehouse" mode:@"fuzzy" highlight:&originalHighlight];
+      double cached = [engine scoreText:text weight:[weight unsignedIntegerValue]
+                                 query:@"wharehouse" mode:@"fuzzy" queryTrigrams:nil
+                     fuzzyTokenMetrics:metrics highlight:&cachedHighlight];
+      XCTAssertEqual(original, cached, @"%@ weight %@", text, weight);
+      XCTAssertEqualObjects(originalHighlight, cachedHighlight, @"%@ weight %@", text, weight);
+      for (NSUInteger repeat = 0; repeat < 2U; repeat++) {
+        NSString *fieldHighlight = nil;
+        double fieldScore = [engine scoreText:text weight:[weight unsignedIntegerValue]
+                                         query:@"wharehouse" mode:@"fuzzy" queryTrigrams:nil
+                             fuzzyTokenMetrics:metrics fuzzyFieldResults:fieldResults
+                                     highlight:&fieldHighlight];
+        XCTAssertEqual(original, fieldScore, @"%@ weight %@", text, weight);
+        XCTAssertEqualObjects(originalHighlight, fieldHighlight, @"%@ weight %@", text, weight);
+      }
+    }
+  }
+  XCTAssertGreaterThan([metrics count], (NSUInteger)0);
+  XCTAssertGreaterThan([fieldResults count], (NSUInteger)0);
+}
+
 - (void)testReindexStreamsBuildBatchesInsteadOfUsingLegacySnapshotContract {
   ALNApplication *app = [self applicationWithConfig:@{
     @"engineClass" : @"Phase27StreamingCaptureSearchEngine",
@@ -864,6 +938,22 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertNil(error);
   XCTAssertEqual((NSUInteger)0, [phrase[@"promotedResults"] count]);
   XCTAssertEqualObjects(@"sku-102", [phrase[@"results"] firstObject][@"recordID"]);
+}
+
+- (void)testPostgresQueryHonorsResourceVisibilityFilters {
+  ALNSearchModuleRuntime *runtime = [self seedPostgresRuntime];
+  if (runtime == nil) { return; }
+  NSError *error = nil;
+  NSDictionary *response = [runtime searchQuery:@"priority" resourceIdentifier:@"products"
+      filters:nil sort:nil limit:10 offset:0
+      queryOptions:@{ @"resourceFilters" : @{ @"products" : @{ @"category" : @"not-visible" } } }
+      error:&error];
+  XCTAssertNotNil(response);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"results"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"promotedResults"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"autocomplete"] ?: @[]) count]);
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(response[@"suggestions"] ?: @[]) count]);
 }
 
 - (void)testPostgresFuzzyMatchesWordsInLongDocumentsWithMarkedHighlights {

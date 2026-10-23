@@ -1,6 +1,6 @@
 {
   identifier = "storage";
-  version = "1.4.0";
+  version = "1.4.3";
   principalClass = "ALNStorageModule";
   dependencies = (
     { identifier = "jobs"; version = ">= 1.0.0"; }

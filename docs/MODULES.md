@@ -243,6 +243,20 @@ version in `config/modules.plist` tells you which module code an app vendors:
 - minor (`1.1.0`): new features, security fixes, or new required configuration
 - major (`2.0.0`): removed or incompatible APIs
 
+The v0.3.1 candidate includes these module versions. Upgrade vendored copies
+with `arlen module upgrade` and apply each module's migration instructions:
+
+| Module | Version |
+| --- | --- |
+| `auth` | `1.7.6` |
+| `admin-ui` | `1.1.3` |
+| `jobs` | `1.1.4` |
+| `notifications` | `1.3.2` |
+| `ops` | `1.1.1` |
+| `search` | `1.2.3` |
+| `storage` | `1.4.3` |
+| `mcp` | `1.0.6` |
+
 CI enforces this with `tools/ci/check_module_versions.py`. Framework
 contributors can run it locally before opening a PR:
 
@@ -293,19 +307,30 @@ index names (a security fix).
 `search` to `1.0.5` and `storage` to `1.1.3` to classify the environment with
 the framework's shared helper, so environment names match regardless of case
 (GitHub issue 294).
-`auth` moved to `1.6.0` to refuse reused TOTP codes, limit failed TOTP and
+`auth` moved to `1.7.0` to reject production registration auto-login and
+request-time auth mail. Its `1.6.0` change refuses reused TOTP codes, limits failed TOTP and
 recovery-code attempts per account, slow down repeated failed password
 sign-ins, and accept recovery codes at the TOTP challenge. It adds migration `004_auth_totp_limits`; run
 `arlen module migrate` after upgrading.
+`auth` moved to `1.7.1` to reject the fixed SMS test verification code outside
+development and test.
+`jobs` moved to `1.1.4` to enforce manual enqueue and replay restrictions.
+`auth` moved to `1.7.2` so queued auth-mail links use `publicBaseURL` instead
+of a job-supplied origin.
 `notifications` moved to `1.3.0` for per-record SQLite persistence and one-time
 legacy import; stop old workers and follow the [migration/backup guide](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading).
+Its `1.3.1` update removes recipient-bearing mail headers from self-queued
+notifications; upgrade vendored copies before accepting user queue requests.
 Its `1.2.0` change ensures `POST /notifications/api/queue` queues
 only for the signed-in user unless the caller has the `admin` role at AAL2.
 `ops` moved to `1.1.0` for cross-process dashboard history transactions.
-`search` moved to `1.2.0` for shared-state transactions, replay protection,
+`search` moved to `1.2.1` so promotions honor explicit and per-resource query
+filters. Its `1.2.0` change added shared-state transactions, replay protection,
 and the security fixes below. Upgrade vendored copies with `arlen module upgrade`.
-`auth` remains at `1.6.0`, while `admin-ui`
-moved to `1.1.0` for the following security fixes and configuration:
+`search` moved to `1.2.2` so PostgreSQL full-text results honor resource
+visibility filters before facets and suggestions are built.
+Earlier `auth` 1.6.0 and `admin-ui` 1.1.0 included the following security
+fixes and configuration:
 
 - `auth`: the stub provider is development/test only; password-reset and
   verification links are single-use; those links are built from the new

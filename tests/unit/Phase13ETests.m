@@ -195,6 +195,31 @@ static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
 - (nullable NSDictionary *)authenticateLocalEmail:(NSString *)email password:(NSString *)password error:(NSError **)error;
 @end
 
+@interface ALNAuthModuleRuntime (Phase13EQueuedMailTesting)
+- (BOOL)dispatchQueuedMailPayload:(NSDictionary *)payload error:(NSError **)error;
+@end
+
+@interface Phase13EQueuedMailRuntime : ALNAuthModuleRuntime
+@property(nonatomic, copy) NSString *sentBaseURL;
+@end
+
+@implementation Phase13EQueuedMailRuntime
+- (NSDictionary *)userForEmail:(NSString *)email error:(NSError **)error {
+  (void)error;
+  return @{ @"id" : @"user-1", @"email" : email ?: @"" };
+}
+- (NSString *)issuePasswordResetTokenForUserID:(NSString *)userID error:(NSError **)error {
+  (void)userID; (void)error;
+  return @"test-token";
+}
+- (BOOL)sendNotificationEvent:(NSString *)event user:(NSDictionary *)user
+                        token:(NSString *)token baseURL:(NSString *)baseURL error:(NSError **)error {
+  (void)event; (void)user; (void)token; (void)error;
+  self.sentBaseURL = baseURL;
+  return YES;
+}
+@end
+
 @interface Phase13ETests : XCTestCase
 @end
 
@@ -569,6 +594,23 @@ static NSString *Phase13ERegistrationLayout(id context, NSError **error) {
   XCTAssertTrue(runtime.smsEnabled);
   XCTAssertEqualObjects(@YES, [runtime resolvedHookSummary][@"mfa"][@"sms"][@"enabled"]);
   XCTAssertEqualObjects(@YES, [runtime resolvedHookSummary][@"mfa"][@"sms"][@"allowPrimaryFactor"]);
+}
+
+- (void)testSMSConfigurationRejectsTestVerificationCodeOutsideDevelopmentAndTest {
+  ALNAuthModuleRuntime *runtime = [ALNAuthModuleRuntime sharedRuntime];
+  NSDictionary *config = @{ @"mfa" : @{ @"sms" : @{ @"enabled" : @YES,
+                                                 @"testVerificationCode" : @"123456" } } };
+  for (NSString *environment in @[ @"production", @"staging", @"preview" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([runtime configureHooksWithModuleConfig:config environment:environment error:&error]);
+    XCTAssertEqual((NSInteger)ALNAuthModuleErrorInvalidConfiguration, error.code);
+    XCTAssertEqualObjects(@"authModule.mfa.sms.testVerificationCode", error.userInfo[@"key_path"]);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    NSError *error = nil;
+    XCTAssertTrue([runtime configureHooksWithModuleConfig:config environment:environment error:&error]);
+    XCTAssertNil(error);
+  }
 }
 
 - (void)testAuthUIConfigurationResolvesGeneratedPathsAndContextHooks {
@@ -1048,7 +1090,7 @@ static ALNContext *ALNTestStandInContext(void) {
     @"environment" : @"production",
     @"csrf" : @{ @"enabled" : @NO },
     @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
-    @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"synchronous" } },
+    @"authModule" : @{ @"localPassword" : @{ @"enabled" : @NO } },
   }];
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
@@ -1063,6 +1105,30 @@ static ALNContext *ALNTestStandInContext(void) {
                                                                  headers:@{ @"Accept" : @"application/json" }
                                                                     body:nil]];
     XCTAssertEqual((NSInteger)404, response.statusCode, @"%@", path);
+  }
+}
+
+- (void)testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest {
+  NSDictionary *autoLogin = @{ @"registration" : @{ @"autoLogin" : @YES } };
+  for (NSString *environment in @[ @"production", @"staging", @"qa" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:autoLogin
+                                                                  environment:environment error:&error]);
+    XCTAssertEqualObjects(@"authModule.registration.autoLogin", error.userInfo[@"key_path"]);
+
+    ALNApplication *app = [[ALNApplication alloc] initWithConfig:@{
+      @"environment" : environment,
+      @"database" : @{ @"connectionString" : @"host=127.0.0.1 port=1 dbname=unused connect_timeout=1" },
+      @"authModule" : @{ @"mailDispatch" : @{ @"mode" : @"synchronous" },
+                         @"publicBaseURL" : @"https://app.example.test" },
+    }];
+    error = nil;
+    XCTAssertFalse([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error]);
+    XCTAssertEqualObjects(@"authModule.mailDispatch.mode", error.userInfo[@"key_path"]);
+  }
+  for (NSString *environment in @[ @"development", @"test" ]) {
+    XCTAssertTrue([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:autoLogin
+                                                                 environment:environment error:NULL]);
   }
 }
 
@@ -1235,7 +1301,9 @@ static ALNContext *ALNTestStandInContext(void) {
                                @"https://app.example.test/a/./b", @"https://app.example.test/..",
                                @"https://app.example.test/%2e%2e/x", @"https://app.example.test/%2E./x",
                                @"https://app.example.test/a/%2e/b", @"https://app.example.test/%zz",
-                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%" ]) {
+                               @"https://app.example.test/a%2", @"https://app.example.test/%G1", @"https://app.example.test/%",
+                               @"https://app.example.test/%00", @"https://app.example.test/%C0%AF",
+                               @"https://app.example.test/%ED%A0%80" ]) {
     NSError *error = nil;
     XCTAssertFalse([[ALNAuthModuleRuntime new] configureHooksWithModuleConfig:@{ @"publicBaseURL" : invalid }
                                                                   environment:@"production"
@@ -1266,6 +1334,23 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqualObjects(@"http://[fe80::1]", runtime.publicBaseURL);
   XCTAssertTrue([runtime configureHooksWithModuleConfig:@{} environment:@"production" error:NULL]);
   XCTAssertEqualObjects(@"", runtime.publicBaseURL);
+}
+
+- (void)testQueuedAuthMailUsesConfiguredPublicBaseURL {
+  Phase13EQueuedMailRuntime *runtime = [Phase13EQueuedMailRuntime new];
+  NSError *error = nil;
+  XCTAssertTrue([runtime configureHooksWithModuleConfig:@{ @"publicBaseURL" : @"https://app.example.test" }
+                                            environment:@"production" error:&error]);
+  XCTAssertNil(error);
+  NSDictionary *payload = @{
+    @"eligible" : @YES,
+    @"event" : @"password_reset",
+    @"email" : @"user@example.test",
+    @"baseURL" : @"https://attacker.example.test",
+  };
+  XCTAssertTrue([runtime dispatchQueuedMailPayload:payload error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(@"https://app.example.test", runtime.sentBaseURL);
 }
 
 - (ALNApplication *)mailingApplicationWithEnvironment:(NSString *)environment
@@ -1447,7 +1532,7 @@ static ALNContext *ALNTestStandInContext(void) {
 
 - (void)testPasswordResetLinkUsesConfiguredPublicBaseURLNotHostHeader {
   XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
-  for (NSString *environment in @[ @"test", @"production" ]) {
+  for (NSString *environment in @[ @"test", @"development" ]) {
     ALNInMemoryMailAdapter *adapter = nil;
     ALNApplication *app = [self mailingApplicationWithEnvironment:environment
                                                        authModule:@{ @"publicBaseURL" : @"https://app.example.test/" }
@@ -1537,20 +1622,8 @@ static ALNContext *ALNTestStandInContext(void) {
   XCTAssertEqual((NSUInteger)1, [bodies count]);
   XCTAssertTrue([[bodies firstObject] containsString:@"http://localhost:3000/auth/password/reset?token="], @"%@", bodies);
 
-  app = [self mailingApplicationWithEnvironment:@"production" authModule:nil mailAdapter:&adapter];
-  email = [self createLinkUserEmail];
-  ALNResponse *response = [self postJSON:@{ @"email" : email } to:@"/auth/api/password/forgot" app:app host:@"evil.example"];
-  XCTAssertEqual((NSInteger)200, response.statusCode);
-  XCTAssertEqualObjects(@"ok", [self JSONResponseBody:response][@"status"]);
-  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
-
-  NSString *registrant = [NSString stringWithFormat:@"register-%@@example.test", [[NSUUID UUID] UUIDString].lowercaseString];
-  response = [self postJSON:@{ @"email" : registrant, @"display_name" : @"Registrant", @"password" : @"register-password" }
-                         to:@"/auth/api/register"
-                        app:app
-                       host:@"evil.example"];
-  XCTAssertEqual((NSInteger)200, response.statusCode);
-  XCTAssertEqual((NSUInteger)0, [[adapter deliveriesSnapshot] count]);
+  // Production now rejects synchronous mail, even when no public base URL is
+  // configured. The startup validation test covers that path.
 }
 
 @end

@@ -38,7 +38,8 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\test_windows_installer.ps1
 
-      # Covers development/watch/jobs smoke and rejection of unsupported propane
+      # Covers watch force-kill cleanup (app and build-error), recovery/jobs
+      # smoke and rejection of unsupported propane
       # startup; independent Windows workers must never share a listen port.
       - name: Run Windows preview runtime parity lane
         shell: powershell
@@ -54,11 +55,25 @@ jobs:
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
 
+      # Full development acceptance; explicit live-service and unsupported
+      # production skips remain in the tests. Keep focused security checks below.
+      - name: Run integration tests
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"
+
       - name: Run Windows static and realtime transport regressions
         shell: powershell
         run: |
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths"
           powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration-filter TEST=HTTPIntegrationTests/testStaticHTTPValidatorsHeadAndRanges"
+
+      # Windows defaults to legacy parsing. Exercise the affected chunked path
+      # explicitly as well; keep the default unit/runtime/integration coverage.
+      - name: Validate opt-in llhttp request parsing and body limits
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "export ARLEN_ENABLE_LLHTTP=1 && make boomhauer && make test-unit-filter TEST=HTTPBodyStreamingTests && make test-unit-filter TEST=RequestTests && make test-integration-filter TEST=HTTPIntegrationTests/testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends && make test-integration-filter TEST=HTTPIntegrationTests/testFinalBodyBytesRespectDeadlineAndRateOnBothBackends"
 
       - name: Upload Windows preview artifacts
         if: github.event_name == 'workflow_dispatch' || failure()

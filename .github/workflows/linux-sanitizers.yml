@@ -55,6 +55,14 @@ jobs:
         run: |
           python3 ./tools/ci/junit_report.py test-results --title "linux-sanitizers XCTest results"
 
+      - name: Upload runtime concurrency server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-sanitizers-runtime-concurrency-${{ github.run_id }}
+          path: build/release_confidence/runtime_concurrency/**
+          if-no-files-found: warn
+
       - name: Upload sanitizer confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4
@@ -102,10 +110,22 @@ jobs:
         run: |
           bash ./tools/ci/install_ci_dependencies.sh
 
+      - name: Build pinned thread-race dependencies
+        run: |
+          source ./tools/source_gnustep_env.sh
+          toolchain_env="$(python3 ./tools/ci/build_tsan_toolchain.py --mode thread)"
+          source "$toolchain_env"
+          {
+            echo "ARLEN_TSAN_LIBRARY_PATH=$ARLEN_TSAN_LIBRARY_PATH"
+            echo "ARLEN_TSAN_EXTRA_FLAGS=$ARLEN_TSAN_EXTRA_FLAGS"
+          } >>"$GITHUB_ENV"
+
       - name: Run nightly thread-race lane
         env:
           GNUSTEP_USER_ROOT: ${{ github.workspace }}/.gnustep
         run: |
+          source ./tools/source_gnustep_env.sh
+          python3 ./tools/ci/test_clang_sanitizer_runtime.py
           bash ./tools/ci/run_linux_thread_race_nightly.sh
 
       - name: Upload thread-race nightly artifacts
@@ -113,7 +133,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-thread-race-nightly-${{ github.run_id }}
-          path: build/sanitizers/phase10m_thread_race/**
+          path: |
+            build/sanitizers/phase10m_thread_race/**
+            .cache/tsan-toolchain/**/identity.json
+            .cache/tsan-toolchain/**/manifest.json
+            .cache/tsan-toolchain/**/build.log
+          include-hidden-files: true
           if-no-files-found: warn
 
   # Issue 271: the integration suite under ASAN+UBSan. Nightly only (one

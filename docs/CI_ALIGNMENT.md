@@ -1,9 +1,18 @@
 # CI Alignment
 
-Last updated: 2026-10-17
+Last updated: 2026-10-21
 
 This document defines the intended shape of Arlen CI so workflow names,
 required checks, and actual project contracts stay aligned.
+
+Configured `main` protection was verified on 2026-10-21: strict updates require
+`linux-quality / quality-gate`, `linux-sanitizers / sanitizer-gate`, and
+`docs-quality / docs-gate`. The recommended baseline below also includes static
+analysis; that recommendation is distinct from currently configured enforcement.
+The actual Windows Actions job context is `windows-preview`, currently
+non-required. Its #200 promotion is coordinated separately after complete
+Windows evidence and the existing 90-minute budget are verified. Expanding test
+coverage does not itself change branch protection or remove configured gates.
 
 CI checkouts must include submodules. `vendor/tools-xctest` pins a tagged
 release of `danjboyd/tools-xctest`, the maintained fork of the dormant
@@ -19,6 +28,29 @@ MSYS2/GNUstep provisioning source that Arlen expects for `windows-preview`
 runners; it is not a new required merge-gate lane by itself.
 
 ## Windows Test Runner
+
+The existing Windows job retains default-backend acceptance and adds an
+explicit `ARLEN_ENABLE_LLHTTP=1` check for `HTTPBodyStreamingTests`, `RequestTests`, and the per-route
+body-limit/spooling integration regression, plus
+`testFinalBodyBytesRespectDeadlineAndRateOnBothBackends`. The latter covers
+late final fragments, buffered/spooled bodies, independent keep-alive clocks,
+and disabled-limit/on-time/healthy-rate controls; the regular Linux integration
+suite also discovers it. It runs the prebuilt server directly, so the existing
+sanitizer integration skip list is unchanged. The Windows step rebuilds the
+server with the same opt-in parser flags as its test bundles. This exercises chunked decoding,
+which the default legacy backend rejects. The managed winpthreads dependency
+is linked only for the opt-in build. Keep the same job context, fork guard,
+artifacts, 90-minute timeout, and configured branch-protection gates.
+
+The existing Windows runtime parity suite covers force-killed watch trees in
+both app and build-error modes. It asserts that the native server exits and
+its port closes, in addition to the existing rebuild/recovery coverage.
+
+The Windows installer contract fixture and release certification share a
+per-user cross-process mutex across checkouts. Each acquires it before saving
+the persisted user PATH and releases it after restoration. Keep current-shell
+and fresh-shell PATH checks enabled; serialize these fixtures rather than
+removing persisted-PATH assertions to avoid interference.
 
 Windows framework, generated-app and vendored-runner builds use
 `_FILE_OFFSET_BITS=64`. The existing unit job verifies a sparse file above
@@ -37,6 +69,11 @@ multiworker reloads on independently bound Windows sockets; that depended on
 unsafe port sharing. The supported-development scope and existing required
 check names remain unchanged. Native exclusive-binding coverage stays enabled.
 
+Module startup-failure integration coverage retains the boomhauer and jobs
+checks on Windows. Its propane assertions require unsupported-hosting exit 2
+without a PID file; POSIX platforms retain startup retry/backoff assertions.
+This preserves coverage without skipping the whole module test.
+
 The ordinary unit suite builds `build/file-job-probe` and runs a four-process
 file-queue regression without PostgreSQL. This is part of existing unit lanes,
 including `windows-preview`; required check names and branch protection stay
@@ -44,8 +81,8 @@ unchanged. Focused execution: `make test-unit-filter TEST=Phase7DTests`.
 The same Windows job also runs
 `make test-integration-filter TEST=HTTPIntegrationTests/testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths`
 for native junction/stream/short-name containment, exclusive binding, Origin
-validation, and receive-only channels. This adds a step to an existing required
-check; branch-protection check names do not change.
+validation, and receive-only channels. This adds coverage to the existing Windows
+job; configured branch-protection checks do not change.
 `test-unit` also runs `llhttp-framing-tests` against the actual vendored C
 parser, even where Windows defaults to the legacy HTTP backend. It checks empty
 Transfer-Encoding rejection and a valid Content-Length control request.
@@ -81,8 +118,14 @@ with their parent.
 `windows-preview` runs on the self-hosted runner `arlen-windows-agent`
 (labels `self-hosted`, `Windows`, `X64`, `arlen`, `msys2-clang64`). That
 runner is a persistent VM, so the job is skipped for pull requests from forks.
-It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`)
-and the unit suite (`make test-unit`). `make windows-confidence` (packaged
+It stays non-required. It runs the phase24 lanes (`tools/ci/run_windows_preview.sh`),
+the unit suite (`make test-unit`), and the complete integration suite
+(`make test-integration`) serially. Focused static/realtime transport regressions
+remain separate steps. Existing live-service and unsupported-production skips
+remain explicit in JUnit; full integration does not certify Windows production.
+On 2026-10-21 the local serial validation passed 1,325 unit tests (148 existing
+skips), four runtime tests, and 254 integration tests (82 existing skips);
+integration took 1,070.803 seconds. The existing job timeout remains 90 minutes. `make windows-confidence` (packaged
 release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
 development-only Windows scope; it returns with Windows production in 0.4.0
 (#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
@@ -306,17 +349,32 @@ containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
 creates an unprivileged user with sudo, packages a source archive, and runs
 `tools/release/smoke_install.sh`. Only download/checkout prerequisites are
 preinstalled; the installer itself provisions build dependencies and the
-pinned gnustep-cli `v0.1.0` managed toolchain with `--yes`. The container has
+pinned patched normal GNUstep runtime natively with `--yes`, using the existing
+custom builder at `5469b5d` and target-specific locks under `tools/runtime/`.
+The normal runtime shares all source pins and three race-patch digests with the
+diagnostic recipe; Ubuntu additionally has a separately pinned clang 21
+epoll-mask compatibility patch, without changing the diagnostic recipe; its compiler/ICU come from each target distribution. The container has
 no `/usr/GNUstep`. Smoke checks use bare `arlen` outside the checkout, a fresh
 interactive bash and the persisted login profile, then generate and serve an
-app. This verifies the setup path instead of bypassing it with preprovisioning.
+app. Linux smoke also runs the generated app's request tests through the installed
+`arlen test --app` launcher. It then compiles and runs fourteen native runtime concurrency controls, including
+arm64, recording compiler, loader linkage, source/patch/ELF provenance and
+per-control logs. Those normal controls do not substitute for TSan acceptance.
+The existing matrix/job names remain unchanged; source builds have a 90-minute
+budget. Artifacts are uploaded as `native-runtime-<arch>-<index>`.
+`linux-quality` also runs `tools/ci/test_runtime_delivery.py` to verify pinned
+builder rejection, lock equality, immutable-prefix failure preservation,
+selected headers/loader precedence and failure without implicit setup.
+This verifies the setup path instead of bypassing it with preprovisioning.
 `ReleasePrebuiltTests` also exercises installer failure, retry, and PATH
 behavior using deterministic fixtures in the normal unit lane.
 
 It runs on pull requests that touch the installer, packaging, GNUstep env
 helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
 a merge-gate lane; the self-hosted lanes stay the authoritative Linux
-baseline.
+baseline. Required check names and branch protection remain unchanged. Release
+qualification must nevertheless check all three native runtime targets; do
+not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback
 
@@ -629,6 +687,13 @@ Shell helpers remove only TSAN preload entries before launching Bash and keep
 TSAN options for linked instrumented binaries. No tests are excluded solely
 because TSAN is active; unrelated service-dependent opt-in tests remain.
 
+TSan resolves `libclang_rt.tsan` from the active clang installation and builds
+instrumented children with `-shared-libsan`, matching XCTest's preload. The
+required sanitizer runtime checks and nightly thread lane exercise dlopen and
+exec with a deliberate race; GCC's `libtsan.so` is not a supported substitute.
+This runtime alignment does not change required check names, branch protection,
+suppression scope, or the two-clean-run criterion for promotion.
+
 See [the investigation](internal/TSAN_RELIABILITY_2026-09-21.md) for evidence,
 remaining runtime work, and promotion criteria.
 
@@ -750,7 +815,21 @@ The same probe also verifies server-originated delivery to both subscribers
 (concurrent mode) and the single subscriber (serialized mode). Its separate
 `runtime-concurrency-fixture` executable accepts a command only through a pipe
 inherited from the test runner; ordinary `boomhauer` has no publishing hook or
-new network route. Failed probe runs retain their server log for diagnosis.
+new network route. Every server generation, including the restarted server,
+must exit zero and have no sanitizer diagnostic anywhere in its complete log.
+A forced shutdown after the existing eight-second wait fails the probe; the
+five-second kill cleanup does not convert it to a pass. Cleanup diagnostics
+also remain visible when an earlier request assertion fails.
+
+Passing and failing generations keep separate logs under
+`build/release_confidence/runtime_concurrency` by default; set
+`ARLEN_RUNTIME_CONCURRENCY_LOG_DIR` to use another evidence directory. Linux
+quality and sanitizer workflows always upload these logs. The thread-race lane
+sets that directory inside its existing TSan artifact directory, so both strict
+release runs retain every initial/restarted concurrent/serialized server log.
+The Python negative controls verify shutdown exit failures, reports despite a
+zero exit, distinct restart logs and preservation of primary request failures.
+Existing lane names, required checks, workloads and time limits are unchanged.
 
 ### Linux sanitizer runtime consistency
 
@@ -768,3 +847,150 @@ must succeed, while ASan memory errors and UBSan overflow errors in either
 process must fail with the expected diagnostic. The check also verifies that an
 unrelated preload is retained. This corrects runtime selection without changing
 lane names, required checks, or branch-protection requirements.
+
+Code-generation CLI fixtures execute the CLI already built for their test bundle.
+They must not invoke `bin/arlen` with cleared build flags: that wrapper can rebuild
+the shared framework and replace the instrumented CLI during a sanitizer run.
+The shell helper removes sanitizer preloads from Bash while instrumented child
+executables retain their linked runtime and sanitizer options. The external Node
+fixture also removes only the selected overlay directories from its library
+search path: otherwise its system ICU dependency can load the instrumented ICU
+and sanitizer runtime even after the preload is removed. JavaScript assertions
+remain enabled, and unrelated library search paths are retained.
+
+`ARLEN_TSAN_LIBRARY_PATH` can select an isolated instrumented dependency overlay
+for XCTest, HTTP runtime probes, and Foundation diagnostics.
+`ARLEN_TSAN_EXTRA_FLAGS` supplies matching overlay header flags to both Arlen and
+the standalone Foundation probe and generated runtime-test executables, before
+installed GNUstep include paths. Build tools retain
+the bootstrap environment, and the vendored XCTest library precedes the overlay.
+Standalone probes and runtime-test children link the same shared clang TSan
+runtime as the dependency DSOs; a static runtime must not be mixed with ICU
+loading a shared one. The selected libraries and positive-control results must accompany any clean-run
+claim; an overlay does not authorize new suppressions or test exclusions.
+
+The thread-race lane builds an isolated dependency set with
+`tools/ci/build_tsan_toolchain.py --mode thread`. Exact upstream commits and the
+ICU archive checksum are in `tools/ci/tsan-toolchain/sources.json`; adjacent patch
+files are applied only after verifying each checkout. The cache key includes
+compiler/bootstrap flags, patches, build mode, and builder identity. A completed
+build records shared-library and dispatch-header hashes in `manifest.json`; changed artifacts fail
+verification instead of being silently reused. Build logs and manifests are
+uploaded with the nightly results. The lane and branch-protection requirements
+remain unchanged.
+
+For local reproduction, source `tools/source_gnustep_env.sh`, run the builder,
+and source the returned `environment.sh` before running the thread-race lane.
+`--mode normal` builds the same patches without sanitizer instrumentation for
+production toolchain review. Neither mode installs system files. Production
+packaging must propagate the patched libraries and dispatch headers together;
+a clean instrumented overlay is not evidence that existing installations have
+received the fixes. Both modes enable GNUstep Base's new KVO implementation.
+Base explicitly compiles and links against the pinned ICU headers and libraries,
+including when the bootstrap host supplies a different ICU version.
+The Base pin matches the existing managed toolchain source lock, including its
+queue idle-exit lock-order fix and the Foundation APIs Arlen already uses.
+
+The dependency patches preserve cached string hashes and class layout. They
+publish shared string metadata, singleton state, runtime class metadata, and
+exception metadata atomically or under the existing lock. NSTask consumes its
+cross-thread child-signal flag with a lock-free atomic exchange. KVC cache
+entries are copied and updated under the existing lock; method resolution and
+getter calls run outside it to preserve reentrancy. Autoreleased-buffer class
+metadata initialization is locked, and runtime method implementation pointers
+use atomic access with the existing pointer layout. Dispatch changes
+cover once publication, the final apply-worker reference, queue-link publication,
+group completion and notifications, and atomic queue-tail, reference-count, and
+semaphore-timeout reads. The Objective-C weak registry lives for the process
+lifetime so detached workers cannot race its destructor at exit. Standalone
+group and notification stress probes retain coverage of these handoffs.
+A serial-queue probe alternates asynchronous submissions and synchronous drains
+to exercise producer checks while workers release queue references. Global-object
+reference-count checks and queue-tail predicates use atomic loads, matching the
+concurrent atomic writes; queue initialization and disposal semantics are unchanged.
+Linux PI-futex synchronization
+receives TSan acquire/release
+annotations at actual successful lock and unlock boundaries; non-sanitized
+builds omit those annotations. No library-wide suppression is added.
+
+## Patched normal runtime in functional CI
+
+`linux-quality`, Linux `release-certification`, and the Linux `release-assets`
+source-archive job explicitly run `tools/ci/setup_normal_runtime.sh
+--install-dependencies` before native functional checks. Existing `preinstalled`
+validation remains a bootstrap check; it does not establish patched runtime
+qualification. The helper builds or verifies an Arlen-owned immutable prefix
+under `$HOME/.cache/arlen/normal-runtimes`, outside the managed GNUstep roots,
+and exports `ARLEN_RUNTIME_PREFIX` to later steps through `GITHUB_ENV`.
+`ARLEN_CI_NORMAL_RUNTIME_ROOT` chooses another final cache location. A failed
+partial prefix is preserved for diagnosis and explicit repair, never overwritten.
+The shared prefix build is locked, so concurrent jobs cannot replace it.
+
+The helper writes a mode-0600 private GNUstep config under
+`$RUNNER_TEMP/arlen-normal-runtime`, retains actual runtime domain paths,
+and assigns absolute per-job defaults and absent user-config paths. It exports
+`ARLEN_GNUSTEP_CONFIG_FILE`; setting `HOME` alone cannot isolate Foundation
+preferences. Runtime provenance, verification and private config are uploaded in a separate
+normal-runtime artifact, preserving existing archive artifact layouts. The source-archive job's budget is 90 minutes to cover
+a native cache miss. Required check names and branch protection do not change.
+The public native matrix still verifies clean provisioning independently.
+
+The dedicated sanitizer and thread-race jobs retain their existing bootstrap,
+thread overlay, diagnostics, suppressions and acceptance contract. Their
+integration classifier excludes app/deploy builder tests; they do not call
+Linux deployment packaging that requires normal-runtime provenance. Static
+analysis and docs jobs also do not create Linux deployment packages. The
+certification job's existing ASan subpack inherits the selected normal runtime;
+this does not alter the separately owned TSan bootstrap or thread recipe.
+Normal linkage controls independently require Base, objc, dispatch and
+BlocksRuntime to resolve inside the selected prefix. `jobs-worker`, like
+`propane`, sources the helper in its own parent shell before executing a
+packaged app; an environment selected by its child build cannot update its
+parent process.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.
+
+The Ubuntu target lock includes only one extra source compatibility patch:
+`tools/runtime/patches/libdispatch-clang21.patch`. It explicitly preserves
+libdispatch's 32-bit epoll complement conversion for clang 21 while keeping
+`-Werror` and signedness diagnostics enabled. The Debian locks and dedicated
+TSan source recipe do not change. Runtime-delivery regressions verify the
+Ubuntu-only lock delta, strict staging/checksum rejection, and 786,432 mask
+cases; the existing native public matrix performs the actual Ubuntu build.
+No lane, classifier, suppression or branch-protection context changes.
+
+## Normal runtime optimization inputs
+
+The three normal target locks explicitly configure tools-make and Base with
+`CFLAGS=-O2` and empty `OBJCFLAGS`. This supplies GNUstep `OPTFLAG=-O2` to C
+and Objective-C builds without leaving a second ObjC optimization flag after
+GNUstep's debug filtering. Required prefix includes remain in the pinned
+builder's `CPPFLAGS`. Revisions, the three race patches, Ubuntu's epoll-mask
+compatibility patch, builder 5469 and the separate TSan recipe stay unchanged.
+These are intentional configure-input and normal lock hash changes; the old
+2bc prefix remains an immutable control with include-only default client flags.
+
+`qualify_normal.py` records and requires the actual new prefix's default client
+optimization and prefix include path before its fourteen unchanged native
+controls and ICU contract. Strict provenance checks reject old tools-make or
+Base configure inputs without rewriting them. Runtime-delivery regressions
+cover all three new lock hashes and explicit input rejection. Fresh prefix
+builds must independently establish default `-O2`, debug filtering, artifact
+hashes, functional/concurrency/ICU/install behavior and unchanged performance
+gates. No result on the old prefix is relabeled as new optimized evidence.
+No compiler-warning category, benchmark baseline, threshold, classifier,
+required check name or branch-protection context changes. The two full TSan
+runs remain a separate final-source gate using the existing bootstrap/thread
+recipe; its normal provenance reference must name the newly qualified prefix.
+
+The HTTP server uses a compile-time-checked lock-free atomic signal stop flag.
+Qualification checks both real signal/console shutdown and the instrumented
+probe's initial and restarted processes; handler code must not acquire a lock
+or call Foundation. Native Windows console checks create a real process group
+before targeting a console-control event.

@@ -5,6 +5,7 @@
 #import "../shared/ALNTestSupport.h"
 #import "ALNAdminUIModule.h"
 #import "ALNApplication.h"
+#import "ALNController.h"
 #import "ALNAuthModule.h"
 #import "ALNJobsModule.h"
 #import "ALNOpsModule.h"
@@ -19,6 +20,17 @@
 // signed session cookie at sign-in. Signing out, password changes and the
 // absolute session lifetime end sessions server-side. Runs in-process against
 // ARLEN_PG_TEST_DSN.
+@interface ALNMountedAuthPolicyTestController : ALNController
+@end
+
+@implementation ALNMountedAuthPolicyTestController
+- (id)status:(ALNContext *)context {
+  (void)context;
+  [self renderText:@"mounted-ok\n"];
+  return nil;
+}
+@end
+
 @interface AuthSessionRoleRefreshIntegrationTests : XCTestCase
 @property(nonatomic, strong) ALNPg *database;
 @end
@@ -91,6 +103,33 @@
                  bootstrapAdmins:(NSArray *)emails
                       authConfig:(NSDictionary *)authConfig
                           search:(BOOL)search {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig search:search security:nil];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
+                 mountedSecurity:(NSDictionary *)security {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig
+                     search:search security:security mountChild:YES];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
+                        security:(NSDictionary *)security {
+  return [self clientWithDSN:dsn bootstrapAdmins:emails authConfig:authConfig
+                     search:search security:security mountChild:NO];
+}
+
+- (ALNTestClient *)clientWithDSN:(NSString *)dsn
+                 bootstrapAdmins:(NSArray *)emails
+                      authConfig:(NSDictionary *)authConfig
+                          search:(BOOL)search
+                        security:(NSDictionary *)security
+                      mountChild:(BOOL)mountChild {
   NSMutableDictionary *authModule = [NSMutableDictionary dictionaryWithDictionary:authConfig ?: @{}];
   if (authModule[@"registration"] == nil) {
     authModule[@"registration"] = @{ @"autoLogin" : @YES };
@@ -105,12 +144,21 @@
     @"authModule" : authModule,
     @"jobsModule" : @{ @"providers" : @{ @"classes" : @[] } },
   }];
+  if (security != nil) {
+    config[@"security"] = security;
+  }
   if (search) {
     config[@"searchModule"] = @{
       @"adminUI" : @{ @"autoResources" : @YES, @"resourceProviderClass" : @"ALNSearchAdminResourceProvider" },
     };
   }
   ALNApplication *app = [[ALNApplication alloc] initWithConfig:config];
+  if (mountChild) {
+    ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+    [child registerRouteMethod:@"GET" path:@"/status" name:@"mounted_status"
+               controllerClass:[ALNMountedAuthPolicyTestController class] action:@"status"];
+    XCTAssertTrue([app mountApplication:child atPrefix:@"/embedded"]);
+  }
   NSError *error = nil;
   XCTAssertTrue([[[ALNAuthModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
   XCTAssertTrue([[[ALNJobsModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
@@ -431,6 +479,52 @@
 
 #pragma mark - Ending sessions
 
+- (void)testMountedChildParentPolicyRejectsRevokedAuthSession {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *security = @{ @"routePolicies" : @{
+    @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ], @"requireAuth" : @YES }
+  } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:nil
+                                       search:NO mountedSecurity:security];
+  [self registerUser:client email:[self uniqueEmail:@"mounted-policy"]];
+  NSString *cookie = [self cookieHeader:client];
+  ALNResponse *before = [client get:@"/embedded/status"];
+  XCTAssertEqual((NSInteger)200, before.statusCode, @"%@", [before bodyText]);
+
+  ALNResponse *logout = [client post:@"/auth/api/logout" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, logout.statusCode, @"%@", [logout bodyText]);
+  ALNTestClient *replay = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *after = [replay requestWithMethod:@"GET" path:@"/embedded/status" query:nil
+                                        headers:@{ @"cookie" : cookie ?: @"" } body:nil];
+  XCTAssertEqual((NSInteger)403, after.statusCode, @"%@", [after bodyText]);
+  XCTAssertEqualObjects(@"authentication_required", [after headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
+- (void)testRoutePolicyRequiresFreshAuthSessionBeforeProtectedController {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *security = @{ @"routePolicies" : @{
+    @"session" : @{ @"pathPrefixes" : @[ @"/auth/api/session" ], @"requireAuth" : @YES }
+  } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:nil
+                                       search:NO security:security];
+  [self registerUser:client email:[self uniqueEmail:@"policy-replay"]];
+  NSString *cookie = [self cookieHeader:client];
+  ALNResponse *before = [client get:@"/auth/api/session"];
+  XCTAssertEqual((NSInteger)200, before.statusCode, @"%@", [before bodyText]);
+
+  ALNResponse *logout = [client post:@"/auth/api/logout" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, logout.statusCode, @"%@", [logout bodyText]);
+  ALNTestClient *replay = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *after = [replay requestWithMethod:@"GET" path:@"/auth/api/session" query:nil
+                                        headers:@{ @"cookie" : cookie ?: @"" } body:nil];
+  XCTAssertEqual((NSInteger)403, after.statusCode, @"%@", [after bodyText]);
+  XCTAssertEqualObjects(@"authentication_required", [after headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+}
+
 - (void)testReplayedCookieAfterLogoutIsSignedOutWhileOtherDevicesStaySignedIn {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
@@ -519,6 +613,76 @@
   [self signedInClientForApplication:client.application email:email password:@"role-refresh-password-changed"];
 }
 
+- (void)testStepUpKeepsSessionGenerationAfterPasswordChange {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[]];
+  NSString *subject = [self registerUser:client email:[self uniqueEmail:@"step-up-stamp"]];
+  ALNResponse *change = [client post:@"/auth/api/password/change"
+                                JSON:@{ @"current_password" : @"role-refresh-password",
+                                        @"new_password" : @"role-refresh-password-changed" }];
+  XCTAssertEqual((NSInteger)200, change.statusCode, @"%@", [change bodyText]);
+  XCTAssertEqualObjects(@"1", [self scalar:@"SELECT session_stamp::text FROM auth_users WHERE subject = $1"
+                                parameters:@[ subject ]]);
+  [self stepUp:client subject:subject];
+  XCTAssertEqualObjects(@YES, [self sessionState:client][@"authenticated"]);
+  XCTAssertEqualObjects(@2, [self sessionState:client][@"aal"]);
+}
+
+- (void)testPasswordInputsRetainSurroundingWhitespaceAcrossFlows {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSString *email = [self uniqueEmail:@"password-spaces"];
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[]];
+  ALNResponse *registered = [client post:@"/auth/api/register"
+                                    JSON:@{ @"email" : email, @"display_name" : @"Spaces",
+                                            @"password" : @"  starting-password  " }];
+  XCTAssertEqual((NSInteger)200, registered.statusCode, @"%@", [registered bodyText]);
+  NSString *subject = [registered JSONObject][@"subject"];
+  XCTAssertTrue([subject length] > 0);
+
+  ALNTestClient *login = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exact = [login post:@"/auth/api/login"
+                             JSON:@{ @"email" : email, @"password" : @"  starting-password  " }];
+  XCTAssertEqual((NSInteger)200, exact.statusCode, @"%@", [exact bodyText]);
+  ALNTestClient *trimmed = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *trimmedRegistrationPassword = [trimmed post:@"/auth/api/login"
+                                                    JSON:@{ @"email" : email, @"password" : @"starting-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedRegistrationPassword.statusCode);
+
+  ALNResponse *changed = [client post:@"/auth/api/password/change"
+                                 JSON:@{ @"current_password" : @"  starting-password  ",
+                                         @"new_password" : @" changed-password " }];
+  XCTAssertEqual((NSInteger)200, changed.statusCode, @"%@", [changed bodyText]);
+  ALNTestClient *changedLogin = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exactChanged = [changedLogin post:@"/auth/api/login"
+                                           JSON:@{ @"email" : email, @"password" : @" changed-password " }];
+  XCTAssertEqual((NSInteger)200, exactChanged.statusCode);
+  ALNResponse *trimmedChanged = [trimmed post:@"/auth/api/login"
+                                         JSON:@{ @"email" : email, @"password" : @"changed-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedChanged.statusCode);
+
+  NSString *token = [[[NSUUID UUID] UUIDString] lowercaseString];
+  NSString *storedToken = [@"sha256:" stringByAppendingString:
+      ALNLowercaseHexStringFromData(ALNSHA256([token dataUsingEncoding:NSUTF8StringEncoding]))];
+  [self execute:@"INSERT INTO auth_password_reset_tokens (user_id, token, expires_at) "
+                 "SELECT id, $2, NOW() + INTERVAL '1 hour' FROM auth_users WHERE subject = $1 RETURNING id"
+     parameters:@[ subject, storedToken ]];
+  ALNTestClient *resetting = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *reset = [resetting post:@"/auth/api/password/reset"
+                                JSON:@{ @"token" : token, @"password" : @" reset-password " }];
+  XCTAssertEqual((NSInteger)200, reset.statusCode, @"%@", [reset bodyText]);
+  ALNTestClient *resetLogin = [[ALNTestClient alloc] initWithApplication:client.application error:NULL];
+  ALNResponse *exactReset = [resetLogin post:@"/auth/api/login"
+                                     JSON:@{ @"email" : email, @"password" : @" reset-password " }];
+  XCTAssertEqual((NSInteger)200, exactReset.statusCode);
+  ALNResponse *trimmedReset = [trimmed post:@"/auth/api/login"
+                                       JSON:@{ @"email" : email, @"password" : @"reset-password" }];
+  XCTAssertEqual((NSInteger)401, trimmedReset.statusCode);
+}
+
 - (void)testPasswordResetByTokenEndsExistingSessions {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
@@ -545,6 +709,55 @@
   XCTAssertEqualObjects(@YES, [self sessionState:resetting][@"authenticated"]);
   XCTAssertEqualObjects(@NO, [self sessionState:client][@"authenticated"]);
   XCTAssertEqualObjects(@NO, [self sessionState:otherDevice][@"authenticated"]);
+}
+
+- (void)testExistingSMSFactorRequiresRecentMFAForTOTPEnrollment {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  XCTAssertTrue([self applyAuthMigrationsWithDSN:dsn]);
+  NSDictionary *authConfig = @{ @"mfa" : @{ @"sms" : @{
+    @"enabled" : @YES, @"allowPrimaryFactor" : @YES,
+    @"testVerificationCode" : @"123456"
+  } } };
+  ALNTestClient *client = [self clientWithDSN:dsn bootstrapAdmins:@[] authConfig:authConfig search:NO];
+  NSString *subject = [self registerUser:client email:[self uniqueEmail:@"sms-before-totp"]];
+  [self execute:@"INSERT INTO auth_mfa_enrollments (user_id, type, secret, recovery_codes_json, enabled, verified_at) "
+                 "SELECT id, 'sms', '+15555550123', '[]', TRUE, NOW() FROM auth_users WHERE subject = $1 RETURNING id"
+     parameters:@[ subject ]];
+
+  NSError *provisioningError = nil;
+  NSDictionary *user = [[ALNAuthModuleRuntime sharedRuntime] currentUserForSubject:subject error:&provisioningError];
+  XCTAssertNotNil(user, @"%@", provisioningError);
+  XCTAssertNil([[ALNAuthModuleRuntime sharedRuntime] totpProvisioningPayloadForUser:user
+                                                                              error:&provisioningError]);
+  XCTAssertEqual(ALNAuthModuleErrorPolicyRejected, provisioningError.code);
+
+  ALNResponse *factors = [client get:@"/auth/api/mfa"];
+  XCTAssertEqual((NSInteger)200, factors.statusCode, @"%@", [factors bodyText]);
+  XCTAssertEqualObjects(@{}, [factors JSONObject][@"mfa"][@"totp"][@"provisioning"]);
+  XCTAssertEqualObjects(@"0", [self scalar:@"SELECT COUNT(*)::text FROM auth_mfa_enrollments m "
+                                              "JOIN auth_users u ON u.id = m.user_id "
+                                              "WHERE u.subject = $1 AND m.type = 'totp'"
+                                parameters:@[ subject ]]);
+  ALNResponse *blockedForm = [client get:@"/auth/api/mfa/totp"];
+  XCTAssertEqual((NSInteger)403, blockedForm.statusCode, @"%@", [blockedForm bodyText]);
+  ALNResponse *blockedVerify = [client post:@"/auth/api/mfa/totp/verify" JSON:@{ @"code" : @"123456" }];
+  XCTAssertEqual((NSInteger)403, blockedVerify.statusCode, @"%@", [blockedVerify bodyText]);
+
+  ALNResponse *send = [client post:@"/auth/api/mfa/sms/resend" JSON:@{}];
+  XCTAssertEqual((NSInteger)200, send.statusCode, @"%@", [send bodyText]);
+  ALNResponse *stepUp = [client post:@"/auth/api/mfa/sms/verify" JSON:@{ @"code" : @"123456" }];
+  XCTAssertEqual((NSInteger)200, stepUp.statusCode, @"%@", [stepUp bodyText]);
+  ALNResponse *allowedForm = [client get:@"/auth/api/mfa/totp"];
+  XCTAssertEqual((NSInteger)200, allowedForm.statusCode, @"%@", [allowedForm bodyText]);
+  NSString *secret = [self scalar:@"SELECT m.secret FROM auth_mfa_enrollments m "
+                                    "JOIN auth_users u ON u.id = m.user_id "
+                                    "WHERE u.subject = $1 AND m.type = 'totp' ORDER BY m.id DESC LIMIT 1"
+                       parameters:@[ subject ]];
+  XCTAssertTrue([secret length] > 0);
+  NSString *code = [ALNTOTP codeForSecret:secret atDate:[NSDate date] error:NULL];
+  ALNResponse *allowedVerify = [client post:@"/auth/api/mfa/totp/verify" JSON:@{ @"code" : code ?: @"" }];
+  XCTAssertEqual((NSInteger)200, allowedVerify.statusCode, @"%@", [allowedVerify bodyText]);
 }
 
 - (void)testRemovingAnSMSFactorEndsOtherSessionsButKeepsTheCurrentOne {

@@ -1,11 +1,11 @@
 # Platform Runner Runbook
 
-Last updated: 2026-04-20
+Last updated: 2026-10-21
 
 This runbook defines the platform-runner contract for the non-required
 Apple and Windows confidence lanes.
 
-The authoritative merge gate remains:
+The documented merge-gate baseline remains:
 
 - `linux-quality / quality-gate`
 - `linux-sanitizers / sanitizer-gate`
@@ -13,8 +13,15 @@ The authoritative merge gate remains:
 - `static-analysis / clang-tidy`
 - `docs-quality / docs-gate`
 
-`apple-baseline` and `windows-preview` stay visible and non-required under the
-current support statement.
+The configured `main` protection was verified on 2026-10-21 to require the
+Linux quality, Linux sanitizer, and docs contexts listed above. The static
+analysis entries remain part of the documented baseline; reconcile their
+enforcement through coordinated policy changes, preserving configured gates.
+
+`apple-baseline` and `windows-preview` are currently non-required in branch
+protection. Windows development is supported from 0.3.0; #200's promotion of
+the exact `windows-preview` job context remains separate from that support
+statement and from adding test coverage. See [CI Alignment](CI_ALIGNMENT.md).
 
 ## Windows Preview Runner
 
@@ -23,7 +30,8 @@ Purpose:
 - run `.github/workflows/windows-preview.yml`
 - validate MSYS2 `CLANG64` runtime parity through
   `tools/ci/run_windows_preview.sh`
-- run the unit suite (`make test-unit`) on Windows
+- run the unit suite (`make test-unit`) and complete integration suite
+  (`make test-integration`) serially on Windows, retaining focused transport checks
 - `make windows-confidence` (packaged release/deploy parity) is not part of the
   workflow until Windows production support (0.4.0); run it by hand
 
@@ -75,6 +83,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "xctest --help"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "bash ./tools/ci/run_windows_preview.sh"
 powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-unit"
+powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "make test-integration"
 ```
 
 Workflow contract:
@@ -83,8 +92,10 @@ Workflow contract:
 - the job must run on `[self-hosted, Windows, X64, arlen, msys2-clang64]`
 - failure artifacts must include `build/phase24`, `build/tests` and
   `test-results` (JUnit)
-- the workflow remains non-required until the Windows support statement is
-  deliberately promoted
+- retain the 90-minute job budget, unit/runtime/full-integration steps, and
+  focused static/realtime security checks; keep platform/service skips explicit
+- the exact `windows-preview` job context remains non-required until a
+  coordinated branch-protection change promotes it
 
 The first operational target is a dedicated or long-lived LAN runner. Ephemeral
 lease-backed registration and teardown are valid follow-up work, but are not

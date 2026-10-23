@@ -400,10 +400,10 @@
   NSString *outputDir = [tempDir stringByAppendingPathComponent:@"frontend/generated/arlen"];
   NSString *manifestPath = [tempDir stringByAppendingPathComponent:@"db/schema/arlen_typescript.json"];
 
-  NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
+  NSString *arlenCLIPath = ALNTestArlenCLIPath();
 
   NSString *command =
-      [NSString stringWithFormat:@"%@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ typescript-codegen --orm-input %@ --openapi-input %@ --output-dir %@ --manifest %@ --package-name %@ --prefix ALNORMX --target all --force",
+      [NSString stringWithFormat:@"%@ && %@ typescript-codegen --orm-input %@ --openapi-input %@ --output-dir %@ --manifest %@ --package-name %@ --prefix ALNORMX --target all --force",
                                  ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
                                  ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),
                                  ALNTestShellQuote(ormFixturePath),
@@ -544,9 +544,9 @@
     return;
   }
   NSString *openAPIPath = ALNTestPathFromRepoRoot(@"tests/fixtures/phase28/openapi_contract.json");
-  NSString *arlenCLIPath = ALNTestPathFromRepoRoot(@"bin/arlen");
+  NSString *arlenCLIPath = ALNTestArlenCLIPath();
   NSString *prefix =
-      [NSString stringWithFormat:@"%@ && cd %@ && LD_PRELOAD='' XCTEST_LD_PRELOAD='' ASAN_OPTIONS='' UBSAN_OPTIONS='' EXTRA_OBJC_FLAGS='' %@ typescript-codegen --openapi-input %@ --output-dir out --manifest build/arlen_typescript.json --force",
+      [NSString stringWithFormat:@"%@ && cd %@ && %@ typescript-codegen --openapi-input %@ --output-dir out --manifest build/arlen_typescript.json --force",
                                  ALNTestGNUstepSourceCommandForRepoRoot(ALNTestRepoRoot()),
                                  ALNTestShellQuote(appRoot),
                                  ALNTestShellQuote([arlenCLIPath stringByStandardizingPath]),

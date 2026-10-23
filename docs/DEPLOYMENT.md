@@ -31,7 +31,8 @@ Recommended app/runtime defaults for production:
 - explicit observability policy (`observability.tracePropagationEnabled`, `observability.healthDetailsEnabled`, `observability.readinessRequiresStartup`, `observability.readinessRequiresClusterQuorum`)
 - explicit propane accessories (`workerCount`, shutdown/reload timings)
 - explicit durable state intent (`state.durable`, `state.mode`, `state.target`)
- or an explicit deploy database contract for request-spanning app state
+ after verifying request-spanning app state is shared across workers; a deploy
+ database contract alone does not clear the multi-worker state warning
 - explicit cluster settings when running multi-node (`cluster.enabled`, `cluster.name`, `cluster.expectedNodes`, `cluster.observedNodes`)
 
 API-only mode (`apiOnly = YES`, or `ARLEN_API_ONLY=1`) defaults to:

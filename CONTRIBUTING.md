@@ -15,6 +15,15 @@ After changing this contract, clean-rebuild the framework, apps and vendored
 XCTest runner; do not mix cached objects built with 32-bit `off_t`. The build-flags
 sentinel also invalidates runner artifacts. See [Windows CLANG64](docs/WINDOWS_CLANG64.md).
 
+Windows defaults to the legacy HTTP backend. For chunked-body changes, also
+validate the opt-in parser with `ARLEN_ENABLE_LLHTTP=1`; the managed toolchain
+provides winpthreads for its thread-local parser state. The existing Windows
+job runs focused llhttp request-parser and body-limit checks after default
+acceptance, including final-fragment deadline/rate checks on both backends.
+Build the server with the same opt-in flags as the test bundles; the clock
+regression runs that binary directly and remains eligible for sanitizer integration.
+Keep both backends and the existing job budget covered.
+
 - File or comment on an issue first if the change is non-trivial. This lets us
   surface design considerations before you invest implementation time.
 - For security-sensitive issues, do **not** open a public issue. Follow
@@ -37,6 +46,7 @@ At a minimum you will need:
 Start every session with:
 
 ```bash
+python3 tools/setup_runtime.py build  # Linux: native patched runtime; prerequisites in docs/TOOLCHAIN_MATRIX.md
 source tools/source_gnustep_env.sh   # Linux/GNUstep
 ./bin/arlen doctor
 ```
@@ -62,6 +72,18 @@ Common targets used in CI and by reviewers:
 On macOS, `./bin/test --smoke-only` runs a fast smoke check. On Linux,
 `./bin/test` runs the full `make test`; use the targets above or a filter for
 something quicker.
+
+The Linux TSan lane uses clang's shared runtime for both XCTest bundles and
+instrumented child executables. After sourcing the GNUstep environment, run
+`python3 tools/ci/test_clang_sanitizer_runtime.py` to check dlopen/exec coverage
+with deliberate ASan, UBSan, and TSan faults. Do not substitute GCC's
+`libtsan.so` or disable detection to make the lane pass.
+
+On Windows, activate the managed `CLANG64` toolchain with
+`scripts/run_clang64.ps1`. CI runs the full unit and integration suites serially,
+alongside runtime parity and focused transport checks, within the existing
+90-minute job budget. Keep live-service and unsupported-production skips
+explicit; see [Platform Runners](docs/PLATFORM_RUNNERS.md) for commands.
 
 For a single test method (XCTest filter syntax):
 
@@ -206,3 +228,52 @@ Storage persistence now defaults to a transactional SQLite catalog. Linux hosts
 need `libsqlite3-0`; macOS and supported Windows use the system SQLite runtime.
 CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](docs/STORAGE_MODULE.md) for migration and backup rules.
+
+Linux release runtime delivery is owned by Arlen's target locks in
+`tools/runtime/` and the existing pinned custom builder. Run
+`python3 tools/ci/test_runtime_delivery.py` for no-build bootstrap regressions;
+run `tools/release/smoke_install.sh` in each clean supported native target for
+actual setup/app/concurrency qualification. Local `.arlen-runtime` selectors
+are untracked. Manual `--no-setup` installs require matching patched runtime
+provenance; generic clang GNUstep is insufficient for release qualification.
+Public native target jobs retain their existing names and optional branch
+protection status; all three are required release evidence.
+
+Functional CI selects the patched runtime explicitly with
+`bash tools/ci/setup_normal_runtime.sh --install-dependencies`, retaining the
+preinstalled toolchain only as bootstrap. For a local no-fetch verification of
+an existing prefix, set `ARLEN_RUNTIME_PREFIX` and
+`ARLEN_NORMAL_RUNTIME_STATE=/absolute/owned/state`, then run the helper without
+`--install-dependencies`. It verifies the runtime and creates a private GNUstep
+config; it never modifies the prefix. Dedicated TSan jobs keep their existing
+bootstrap and instrumented overlay.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.
+
+Ubuntu 26.04's lock additionally pins a narrow libdispatch epoll-mask source
+compatibility patch for clang 21. Preserve the shared three race-patch digests,
+Debian lock bytes, and dedicated TSan recipe when updating it. Run
+`python3 tools/ci/test_runtime_delivery.py` to verify target-only lock/staging
+rules, substitution rejection, and the exhaustive 32-bit mask contract with
+strict signedness diagnostics. Native Ubuntu CI must also build and run the
+installed app and normal/ICU controls; no warning category is disabled.
+
+Normal production optimization comes from tools-make/Base configure inputs in
+the target locks (`CFLAGS=-O2`, empty `OBJCFLAGS`), with prefix includes kept
+in `CPPFLAGS`. This retains GNUstep debug filtering and existing caller flags;
+do not replace it with global `MAKEFLAGS`, installed config edits, warning
+suppression, or an unconditional Arlen compiler override. Old include-only
+prefixes are preserved controls and fail the new normal configure-input check.
+Fresh-prefix native/performance qualification is required after a lock change.
+
+Runtime concurrency probe changes must preserve server-process qualification:
+run `python3 tools/ci/test_runtime_concurrency_probe.py` and the maintained
+runtime concurrency gate. Each server generation must exit zero without a
+sanitizer report, including during restart and final shutdown. Keep all separate
+server logs; see [CI alignment](docs/CI_ALIGNMENT.md) for artifact locations.

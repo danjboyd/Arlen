@@ -26,6 +26,7 @@ typedef NSString *_Nullable (*ALNEOCRenderFunction)(id _Nullable ctx,
 
 NSString *ALNEOCCanonicalTemplatePath(NSString *path);
 NSString *ALNEOCEscapeHTMLString(NSString *input);
+NSString *ALNEOCSafeLinkURL(id _Nullable value);
 NSString *ALNEOCNormalizeTemplateReference(NSString *path);
 
 BOOL ALNEOCStrictLocalsEnabled(void);

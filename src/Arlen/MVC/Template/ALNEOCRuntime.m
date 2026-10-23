@@ -9,6 +9,24 @@ NSString *const ALNEOCErrorLocalNameKey = @"local";
 NSString *const ALNEOCErrorKeyPathKey = @"key_path";
 NSString *const ALNEOCErrorSegmentKey = @"segment";
 
+NSString *ALNEOCSafeLinkURL(id value) {
+  if (![value isKindOfClass:[NSString class]] || [value length] == 0) return @"#";
+  NSString *url = value;
+  NSMutableCharacterSet *forbidden = [[NSCharacterSet whitespaceAndNewlineCharacterSet] mutableCopy];
+  [forbidden formUnionWithCharacterSet:[NSCharacterSet controlCharacterSet]];
+  if ([url rangeOfCharacterFromSet:forbidden].location != NSNotFound ||
+      [url rangeOfString:@"\\"].location != NSNotFound || [url hasPrefix:@"//"]) return @"#";
+  NSRange colon = [url rangeOfString:@":"];
+  NSRange separator = [url rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"/?#"]];
+  if (colon.location != NSNotFound &&
+      (separator.location == NSNotFound || colon.location < separator.location)) {
+    NSString *scheme = [[url substringToIndex:colon.location] lowercaseString];
+    if (![scheme isEqualToString:@"http"] && ![scheme isEqualToString:@"https"] &&
+        ![scheme isEqualToString:@"mailto"]) return @"#";
+  }
+  return url;
+}
+
 static NSString *const ALNEOCThreadOptionsKey = @"aln.eoc.render_options";
 static NSString *const ALNEOCThreadStrictLocalsKey = @"strict_locals";
 static NSString *const ALNEOCThreadStrictStringifyKey = @"strict_stringify";
@@ -779,14 +797,9 @@ BOOL ALNEOCAppendYield(NSMutableString *out,
   if (!found) {
     return YES;
   }
-  if ([resolvedSlot isEqualToString:@"content"]) {
-    // The `content` context value is the rendered page body supplied by the
-    // layout renderer, so it keeps raw output like the content slot itself.
-    return ALNEOCAppendRawChecked(out, value, templatePath, line, column, error);
-  }
-  // A named slot that no template filled falls back to the context value of
-  // the same name. That value is ordinary data, so it is HTML-escaped like a
-  // `<%= %>` expression.
+  // A slot that no template filled falls back to ordinary context data,
+  // including `content`. Only captured rendered output in the slot map is
+  // trusted HTML; context values are escaped like `<%= %>` expressions.
   return ALNEOCAppendEscapedChecked(out, value, templatePath, line, column, error);
 }
 

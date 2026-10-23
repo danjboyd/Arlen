@@ -7,6 +7,7 @@ cd "$repo_root"
 artifact_dir="${ARLEN_TSAN_ARTIFACT_DIR:-$repo_root/build/sanitizers/tsan}"
 log_path="$artifact_dir/tsan.log"
 summary_path="$artifact_dir/summary.json"
+export ARLEN_RUNTIME_CONCURRENCY_LOG_DIR="$artifact_dir/runtime_concurrency"
 staging_dir="$(mktemp -d)"
 staged_log_path="$staging_dir/tsan.log"
 staged_summary_path="$staging_dir/summary.json"
@@ -82,14 +83,23 @@ if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
   set -u
 fi
 
-tsan_so="$(clang -print-file-name=libtsan.so)"
+# A dlopened XCTest bundle and exec'd children must use the same clang
+# runtime. clang -print-file-name=libtsan.so can select GCC's incompatible DSO.
+tsan_arch="$(clang -dumpmachine)"
+tsan_arch="${tsan_arch%%-*}"
+tsan_so="$(clang -print-file-name="libclang_rt.tsan-${tsan_arch}.so")"
+if [[ ! -f "$tsan_so" ]]; then
+  tsan_so="$(clang -print-runtime-dir)/libclang_rt.tsan.so"
+fi
 if [[ -z "$tsan_so" || ! -f "$tsan_so" ]]; then
   echo "ci: tsan experimental unavailable (libtsan.so missing)" | tee -a "$staged_log_path"
   write_summary "unavailable" "77" "libtsan_unavailable"
   exit 77
 fi
 
-tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer}"
+tsan_objc_flags="${EXTRA_OBJC_FLAGS:--fsanitize=thread -fno-omit-frame-pointer} -shared-libsan -Wl,-rpath,$(dirname "$tsan_so") -Wno-unused-command-line-argument"
+# Overlay headers must precede gnustep-config's installed include paths.
+tsan_cc="${ARLEN_CC:-clang}${ARLEN_TSAN_EXTRA_FLAGS:+ $ARLEN_TSAN_EXTRA_FLAGS}"
 tsan_suppressions_file="${ARLEN_TSAN_SUPPRESSIONS_FILE:-$repo_root/tests/fixtures/sanitizers/phase9h_tsan.supp}"
 tsan_options="${TSAN_OPTIONS:-halt_on_error=1:history_size=7:second_deadlock_stack=1}"
 using_default_tsan_suppressions=0
@@ -99,6 +109,11 @@ if [[ -n "$tsan_suppressions_file" && -f "$tsan_suppressions_file" && "$tsan_opt
 fi
 export TSAN_OPTIONS="$tsan_options"
 export XCTEST_LD_PRELOAD="$tsan_so"
+# An isolated instrumented dependency overlay is only applied to test/runtime
+# processes. Build tools continue using the normal bootstrap environment.
+if [[ -n "${ARLEN_TSAN_LIBRARY_PATH:-}" ]]; then
+  export ARLEN_XCTEST_LD_LIBRARY_PATH="$repo_root/vendor/tools-xctest/XCTest/obj:$ARLEN_TSAN_LIBRARY_PATH${ARLEN_XCTEST_LD_LIBRARY_PATH:+:$ARLEN_XCTEST_LD_LIBRARY_PATH}"
+fi
 
 # Opt-in flake hunting for the TSAN unit run (issue #113). Off by default:
 # repeating the whole unit suite under TSAN multiplies the lane's runtime.
@@ -123,8 +138,9 @@ set +e
   echo "ci: tsan unit test repetition ${unit_repeat_args[*]:-none}"
   make clean || exit $?
   make EXTRA_OBJC_FLAGS= EOC_TOOL="$bootstrap_eocc" eocc transpile module-transpile || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" boomhauer runtime-concurrency-fixture arlen || exit $?
-  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" -o "$bootstrap_eocc" ${unit_repeat_args[@]+"${unit_repeat_args[@]}"} test-unit || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" ARLEN_CC="$tsan_cc" -o "$bootstrap_eocc" boomhauer runtime-concurrency-fixture arlen || exit $?
+  make EXTRA_OBJC_FLAGS="$tsan_objc_flags" EOC_TOOL="$bootstrap_eocc" ARLEN_CC="$tsan_cc" -o "$bootstrap_eocc" ${unit_repeat_args[@]+"${unit_repeat_args[@]}"} test-unit || exit $?
+  LD_LIBRARY_PATH="${ARLEN_TSAN_LIBRARY_PATH:+$ARLEN_TSAN_LIBRARY_PATH:}${LD_LIBRARY_PATH:-}" \
   python3 ./tools/ci/runtime_concurrency_probe.py \
     --binary ./build/runtime-concurrency-fixture \
     --iterations "${ARLEN_TSAN_RUNTIME_ITERS:-1}" || exit $?

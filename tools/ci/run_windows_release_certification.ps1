@@ -20,6 +20,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+. (Join-Path $PSScriptRoot 'windows_installer_test_lock.ps1')
+$installerTestLock = Enter-ArlenInstallerTestLock
 $savedUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $savedProcessPath = $env:Path
 
@@ -178,6 +180,8 @@ exit $LASTEXITCODE
 } finally {
   $env:Path = $savedProcessPath
   [Environment]::SetEnvironmentVariable('Path', $savedUserPath, 'User')
+  $installerTestLock.ReleaseMutex()
+  $installerTestLock.Dispose()
   if (-not $KeepWorkDir) {
     $resolvedWork = [IO.Path]::GetFullPath($WorkDir)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

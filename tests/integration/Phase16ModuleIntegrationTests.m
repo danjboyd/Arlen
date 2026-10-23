@@ -11,6 +11,9 @@
 #import "ALNResponse.h"
 #import "ALNSearchModule.h"
 
+extern NSString *ALNEOCRender_modules_admin_ui_resources_index_html_eoc(id ctx, NSError **error);
+extern NSString *ALNEOCRender_modules_admin_ui_resources_show_html_eoc(id ctx, NSError **error);
+
 static NSMutableDictionary<NSString *, NSMutableDictionary *> *Phase16IntegrationOrderStore(void) {
   static NSMutableDictionary<NSString *, NSMutableDictionary *> *store = nil;
   if (store == nil) {
@@ -345,6 +348,31 @@ static void Phase16IntegrationResetOrderStore(void) {
 
 @implementation Phase16ModuleIntegrationTests
 
+- (void)testAdminResourceLinkTemplatesUseSafeTargets {
+  NSDictionary *resource = @{
+    @"singularLabel" : @"Link",
+    @"identifierField" : @"id",
+    @"primaryField" : @"id",
+    @"paths" : @{ @"html_index" : @"/admin/resources/links" },
+    @"fields" : @[ @{ @"name" : @"id", @"label" : @"ID", @"list" : @YES, @"detail" : @YES },
+                    @{ @"name" : @"dictLink", @"label" : @"Dict", @"kind" : @"link", @"list" : @YES, @"detail" : @YES },
+                    @{ @"name" : @"stringLink", @"label" : @"String", @"kind" : @"link", @"list" : @YES, @"detail" : @YES } ],
+  };
+  NSDictionary *record = @{ @"id" : @"one", @"dictLink" : @{ @"href" : @"javascript:alert(1)", @"label" : @"Unsafe" },
+                            @"stringLink" : @"data:text/html,unsafe" };
+  NSError *error = nil;
+  NSString *index = ALNEOCRender_modules_admin_ui_resources_index_html_eoc(
+      @{ @"resource" : resource, @"records" : @[ record ] }, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [[index componentsSeparatedByString:@"href=\"#\""] count] - 1);
+  XCTAssertFalse([index containsString:@"href=\"javascript:"]);
+  XCTAssertFalse([index containsString:@"href=\"data:"]);
+  NSString *show = ALNEOCRender_modules_admin_ui_resources_show_html_eoc(
+      @{ @"resource" : resource, @"record" : record }, &error);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)2, [[show componentsSeparatedByString:@"href=\"#\""] count] - 1);
+}
+
 - (void)setUp {
   [super setUp];
   Phase16IntegrationResetOrderStore();
@@ -384,6 +412,31 @@ static void Phase16IntegrationResetOrderStore(void) {
   XCTAssertNil(error);
   XCTAssertTrue([[[ALNOpsModule alloc] init] registerWithApplication:app error:&error]);
   XCTAssertNil(error);
+}
+
+- (void)testAdminCSVExportTreatsFormulaLikeCellsAsText {
+  Phase16IntegrationOrderStore()[@"ord-100"][@"order_number"] = @"=1+1";
+  Phase16IntegrationOrderStore()[@"ord-100"][@"owner_email"] = @"\t=HYPERLINK(\"https://example.test\",\"open\")";
+  Phase16IntegrationOrderStore()[@"ord-102"][@"order_number"] = @"+SUM(1,2)";
+  Phase16IntegrationOrderStore()[@"ord-102"][@"owner_email"] = @"@cmd";
+  ALNApplication *app = [self application];
+  NSError *error = nil;
+  XCTAssertTrue([[[ALNAdminUIModule alloc] init] registerWithApplication:app error:&error], @"%@", error);
+  NSDictionary *csvExport = [[ALNAdminUIModuleRuntime sharedRuntime]
+      exportPayloadForResourceIdentifier:@"orders" format:@"csv" parameters:@{} error:&error];
+  XCTAssertNotNil(csvExport, @"%@", error);
+  NSString *csv = [[NSString alloc] initWithData:csvExport[@"bodyData"] encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([csv containsString:@"\"'=1+1\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'\t=HYPERLINK(\"\"https://example.test\"\",\"\"open\"\")\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'+SUM(1,2)\""], @"%@", csv);
+  XCTAssertTrue([csv containsString:@"\"'@cmd\""], @"%@", csv);
+  XCTAssertTrue([csv hasPrefix:@"Order,Status,Owner,Total\n"], @"%@", csv);
+
+  NSDictionary *jsonExport = [[ALNAdminUIModuleRuntime sharedRuntime]
+      exportPayloadForResourceIdentifier:@"orders" format:@"json" parameters:@{} error:&error];
+  NSArray *jsonRows = [NSJSONSerialization JSONObjectWithData:jsonExport[@"bodyData"] options:0 error:&error];
+  XCTAssertNil(error);
+  XCTAssertTrue([[jsonRows description] containsString:@"=1+1"]);
 }
 
 - (ALNRequest *)requestWithMethod:(NSString *)method

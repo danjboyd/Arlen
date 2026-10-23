@@ -51,6 +51,11 @@ The ops module uses the shared operator/admin policy:
 - AAL2 step-up
 
 That same protection applies to both the HTML dashboard and the JSON routes.
+Operator responses contain job totals and queues, notification status cards,
+and storage counts, but omit individual job, outbox/fanout, and storage records.
+An `admin` role grants the full ops view. This rule also applies to module
+drilldowns; historical snapshots contain aggregate counts only. Upgrade
+vendored `ops` modules to 1.1.1 for this protection.
 
 ## Summary Model
 

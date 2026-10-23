@@ -1,4 +1,5 @@
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNAdminUIModule.h"
 
 #import <dispatch/dispatch.h>
@@ -194,11 +195,11 @@ static NSDictionary *AUQueryParametersFromBody(NSData *body) {
       name = [pair substringToIndex:separator.location];
       value = [pair substringFromIndex:(separator.location + 1)];
     }
-    NSString *decodedName = [[name stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding] ?: @"";
+    NSString *decodedName = ALNPercentDecodedString(name, YES) ?: @"";
     if ([decodedName length] == 0) {
       continue;
     }
-    NSString *decodedValue = [[value stringByReplacingOccurrencesOfString:@"+" withString:@" "] stringByRemovingPercentEncoding] ?: @"";
+    NSString *decodedValue = ALNPercentDecodedString(value, YES) ?: @"";
     parameters[decodedName] = decodedValue;
   }
   return parameters;
@@ -251,6 +252,23 @@ static NSString *AUStringifyValue(id value) {
     return AUTrimmedString(value[@"value"]);
   }
   return @"";
+}
+
+static NSString *AUCSVCell(NSString *rawValue, BOOL alwaysQuote) {
+  NSString *value = [rawValue isKindOfClass:[NSString class]] ? rawValue : @"";
+  if ([value length] > 0) {
+    unichar first = [value characterAtIndex:0];
+    BOOL formulaPrefix = first == '=' || first == '+' || first == '-' || first == '@';
+    BOOL leadingControl = first <= 0x20 || first == 0x7f ||
+        [[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:first];
+    if (formulaPrefix || leadingControl) {
+      value = [@"'" stringByAppendingString:value];
+    }
+  }
+  NSString *escaped = [value stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+  BOOL quote = alwaysQuote || [escaped rangeOfCharacterFromSet:
+      [NSCharacterSet characterSetWithCharactersInString:@",\"\r\n"]].location != NSNotFound;
+  return quote ? [NSString stringWithFormat:@"\"%@\"", escaped] : escaped;
 }
 
 static NSArray<NSDictionary *> *AUNormalizedChoiceArray(id rawChoices) {
@@ -1774,15 +1792,15 @@ static void AUNotifySearchIncrementalSync(NSString *resourceIdentifier, NSDictio
     NSMutableArray<NSString *> *rows = [NSMutableArray array];
     NSMutableArray<NSString *> *headers = [NSMutableArray array];
     for (NSDictionary *field in exportFields) {
-      [headers addObject:[AUTrimmedString(field[@"label"]) length] > 0 ? AUTrimmedString(field[@"label"]) : AUTrimmedString(field[@"name"])];
+      NSString *label = [AUTrimmedString(field[@"label"]) length] > 0
+                            ? AUTrimmedString(field[@"label"]) : AUTrimmedString(field[@"name"]);
+      [headers addObject:AUCSVCell(label, NO)];
     }
     [rows addObject:[headers componentsJoinedByString:@","]];
     for (NSDictionary *record in records) {
       NSMutableArray<NSString *> *values = [NSMutableArray array];
       for (NSDictionary *field in exportFields) {
-        NSString *value = [AUStringifyValue(record[field[@"name"]]) copy];
-        NSString *escaped = [[value stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""] copy];
-        [values addObject:[NSString stringWithFormat:@"\"%@\"", escaped ?: @""]];
+        [values addObject:AUCSVCell(AUStringifyValue(record[field[@"name"]]), YES)];
       }
       [rows addObject:[values componentsJoinedByString:@","]];
     }

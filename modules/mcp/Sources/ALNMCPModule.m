@@ -2,6 +2,7 @@
 #import "ALNPlatform.h"
 #import "ALNMCPSchema.h"
 #import "ALNAuth.h"
+#import "ALNAuthSession.h"
 #import "ALNOAuthResourceServer.h"
 #import "ALNJSONSerialization.h"
 #import "ALNLogger.h"
@@ -11,6 +12,7 @@
 #import "ALNResponse.h"
 #import "ALNRouter.h"
 #import "ALNRateLimitMiddleware.h"
+#import "ALNRoutePolicyMiddleware.h"
 #import "ALNResponseEnvelopeMiddleware.h"
 #import "ALNPositiveInteger.h"
 
@@ -519,11 +521,20 @@ static NSString *Encode(NSString *value) {
     if (params[@"cursor"]) { [self reply:nil code:-32602 message:@"Unknown cursor; catalog fits one page" identifier:identifier context:context]; return; }
     NSArray *sorted = [self.entries sortedArrayUsingComparator:^NSComparisonResult(ALNMCPEntry *a, ALNMCPEntry *b) { return [a.listing[@"name"] compare:b.listing[@"name"]]; }];
     NSMutableArray *list = [NSMutableArray array];
-    // List only tools whose route roles and scopes the caller holds. tools/call
-    // still runs the full route policy (roles, scopes, policies, assurance).
+    // Catalog checks use metadata and request identity only; no tool handler
+    // or route guard executes. tools/call still enforces the full route.
     for (ALNMCPEntry *entry in sorted) {
       if (![ALNAuth context:context hasRequiredRoles:entry.route.requiredRoles ?: @[]]) continue;
       if (![ALNAuth context:context hasRequiredScopes:entry.route.requiredScopes ?: @[]]) continue;
+      if (entry.route.minimumAuthAssuranceLevel > 0 ||
+          entry.route.maximumAuthenticationAgeSeconds > 0) {
+        if ([[context authSubject] length] == 0 ||
+            ![ALNAuthSession context:context
+                satisfiesMinimumAssuranceLevel:entry.route.minimumAuthAssuranceLevel
+              maximumAuthenticationAgeSeconds:entry.route.maximumAuthenticationAgeSeconds
+                                 referenceDate:nil]) continue;
+      }
+      if (![ALNRoutePolicyMiddleware context:context canListRoute:entry.route]) continue;
       [list addObject:entry.listing];
     }
     [self reply:@{@"tools":list} code:0 message:nil identifier:identifier context:context]; return;

@@ -49,6 +49,23 @@ static NSDictionary *ALNTemplateContextFromStash(NSDictionary *stash) {
   return [NSDictionary dictionaryWithDictionary:context];
 }
 
+static void ALNAddAcceptVary(ALNResponse *response) {
+  NSArray<NSString *> *values = [response headerValuesForName:@"Vary"];
+  NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+  for (NSString *value in values ?: @[]) {
+    for (NSString *component in [value componentsSeparatedByString:@","]) {
+      NSString *token = [component stringByTrimmingCharactersInSet:
+          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+      if ([token length] == 0) continue;
+      if ([token caseInsensitiveCompare:@"Accept"] == NSOrderedSame ||
+          [token isEqualToString:@"*"]) return;
+      [tokens addObject:token];
+    }
+  }
+  [tokens addObject:@"Accept"];
+  [response setHeader:@"Vary" value:[tokens componentsJoinedByString:@", "]];
+}
+
 static NSString *ALNJSONStringFromObject(id value) {
   if (value == nil || value == [NSNull null]) {
     return @"";
@@ -360,11 +377,16 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
                       jsonObject:(id)jsonObject
                            error:(NSError **)error {
   if ([self.context wantsJSON]) {
-    id payload = jsonObject ?: context ?: @{};
-    return [self renderJSON:payload error:error];
+    // Template context often contains CSRF tokens and app-only values. JSON
+    // output must be an explicit object supplied for the API representation.
+    BOOL rendered = [self renderJSON:jsonObject ?: @{} error:error];
+    if (rendered) ALNAddAcceptVary(self.context.response);
+    return rendered;
   }
   NSDictionary *effectiveContext = context ?: [self templateContext];
-  return [self renderTemplate:templateName context:effectiveContext error:error];
+  BOOL rendered = [self renderTemplate:templateName context:effectiveContext error:error];
+  if (rendered) ALNAddAcceptVary(self.context.response);
+  return rendered;
 }
 
 - (BOOL)renderJSON:(id)object error:(NSError **)error {
@@ -521,7 +543,7 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
   }
 
   NSDictionary *payload = [ALNLive validatedPayloadWithOperations:operations
-                                                             meta:ALNLiveMeta(self.context)
+                                                             meta:@{}
                                                             error:error];
   if (payload == nil) {
     return 0;
@@ -555,19 +577,8 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
                                context:(NSDictionary *)context
                              onChannel:(NSString *)channel
                                  error:(NSError **)error {
-  NSDictionary *effectiveContext = context ?: [self templateContext];
-  NSString *rendered = [self renderedTemplateString:templateName
-                                            context:effectiveContext
-                               defaultLayoutEnabled:NO
-                                             error:error];
-  if (rendered == nil) {
-    return 0;
-  }
-
-  NSDictionary *liveMetadata = [self liveMetadata];
-  NSString *effectiveContainer =
-      ([container length] > 0) ? container : liveMetadata[@"container"];
-  NSString *effectiveKey = ([key length] > 0) ? key : liveMetadata[@"key"];
+  NSString *effectiveContainer = container;
+  NSString *effectiveKey = key;
   if ([effectiveContainer length] == 0 || [effectiveKey length] == 0) {
     if (error != NULL) {
       *error = [NSError errorWithDomain:@"Arlen.Live.Error"
@@ -581,6 +592,16 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
     }
     return 0;
   }
+
+  NSDictionary *effectiveContext = context ?: [self templateContext];
+  NSString *rendered = [self renderedTemplateString:templateName
+                                            context:effectiveContext
+                               defaultLayoutEnabled:NO
+                                             error:error];
+  if (rendered == nil) {
+    return 0;
+  }
+
 
   NSDictionary *operation = [ALNLive upsertKeyedOperationForContainer:effectiveContainer
                                                                   key:effectiveKey

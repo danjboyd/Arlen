@@ -26,6 +26,12 @@ Current scope on `main`:
 Development is the supported scope. Production hosting stays out of scope
 until 0.4.0; see the support statement below.
 
+Windows watch mode contains each app or build-error server in a native
+kill-on-close job and monitors the watch shell. Force-killing the watch tree
+also stops its server and releases its listen port, including when invoking
+`bin/boomhauer` directly from CLANG64. Changes to the native watch helper header
+invalidate packaged prebuilt trust so the framework tools rebuild before use.
+
 ## 1. Host Entry Path
 
 Windows framework, application and test builds set `_FILE_OFFSET_BITS=64`.
@@ -250,8 +256,10 @@ Not planned:
   64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
 - **Production: not supported until 0.4.0.** Deploy production apps to Linux,
   the authoritative production baseline, or to macOS.
-- The `windows-preview` CI lane runs `make phase24-windows-confidence` and
-  `make test-unit`. `make windows-confidence` (packaged release and deploy
+- The `windows-preview` CI lane runs `make phase24-windows-confidence`,
+  `make test-unit`, and `make test-integration` serially, retaining focused
+  static/realtime security checks and explicit platform/live-service skips.
+  The job keeps its 90-minute budget. `make windows-confidence` (packaged release and deploy
   parity) is a manual lane until Windows production support lands in 0.4.0.
 
 ## Installer Regression Checks
@@ -279,3 +287,21 @@ then scaffolds, builds and serves a generated app. Use
 exit. See [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for setup,
 offline options, and the distinction between an in-process installer and a
 child PowerShell process.
+
+## Opt-in llhttp validation
+
+Windows keeps llhttp disabled by default. Set `ARLEN_ENABLE_LLHTTP=1` explicitly
+to build the alternative parser; its headers precede Foundation's WinInet status
+macros, and both framework tools and generated apps link the managed toolchain's
+winpthreads library. Changing this flag invalidates the existing build sentinel
+and rebuilds the vendored XCTest runner. CI retains default-backend acceptance
+and separately runs request-parser and body-limit security regressions with
+llhttp enabled; this does not expand Windows production support.
+
+## Rejected HTTP requests
+
+Parser rejections and HTTP session/worker queue admission rejections send their
+HTTP error response before a bounded graceful close. Pending input is discarded
+under a 64 KiB/100 ms budget per rejected connection, preventing an unread
+pipelined tail from truncating an ordinary rejection response with a
+Winsock reset. The body-clock matrix covers spooled and in-memory requests.

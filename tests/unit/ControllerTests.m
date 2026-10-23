@@ -46,6 +46,29 @@ static NSString *RenderControllerAlternateLayout(id ctx, NSError **error) {
 
 @implementation ControllerTests
 
+- (void)testNegotiatedRenderDoesNotSerializeTemplateContextAndVariesOnAccept {
+  ControllerTestHarness *jsonController = [self freshController];
+  jsonController.context.stash[ALNContextRequestFormatStashKey] = @"json";
+  [jsonController.context.response setHeader:@"Vary" value:@"Accept-Encoding"];
+  NSError *error = nil;
+  XCTAssertTrue([jsonController renderNegotiatedTemplate:@"pages/show"
+                                               context:@{ @"csrfToken" : @"template-only-value" }
+                                            jsonObject:nil error:&error], @"%@", error);
+  XCTAssertNil(error);
+  id json = [NSJSONSerialization JSONObjectWithData:jsonController.context.response.bodyData
+                                             options:0 error:&error];
+  XCTAssertEqualObjects(@{}, json);
+  XCTAssertEqualObjects(@"Accept-Encoding, Accept", [jsonController.context.response headerForName:@"Vary"]);
+
+  ALNEOCRegisterTemplate(@"pages/show.html.eoc", &RenderControllerPage);
+  ControllerTestHarness *htmlController = [self freshController];
+  XCTAssertTrue([htmlController renderNegotiatedTemplate:@"pages/show"
+                                               context:@{ @"csrfToken" : @"template-only-value" }
+                                            jsonObject:@{ @"public" : @YES } error:&error], @"%@", error);
+  XCTAssertEqualObjects(@"body", [self responseBodyText:htmlController.context.response]);
+  XCTAssertEqualObjects(@"Accept", [htmlController.context.response headerForName:@"Vary"]);
+}
+
 - (void)testSSERejectsInjectedEventFields {
   ControllerTestHarness *controller = [self freshController];
   [controller renderSSEEvents:@[

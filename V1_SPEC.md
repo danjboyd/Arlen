@@ -172,6 +172,9 @@ Behavior:
 - `yield` defaults to the `content` slot.
 - `slot` captures rendered output until the matching `endslot`.
 - Body output is exposed as the `content` slot when a layout is rendered through `ALNView`.
+- Unfilled slots that fall back to context values are escaped, including an
+  unfilled `content` slot. Captured rendered body and named slot output remain
+  raw HTML in the slot map.
 - Layout paths are normalized to `.html.eoc`.
 - Named-slot fallback/default content remains layout-owned in v1; callers either fill a
   slot or let the layout render its own fallback markup around the corresponding `yield`

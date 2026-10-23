@@ -321,6 +321,10 @@ esac
 framework_root="$(normalize_host_path "$framework_root")"
 framework_root="$(cd "$framework_root" && pwd -P)"
 
+if [[ "$(uname -s)" == Linux && -f "$framework_root/tools/source_gnustep_env.sh" ]]; then
+  source "$framework_root/tools/source_gnustep_env.sh" >/dev/null || exit 1
+fi
+
 app_root="$(normalize_host_path "$app_root")"
 app_root="$(cd "$app_root" && pwd -P)"
 
@@ -375,11 +379,14 @@ fi
 
 # The heredoc lives in a function: bash 3.2 misparses one nested in < <(...).
 emit_config_values() {
-  python3 - "$1" <<'PY'
+  # Keep merged secrets out of the Python process's argument list. stdin is
+  # the program; a separate inherited descriptor carries the configuration.
+  python3 - 3<<<"$1" <<'PY'
 import json
-import sys
+import os
 
-cfg = json.loads(sys.argv[1])
+with os.fdopen(3) as config_input:
+    cfg = json.load(config_input)
 accessories = cfg.get("propaneAccessories") or {}
 cluster = cfg.get("cluster") or {}
 
@@ -411,6 +418,7 @@ def as_str(value, default=""):
 print(f"config_host={cfg.get('host', '127.0.0.1')}")
 print(f"config_port={as_int(cfg.get('port', 3000), 3000, 1)}")
 print(f"config_workers={as_int(accessories.get('workerCount', 4), 4, 1)}")
+print(f"config_rate_limit_enabled={1 if as_bool((cfg.get('rateLimit') or {}).get('enabled', False), False) else 0}")
 print(f"config_graceful_shutdown_seconds={as_int(accessories.get('gracefulShutdownSeconds', 10), 10, 1)}")
 print(f"config_respawn_delay_ms={as_int(accessories.get('respawnDelayMs', 250), 250, 0)}")
 print(f"config_reload_overlap_seconds={as_int(accessories.get('reloadOverlapSeconds', 1), 1, 0)}")
@@ -444,6 +452,7 @@ while IFS='=' read -r key value; do
     config_host) config_host="$value" ;;
     config_port) config_port="$value" ;;
     config_workers) config_workers="$value" ;;
+    config_rate_limit_enabled) config_rate_limit_enabled="$value" ;;
     config_graceful_shutdown_seconds) config_graceful_shutdown_seconds="$value" ;;
     config_respawn_delay_ms) config_respawn_delay_ms="$value" ;;
     config_reload_overlap_seconds) config_reload_overlap_seconds="$value" ;;
@@ -670,6 +679,10 @@ export ARLEN_APP_ROOT="$app_root"
 export ARLEN_FRAMEWORK_ROOT="$framework_root"
 # Workers use this to warn when process-local state (websocket channels) cannot
 # reach the other workers.
+if (( worker_count > 1 && ${config_rate_limit_enabled:-0} == 1 )); then
+  echo "propane: rateLimit.enabled requires one worker because the built-in rate limiter is process-local. Use --workers 1, or disable rateLimit.enabled and enforce the request budget at ingress." >&2
+  exit 1
+fi
 export ARLEN_PROPANE_WORKERS="$worker_count"
 export ARLEN_LISTEN_BACKLOG="$listen_backlog"
 export ARLEN_CONNECTION_TIMEOUT_SECONDS="$connection_timeout_seconds"

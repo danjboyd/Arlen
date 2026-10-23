@@ -122,6 +122,8 @@ Generated apps start with:
   and chunked bodies, and bodies that stream to the spool file. A slower body
   gets `408`, the connection closes and any spool file is removed. `0` turns it
   off. Raise it with `maxBodyBytes` for very large uploads over slow links.
+  The deadline is checked again when the final body bytes arrive, before the
+  request is accepted; completing the body does not bypass an expired clock.
 - `requestBodyMinBytesPerSecond` (default `1024`; env
   `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND`) and
   `requestBodyMinRateGraceSeconds` (default `10`; env
@@ -130,6 +132,9 @@ Generated apps start with:
   second, or the request gets `408`. A client trickling a body is closed long
   before the total deadline; slow but real uploads (1 KiB/s is far below any
   mobile link) are not. `0` turns the rate check off.
+  This check also applies to the final fragment. Bytes from a following
+  pipelined request do not count toward the preceding body's rate, and each
+  keep-alive request starts its own body clock.
 
 Raise these only for real application needs. The defaults are intentionally
 bounded.
@@ -146,12 +151,25 @@ and allows one file part to use all of it. Bodies above `spoolThresholdBytes`
 stream to disk (see [Multipart Uploads](MULTIPART_UPLOADS.md)).
 
 Chunked request bodies (`Transfer-Encoding: chunked`) are accepted by the
-default `llhttp` parser. They are buffered in memory, never spooled, and their
-decoded size is held to `requestLimits.maxBodyBytes`; a per-route override
-can't be checked before the body arrives, because there is no
-`Content-Length`. Only the request head (request line and headers) counts
-toward `maxHeaderBytes`, not the chunk-size lines. The legacy parser
-(`ARLEN_HTTP_PARSER_BACKEND=legacy`) rejects chunked bodies with `400`.
+`llhttp` parser. The server decodes each received byte once, applies the selected
+route's body limit to decoded bytes as they arrive, and returns `413` before
+storing bytes beyond that limit. A larger upload route does not raise another
+route's limit. Decoded bodies above `spoolThresholdBytes` stream to private spool
+files while the upload is still arriving; success transfers file ownership to
+the request, and rejection, malformed framing, disconnects, and exceptions clean
+up incomplete files. Only the request head counts toward `maxHeaderBytes`.
+
+Windows parser and HTTP admission rejections use a bounded graceful connection
+close to preserve the HTTP error response when later input is already queued.
+Cleanup discards at most 64 KiB within a 100 ms budget per rejected connection
+before releasing the socket, including session-limit and worker-queue `503`s.
+
+The existing encoded envelope cap (maximum configured body allowance plus header
+allowance) also bounds chunk framing and trailers. Pipelined requests remain
+separate. On Windows, each chunked spool is created exclusively with a protected
+DACL granting access only to the process token user before any payload is written;
+the file handle is not inherited by child processes. The legacy parser (`ARLEN_HTTP_PARSER_BACKEND=legacy`) continues to
+reject chunked bodies with `400`; it is Windows' default build backend.
 
 Other request-head rules:
 
@@ -221,7 +239,10 @@ Environment overrides:
 
 This is an operator/developer intent signal. Arlen does not claim it can
 statically prove every app-owned store is durable. The signal drives production
-doctor/deploy warnings for multi-worker apps.
+doctor/deploy warnings for multi-worker apps. A database URL or deploy database
+contract alone does not prove that sessions or other request-spanning app state
+use that database. In production-like environments, set `state.durable = YES`
+only after verifying those stores are shared across workers.
 
 ## 4.1a Storage Module Signing Secret
 
@@ -503,7 +524,8 @@ startup with deterministic diagnostics.
 
 Policy keys:
 
-- `pathPrefixes`: URL path prefixes protected by the policy
+- `pathPrefixes`: URL path prefixes protected by the policy, including requests
+  with a format suffix that dispatch to a matching route
 - `sourceIPAllowlist`: IPv4 or IPv6 CIDR ranges allowed through the outer gate
 - `requireAuth`: deny when the request has no authenticated subject
 - `trustForwardedClientIP`: allow the policy to use proxy-provided client IP
@@ -795,20 +817,18 @@ to `claimTrustedEmail:`.
 When it is not set, the `development` and `test` environments fall back to the
 request's scheme and `Host` header so local sign-up keeps working. In other
 environments, durable auth mail configuration fails startup without this value.
-Explicit synchronous compatibility mode sends no link, logs a warning, and
-keeps the generic response. `claimTrustedEmail:` keeps taking its `baseURL`
-from the caller.
+`claimTrustedEmail:` keeps taking its `baseURL` from the caller.
 
 `authModule.mailDispatch.mode` accepts `durable` or `synchronous`. When a
 PostgreSQL `ALNDurableJobAdapter` and the jobs module are registered, durable
 dispatch is selected automatically. Production-like environments with local
-passwords and a mail adapter fail startup without that setup unless they
-explicitly select `synchronous`. Durable dispatch enqueues generic
+passwords and a mail adapter fail startup without that setup. Explicit
+`synchronous` mode also fails startup outside `development` and `test` when
+local passwords and mail are enabled. Durable dispatch enqueues generic
 `auth.mail.dispatch` jobs on `auth_mail`: registration commits user and job
 together, and password reset enqueues for both known and unknown addresses.
 Run a jobs worker for delivery. A queue failure returns 503 without reporting
-whether an account exists. The synchronous mode can expose account membership
-through mail provider latency; reserve it for compatibility.
+whether an account exists. Development and test may use synchronous mail.
 
 ## Auth Module Registration Privacy
 
@@ -817,7 +837,8 @@ addresses receive the same accepted registration response without an
 authenticated session. A new address receives one verification message when
 email links are configured; an existing account is unchanged. Set `YES` only
 for compatibility with the previous immediate sign-in flow, which reports
-duplicate addresses and can reveal account membership. See
+duplicate addresses and can reveal account membership. Outside `development`
+and `test`, `YES` is rejected at startup. See
 [Auth Module](AUTH_MODULE.md).
 
 ## Auth Module Sessions
@@ -888,9 +909,16 @@ Environment overrides are `ARLEN_RESPONSE_SEND_TIMEOUT_SECONDS`,
 `ARLEN_RESPONSE_MIN_RATE_GRACE_SECONDS`. SSE and WebSocket sessions use their
 separate streaming lifecycle and are exempt from these bulk-transfer limits.
 
-The built-in `rateLimit` budget is **per worker**. With four propane workers,
-a client can receive up to four times `rateLimit.requests` in one window by
-opening connections across workers. Startup logs `rate limit is per worker`
-when rate limiting and multiple workers are configured. Use an ingress rate
-limiter for a deployment-wide quota; authentication's account attempt limits
-are separate from this request middleware.
+The built-in `rateLimit` stores its budget in one process. Startup refuses
+`rateLimit.enabled = YES` with more than one configured worker, including the
+default four propane workers. This prevents multiplying the configured request
+budget across independent workers. `ARLEN_PROPANE_WORKERS` (legacy alias
+`MOJOOBJC_PROPANE_WORKERS`) and propane's `--workers` override are enforced.
+
+Migration from v0.3.0: select `propaneAccessories.workerCount = 1` or
+`propane --workers 1` to retain the built-in limiter. For multiple workers,
+disable `rateLimit.enabled` and enforce the request budget at ingress before
+starting the app. Generated apps keep rate limiting disabled by default.
+Authentication's account attempt limits are separate from this request
+middleware. The built-in limiter does not provide a quota across independent
+app instances or hosts.

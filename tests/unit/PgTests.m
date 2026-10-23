@@ -41,6 +41,7 @@ extern NSData *ALNPgDataFromByteaString(NSString *value);
 extern NSString *ALNPgTimestampStringFromDate(NSDate *value);
 extern NSDate *ALNPgDateFromTimestampString(NSString *value);
 extern NSDate *ALNPgDateFromDateString(NSString *value);
+extern BOOL ALNPgServerIsReady(NSString *connectionString);
 
 // Some GNUstep tagged-date runtimes represent an exact zero reference interval
 // as two seconds; build test dates the way ALNPg's decoder does.
@@ -297,6 +298,14 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
 }
 
 #pragma mark - Text codecs (issues #233 and #234, no live DB required)
+
+- (void)testReadinessProbeRejectsEmptyNULAndMalformedConnectionStrings {
+  XCTAssertFalse(ALNPgServerIsReady(nil));
+  XCTAssertFalse(ALNPgServerIsReady(@""));
+  NSString *withNUL = [NSString stringWithFormat:@"host=127.0.0.1%Cignored", (unichar)0];
+  XCTAssertFalse(ALNPgServerIsReady(withNUL));
+  XCTAssertFalse(ALNPgServerIsReady(@"arlen_invalid_option=value"));
+}
 
 - (void)testTimestampDecoderMatchesPostgresProlepticGregorianCalendar {
   // Expected seconds since 2001-01-01 UTC, computed independently.
@@ -1497,6 +1506,37 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqual((NSUInteger)2, connection.livenessCheckCount);
 }
 
+- (void)testOversizedNumericValuesFailDecodingWithoutKillingTheConnection {
+  NSString *dsn = [self pgTestDSN];
+  XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  NSError *error = nil;
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:dsn maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  XCTAssertNil(error);
+  if (!database) return;
+  for (NSString *value in @[ @"9999999999999999999999999999999999999999999999999",
+                             @"999999999999999999999999999999999999999",
+                             @"1e50", @"-1e50", @"0.00000000000000000000000000000000000000000000000001" ]) {
+    for (NSString *sql in @[ @"SELECT $1::numeric AS amount", @"SELECT ARRAY[$1::numeric] AS amounts" ]) {
+      error = nil;
+      XCTAssertNil([database executeQuery:sql parameters:@[value] error:&error]);
+      XCTAssertNotNil(error, @"oversized numeric must produce a decode error: %@", value);
+      error = nil;
+      NSArray *rows = [database executeQuery:@"SELECT 19.75::numeric AS amount" parameters:@[] error:&error];
+      XCTAssertNil(error);
+      XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:@"19.75"], rows.firstObject[@"amount"]);
+    }
+  }
+  for (NSString *value in @[ @"99999999999999999999999999999999999999",
+                             @"-9999999999999999999.9999999999999999999",
+                             @"0.0000000000000000000000000000000000001" ]) {
+    error = nil;
+    NSArray *rows = [database executeQuery:@"SELECT $1::numeric AS amount" parameters:@[value] error:&error];
+    XCTAssertNil(error);
+    XCTAssertEqualObjects([NSDecimalNumber decimalNumberWithString:value], rows.firstObject[@"amount"]);
+  }
+}
+
 - (void)testPostgresRowsMaterializeTypedValuesForSupportedScalarColumns {
   NSString *dsn = [self pgTestDSN];
   XCTSkipUnless([dsn length] > 0, @"ARLEN_PG_TEST_DSN is not set");
@@ -1861,6 +1901,20 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertFalse(savepointOK);
   XCTAssertNotNil(savepointError);
 
+  BOOL caught = NO;
+  @try {
+    ALNDatabaseWithSavepoint((id<ALNDatabaseConnection>)connection, @"phase20_throwing",
+                            ^BOOL(NSError **blockError) {
+      XCTAssertEqual((NSInteger)1, [connection executeCommand:insertSQL
+          parameters:@[ @"must-not-commit" ] error:blockError]);
+      [NSException raise:@"PgSavepointFailure" format:@"intentional inner exception"];
+      return NO;
+    }, NULL);
+  } @catch (NSException *exception) {
+    caught = [exception.name isEqualToString:@"PgSavepointFailure"];
+  }
+  XCTAssertTrue(caught);
+
   XCTAssertEqual((NSInteger)1,
                  [connection executeCommand:insertSQL parameters:@[ @"boomhauer" ] error:&error]);
   XCTAssertNil(error);
@@ -1876,10 +1930,29 @@ static NSDate *PgTestDate(NSTimeInterval interval) {
   XCTAssertEqualObjects(@3, [countResult scalarValueForColumn:@"count" error:&error]);
   XCTAssertNil(error);
 
-  (void)[connection executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
-                        parameters:@[]
-                             error:nil];
+  // If the body invalidates its own savepoint and then throws, rollback cannot
+  // restore that scope. The adapter must close the unsafe connection.
+  XCTAssertTrue([connection beginTransaction:&error]);
+  caught = NO;
+  @try {
+    [connection withSavepointNamed:@"phase20_invalidated" usingBlock:^BOOL(NSError **blockError) {
+      XCTAssertEqual((NSInteger)1, [connection executeCommand:insertSQL
+          parameters:@[ @"must-not-commit-after-rollback-failure" ] error:blockError]);
+      XCTAssertTrue([connection releaseSavepointNamed:@"phase20_invalidated" error:blockError]);
+      [NSException raise:@"PgSavepointFailure" format:@"invalidated savepoint"];
+      return NO;
+    } error:NULL];
+  } @catch (NSException *exception) {
+    caught = [exception.name isEqualToString:@"PgSavepointFailure"];
+  }
+  XCTAssertTrue(caught);
+  XCTAssertFalse(connection.isOpen);
   [database releaseConnection:connection];
+  NSDictionary *row = [[database executeQuery:
+      [NSString stringWithFormat:@"SELECT COUNT(*) AS count FROM %@", table] parameters:@[] error:&error] firstObject];
+  XCTAssertEqualObjects(@3, row[@"count"]);
+  (void)[database executeCommand:[NSString stringWithFormat:@"DROP TABLE IF EXISTS %@", table]
+                      parameters:@[] error:NULL];
 }
 
 - (void)testTransactionHelperCommitAndRollback {

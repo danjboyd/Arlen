@@ -92,7 +92,12 @@
   (void)runtime;
   (void)error;
   return @{
-    @"url" : @"https://hooks.example.test/digest",
+    @"url" : [payload[@"webhookSecret"] isKindOfClass:[NSString class]]
+                 ? [@"https://hooks.example.test/digest?token=" stringByAppendingString:payload[@"webhookSecret"]]
+                 : @"https://hooks.example.test/digest",
+    @"headers" : [payload[@"webhookSecret"] isKindOfClass:[NSString class]]
+                     ? @{ @"Authorization" : [@"Bearer " stringByAppendingString:payload[@"webhookSecret"]] }
+                     : @{},
     @"body" : @{
       @"recipient" : payload[@"recipient"] ?: @"",
       @"name" : payload[@"name"] ?: @"",
@@ -302,6 +307,46 @@
   XCTAssertEqualObjects(@YES, inboxSummary[@"entries"][0][@"read"]);
   XCTAssertEqualObjects(@NO,
                         [runtime notificationPreferencesForRecipient:@"persist-user"][@"phase16b.digest"][@"email"]);
+}
+
+- (void)testWebhookSecretsAreAbsentFromDurableOutboxAndLegacyEntriesAreScrubbed {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"notifications-state.plist"];
+  NSError *error = nil;
+  ALNNotificationsCatalog *catalog = [[ALNNotificationsCatalog alloc]
+      initWithPath:[statePath stringByAppendingString:@".sqlite3"] legacyPath:statePath error:&error];
+  XCTAssertNotNil(catalog);
+  XCTAssertNil(error);
+  NSDictionary *legacyEntry = @{ @"entryID" : @"old-webhook", @"channel" : @"webhook",
+                                @"recipient" : @"https://hooks.example.test/?token=legacy-secret",
+                                @"message" : @{ @"url" : @"https://hooks.example.test/?token=legacy-secret",
+                                                  @"headers" : @{ @"Authorization" : @"Bearer legacy-secret" },
+                                                  @"method" : @"POST" },
+                                @"error" : @"Bearer legacy-secret" };
+  NSDictionary *legacyState = @{ @"version" : @1, @"outboxEntries" : @[ legacyEntry ],
+                                 @"inboxByRecipient" : @{}, @"preferencesByRecipient" : @{},
+                                 @"recentFanoutEvents" : @[], @"nextEntrySequence" : @1 };
+  XCTAssertTrue([catalog writeState:legacyState error:&error]);
+  XCTAssertNil(error);
+
+  ALNApplication *app = [self applicationWithStatePath:statePath];
+  [self registerModulesForApplication:app];
+  ALNNotificationsModuleRuntime *runtime = [ALNNotificationsModuleRuntime sharedRuntime];
+  NSDictionary *payload = @{ @"recipient" : @"reader", @"email" : @"reader@example.test",
+                             @"name" : @"Reader", @"webhookSecret" : @"new-secret" };
+  NSDictionary *result = [runtime testSendNotificationIdentifier:@"phase16b.digest" payload:payload
+                                                        channels:@[ @"webhook" ] error:&error];
+  XCTAssertNotNil(result);
+  XCTAssertNil(error);
+  NSArray *outbox = [self persistedStateAtPath:statePath][@"outboxEntries"];
+  XCTAssertEqual((NSUInteger)2, [outbox count]);
+  for (NSDictionary *entry in outbox) {
+    NSString *serialized = [entry description];
+    XCTAssertFalse([serialized containsString:@"legacy-secret"]);
+    XCTAssertFalse([serialized containsString:@"new-secret"]);
+    XCTAssertFalse([serialized containsString:@"Authorization"]);
+    XCTAssertEqualObjects(@"webhook", entry[@"recipient"]);
+    XCTAssertNil(entry[@"message"][@"url"]);
+  }
 }
 
 - (void)testInAppDeliveryPublishesRealtimeFanout {

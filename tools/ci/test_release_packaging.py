@@ -29,6 +29,16 @@ class SourceArchiveTests(unittest.TestCase):
             self.assertTrue(all(n == "arlen-9.8.7" or n.startswith("arlen-9.8.7/") for n in names))
             self.assertIn("arlen-9.8.7/bin/arlen", names)
             self.assertIn("arlen-9.8.7/tools/install.sh", names)
+            self.assertIn("arlen-9.8.7/tools/setup_runtime.py", names)
+            self.assertIn("arlen-9.8.7/tools/ci/setup_normal_runtime.sh", names)
+            self.assertIn("arlen-9.8.7/tests/fixtures/runtime/icu_runtime_contract.m", names)
+            self.assertIn("arlen-9.8.7/tools/runtime/patches/libdispatch-clang21.patch", names)
+            self.assertIn("arlen-9.8.7/tests/fixtures/runtime/epoll_mask_contract.c", names)
+            for target in ("debian-13-amd64", "debian-13-arm64", "ubuntu-26.04-amd64"):
+                self.assertIn(f"arlen-9.8.7/tools/runtime/{target}.lock.json", names)
+            for component in ("libobjc2", "libdispatch", "libs-base"):
+                self.assertIn(f"arlen-9.8.7/tools/ci/tsan-toolchain/{component}.patch", names)
+            self.assertNotIn("arlen-9.8.7/.arlen-runtime", names)
             self.assertIn("arlen-9.8.7/vendor/tools-xctest/GNUmakefile", names)
             self.assertFalse(any("/.git/" in n or n.endswith("/.git") for n in names))
             self.assertFalse(any(n.startswith("arlen-9.8.7/vendor/gnustep-cli-new/") for n in names))
@@ -44,6 +54,50 @@ class SourceArchiveTests(unittest.TestCase):
              "--version", "latest", "--kind", "source"],
             cwd=REPO_ROOT, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
+
+
+class LinuxBootstrapTrustTests(unittest.TestCase):
+    def test_matching_remote_checksum_cannot_replace_pinned_bootstrap(self):
+        installer = (REPO_ROOT / "tools/install.sh").read_text()
+        start = installer.index("  if ! linux_toolchain_ready; then\n")
+        end = installer.index("\n  fi\n  linux_toolchain_ready", start) + len("\n  fi")
+        fragment = installer[start:end]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "substitute-bootstrap.sh"
+            marker = root / "bootstrap-executed"
+            payload.write_text('#!/bin/sh\nprintf executed > "$ARLEN_TEST_BOOTSTRAP_MARKER"\n')
+            script = r'''
+set -euo pipefail
+linux_toolchain_ready() { return 1; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+sha256_of() {
+  python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+}
+curl() {
+  local output='' url=''
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -o) output="$2"; shift 2 ;;
+      -*) shift ;;
+      *) url="$1"; shift ;;
+    esac
+  done
+  case "$url" in
+    *.sha256) printf '%s  gnustep-bootstrap.sh\n' "$(sha256_of "$ARLEN_TEST_BOOTSTRAP_PAYLOAD")" > "$output" ;;
+    *) cp "$ARLEN_TEST_BOOTSTRAP_PAYLOAD" "$output" ;;
+  esac
+}
+setup_fragment() {
+''' + fragment + '\n}\nsetup_fragment\n'
+            environment = dict(os.environ, work_dir=directory,
+                               ARLEN_TEST_BOOTSTRAP_PAYLOAD=str(payload),
+                               ARLEN_TEST_BOOTSTRAP_MARKER=str(marker))
+            result = subprocess.run(["bash", "-c", script], env=environment,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("GNUstep bootstrap checksum mismatch", result.stderr)
+            self.assertFalse(marker.exists(), "untrusted bootstrap must not execute")
 
 
 class InstallPathHintTests(unittest.TestCase):

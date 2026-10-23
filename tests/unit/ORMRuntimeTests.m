@@ -5,6 +5,7 @@
 #import "../shared/ALNDatabaseTestSupport.h"
 #import "../shared/ALNTestSupport.h"
 #import "ALNPg.h"
+#import "ALNMSSQL.h"
 #import "ArlenORM/ArlenORM.h"
 
 static NSDictionary *ALNORMRuntimeFixtureMetadata(void) {
@@ -514,6 +515,38 @@ static ALNORMModelDescriptor *ALNORMRuntimeAuditEntriesDescriptor(void) {
   return success;
 }
 
+@end
+
+// Exercise the shared savepoint fallback rather than the fake's convenience method.
+@interface ORMRuntimeFallbackSavepointAdapter : ORMRuntimeFakeAdapter
+@end
+@implementation ORMRuntimeFallbackSavepointAdapter
+- (BOOL)respondsToSelector:(SEL)selector {
+  if (selector == @selector(withSavepointNamed:usingBlock:error:)) return NO;
+  return [super respondsToSelector:selector];
+}
+@end
+
+@interface ORMRuntimeMSSQLSavepointProbe : ALNMSSQLConnection
+@property(nonatomic, strong) NSMutableArray *events;
+@property(nonatomic) BOOL rollbackSucceeds;
+@end
+@implementation ORMRuntimeMSSQLSavepointProbe
+- (instancetype)init {
+  self = [super init];
+  if (self) { _events = [NSMutableArray array]; _rollbackSucceeds = YES; }
+  return self;
+}
+- (BOOL)createSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name; (void)error; [self.events addObject:@"CREATE"]; return YES;
+}
+- (BOOL)rollbackToSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name; (void)error; [self.events addObject:@"ROLLBACK"]; return self.rollbackSucceeds;
+}
+- (BOOL)releaseSavepointNamed:(NSString *)name error:(NSError **)error {
+  (void)name; (void)error; [self.events addObject:@"RELEASE"]; return YES;
+}
+- (void)close { [self.events addObject:@"CLOSE"]; }
 @end
 
 static ALNORMWriteOptions *ALNORMRuntimeAuditWriteOptions(void) {
@@ -1125,6 +1158,77 @@ static ALNORMContext *ALNORMRuntimeConfiguredAuditContext(ORMRuntimeFakeAdapter 
   XCTAssertEqual(ALNORMModelStateDetached, first.state);
   XCTAssertEqual((NSUInteger)0, context.queryCount);
   XCTAssertEqual((NSUInteger)0, [context.queryEvents count]);
+}
+
+- (void)testThrowingTransactionDoesNotLeaveAConnectionInTheContext {
+  ORMRuntimeFakeAdapter *adapter = [[ORMRuntimeFakeAdapter alloc] initWithAdapterName:@"postgresql"];
+  ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+  BOOL caught = NO;
+  @try {
+    [context withTransactionUsingBlock:^BOOL(NSError **error) {
+      (void)error;
+      [NSException raise:@"ORMBodyFailure" format:@"intentional transaction failure"];
+      return NO;
+    } error:NULL];
+  } @catch (NSException *exception) {
+    caught = [exception.name isEqualToString:@"ORMBodyFailure"];
+  }
+  XCTAssertTrue(caught);
+  XCTAssertTrue([context withTransactionUsingBlock:^BOOL(NSError **error) {
+    (void)error;
+    return YES;
+  } error:NULL]);
+  // Reuse must enter a new adapter transaction, rather than using a connection
+  // that the previous adapter call has already released.
+  XCTAssertEqualObjects((@[ @"BEGIN", @"BEGIN", @"COMMIT" ]), adapter.transactionLog);
+}
+
+- (void)testCaughtSavepointExceptionRollsBackBeforeOuterTransactionCommits {
+  ORMRuntimeFallbackSavepointAdapter *adapter = [[ORMRuntimeFallbackSavepointAdapter alloc]
+      initWithAdapterName:@"postgresql"];
+  ALNORMContext *context = [[ALNORMContext alloc] initWithAdapter:adapter];
+  __block BOOL caught = NO;
+  XCTAssertTrue([context withTransactionUsingBlock:^BOOL(NSError **error) {
+    (void)error;
+    @try {
+      [context withSavepointNamed:@"inner" usingBlock:^BOOL(NSError **innerError) {
+        (void)innerError;
+        [NSException raise:@"ORMSavepointFailure" format:@"intentional inner failure"];
+        return NO;
+      } error:NULL];
+    } @catch (NSException *exception) {
+      caught = [exception.name isEqualToString:@"ORMSavepointFailure"];
+    }
+    return YES;
+  } error:NULL]);
+  XCTAssertTrue(caught);
+  XCTAssertEqualObjects((@[ @"BEGIN", @"SAVEPOINT:inner", @"ROLLBACK_TO:inner",
+                            @"RELEASE:inner", @"COMMIT" ]), adapter.transactionLog);
+}
+
+- (void)testMSSQLSavepointExceptionRollsBackOrClosesAnUnsafeConnection {
+#if __has_include(<sql.h>) && __has_include(<sqlext.h>)
+  for (NSNumber *rollbackSucceeds in @[ @YES, @NO ]) {
+    ORMRuntimeMSSQLSavepointProbe *connection = [[ORMRuntimeMSSQLSavepointProbe alloc] init];
+    connection.rollbackSucceeds = rollbackSucceeds.boolValue;
+    NSException *failure = [NSException exceptionWithName:@"MSSQLSavepointFailure"
+                                                  reason:@"intentional inner failure" userInfo:nil];
+    NSException *caught = nil;
+    @try {
+      [connection withSavepointNamed:@"inner" usingBlock:^BOOL(NSError **error) {
+        (void)error;
+        @throw failure;
+      } error:NULL];
+    } @catch (NSException *exception) {
+      caught = exception;
+    }
+    XCTAssertEqual(failure, caught);
+    XCTAssertEqualObjects((@[ @"CREATE", @"ROLLBACK", rollbackSucceeds.boolValue ? @"RELEASE" : @"CLOSE" ]),
+                          connection.events);
+  }
+#else
+  XCTSkip(@"MSSQL transport is unavailable because ODBC headers are not installed");
+#endif
 }
 
 - (void)testTransactionAndSavepointHelpersComposeWithAdapterSeams {

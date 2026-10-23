@@ -34,6 +34,20 @@ static NSString *RenderExplicitLayoutShell(id ctx, NSError **error) {
   return [NSString stringWithString:out];
 }
 
+static NSString *RenderAuditThrowingTemplate(id ctx, NSError **error) {
+  (void)ctx;
+  (void)error;
+  ALNEOCSetSlotContent(@"audit-secret", @"previous-request-value");
+  [NSException raise:@"AuditRenderFailure" format:@"intentional rendering failure"];
+  return nil;
+}
+
+static NSString *RenderAuditSlotReader(id ctx, NSError **error) {
+  NSMutableString *out = [NSMutableString string];
+  if (!ALNEOCAppendYield(out, ctx, @"audit-secret", @"audit/reader.html.eoc", 1, 1, error)) return nil;
+  return out;
+}
+
 @interface ViewTests : XCTestCase
 @end
 
@@ -51,6 +65,53 @@ static NSString *RenderExplicitLayoutShell(id ctx, NSError **error) {
   ALNEOCSetStrictLocalsEnabled(NO);
   ALNEOCSetStrictStringifyEnabled(NO);
   [super tearDown];
+}
+
+- (void)testRenderExceptionRestoresThreadOptionsAndDiscardsRequestSlots {
+  ALNEOCRegisterTemplate(@"audit/throw.html.eoc", &RenderAuditThrowingTemplate);
+  ALNEOCRegisterTemplate(@"audit/reader.html.eoc", &RenderAuditSlotReader);
+  ALNEOCRegisterTemplate(@"audit/body.html.eoc", &RenderAutoLayoutPage);
+  // Exercise an exception in the body and in the layout. The next direct
+  // renderer on this same worker must never inherit the failed render's slots.
+  for (NSNumber *throwInLayout in @[ @NO, @YES ]) {
+    BOOL caught = NO;
+    @try {
+      [ALNView renderTemplate:throwInLayout.boolValue ? @"audit/body" : @"audit/throw"
+                     context:@{}
+                      layout:throwInLayout.boolValue ? @"audit/throw" : nil
+                strictLocals:YES strictStringify:YES error:NULL];
+    } @catch (NSException *exception) {
+      caught = [exception.name isEqualToString:@"AuditRenderFailure"];
+    }
+    XCTAssertTrue(caught);
+    XCTAssertFalse(ALNEOCStrictLocalsEnabled());
+    XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+    XCTAssertEqualObjects(@"", ALNEOCRenderTemplate(@"audit/reader.html.eoc", @{}, NULL));
+  }
+}
+
+- (void)testRenderExceptionPreservesEnclosingCompositionAndOptions {
+  ALNEOCRegisterTemplate(@"audit/throw.html.eoc", &RenderAuditThrowingTemplate);
+  ALNEOCRegisterTemplate(@"audit/reader.html.eoc", &RenderAuditSlotReader);
+  NSDictionary *options = ALNEOCPushRenderOptions(YES, NO);
+  NSDictionary *composition = ALNEOCPushCompositionState();
+  @try {
+    ALNEOCSetSlotContent(@"audit-secret", @"outer-render-value");
+    BOOL caught = NO;
+    @try {
+      [ALNView renderTemplate:@"audit/throw" context:@{} layout:nil
+                strictLocals:NO strictStringify:YES error:NULL];
+    } @catch (NSException *exception) {
+      caught = [exception.name isEqualToString:@"AuditRenderFailure"];
+    }
+    XCTAssertTrue(caught);
+    XCTAssertTrue(ALNEOCStrictLocalsEnabled());
+    XCTAssertFalse(ALNEOCStrictStringifyEnabled());
+    XCTAssertEqualObjects(@"outer-render-value", ALNEOCRenderTemplate(@"audit/reader.html.eoc", @{}, NULL));
+  } @finally {
+    ALNEOCPopCompositionState(composition);
+    ALNEOCPopRenderOptions(options);
+  }
 }
 
 - (void)testRenderTemplateUsesRegisteredLayoutWhenExplicitLayoutMissing {

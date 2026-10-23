@@ -106,6 +106,9 @@ static NSString *ALNPgSQLToken(NSString *sql);
 static void ALNPgEmitEventToStderr(NSDictionary *event);
 
 static PGconn *(*ALNPQconnectdb)(const char *conninfo) = NULL;
+static int (*ALNPQpingParams)(const char *const *keywords,
+                             const char *const *values,
+                             int expandDBName) = NULL;
 static int (*ALNPQconsumeInput)(PGconn *conn) = NULL;
 static ALNPGnotify *(*ALNPQnotifies)(PGconn *conn) = NULL;
 static int (*ALNPQsocket)(const PGconn *conn) = NULL;
@@ -333,6 +336,8 @@ static BOOL ALNLoadLibpq(NSError **error) {
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQgetvalue, handle, "PQgetvalue");
     ok = ok && ALNBindLibpqSymbol((void **)&ALNPQcmdTuples, handle, "PQcmdTuples");
     ALNBindOptionalLibpqSymbol((void **)&ALNPQresultErrorField, handle, "PQresultErrorField");
+    // The deploy doctor's readiness check is optional for ordinary queries.
+    ALNBindOptionalLibpqSymbol((void **)&ALNPQpingParams, handle, "PQpingParams");
     // LISTEN/NOTIFY support (waitForNotificationsWithTimeout:); optional so a
     // minimal libpq still serves ordinary queries.
     ALNBindOptionalLibpqSymbol((void **)&ALNPQconsumeInput, handle, "PQconsumeInput");
@@ -992,6 +997,14 @@ static NSDecimalNumber *ALNPgDecimalNumberFromString(NSString *value) {
   if (![value isKindOfClass:[NSString class]] || [value length] == 0) {
     return nil;
   }
+  // GNUstep's decimal parser has a fixed-size mantissa. Bound the textual
+  // driver value before entering Foundation; oversized values fail decoding.
+  if ([value length] > 40) return nil;
+  NSUInteger digits = 0;
+  for (NSUInteger index = 0; index < [value length]; index++) {
+    unichar ch = [value characterAtIndex:index];
+    if (ch >= '0' && ch <= '9' && ++digits > 38) return nil;
+  }
   NSDecimalNumber *number = [NSDecimalNumber decimalNumberWithString:value];
   return [number isEqualToNumber:[NSDecimalNumber notANumber]] ? nil : number;
 }
@@ -1645,6 +1658,25 @@ static BOOL ALNPgTextContainsNUL(NSString *text) {
   return [text isKindOfClass:[NSString class]] &&
          [text rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location !=
              NSNotFound;
+}
+
+// Internal CLI seam: let libpq parse the DSN in this process, rather than
+// exposing its credentials to a shell or pg_isready process argument list.
+BOOL ALNPgServerIsReady(NSString *connectionString) {
+  if (![connectionString isKindOfClass:[NSString class]] ||
+      [connectionString length] == 0 || ALNPgTextContainsNUL(connectionString) ||
+      !ALNLoadLibpq(NULL) || ALNPQpingParams == NULL) {
+    return NO;
+  }
+  // expandDBName handles both URI and keyword DSNs. The later timeout overrides
+  // a DSN's timeout, preserving pg_isready's default three seconds per host.
+  const char *dsn = [connectionString UTF8String];
+  if (dsn == NULL) {
+    return NO;
+  }
+  const char *keywords[] = { "dbname", "connect_timeout", NULL };
+  const char *values[] = { dsn, "3", NULL };
+  return ALNPQpingParams(keywords, values, 1) == 0; // PQPING_OK
 }
 
 static BOOL ALNPgFailIfTextContainsNUL(NSString *text, NSString *what, NSError **error) {
@@ -3602,7 +3634,17 @@ static NSDictionary *ALNPgRowDictionary(PGresult *result,
   }
 
   NSError *blockError = nil;
-  BOOL success = block(&blockError);
+  BOOL success = NO;
+  @try {
+    success = block(&blockError);
+  } @catch (NSException *exception) {
+    // Preserve the outer transaction while undoing the throwing inner scope.
+    if (![self rollbackToSavepointNamed:name error:NULL] ||
+        ![self releaseSavepointNamed:name error:NULL]) {
+      [self close];
+    }
+    @throw;
+  }
   if (success) {
     NSError *releaseError = nil;
     if (![self releaseSavepointNamed:name error:&releaseError]) {

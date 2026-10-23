@@ -1,5 +1,32 @@
 # Auth Module
 
+Auth 1.7.6 keeps optional session-schema metadata in the auth runtime, keyed to
+its current database adapter. Concurrent password resets and session refreshes
+no longer attach metadata to an already shared adapter. Missing tables and
+failed probes remain retryable; replacing the adapter clears its cached schema
+features. Upgrade vendored auth copies with `arlen module upgrade auth` and
+restart the app. This correction requires no new migration or configuration.
+
+Auth 1.7.2 uses the configured `publicBaseURL` when a queued auth-mail job
+builds a verification or password-reset link. Queued payloads cannot replace
+that configured origin. Upgrade the vendored auth module with the jobs module.
+
+Auth session state is refreshed before `security.routePolicies` checks
+`requireAuth`, so a revoked cookie cannot pass a policy protected route.
+
+When a verified SMS factor already exists, adding an authenticator app requires
+recent AAL2 authentication. The factor discovery and management responses omit
+the new TOTP secret until step-up succeeds. App code that calls
+`totpProvisioningPayloadForUser:error:` must use the new
+`totpProvisioningPayloadForUser:context:error:` form when an existing factor
+needs step-up; the user-only form refuses to release the secret in that case.
+
+Passwords are treated as exact strings, including leading and trailing spaces,
+across registration, sign-in, change, and reset. TOTP and SMS step-up rotate
+the session identifier and retain the validated server-side session generation;
+if a concurrent revocation changes that generation, step-up fails and clears
+the session.
+
 The first-party `auth` module ships one auth backend contract with three UI
 ownership modes:
 
@@ -115,7 +142,7 @@ an existing address enqueues a no-op job. A registration hook can still affect
 request latency, so applications using custom hooks should review their timing.
 Production-like environments with local passwords and mail configured require
 the durable jobs adapter and `authModule.publicBaseURL` at startup. Explicit
-`authModule.mailDispatch.mode = "synchronous"` keeps the old delivery path;
+`authModule.mailDispatch.mode = "synchronous"` is rejected in those environments;
 its provider and database latency can reveal whether an address exists.
 Use the same PostgreSQL database and search path for auth and jobs so the new
 account and its mail job commit together. A failed enqueue rolls back a new
@@ -124,16 +151,15 @@ registration and returns a generic 503 for registration or password reset.
 The previous registration behavior can be enabled explicitly with
 `authModule.registration.autoLogin = YES`. This compatibility setting starts
 a session and returns user details for new accounts, and reports an existing
-address as an error. It exposes whether an email is registered; use it only
-when that disclosure is acceptable. Existing apps that relied on automatic
-sign-in after registration must update their client flow or opt in.
+address as an error. It exposes whether an email is registered, so it is
+available only in `development` and `test`. Existing apps that relied on
+automatic sign-in after registration must update their client flow to sign in
+after verification.
 
 Password-reset and email-verification emails link to
 `authModule.publicBaseURL` (for example `publicBaseURL =
 "https://app.example.com";`). Set it in production: durable mail configuration
-fails startup without it. Explicit synchronous compatibility mode sends no link
-when it is absent and never trusts the request's `Host` header. In `development`
-and `test` an unset value falls back to the request's
+fails startup without it. In `development` and `test` an unset value falls back to the request's
 scheme and `Host`. See
 [Configuration Reference](CONFIGURATION_REFERENCE.md#auth-module-email-links).
 
@@ -167,6 +193,8 @@ Current MFA factor scope:
 - authenticator-app TOTP remains the recommended and preferred factor
 - optional SMS/Twilio Verify is implemented as a disabled-by-default fallback
   factor
+- `mfa.sms.testVerificationCode` is a development/test fixture setting. The
+  module rejects a nonempty value at startup in every other environment.
 - when SMS is disabled, no SMS routes are registered and the stock HTML factor
   management UI hides SMS affordances entirely
 - when SMS is enabled, send and verification attempt budgets are recorded per
@@ -251,7 +279,7 @@ These need auth module migration `004_auth_totp_limits` (run
     account is looked up. Known and unknown emails get the same counters,
     delays, response bodies and one Argon2 verification each, so the limiter
     does not reveal whether an account exists.
-  - the tables stay bounded: at most once a minute a sign-in starts a prune
+  - pruning limits table growth: at most once a minute a sign-in starts a prune
     on a background queue, so the request does not wait for it. Each prune
     deletes at most `pruneBatchSize` rows (default 1000). First it removes
     expired rows with no active wait: account-wide rows untouched for a whole
@@ -262,6 +290,10 @@ These need auth module migration `004_auth_totp_limits` (run
     oldest first, known devices last. Account-wide rows and rows with an
     active wait are never removed to meet the cap: if only those are left,
     the table stays over the cap until they expire and a warning is logged.
+    `maxTrackedEntries` is a soft limit, not a hard database row cap: influx
+    above `pruneBatchSize` per minute can outpace cleanup, and protected
+    account-wide or delayed rows can keep the table above the limit. Monitor
+    row count and prune warnings under sustained sign-in floods.
     Every statement is limited and walks the `updated_at` index; the only
     count reads at most `maxTrackedEntries + pruneBatchSize` rows.
 - forgot-password is not subject to the password delays or the account-wide
@@ -424,6 +456,12 @@ replaces the session's roles for the request with the current ones, so
 `[ctx authRoles]`, route contracts (`requiredRoles`, minimum assurance level),
 and the admin-ui, jobs, ops and other module API guards all see the user's
 current roles:
+
+When application code adds session middleware after creating the app and before
+registering the auth module, Arlen places it before route policy middleware.
+The auth module then installs its
+session refresh between cookie decoding and route policy checks. This order
+also applies to OIDC resolver roles on protected routes.
 
 - Module sign-ins (local password, email link, the stub provider) are looked up
   in `auth_users` by subject: one indexed query per request, with no cache
@@ -952,9 +990,10 @@ development and test convenience only:
 
 Production apps that use local passwords and mail must set
 `authModule.publicBaseURL` and install the PostgreSQL jobs adapter and worker
-when upgrading to auth 1.6.1. See [Durable Jobs](DURABLE_JOBS.md). Explicit
-`authModule.mailDispatch.mode = "synchronous"` preserves legacy request-time
-delivery with its timing disclosure risk.
+when upgrading to auth 1.7.0. See [Durable Jobs](DURABLE_JOBS.md). Remove
+`authModule.mailDispatch.mode = "synchronous"` and
+`authModule.registration.autoLogin = YES` before upgrading production-like
+environments; both now stop startup with a configuration error.
 
 Disabling local passwords removes registration, verification, password-login,
 forgot/reset/change-password routes in both HTML and API surfaces. The login

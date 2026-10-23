@@ -107,6 +107,13 @@ libcurl; custom embedders must link `-lcurl`. TLS and asynchronous DNS support a
 required. Supported wire versions depend on the installed libcurl; the API does
 not promise HTTP/3 availability. The older Apple helpers retain NSURLSession.
 
+All request helpers validate retained headers before connecting. Header names
+must be nonempty HTTP token strings, and values must be strings without CR, LF
+or NUL. The compatibility helpers return `NSURLErrorDomain/NSURLErrorBadURL`
+for invalid headers; `ALNHTTPClient` retains its `InvalidRequest` error contract.
+Validation runs before both libcurl and Apple's NSURLSession transport and is
+repeated for each libcurl hop.
+
 Only HTTP/HTTPS are followed. TLS peer and hostname verification stay enabled.
 There is no shared cookie store or automatic cookie persistence. Authorization
 and explicit Cookie headers are removed when a redirect changes scheme, host,

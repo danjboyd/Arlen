@@ -65,7 +65,14 @@ if [[ -f "$repo_root/tools/source_gnustep_env.sh" ]]; then
 fi
 make boomhauer
 
-tsan_so="$(clang -print-file-name=libtsan.so)"
+# A dlopened XCTest bundle and exec'd children must use the same clang
+# runtime. clang -print-file-name=libtsan.so can select GCC's incompatible DSO.
+tsan_arch="$(clang -dumpmachine)"
+tsan_arch="${tsan_arch%%-*}"
+tsan_so="$(clang -print-file-name="libclang_rt.tsan-${tsan_arch}.so")"
+if [[ ! -f "$tsan_so" ]]; then
+  tsan_so="$(clang -print-runtime-dir)/libclang_rt.tsan.so"
+fi
 if [[ -n "$tsan_so" && -f "$tsan_so" ]]; then
   {
     echo "phase10m-thread-race: engine=tsan"
@@ -73,6 +80,7 @@ if [[ -n "$tsan_so" && -f "$tsan_so" ]]; then
   tsan_rc=0
   ARLEN_TSAN_ARTIFACT_DIR="$artifact_dir/tsan" bash ./tools/ci/run_phase5e_tsan_experimental.sh >>"$staged_log_path" 2>&1 || tsan_rc=$?
   diagnostic_rc=0
+  LD_LIBRARY_PATH="${ARLEN_TSAN_LIBRARY_PATH:+$ARLEN_TSAN_LIBRARY_PATH:}${LD_LIBRARY_PATH:-}" \
   python3 ./tools/ci/tsan_runtime_diagnostics.py --output "$artifact_dir/diagnostics" >>"$staged_log_path" 2>&1 || diagnostic_rc=$?
   if [[ "$tsan_rc" -ne 0 ]]; then
     write_summary "fail" "tsan" "$tsan_rc" "tsan_lane_failure"

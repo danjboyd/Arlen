@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-10-16
+Last updated: 2026-10-22
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -22,6 +22,80 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 Windows is supported for development from 0.3.0. Production (`propane`,
 `jobs-worker`, service deploys) is planned for 0.4.0.
 
+## Linux release runtime
+
+Linux release setup builds a normal, uninstrumented runtime with the existing
+custom builder at commit `5469b5dfd442f1091475fa6600cfd487af878e8f`. Its source
+archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03197`.
+Locks under `tools/runtime/` identify Debian 13 amd64/arm64 and Ubuntu 26.04
+amd64 independently. All use identical component revisions and three race-patch digests;
+Ubuntu additionally pins one clang 21 compatibility patch.
+The normal production locks configure `CFLAGS=-O2` and explicit empty
+`OBJCFLAGS` for tools-make and Base. GNUstep's `OPTFLAG` then supplies `-O2`
+to C and Objective-C clients by default. Keeping optimization out of
+`OBJCFLAGS` lets `--debug-flags` / `debug=yes` remove it normally. Prefix
+headers remain in the builder's `CPPFLAGS`; component revisions and runtime
+patches are unchanged.
+
+| Normal target | Lock SHA256 |
+| --- | --- |
+| Debian 13 amd64 | `df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34` |
+| Debian 13 arm64 | `ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e` |
+| Ubuntu 26.04 amd64 | `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125` |
+
+The earlier Debian lock `2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`
+produced include-only default client flags. Its existing prefix remains an
+immutable diagnostic/performance control; it is not an optimized production
+prefix. New lock identities build into new final versioned prefixes rather
+than changing the old installation. Qualification must verify the new actual
+flags, ELF hashes, functional behavior, native concurrency, ICU and performance;
+old-prefix results do not establish those new-prefix results.
+The patches are shared with the diagnostic toolchain in
+`tools/ci/tsan-toolchain/`; production output has no TSan instrumentation.
+Ubuntu's extra `tools/runtime/patches/libdispatch-clang21.patch` preserves the
+32-bit epoll complement conversion explicitly, with `-Werror` retained.
+
+Native build dependencies on supported Debian/Ubuntu hosts:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends ca-certificates curl git tar gzip tzdata \
+  make cmake ninja-build pkg-config autoconf automake libtool python3 clang lld \
+  libblocksruntime-dev libssl-dev libsqlite3-0 zlib1g-dev libxml2-dev libxslt1-dev \
+  libicu-dev libavahi-client-dev libcurl4-gnutls-dev libgnutls28-dev libffi-dev
+python3 tools/setup_runtime.py build
+source tools/source_gnustep_env.sh
+```
+
+The helper builds directly at its final absolute prefix and records source,
+patch, build-host and ELF provenance. It refuses system/managed roots and
+existing invalid prefixes. It never replaces a managed gnustep-cli pin or
+changes `ld.so.conf`. Native target qualification must cover the actual CPU,
+compiler and ICU: Debian uses clang 19/ICU 76, Ubuntu uses clang 21/ICU 78.
+The public install CI runs the installed app and fourteen concurrency controls
+on each native target, including arm64. These normal controls exercise weak
+memory paths; race-detector acceptance remains the separate instrumented TSan
+gate. A successful amd64 run alone does not establish arm64 qualification.
+See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) for selection
+and service paths.
+
+Ubuntu's compatibility patch SHA256 is
+`ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d`;
+its target lock SHA256 is
+`89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125`.
+It applies after the unchanged libdispatch race patch. The field being masked
+is `uint32_t`; the disarmed mask is `uint16_t`. Casting the promoted signed
+complement back to `uint32_t` explicitly preserves high event bits and the
+original arithmetic while satisfying clang 21's signedness diagnostics.
+The compatibility patch does not change the dedicated TSan recipe. The
+normal locks separately include the explicit optimization inputs above. Runtime staging
+checks each exact patch path and SHA256; Ubuntu prefix validation requires the
+additional patch in its installed provenance. The no-build regression suite
+compiles the exact new return expression with `-Werror`, `-Wconversion` and
+`-Wsign-conversion`, then checks all 65,536 disarmed masks against twelve
+32-bit event masks (786,432 cases). Native Ubuntu build/install/runtime
+qualification is still required; this arithmetic control cannot replace it.
+
 ## Known-Good Baseline (2026-02-20)
 
 | Component | Command | Observed baseline |
@@ -35,7 +109,7 @@ Windows is supported for development from 0.3.0. Production (`propane`,
 | GNUstep bootstrap helper | `source /path/to/Arlen/tools/source_gnustep_env.sh` | Present in repo |
 | GNUstep tooling script | `/usr/GNUstep/System/Library/Makefiles/GNUstep.sh` | Present on current known-good baseline |
 | GNUstep config tool | `source /path/to/Arlen/tools/source_gnustep_env.sh && command -v gnustep-config` | `/usr/GNUstep/System/Tools/gnustep-config` |
-| XCTest runner | `command -v xctest` | `/usr/GNUstep/System/Tools/xctest` |
+| XCTest runner | `make test-unit` | Vendored `vendor/tools-xctest` v0.5.0 |
 
 ## Apple Baseline (2026-10-08)
 
@@ -190,7 +264,7 @@ Current documented required checks for `main`:
 Current documented non-required checks:
 
 - `apple-baseline / apple-baseline`
-- `windows-preview / windows-preview`
+- `windows-preview` (exact Actions job context)
 - `release-certification / release-certification`
 
 Windows preview helpers:
@@ -243,10 +317,15 @@ Platform runner provisioning:
 - this pin supports the non-required Windows preview lane; it does not change
   the authoritative Linux/GNUstep merge gate
 
-Windows preview CI currently validates two layers:
+Windows preview CI validates these development layers serially:
 
 - runtime parity via `make phase24-windows-confidence`
 - the unit suite via `make test-unit`
+- the complete integration suite via `make test-integration`, with existing
+  platform and live-service skips reported explicitly
+- focused static/realtime transport security regressions
+
+The job retains its 90-minute budget and existing branch-protection policy.
 
 Packaged release/deploy parity (`make windows-confidence`) is a manual lane
 until Windows production support in 0.4.0.
@@ -286,3 +365,11 @@ Update this matrix when:
 Apple builds additionally link the system libcurl for the received HTTP result
 API. HTTP/data contract confidence uses Apple XCTest and a disposable PostgreSQL
 cluster; GNUstep runs equivalent coverage with the vendored tools-xctest runner.
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.

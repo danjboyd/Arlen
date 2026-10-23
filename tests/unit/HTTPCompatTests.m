@@ -169,6 +169,56 @@ extern NSString *ALNHTTPReceivedReasonPhraseFromStatusLine(NSString *line);
   XCTAssertNil(echo[@"headers"][@"cookie"]);
 }
 
+- (void)testSynchronousHelpersRejectUnsafeHeaderValuesBeforeTransport {
+  unichar nulCharacters[] = { 'a', 0, 'b' };
+  NSString *nulValue = [NSString stringWithCharacters:nulCharacters length:3];
+  NSUInteger expectedRequests = 0;
+  for (NSString *value in @[ @"abc\r\nX-Injected: yes", @"abc\nX-Injected: yes", nulValue ]) {
+    for (NSNumber *mode in @[ @0, @1, @2 ]) {
+      NSMutableURLRequest *request = [self requestForPath:@"/echo" timeout:3];
+      @try {
+        [request setValue:value forHTTPHeaderField:@"X-Audit"];
+      } @catch (NSException *exception) {
+        // Foundation may reject invalid headers before they reach Arlen.
+        XCTAssertEqualObjects(NSInvalidArgumentException, exception.name);
+        continue;
+      }
+      NSString *stored = [request valueForHTTPHeaderField:@"X-Audit"] ?: @"";
+      BOOL unsafe = NO;
+      for (NSUInteger index = 0; index < stored.length; index++) {
+        unichar ch = [stored characterAtIndex:index];
+        if (ch == 0 || ch == '\r' || ch == '\n') unsafe = YES;
+      }
+      NSError *error = nil;
+      NSURLResponse *response = nil;
+      id result = nil;
+      if (mode.integerValue == 0) {
+        result = ALNSynchronousURLRequest(request, &response, &error);
+      } else if (mode.integerValue == 1) {
+        result = ALNSynchronousURLRequestFollowingRedirects(request, 0, &response, &error);
+      } else {
+        result = ALNSynchronousHTTPResult(request, 0, ALNHTTPRedirectLimitReturnResponse, &error);
+      }
+      if (unsafe) {
+        XCTAssertNil(result, @"helper %@ must reject an unsafe retained header", mode);
+        XCTAssertNil(response);
+        XCTAssertEqualObjects(NSURLErrorDomain, error.domain);
+        XCTAssertEqual((NSInteger)NSURLErrorBadURL, error.code);
+      } else {
+        // A Foundation-normalized value is safe to send as a single header.
+        expectedRequests += 1;
+        XCTAssertNotNil(result);
+        XCTAssertNil(error);
+        NSData *body = [result isKindOfClass:[ALNHTTPClientResult class]]
+                           ? [(ALNHTTPClientResult *)result body] : result;
+        NSDictionary *echo = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+        XCTAssertNil(echo[@"headers"][@"x-injected"]);
+      }
+    }
+  }
+  XCTAssertEqual(expectedRequests, [self trace].count, @"unsafe headers must fail before a connection");
+}
+
 - (void)testImmediateResponseCompletes {
   XCTAssertTrue(_port > 0);
   NSURLResponse *response = nil;

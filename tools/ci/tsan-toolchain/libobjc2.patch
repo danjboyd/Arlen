@@ -1,0 +1,253 @@
+diff --git a/arc.mm b/arc.mm
+index 2a49b6b..e9f8ba3 100644
+--- a/arc.mm
++++ b/arc.mm
+@@ -1081,8 +1081,11 @@ using weak_table_t = WeakRefTable<OBJC_WEAK_SHARD_COUNT>;
+ // before any weak operation can run.
+ static inline weak_table_t &weakTable()
+ {
+-	static weak_table_t t;
+-	return t;
++	// Detached runtime/dispatch threads may release objects during process exit.
++	// Keep this runtime registry alive until the process itself is reclaimed;
++	// a static destructor would race those final weak-reference removals.
++	static weak_table_t *t = new weak_table_t;
++	return *t;
+ }
+ 
+ }
+diff --git a/class.h b/class.h
+index 090d713..2ed7e16 100644
+--- a/class.h
++++ b/class.h
+@@ -97,7 +97,9 @@ struct objc_class
+ 	 * The dispatch table for this class.  Intialized and maintained by the
+ 	 * runtime.
+ 	 */
+-	SparseArray               *dtable;
++	/* Published after +initialize and read concurrently by message lookup.
++	 * Clang's atomic pointer retains the ABI size and alignment of this slot. */
++	_Atomic(SparseArray *)     dtable;
+ 	/**
+ 	 * A pointer to the first subclass for this class.  Filled in by the
+ 	 * runtime.
+@@ -351,20 +353,20 @@ enum objc_class_flags
+ };
+ 
+ /**
+- * Sets the specific class flag.  Note: This is not atomic.
++ * Atomically sets the specific class flag.
+  */
+ static inline void objc_set_class_flag(Class aClass,
+                                        enum objc_class_flags flag)
+ {
+-	aClass->info |= (unsigned long)flag;
++	__atomic_fetch_or(&aClass->info, (unsigned long)flag, __ATOMIC_ACQ_REL);
+ }
+ /**
+- * Unsets the specific class flag.  Note: This is not atomic.
++ * Atomically unsets the specific class flag.
+  */
+ static inline void objc_clear_class_flag(Class aClass,
+                                          enum objc_class_flags flag)
+ {
+-	aClass->info &= ~(unsigned long)flag;
++	__atomic_fetch_and(&aClass->info, ~(unsigned long)flag, __ATOMIC_ACQ_REL);
+ }
+ /**
+  * Checks whether a specific class flag is set.
+@@ -372,7 +374,7 @@ static inline void objc_clear_class_flag(Class aClass,
+ static inline BOOL objc_test_class_flag(Class aClass,
+                                         enum objc_class_flags flag)
+ {
+-	return (aClass->info & (unsigned long)flag) == (unsigned long)flag;
++	return (__atomic_load_n(&aClass->info, __ATOMIC_ACQUIRE) & (unsigned long)flag) == (unsigned long)flag;
+ }
+ 
+ 
+diff --git a/dtable.c b/dtable.c
+index 54c0d72..8d119a7 100644
+--- a/dtable.c
++++ b/dtable.c
+@@ -90,6 +90,15 @@ static BOOL ownsMethod(Class cls, SEL sel)
+  * `+allocWithZone`, or `-init` in a way that requires the methods to be
+  * called.
+  */
++static SEL alloc, allocWithZone, init, isTrivialAllocInit;
++static void initializeFastAllocSelectors(void)
++{
++	alloc = sel_registerName("alloc");
++	allocWithZone = sel_registerName("allocWithZone:");
++	init = sel_registerName("init");
++	isTrivialAllocInit = sel_registerName("_TrivialAllocInit");
++}
++
+ static void checkFastAllocInit(Class cls)
+ {
+ 	// This needs to be called on the class, not the metaclass
+@@ -97,14 +106,8 @@ static void checkFastAllocInit(Class cls)
+ 	{
+ 		return;
+ 	}
+-	static SEL alloc, allocWithZone, init, isTrivialAllocInit;
+-	if (NULL == alloc)
+-	{
+-		alloc = sel_registerName("alloc");
+-		allocWithZone = sel_registerName("allocWithZone:");
+-		init = sel_registerName("init");
+-		isTrivialAllocInit = sel_registerName("_TrivialAllocInit");
+-	}
++	static pthread_once_t selectorsOnce = PTHREAD_ONCE_INIT;
++	pthread_once(&selectorsOnce, initializeFastAllocSelectors);
+ 	Class metaclass = cls->isa;
+ 	Class isTrivialOwner = ownerForMethod(metaclass, isTrivialAllocInit);
+ 	// If nothing in this hierarchy opts in to trivial alloc / init behaviour, give up.
+diff --git a/eh_personality.c b/eh_personality.c
+index 193b78b..264512d 100644
+--- a/eh_personality.c
++++ b/eh_personality.c
+@@ -404,12 +404,12 @@ static inline _Unwind_Reason_Code internal_objc_personality(int version,
+ 	void *object = NULL;
+ 
+ #ifndef NO_OBJCXX
+-	if (cxx_exception_class == 0)
++	if (objc_load_cxx_exception_class() == 0)
+ 	{
+ 		test_cxx_eh_implementation();
+ 	}
+ 
+-	if (exceptionClass == cxx_exception_class)
++	if (exceptionClass == objc_load_cxx_exception_class())
+ 	{
+ 		int objcxx;
+ 		id obj = objc_object_for_cxx_exception(exceptionObject, &objcxx);
+@@ -575,7 +575,7 @@ BEGIN_PERSONALITY_FUNCTION(__gnustep_objc_personality_v0)
+ OBJC_PUBLIC
+ BEGIN_PERSONALITY_FUNCTION(__gnustep_objcxx_personality_v0)
+ #ifndef NO_OBJCXX
+-	if (cxx_exception_class == 0)
++	if (objc_load_cxx_exception_class() == 0)
+ 	{
+ 		test_cxx_eh_implementation();
+ 	}
+@@ -590,7 +590,7 @@ BEGIN_PERSONALITY_FUNCTION(__gnustep_objcxx_personality_v0)
+ 		// state for the unwinder) in flight.  Make sure that they're in sync.
+ 		COPY_EXCEPTION(ex->cxx_exception, exceptionObject);
+ 		exceptionObject = ex->cxx_exception;
+-		exceptionClass = cxx_exception_class;
++		exceptionClass = objc_load_cxx_exception_class();
+ 		int ret = CALL_PERSONALITY_FUNCTION(__gxx_personality_v0);
+ 		COPY_EXCEPTION(exceptionObject, ex->cxx_exception);
+ 		if (ret == _URC_INSTALL_CONTEXT)
+@@ -644,7 +644,7 @@ OBJC_PUBLIC id objc_begin_catch(struct _Unwind_Exception *exceptionObject)
+ 	}
+ #ifndef NO_OBJCXX
+ 	// If this is a C++ exception, let the C++ runtime handle it.
+-	if (exceptionObject->exception_class == cxx_exception_class)
++	if (exceptionObject->exception_class == objc_load_cxx_exception_class())
+ 	{
+ 		DEBUG_LOG("c++ catch\n");
+ 		td->current_exception_type = CXX;
+@@ -746,7 +746,7 @@ OBJC_PUBLIC void objc_exception_rethrow(struct _Unwind_Exception *e)
+ #ifndef NO_OBJCXX
+ 	else if (td->current_exception_type == CXX)
+ 	{
+-		assert(e->exception_class == cxx_exception_class);
++		assert(e->exception_class == objc_load_cxx_exception_class());
+ 		__cxa_rethrow();
+ 	}
+ #endif
+diff --git a/method.h b/method.h
+index a155cb8..517877c 100644
+--- a/method.h
++++ b/method.h
+@@ -10,7 +10,7 @@ struct objc_method
+ 	/**
+ 	 * A pointer to the function implementing this method.
+ 	 */
+-	IMP         imp;
++	_Atomic(IMP) imp;
+ 	/**
+ 	 * Selector used to send messages to this method.
+ 	 */
+diff --git a/objcxx_eh.cc b/objcxx_eh.cc
+index 10a29d1..4101ca8 100644
+--- a/objcxx_eh.cc
++++ b/objcxx_eh.cc
+@@ -127,7 +127,7 @@ namespace gnustep
+ 		 * required to get the object pointer. We need to do it ourselves if we have
+ 		 * caught an exception with libc++'s exception class. */
+ #ifndef __MINGW32__
+-		 if (cxx_exception_class == llvm_cxx_exception_class) {
++		 if (objc_load_cxx_exception_class() == llvm_cxx_exception_class) {
+ 			 return **(id**)obj;
+ 		 }
+ 		 return *(id*)obj;
+@@ -224,7 +224,7 @@ struct _Unwind_Exception *objc_init_cxx_exception(id obj)
+ 	*newEx = obj;
+ 	_Unwind_Exception *ex = pointer_add<_Unwind_Exception>(newEx, -exception_struct_size);
+ 	*pointer_add<std::type_info*>(ex, type_info_offset) = &__objc_id_type_info;
+-	ex->exception_class = cxx_exception_class;
++	ex->exception_class = objc_load_cxx_exception_class();
+ 	ex->exception_cleanup = exception_cleanup;
+ 	__cxa_get_globals()->uncaughtExceptions++;
+ 	return ex;
+@@ -274,14 +274,13 @@ PRIVATE void cxx_throw()
+ extern "C"
+ PRIVATE
+ BEGIN_PERSONALITY_FUNCTION(test_eh_personality)
+-	// Don't bother with a mutex here.  It doesn't matter if two threads set
+-	// these values at the same time.
++	// Concurrent probes publish identical values using atomic accesses.
+ 	if (!done_setup)
+ 	{
+ 		uint64_t cls = __builtin_bswap64(exceptionClass);
+ 		type_info_offset = find_backwards(exceptionObject, &typeid(MagicValueHolder));
+ 		exception_struct_size = find_forwards(exceptionObject, MagicValueHolder::magic);
+-		cxx_exception_class = exceptionClass;
++		__atomic_store_n(&cxx_exception_class, exceptionClass, __ATOMIC_RELEASE);
+ 		done_setup = true;
+ 	}
+ 	return CALL_PERSONALITY_FUNCTION(__gxx_personality_v0);
+diff --git a/objcxx_eh.h b/objcxx_eh.h
+index 5ac70a3..f09e8ee 100644
+--- a/objcxx_eh.h
++++ b/objcxx_eh.h
+@@ -51,6 +51,11 @@ void print_type_info(void *thrown_exception);
+  */
+ extern uint64_t cxx_exception_class;
+ 
++static inline uint64_t objc_load_cxx_exception_class(void)
++{
++	return __atomic_load_n(&cxx_exception_class, __ATOMIC_ACQUIRE);
++}
++
+ /**
+  * The exception class that libsupc++ and libcxxrt use.
+  */
+diff --git a/runtime.c b/runtime.c
+index 45b290e..0957112 100644
+--- a/runtime.c
++++ b/runtime.c
+@@ -493,9 +493,7 @@ IMP class_replaceMethod(Class cls, SEL name, IMP imp, const char *types)
+ 		class_addMethod(cls, sel, imp, types);
+ 		return NULL;
+ 	}
+-	IMP old = (IMP)method->imp;
+-	method->imp = imp;
+-	return old;
++	return __c11_atomic_exchange(&method->imp, imp, __ATOMIC_ACQ_REL);
+ }
+ 
+ 
+@@ -623,9 +621,7 @@ SEL method_getName(Method method)
+ IMP method_setImplementation(Method method, IMP imp)
+ {
+ 	if (NULL == method) { return (IMP)NULL; }
+-	IMP old = (IMP)method->imp;
+-	method->imp = imp;
+-	return old;
++	return __c11_atomic_exchange(&method->imp, imp, __ATOMIC_ACQ_REL);
+ }
+ 
+ Class objc_getRequiredClass(const char *name)

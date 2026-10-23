@@ -688,7 +688,19 @@ BOOL ALNDatabaseWithSavepoint(id<ALNDatabaseConnection> connection,
   }
 
   NSError *blockError = nil;
-  BOOL success = block(&blockError);
+  BOOL success = NO;
+  @try {
+    success = block(&blockError);
+  } @catch (NSException *exception) {
+    // A caller may catch the body exception and continue the outer transaction.
+    // Undo this scope before propagating it, so its writes cannot then commit.
+    BOOL rolledBack = ALNDatabaseRollbackToSavepoint(connection, name, NULL);
+    BOOL released = rolledBack && ALNDatabaseReleaseSavepoint(connection, name, NULL);
+    if (!released && [connection respondsToSelector:@selector(close)]) {
+      [(id)connection close];
+    }
+    @throw;
+  }
   if (success) {
     NSError *releaseError = nil;
     if (!ALNDatabaseReleaseSavepoint(connection, name, &releaseError)) {

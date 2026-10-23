@@ -2,6 +2,17 @@
 
 This document defines Arlen release lifecycle operations.
 
+Synthetic certification-generator smoke tests supply their own current-dated
+risk fixture alongside their synthetic lane artifacts. Actual release
+certification still validates the checked-in risk register, including its
+review age, owners, and target dates. Resolve an expired real review through
+review without relaxing the freshness threshold.
+
+Windows installer contract tests and release certification temporarily modify
+the saved user PATH. Their shared per-user mutex serializes that interval
+across checkouts and runner sessions, preserving current-shell and fresh-shell
+validation. Do not run an unguarded installer fixture alongside certification.
+
 ## 1. Versioning Policy
 
 Arlen uses semantic versioning:
@@ -228,3 +239,28 @@ The required `linux-quality / quality-gate` includes the isolated PostgreSQL
 regression step (`tools/ci/run_postgres_regressions.sh`). Release validation must
 include its generated-client, migration, search, and repeated server cleanup
 coverage. No additional branch-protection check name is needed for this step.
+
+### Linux patched runtime delivery qualification
+
+Source archives ship `tools/setup_runtime.py`, all three target locks and the
+three checked race patches and Ubuntu's pinned clang 21 compatibility patch. They fetch the SHA256-pinned existing custom
+builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
+Ubuntu 26.04 amd64 install/app/concurrency evidence from
+`linux-public-toolchain` before release. The runtime is compiled at its final
+versioned prefix; the framework install stage may move, the runtime may not.
+The Linux archive smoke also runs the generated app's request tests
+through the installed launcher before checking HTTP and native runtime controls.
+Keep old runtime prefixes while any framework or service uses them. A service
+on another host requires that host's own patched runtime and an explicit
+`ARLEN_RUNTIME_PREFIX`; source archives contain no prebuilt Linux runtime.
+Normal native controls and full functional qualification complement the
+separate unchanged two-run TSan acceptance gate.
+
+Normal runtime production locks also require explicit optimization inputs for
+tools-make/Base. Record `gnustep-config --objc-flags` from the fresh prefix: it
+must default to `-O2` and retain its own include paths. Check `--debug-flags`
+removes optimization. Preserve the earlier 2bc prefix as a separate control;
+its artifacts and timing results do not certify a new normal prefix. Use the
+new qualified prefix/lock/ELF manifest for final normal qualification and the
+TSan driver's normal-source provenance comparison, while retaining the
+unchanged dedicated thread recipe and actual TSan bootstrap conditions.

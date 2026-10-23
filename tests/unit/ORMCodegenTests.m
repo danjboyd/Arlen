@@ -162,8 +162,8 @@
     NSString *archive = [root stringByAppendingPathComponent:@"build/apple/lib/libArlenFramework.a"];
     NSString *libraries = @"-framework Foundation -framework CoreFoundation -L\"${ARLEN_OPENSSL_PREFIX:-$(brew --prefix openssl@3)}/lib\" -lcrypto -lcurl";
 #else
-    NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -pthread",
-        ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
+    NSString *compiler = [NSString stringWithFormat:@"%@ && %@ $(gnustep-config --objc-flags) %@ -fobjc-arc -pthread",
+        ALNTestGNUstepSourceCommandForRepoRoot(root), ALNTestClangCommand(), [self gnuStepSyntaxOnlyContractFlags]];
     NSString *archive = [root stringByAppendingPathComponent:@"build/lib/libArlenFramework.a"];
     NSString *libraries = [NSString stringWithFormat:@"$(gnustep-config --base-libs) -lcrypto -ldispatch -lcurl %@", ALNTestPlatformLinkLibraries()];
 #endif
@@ -426,8 +426,8 @@
   // Sanitizer lanes preload libasan into every child; gnustep-config then
   // prints nothing, so name the runtime contract explicitly like the
   // syntax-only tests do instead of depending on its output.
-  NSString *compiler = [NSString stringWithFormat:@"%@ && clang $(gnustep-config --objc-flags) %@ -fobjc-arc -shared -fPIC",
-      ALNTestGNUstepSourceCommandForRepoRoot(root), [self gnuStepSyntaxOnlyContractFlags]];
+  NSString *compiler = [NSString stringWithFormat:@"%@ && %@ $(gnustep-config --objc-flags) %@ -fobjc-arc -shared -fPIC",
+      ALNTestGNUstepSourceCommandForRepoRoot(root), ALNTestClangCommand(), [self gnuStepSyntaxOnlyContractFlags]];
 #endif
   NSString *command = [NSString stringWithFormat:@"cd %@ && %@ -Werror=incompatible-property-type -Werror=property-attribute-mismatch -Werror=nullability -Wno-nullability-completeness %@ %@ -o %@",
       ALNTestShellQuote(tmp), compiler, flags, ALNTestShellQuote(implementation), ALNTestShellQuote(library)];

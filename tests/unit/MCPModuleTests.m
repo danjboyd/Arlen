@@ -47,6 +47,8 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   if (self.endpointOnly && ![context.request.path isEqual:@"/mcp"]) return YES;
   NSString *credential = [context headerValueForName:@"authorization"];
   if ([credential isEqual:@"Bearer reader"]) [ALNAuth applyClaims:@{@"sub": @"reader", @"scope": @"catalog:read", @"roles": @[@"reader"]} toContext:context];
+  if ([credential isEqual:@"Bearer elevated"]) [ALNAuth applyClaims:@{@"sub": @"reader", @"scope": @"catalog:read", @"roles": @[@"reader"], @"aal": @2, @"auth_time": @((NSInteger)[[NSDate date] timeIntervalSince1970])} toContext:context];
+  if ([credential isEqual:@"Bearer stale"]) [ALNAuth applyClaims:@{@"sub": @"reader", @"scope": @"catalog:read", @"roles": @[@"reader"], @"aal": @2, @"auth_time": @((NSInteger)[[NSDate date] timeIntervalSince1970] - 3600)} toContext:context];
   if ([credential isEqual:@"Bearer visitor"]) [ALNAuth applyClaims:@{@"sub": @"visitor"} toContext:context];
   if ([[context headerValueForName:@"x-deny-middleware"] isEqual:context.routeName]) {
     context.response.statusCode = 429; context.response.committed = YES; return NO;
@@ -228,6 +230,39 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   XCTAssertEqualObjects(@YES, [self call:@"scoped.export" arguments:@{} headers:nil][@"result"][@"isError"]);
   XCTAssertEqualObjects(@NO, [self call:@"public.ping" arguments:@{} headers:@{@"authorization":@"Bearer visitor"}][@"result"][@"isError"]);
   XCTAssertEqual(1u, Calls);
+}
+
+- (void)testToolsListUsesAssuranceAgeAndRoutePoliciesWithoutRunningTools {
+  [self configure:@{ @"security" : @{ @"routePolicies" : @{
+    @"catalog" : @{ @"pathPrefixes" : @[ @"/catalog" ], @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ] },
+    @"blocked" : @{ @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ] },
+    @"allowed" : @{ @"sourceIPAllowlist" : @[ @"203.0.113.5/32" ] }
+  } } }];
+  [self routeTool];
+  for (NSDictionary *extra in @[
+    @{ @"name" : @"policy.blocked", @"policies" : @[ @"blocked" ] },
+    @{ @"name" : @"policy.allowed", @"policies" : @[ @"allowed" ] },
+    @{ @"name" : @"assurance.high", @"minimumAuthAssuranceLevel" : @2 },
+    @{ @"name" : @"assurance.recent", @"minimumAuthAssuranceLevel" : @2,
+       @"maximumAuthenticationAgeSeconds" : @300 }
+  ]) {
+    NSMutableDictionary *definition = [@{ @"annotations" : Annotations(),
+                                          @"requiredRoles" : @[ @"reader" ] } mutableCopy];
+    [definition addEntriesFromDictionary:extra];
+    XCTAssertTrue([self.module registerTool:definition handler:^NSDictionary *(NSDictionary *args, ALNContext *ctx, NSError **error) {
+      Calls++; return @{ @"structuredContent" : @{} };
+    } error:NULL]);
+  }
+  [self install];
+  NSArray *reader = [[self rpc:@"tools/list" params:nil headers:nil][@"result"][@"tools"] valueForKey:@"name"];
+  XCTAssertEqualObjects((@[ @"policy.allowed" ]), reader);
+  NSArray *elevated = [[self rpc:@"tools/list" params:nil
+                               headers:@{ @"authorization" : @"Bearer elevated" }][@"result"][@"tools"] valueForKey:@"name"];
+  XCTAssertEqualObjects((@[ @"assurance.high", @"assurance.recent", @"policy.allowed" ]), elevated);
+  NSArray *stale = [[self rpc:@"tools/list" params:nil
+                            headers:@{ @"authorization" : @"Bearer stale" }][@"result"][@"tools"] valueForKey:@"name"];
+  XCTAssertEqualObjects((@[ @"assurance.high", @"policy.allowed" ]), stale);
+  XCTAssertEqual((NSUInteger)0, Calls);
 }
 - (void)testOutputValidationBoundsAndSafeFailure {
   [self configure:@{@"mcp":@{@"enabled":@YES, @"maxOutputBytes":@1024}}];

@@ -7,10 +7,10 @@
 #import "ALNLogger.h"
 #import "ALNPg.h"
 #import "ALNResponse.h"
+#import "ALNRoutePolicyMiddleware.h"
 #import "ALNSecurityPrimitives.h"
 
 #import <dispatch/dispatch.h>
-#import <objc/runtime.h>
 
 // Per-request session resolution for the auth module. Sessions are signed
 // cookies, so the roles written at sign-in would otherwise stay in force until
@@ -194,12 +194,15 @@ static NSArray<NSString *> *ARSessionRevocationIdentifiers(ALNContext *context, 
 @implementation ARAuthSchemaFeatures
 @end
 
-static char ARAuthSchemaFeaturesKey;
-
 static NSString *const ARRevokedSessionPredicate =
     @"EXISTS (SELECT 1 FROM auth_revoked_sessions r WHERE r.session_id IN ($2, $3) AND r.expires_at > NOW())";
 
 @interface ALNAuthModuleRuntime (ALNAuthModuleSessionRefreshPrivate)
+// Backed by the runtime's own ivars. The lock is created in -init, before the
+// runtime or its database adapter is shared with request threads.
+@property(nonatomic, strong) ALNPg *authSchemaDatabase;
+@property(nonatomic, strong) id authSchemaFeatures;
+@property(nonatomic, strong) NSLock *authSchemaLock;
 - (nullable ALNPg *)database;
 - (nullable NSString *)environmentName;
 - (nullable NSDictionary<NSString *, ALNAuthModuleOIDC *> *)oidcProviders;
@@ -242,7 +245,8 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
       return;
     }
   }
-  [application addMiddleware:[[ALNAuthModuleSessionMiddleware alloc] init]];
+  [application addMiddleware:[[ALNAuthModuleSessionMiddleware alloc] init]
+      beforeMiddlewareOfClass:[ALNRoutePolicyMiddleware class]];
 }
 
 @implementation ALNAuthModuleRuntime (ALNAuthModuleSessionRefresh)
@@ -252,44 +256,49 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
 // reports the missing tables and the next request probes again.
 - (ARAuthSchemaFeatures *)authSchemaFeaturesWithLogger:(ALNLogger *)logger error:(NSError **)error {
   ALNPg *database = [self database];
-  if (database == nil) {
-    return nil;
-  }
-  static NSLock *probeLock = nil;
-  static dispatch_once_t once;
-  dispatch_once(&once, ^{
-    probeLock = [[NSLock alloc] init];
-  });
+  NSLock *probeLock = self.authSchemaLock;
   [probeLock lock];
-  ARAuthSchemaFeatures *features = objc_getAssociatedObject(database, &ARAuthSchemaFeaturesKey);
-  if (features != nil) {
-    [probeLock unlock];
-    return features;
-  }
-  NSError *queryError = nil;
-  NSArray *rows = [database
-      executeQuery:@"SELECT CASE WHEN to_regclass('auth_users') IS NULL THEN 'f' ELSE 't' END AS users, "
-                    "CASE WHEN EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('auth_users') "
-                    "AND attname = 'session_stamp' AND attnum > 0 AND NOT attisdropped) THEN 't' ELSE 'f' END AS stamp, "
-                    "CASE WHEN to_regclass('auth_revoked_sessions') IS NULL THEN 'f' ELSE 't' END AS revoked"
-        parameters:@[]
-             error:&queryError];
-  if (rows == nil) {
-    [probeLock unlock];
-    if (error != NULL) {
-      *error = ARTranslatedQueryError(queryError, [self environmentName]);
+  ARAuthSchemaFeatures *features = nil;
+  BOOL usersTableExists = NO;
+  @try {
+    if (self.authSchemaDatabase != database) {
+      self.authSchemaFeatures = nil;
+      self.authSchemaDatabase = database;
     }
-    return nil;
+    if (database == nil) {
+      return nil;
+    }
+    features = self.authSchemaFeatures;
+    if (features != nil) {
+      return features;
+    }
+    NSError *queryError = nil;
+    NSArray *rows = [database
+        executeQuery:@"SELECT CASE WHEN to_regclass('auth_users') IS NULL THEN 'f' ELSE 't' END AS users, "
+                      "CASE WHEN EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass('auth_users') "
+                      "AND attname = 'session_stamp' AND attnum > 0 AND NOT attisdropped) THEN 't' ELSE 'f' END AS stamp, "
+                      "CASE WHEN to_regclass('auth_revoked_sessions') IS NULL THEN 'f' ELSE 't' END AS revoked"
+          parameters:@[]
+               error:&queryError];
+    if (rows == nil) {
+      if (error != NULL) {
+        *error = ARTranslatedQueryError(queryError, [self environmentName]);
+      }
+      return nil;
+    }
+    NSDictionary *row = [rows firstObject];
+    features = [[ARAuthSchemaFeatures alloc] init];
+    features.sessionStamp = [ARTrimmedString(row[@"stamp"]) isEqualToString:@"t"];
+    features.revokedSessions = [ARTrimmedString(row[@"revoked"]) isEqualToString:@"t"];
+    usersTableExists = [ARTrimmedString(row[@"users"]) isEqualToString:@"t"];
+    if (usersTableExists) {
+      // Late associated-object attachment changes libobjc2's isa on a shared
+      // adapter, racing with ARC retains outside this lock. Keep metadata here.
+      self.authSchemaFeatures = features;
+    }
+  } @finally {
+    [probeLock unlock];
   }
-  NSDictionary *row = [rows firstObject];
-  features = [[ARAuthSchemaFeatures alloc] init];
-  features.sessionStamp = [ARTrimmedString(row[@"stamp"]) isEqualToString:@"t"];
-  features.revokedSessions = [ARTrimmedString(row[@"revoked"]) isEqualToString:@"t"];
-  BOOL usersTableExists = [ARTrimmedString(row[@"users"]) isEqualToString:@"t"];
-  if (usersTableExists) {
-    objc_setAssociatedObject(database, &ARAuthSchemaFeaturesKey, features, OBJC_ASSOCIATION_RETAIN);
-  }
-  [probeLock unlock];
   if (!usersTableExists) {
     return features;
   }
@@ -310,15 +319,23 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
 }
 
 - (BOOL)recordSessionStampForContext:(ALNContext *)context error:(NSError **)error {
-  return [self recordSessionStampForContext:context preservingIdentifier:NO error:error];
+  return [self recordSessionStampForContext:context preservingIdentifier:NO expectedStamp:nil error:error];
 }
 
 - (BOOL)recordCurrentSessionStampForContext:(ALNContext *)context error:(NSError **)error {
-  return [self recordSessionStampForContext:context preservingIdentifier:YES error:error];
+  return [self recordSessionStampForContext:context preservingIdentifier:YES expectedStamp:nil error:error];
+}
+
+- (BOOL)recordRotatedSessionStampForContext:(ALNContext *)context
+                             validatedStamp:(NSString *)validatedStamp
+                                      error:(NSError **)error {
+  return [self recordSessionStampForContext:context preservingIdentifier:NO
+                             expectedStamp:validatedStamp error:error];
 }
 
 - (BOOL)recordSessionStampForContext:(ALNContext *)context
                 preservingIdentifier:(BOOL)preserveIdentifier
+                      expectedStamp:(NSString *)expectedStamp
                                error:(NSError **)error {
   NSString *subject = ARTrimmedString([ALNAuthSession subjectFromContext:context]);
   if (context == nil || [subject length] == 0 || [self database] == nil) {
@@ -352,6 +369,13 @@ void ALNAuthModuleInstallSessionRefresh(ALNApplication *application) {
     // Not an auth_users subject (for example a session policy hook mapped the
     // sign-in elsewhere); there is no stamp to record.
     return YES;
+  }
+  if (expectedStamp != nil && ![ARTrimmedString(row[@"session_stamp"]) isEqualToString:expectedStamp]) {
+    if (error != NULL) {
+      *error = ARError(ALNAuthModuleErrorAuthenticationFailed,
+                       @"The session was revoked while authentication was in progress", nil);
+    }
+    return NO;
   }
   NSDictionary *existing = ARSessionRecord(context);
   NSString *recordIdentifier = @"";

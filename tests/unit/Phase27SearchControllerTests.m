@@ -436,6 +436,17 @@
   XCTAssertTrue([(NSArray *)(payload[@"resources"] ?: @[]) containsObject:@"tenant_orders"]);
   XCTAssertEqualObjects(@"sku-102", [payload[@"promotedResults"] firstObject][@"recordID"]);
 
+  ALNResponse *filteredResponse =
+      [app dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/search/api/resources/products/query"
+                                       queryString:@"q=priority&filter.category=starter"
+                                           headers:headers
+                                              body:nil]];
+  XCTAssertEqual((NSInteger)200, filteredResponse.statusCode);
+  NSDictionary *filteredJSON = [self JSONObjectFromResponse:filteredResponse];
+  NSDictionary *filteredPayload = [filteredJSON[@"data"] isKindOfClass:[NSDictionary class]] ? filteredJSON[@"data"] : @{};
+  XCTAssertEqual((NSUInteger)0, [(NSArray *)(filteredPayload[@"promotedResults"] ?: @[]) count]);
+
   NSMutableArray<NSString *> *resultIDs = [NSMutableArray array];
   for (NSDictionary *entry in [payload[@"results"] isKindOfClass:[NSArray class]] ? payload[@"results"] : @[]) {
     if ([entry[@"recordID"] isKindOfClass:[NSString class]]) {

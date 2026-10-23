@@ -19,6 +19,18 @@ mkdir -p "$install_home"
 # Preserve a deliberately supplied toolchain, otherwise allow the installer to
 # bootstrap into this isolated HOME. Never edit the caller's startup files.
 cleanup() {
+  if [[ -n "${ARLEN_RUNTIME_EVIDENCE_DIR:-}" ]]; then
+    mkdir -p "$ARLEN_RUNTIME_EVIDENCE_DIR"
+    cp -a "$work/native-runtime-controls" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
+    cp "$work/boomhauer.log" "$work/app-tests.log" "$work/arlen/last-build-failure.log" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
+    local attempt
+    for attempt in "$work/arlen/runtimes"/.*-build-*; do
+      [[ -d "$attempt" ]] || continue
+      mkdir -p "$ARLEN_RUNTIME_EVIDENCE_DIR/$(basename "$attempt")"
+      cp "$attempt/builder-result.log" "$ARLEN_RUNTIME_EVIDENCE_DIR/$(basename "$attempt")/" 2>/dev/null || true
+      cp -a "$attempt/native/logs" "$ARLEN_RUNTIME_EVIDENCE_DIR/$(basename "$attempt")/" 2>/dev/null || true
+    done
+  fi
   if [[ -n "$server_pid" ]]; then
     # boomhauer runs in its own process group; stop the whole group.
     kill -TERM -- "-$server_pid" 2>/dev/null || kill -TERM "$server_pid" 2>/dev/null || true
@@ -44,6 +56,14 @@ cd "$work"
 arlen new SmokeApp
 cd SmokeApp
 arlen build
+
+if [[ "$(uname -s)" == Linux && -f "$work/arlen/current/tools/setup_runtime.py" ]]; then
+  if ! arlen test --app >"$work/app-tests.log" 2>&1; then
+    echo "smoke_install: installed app request tests failed" >&2
+    cat "$work/app-tests.log" >&2
+    exit 1
+  fi
+fi
 
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 if command -v setsid >/dev/null 2>&1; then
@@ -91,6 +111,19 @@ if [[ "$kind" == "macos-arm64" ]]; then
   fi
 elif grep -q "building framework artifacts" "$work/boomhauer.log"; then
   echo "smoke_install: note: boomhauer rebuilt framework artifacts after install"
+fi
+
+if [[ "$(uname -s)" == Linux && -f "$install_root/tools/runtime/qualify_normal.py" ]]; then
+  # Fresh CLI invocations selected the runtime themselves; now inspect the
+  # installed environment and execute controls natively on every CI target.
+  source "$install_root/tools/source_gnustep_env.sh"
+  python3 "$install_root/tools/runtime/qualify_normal.py" --output "$work/native-runtime-controls"
+  if [[ -n "${ARLEN_RUNTIME_EVIDENCE_DIR:-}" ]]; then
+    mkdir -p "$ARLEN_RUNTIME_EVIDENCE_DIR"
+    cp -a "$work/native-runtime-controls" "$ARLEN_RUNTIME_EVIDENCE_DIR/"
+    cp "$ARLEN_RUNTIME_PREFIX/gnustep-toolchain-provenance.json" "$ARLEN_RUNTIME_EVIDENCE_DIR/"
+    cp "$ARLEN_RUNTIME_PREFIX/arlen-runtime-delivery.json" "$ARLEN_RUNTIME_EVIDENCE_DIR/" 2>/dev/null || true
+  fi
 fi
 
 echo "smoke_install: ok ($(basename "$archive"))"

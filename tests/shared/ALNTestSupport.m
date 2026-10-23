@@ -448,6 +448,27 @@ NSDictionary<NSString *, NSString *> *ALNTestShellEnvironment(
   return child;
 }
 
+NSString *ALNTestClangCommand(void) {
+  NSDictionary *environment = [[NSProcessInfo processInfo] environment];
+  NSString *compiler = environment[@"ARLEN_CC"];
+  if ([compiler length] == 0) compiler = @"clang";
+  NSString *flags = environment[@"ARLEN_TSAN_EXTRA_FLAGS"];
+  NSMutableString *command = [compiler mutableCopy];
+  if ([flags length] > 0) [command appendFormat:@" %@", flags];
+#if __has_feature(thread_sanitizer)
+  // Share the runtime with instrumented dependency DSOs, including ICU.
+  [command appendString:@" -shared-libsan"];
+  NSString *preload = environment[@"XCTEST_LD_PRELOAD"] ?: environment[@"LD_PRELOAD"];
+  for (NSString *library in [preload componentsSeparatedByString:@":"]) {
+    if ([library.lastPathComponent hasPrefix:@"libclang_rt.tsan"]) {
+      [command appendFormat:@" -Wl,-rpath,%@", ALNTestShellQuote(library.stringByDeletingLastPathComponent)];
+      break;
+    }
+  }
+#endif
+  return command;
+}
+
 NSString *ALNTestFrameworkBuildCommand(NSString *targets) {
 #if defined(__APPLE__)
   (void)targets;
@@ -462,6 +483,14 @@ NSString *ALNTestAppBinaryRelativePath(void) {
   return @".boomhauer/apple/boomhauer-app";
 #else
   return ALNTestExecutablePath(@".boomhauer/build/boomhauer-app");
+#endif
+}
+
+NSString *ALNTestArlenCLIPath(void) {
+#if defined(__APPLE__)
+  return ALNTestPathFromRepoRoot(@"build/apple/arlen");
+#else
+  return ALNTestPathFromRepoRoot(ALNTestExecutablePath(@"build/arlen"));
 #endif
 }
 

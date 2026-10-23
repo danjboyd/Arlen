@@ -3,6 +3,8 @@
 Upgrading an existing app? Review [Getting Started](docs/GETTING_STARTED.md)
 for module re-vendoring and the [Live UI guide](docs/LIVE_UI.md) for channel
 subscription and reconnect behavior.
+Apps using the built-in request limiter must select one worker; see the
+[multi-worker migration note](docs/GETTING_STARTED.md#request-limits-with-multiple-workers).
 
 **A batteries-included web framework for Objective-C.**
 
@@ -75,7 +77,12 @@ bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/lates
 
 The installer checks release checksums, sets up supported prerequisites, and
 adds `arlen` to future shells. The final `export` makes it available in this
-terminal too. `--yes` allows prerequisite installation; Linux may ask for your
+terminal too. Linux setup builds Arlen's pinned patched GNUstep runtime in a
+versioned, fixed prefix using the distribution's ICU and clang. Normal GNUstep
+client builds default to `-O2`, with explicit debug flags retaining control. Ubuntu's lock
+includes a pinned clang 21 compatibility patch; see
+[manual/offline setup](docs/GETTING_STARTED.md#manual-toolchain-setup).
+`--yes` allows prerequisite installation; Linux may ask for your
 sudo password. On macOS, install Apple's Command Line Tools and Homebrew first
 if they are missing; the installer explains the required steps.
 

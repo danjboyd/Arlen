@@ -2,6 +2,205 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-22
+
+This patch release corrects authorization, request handling, persistence and
+runtime behavior. Upgrade affected vendored modules as described below.
+Linux setup now builds and selects Arlen's pinned patched GNUstep runtime in
+an Arlen-owned versioned prefix. Keep that prefix in place while installations
+or services use it; see [Getting Started](GETTING_STARTED.md#manual-toolchain-setup).
+
+Release qualification and remaining limitations are documented in the
+[Known Risk Register](KNOWN_RISK_REGISTER.md).
+
+- HTTP signal and console shutdown flags now use lock-free atomic accesses
+  across handlers and worker threads.
+
+- Runtime concurrency qualification now rejects server shutdown errors and
+  sanitizer reports, and retains separate logs for every server generation.
+
+- GNUstep app tests build and use the bundled XCTest library and headers
+  together, including on clean toolchains without system XCTest.
+
+- Session middleware added before auth-module registration now decodes cookies
+  before session refresh and route policy, preserving current OIDC roles and
+  sign-out enforcement on protected routes.
+
+- Windows preserves HTTP parser errors and session/worker queue overload `503`
+  responses with a bounded graceful close when rejected requests leave unread
+  input queued in the socket.
+
+- Request body deadlines and minimum rates are rechecked before accepting the
+  final fragment on chunked and `Content-Length` readers. This closes a gap
+  where late completion bypassed the clock; pipelined bytes do not increase
+  the preceding body's rate, and failed uploads remove their spool files.
+  Body clock settings also honor their documented zero values instead of
+  silently restoring defaults.
+
+- Linux automatic prerequisite setup pins the GNUstep bootstrap executable
+  digest instead of trusting a checksum downloaded with the script.
+
+- Deploy init restricts generated secret files before writing their contents
+  and stops on permission errors, replacing the later best-effort chmod.
+
+- Deploy doctor checks configured host-local PostgreSQL readiness in process
+  through libpq instead of exposing the DSN in shell and `pg_isready` arguments.
+  It fails closed if libpq is unavailable or the server is not ready.
+
+- Propane keeps merged configuration secrets out of its Python parser process
+  arguments while preserving unredacted worker settings.
+
+- Jobs 1.1.4 enforces `allowManualEnqueue = NO` for API enqueue and dead-letter
+  replay. Auth 1.7.2 uses `authModule.publicBaseURL` for queued mail links even
+  when a job payload supplies another origin. Upgrade both vendored modules.
+
+- EOC `yield` escapes an unfilled `content` slot's context fallback. The
+  rendered page body captured by `ALNView` remains raw HTML in its filled slot.
+
+- Negotiated template rendering no longer serializes template context as JSON
+  when no JSON object is supplied. It returns `{}` for that branch and adds
+  `Vary: Accept` to both HTML and JSON responses.
+
+- Auth 1.7.4 requires recent MFA before an AAL1 session can view or verify a
+  new TOTP enrollment when a verified SMS factor already exists. Factor
+  discovery omits the new authenticator secret until step-up. Upgrade vendored
+  auth modules before using SMS as a primary factor.
+
+- Auth 1.7.5 retains the validated session generation after TOTP or SMS step-up,
+  so normal step-up stays signed in at the new assurance level. Concurrent
+  revocation makes step-up fail and clears the session. Password registration,
+  sign-in, and change now preserve surrounding
+  whitespace exactly, matching password reset and policy validation. Upgrade
+  vendored auth modules.
+
+- Auth 1.7.6 keeps session-schema metadata in the auth runtime instead of
+  attaching it to a shared database adapter during requests. This removes the
+  observed GNUstep class-pointer race during concurrent password resets.
+  Replacing the adapter resets the cache; missing tables and failed probes
+  remain retryable. Upgrade vendored auth modules and restart the app; this
+  correction requires no new migration or configuration.
+
+- Ops 1.1.1 removes individual jobs, notification outbox/fanout, and storage
+  records from operator HTML and JSON summaries and drilldowns while keeping status
+  metrics. Admins retain full detail. Upgrade vendored `ops` modules.
+
+- Notifications 1.3.2 omits webhook URLs, headers, bodies, and error text from
+  persisted outbox records and scrubs existing catalog rows at startup. Rotate
+  older exports and backups separately if they contain webhook credentials.
+  Upgrade vendored `notifications` modules.
+
+- Admin UI 1.1.3 rejects executable and ambiguous resource link targets in
+  HTML list and detail pages. Unsafe targets render as `#`; upgrade vendored
+  `admin-ui` modules.
+
+- MCP 1.0.6 filters `tools/list` by route policy, assurance, and authentication
+  age metadata in addition to roles and scopes. Listing does not execute tool
+  handlers or guards; calls retain full route enforcement. Upgrade vendored
+  `mcp` modules.
+
+- Synchronous HTTP compatibility helpers now reject invalid header names and
+  CR/LF/NUL-containing values before connecting, on GNUstep and Apple paths.
+  Invalid headers return `NSURLErrorDomain/NSURLErrorBadURL`; the configured
+  HTTP client's existing invalid-request error remains unchanged.
+
+- PostgreSQL numeric results, including array elements, and MSSQL decimal
+  results reject text over 40 characters or 38 digits before Foundation
+  conversion. Queries return a decode error and leave the connection usable.
+  Select wider values as text when exact arbitrary precision is needed.
+
+- Route path-prefix policies also apply to format-suffixed requests that
+  dispatch to the protected route. Compiled fast routes now use the normal
+  authorization path when assurance or authentication-age limits are set, and
+  recognize string-valued path-prefix policies.
+
+- Auth 1.7.3 refreshes and revokes signed sessions before `requireAuth` route
+  policies run. Upgrade vendored auth modules before protecting routes solely
+  with `security.routePolicies`.
+
+- Admin UI 1.1.2 exports spreadsheet formula-like CSV cells as text, including
+  configured column labels and values with leading whitespace. Upgrade vendored
+  admin UI modules before opening exports in spreadsheet software.
+
+- Parent `security.routePolicies` path prefixes apply to mounted child requests
+  before forwarding. Parent session state is checked for `requireAuth`, and
+  source IP rules use the original request path and peer. Exact mounted leaf
+  prefixes also cover format-suffixed requests and nested mounts. Startup
+  rejects enabled sessions anywhere in the mount tree that use the same cookie
+  name with different secrets, including siblings and descendants behind a
+  session-disabled app. Shared-session child cookie writes take precedence over
+  parent legacy refresh cookies.
+
+- Storage 1.4.2 refuses cached reads and downloads when the authoritative catalog
+  cannot be reloaded. Backend exceptions release writer locks, discard
+  uncommitted cached entries on the next reload, and remove the failed update's
+  new attachment. Repair a corrupt catalog before retrying and upgrade vendored
+  storage modules with `arlen module upgrade`.
+
+- Auth 1.7.1 rejects `authModule.mfa.sms.testVerificationCode` outside
+  development and test at startup. Remove this test bypass from production-like
+  configuration and upgrade vendored `auth` modules.
+
+- Search 1.2.2 applies resource visibility filters to PostgreSQL full-text
+  results and their derived facets and suggestions. Upgrade vendored `search`
+  modules before using tenant, soft-delete, or app-defined visibility rules
+  with the PostgreSQL search engine.
+
+- Search 1.2.3 bounds repeated fuzzy token and field scoring work to one query
+  on the default in-memory engine. It retains ranking, highlighting, resource
+  filters, and the existing query limits. Query history updates now copy only
+  their bounded history for rollback while retaining state reload and atomic
+  persistence behavior. Failed state writes also report an execution error when
+  Foundation does not provide a file error.
+
+- Storage module 1.4.3 creates Windows legacy plist catalogs with an owner-only
+  protected DACL before writing and retains the last catalog on failed replacement.
+  The canonical storage privacy regression now runs on Windows and POSIX.
+
+- Chunked uploads on llhttp now enforce per-route decoded-byte limits and spool
+  while receiving. Incremental decoding avoids repeated body parsing; encoded
+  framing limits, body deadlines, and legacy rejection remain in force.
+
+- Live keyed publishing requires explicit container and key arguments; broadcast
+  payloads omit requester-specific live metadata and tracing IDs.
+
+- ORM transaction exceptions clear the context's borrowed connection. Savepoint
+  exceptions roll back inner writes before an outer transaction can continue;
+  PostgreSQL and MSSQL close connections when that cleanup fails.
+
+- Windows watch scans read each file's size and sub-second modification/change
+  times together, preserving edit detection while avoiding delayed build-error
+  recovery on large source checkouts.
+
+- Redis URLs containing literal or encoded NUL are rejected before parsing.
+- Template exceptions now restore per-thread render options and discard the
+  failed render's composition slots, preserving any enclosing render state.
+
+- Search 1.2.1 applies explicit and per-resource filters to promoted results.
+  Filtered queries no longer include promotions that contradict those filters.
+  Upgrade vendored `search` modules with `arlen module upgrade`.
+- Windows watch mode now stops both app and build-error servers when its
+  watch process tree is force-killed, releasing their listen ports even for
+  direct CLANG64 shell launches.
+- Windows installer fixtures serialize saved-user-PATH checks across
+  checkouts, retaining current-shell and fresh-shell certification.
+- Auth 1.7.0 rejects `registration.autoLogin = YES` outside `development` and
+  `test`, because immediate sign-in reveals registered addresses. Production-like
+  apps with local passwords and mail also reject `mailDispatch.mode = "synchronous"`
+  because delivery latency can reveal account membership. Remove these settings,
+  use the generic registration flow and durable mail jobs, then upgrade vendored
+  auth modules.
+
+- Multi-worker state diagnostics now require an explicit `state.durable = YES`
+  declaration in production-like environments. A database URL or deploy
+  database contract alone no longer clears the warning. Review app-owned
+  request-spanning stores before adding the declaration; the check records
+  intent and does not verify store durability.
+
+- Notifications 1.3.1 removes `Reply-To`, `Resent-*`, and other address-bearing
+  mail headers when a signed-in user queues a notification for themselves.
+  Upgrade vendored notification modules with `arlen module upgrade notifications`;
+  admin AAL2 and app-owned runtime queue paths retain definition headers.
+
 ## 0.3.0 — 2026-10-19
 
 This release combines the public audit fixes and security hardening work. It

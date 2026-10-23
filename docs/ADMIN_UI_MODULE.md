@@ -1,5 +1,10 @@
 # Admin UI Module
 
+Resource fields with `kind: link` allow relative URLs and `http`, `https`, or
+`mailto` links. Unsafe schemes, whitespace/control characters, backslashes,
+and protocol-relative URLs render as `#` in HTML link targets. Link labels
+remain escaped as text. Upgrade vendored `admin-ui` to 1.1.3 for this rule.
+
 The first-party `admin-ui` module ships one admin product with two surfaces:
 
 - HTML-first admin pages under `/admin/...`
@@ -32,6 +37,10 @@ Core resource responsibilities:
 - optional exports
 - optional autocomplete hooks
 - optional policy hook
+
+CSV exports prefix formula-like header labels and record values with an
+apostrophe so spreadsheet applications treat them as text. JSON exports retain
+the original values.
 
 Useful metadata includes:
 

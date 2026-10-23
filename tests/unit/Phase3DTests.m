@@ -2,11 +2,14 @@
 #import <XCTest/XCTest.h>
 
 #import "ALNApplication.h"
+#import "ALNAuthSession.h"
 #import "ALNContext.h"
 #import "ALNController.h"
 #import "ALNRealtime.h"
 #import "ALNRequest.h"
 #import "ALNResponse.h"
+#import "ALNSecurityPrimitives.h"
+#import "ALNSessionMiddleware.h"
 
 @interface Phase3DRealtimeSubscriber : NSObject <ALNRealtimeSubscriber>
 
@@ -50,6 +53,32 @@
     @"mounted" : @(YES),
     @"source" : @"phase3d"
   };
+}
+
+- (id)signIn:(ALNContext *)ctx {
+  NSError *error = nil;
+  [ALNAuthSession establishAuthenticatedSessionForSubject:@"mounted-user"
+                                                provider:@"test"
+                                                 methods:@[ @"password" ]
+                                          assuranceLevel:1
+                                         authenticatedAt:[NSDate date]
+                                                 context:ctx
+                                                   error:&error];
+  [self renderText:error == nil ? @"signed-in\n" : @"sign-in failed\n"];
+  return nil;
+}
+
+- (id)signOut:(ALNContext *)ctx {
+  [ALNAuthSession clearAuthenticatedSessionForContext:ctx];
+  [self renderText:@"signed-out\n"];
+  return nil;
+}
+
+- (id)touchSession:(ALNContext *)ctx {
+  [ctx session][@"child_marker"] = @"child-write";
+  [ctx markSessionDirty];
+  [self renderText:@"touched\n"];
+  return nil;
 }
 
 @end
@@ -114,6 +143,19 @@
     return @{};
   }
   return parsed;
+}
+
+- (NSString *)legacySessionCookieForSession:(NSDictionary *)session secret:(NSString *)secret {
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  NSDictionary *payload = @{ @"iat" : @((NSInteger)now),
+                             @"exp" : @((NSInteger)(now + 600)),
+                             @"data" : session ?: @{} };
+  NSData *plaintext = [NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+  NSString *prefix = [NSString stringWithFormat:@"v2.%@", ALNBase64URLStringFromData(plaintext)];
+  NSData *signature = ALNHMACSHA256([prefix dataUsingEncoding:NSUTF8StringEncoding],
+                                    [secret dataUsingEncoding:NSUTF8StringEncoding]);
+  return [NSString stringWithFormat:@"arlen_session=%@.%@", prefix,
+                                    ALNBase64URLStringFromData(signature)];
 }
 
 - (void)testRealtimeHubDeterministicFanoutAndUnsubscribe {
@@ -291,6 +333,260 @@
   NSDictionary *json = [self jsonFromResponse:apiResponse];
   XCTAssertEqualObjects(@(YES), json[@"mounted"]);
   XCTAssertEqualObjects(@"phase3d", json[@"source"]);
+}
+
+- (void)testMountedChildHonorsParentPathPolicies {
+  ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-parent-policy-test-secret-0123456789" },
+    @"security" : @{ @"routePolicies" : @{
+      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded/status", @"/embedded/nested/status" ],
+                       @"sourceIPAllowlist" : @[ @"127.0.0.1/32" ],
+                       @"requireAuth" : @YES }
+    } }
+  }];
+  ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  [child registerRouteMethod:@"GET" path:@"/status" name:@"child_status"
+             controllerClass:[Phase3DMountedController class] action:@"status"];
+  ALNApplication *grandchild = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test" }];
+  [grandchild registerRouteMethod:@"GET" path:@"/status" name:@"grandchild_status"
+                 controllerClass:[Phase3DMountedController class] action:@"status"];
+  XCTAssertTrue([child mountApplication:grandchild atPrefix:@"/nested"]);
+  [parent registerRouteMethod:@"GET" path:@"/sign-in" name:@"parent_sign_in"
+              controllerClass:[Phase3DMountedController class] action:@"signIn"];
+  XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
+  XCTAssertTrue([parent startWithError:NULL]);
+
+  ALNRequest *blockedIP = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                       queryString:@"" headers:@{}];
+  blockedIP.remoteAddress = @"203.0.113.9";
+  ALNResponse *ipResponse = [parent dispatchRequest:blockedIP];
+  XCTAssertEqual((NSInteger)403, ipResponse.statusCode);
+  XCTAssertEqualObjects(@"source_ip_denied", [ipResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  ALNRequest *anonymous = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                      queryString:@"" headers:@{}];
+  anonymous.remoteAddress = @"127.0.0.1";
+  ALNResponse *authResponse = [parent dispatchRequest:anonymous];
+  XCTAssertEqual((NSInteger)403, authResponse.statusCode);
+  XCTAssertEqualObjects(@"authentication_required", [authResponse headerForName:@"X-Arlen-Policy-Denial-Reason"]);
+
+  for (NSString *path in @[ @"/embedded/status.json", @"/embedded/nested/status.json" ]) {
+    ALNRequest *suffixDenied = [self requestWithMethod:@"GET" path:path
+                                          queryString:@"" headers:@{}];
+    suffixDenied.remoteAddress = @"127.0.0.1";
+    ALNResponse *denied = [parent dispatchRequest:suffixDenied];
+    XCTAssertEqual((NSInteger)403, denied.statusCode, @"%@", path);
+    XCTAssertEqualObjects(@"authentication_required",
+                          [denied headerForName:@"X-Arlen-Policy-Denial-Reason"], @"%@", path);
+  }
+
+  ALNResponse *signIn = [parent dispatchRequest:[self requestWithMethod:@"GET" path:@"/sign-in"
+                                                         queryString:@"" headers:@{}]];
+  XCTAssertEqual((NSInteger)200, signIn.statusCode);
+  NSString *cookie = [[[signIn headerForName:@"Set-Cookie"] ?: @"" componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue([cookie length] > 0);
+  ALNRequest *authenticated = [self requestWithMethod:@"GET" path:@"/embedded/status"
+                                          queryString:@"" headers:@{ @"cookie" : cookie ?: @"" }];
+  authenticated.remoteAddress = @"127.0.0.1";
+  ALNResponse *allowed = [parent dispatchRequest:authenticated];
+  XCTAssertEqual((NSInteger)200, allowed.statusCode);
+  XCTAssertEqualObjects(@"child-ok\n", [[NSString alloc] initWithData:allowed.bodyData
+                                                              encoding:NSUTF8StringEncoding]);
+  for (NSString *path in @[ @"/embedded/status.json", @"/embedded/nested/status.json" ]) {
+    ALNRequest *suffixAllowed = [self requestWithMethod:@"GET" path:path
+                                           queryString:@"" headers:@{ @"cookie" : cookie ?: @"" }];
+    suffixAllowed.remoteAddress = @"127.0.0.1";
+    ALNResponse *response = [parent dispatchRequest:suffixAllowed];
+    XCTAssertEqual((NSInteger)200, response.statusCode, @"%@", path);
+  }
+}
+
+- (void)testMountedParentAndChildDistinctSessionCookies {
+  ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-parent-cookie-test-secret-0123456789" },
+    @"security" : @{ @"routePolicies" : @{
+      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ], @"requireAuth" : @YES }
+    } }
+  }];
+  ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-child-cookie-test-secret-0123456789",
+                    @"cookieName" : @"mounted_child_session" }
+  }];
+  [parent registerRouteMethod:@"GET" path:@"/sign-in" name:@"parent_sign_in"
+              controllerClass:[Phase3DMountedController class] action:@"signIn"];
+  [child registerRouteMethod:@"GET" path:@"/status" name:@"child_status"
+             controllerClass:[Phase3DMountedController class] action:@"status"];
+  [child registerRouteMethod:@"GET" path:@"/sign-in" name:@"child_sign_in"
+             controllerClass:[Phase3DMountedController class] action:@"signIn"];
+  [child registerRouteMethod:@"GET" path:@"/sign-out" name:@"child_sign_out"
+             controllerClass:[Phase3DMountedController class] action:@"signOut"];
+  XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
+  XCTAssertTrue([parent startWithError:NULL]);
+
+  ALNResponse *parentLogin = [parent dispatchRequest:[self requestWithMethod:@"GET" path:@"/sign-in"
+                                                        queryString:@"" headers:@{}]];
+  NSString *parentCookie = [[[parentLogin headerForName:@"Set-Cookie"] ?: @""
+      componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue([parentCookie hasPrefix:@"arlen_session="]);
+  ALNResponse *childLogin = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                             path:@"/embedded/sign-in" queryString:@""
+                                          headers:@{ @"cookie" : parentCookie }]];
+  XCTAssertEqual((NSInteger)200, childLogin.statusCode);
+  NSArray *loginCookies = [childLogin headerValuesForName:@"Set-Cookie"];
+  XCTAssertEqual((NSUInteger)1, [loginCookies count]);
+  NSString *childCookie = [[[loginCookies firstObject] ?: @"" componentsSeparatedByString:@";"] firstObject];
+  XCTAssertTrue([childCookie hasPrefix:@"mounted_child_session="]);
+  XCTAssertNotEqualObjects(parentCookie, childCookie);
+  NSString *bothCookies = [NSString stringWithFormat:@"%@; %@", parentCookie, childCookie];
+  ALNResponse *afterChildLogin = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                                 path:@"/embedded/status" queryString:@""
+                                              headers:@{ @"cookie" : bothCookies }]];
+  XCTAssertEqual((NSInteger)200, afterChildLogin.statusCode);
+  ALNResponse *childCookieLogout = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                                    path:@"/embedded/sign-out" queryString:@""
+                                                 headers:@{ @"cookie" : childCookie }]];
+  XCTAssertEqual((NSInteger)403, childCookieLogout.statusCode);
+
+  ALNResponse *childLogout = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/embedded/sign-out" queryString:@""
+                                           headers:@{ @"cookie" : bothCookies }]];
+  XCTAssertEqual((NSInteger)200, childLogout.statusCode);
+  NSString *cleared = [[childLogout headerValuesForName:@"Set-Cookie"] firstObject];
+  XCTAssertTrue([cleared hasPrefix:@"mounted_child_session="]);
+  XCTAssertTrue([cleared containsString:@"Max-Age=0"]);
+  ALNResponse *stillAuthenticated = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                                    path:@"/embedded/status" queryString:@""
+                                                 headers:@{ @"cookie" : parentCookie }]];
+  XCTAssertEqual((NSInteger)200, stillAuthenticated.statusCode);
+}
+
+- (void)testMountedParentAndChildSameSessionCookieFailsStartup {
+  ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-parent-cookie-test-secret-0123456789" }
+  }];
+  ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test",
+    @"session" : @{ @"enabled" : @YES,
+                    @"secret" : @"mounted-child-cookie-test-secret-0123456789" }
+  }];
+  XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
+  NSError *error = nil;
+  XCTAssertFalse([parent startWithError:&error]);
+  XCTAssertEqualObjects(@"Arlen.Application.Error", error.domain);
+  XCTAssertEqual((NSInteger)309, error.code);
+  XCTAssertTrue([error.localizedDescription containsString:@"/embedded"]);
+  XCTAssertTrue([error.localizedDescription containsString:@"session.cookieName"]);
+}
+
+- (void)testNestedSessionCookieConflictAcrossDisabledIntermediate {
+  NSString *rootSecret = @"mounted-root-cookie-test-secret-0123456789";
+  NSString *otherSecret = @"mounted-other-cookie-test-secret-0123456789";
+  ALNApplication *root = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  ALNApplication *middle = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *leaf = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : otherSecret }
+  }];
+  XCTAssertTrue([middle mountApplication:leaf atPrefix:@"/leaf"]);
+  XCTAssertTrue([root mountApplication:middle atPrefix:@"/middle"]);
+  NSError *error = nil;
+  XCTAssertFalse([root startWithError:&error]);
+  XCTAssertEqual((NSInteger)309, error.code);
+  XCTAssertTrue([error.localizedDescription containsString:@"/middle/leaf"]);
+
+  ALNApplication *sharedLeaf = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  ALNApplication *sharedMiddle = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *sharedRoot = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES, @"secret" : rootSecret }
+  }];
+  XCTAssertTrue([sharedMiddle mountApplication:sharedLeaf atPrefix:@"/leaf"]);
+  XCTAssertTrue([sharedRoot mountApplication:sharedMiddle atPrefix:@"/middle"]);
+  XCTAssertTrue([sharedRoot startWithError:&error], @"%@", error);
+}
+
+- (void)testSiblingSessionCookieConflictUnderDisabledRoot {
+  NSDictionary *firstSession = @{ @"enabled" : @YES,
+                                  @"secret" : @"mounted-first-cookie-test-secret-0123456789" };
+  NSDictionary *secondSession = @{ @"enabled" : @YES,
+                                   @"secret" : @"mounted-second-cookie-test-secret-0123456789" };
+  ALNApplication *root = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *first = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : firstSession }];
+  ALNApplication *second = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : secondSession }];
+  XCTAssertTrue([root mountApplication:first atPrefix:@"/first"]);
+  XCTAssertTrue([root mountApplication:second atPrefix:@"/second"]);
+  NSError *error = nil;
+  XCTAssertFalse([root startWithError:&error]);
+  XCTAssertEqual((NSInteger)309, error.code);
+  XCTAssertTrue([error.localizedDescription containsString:@"arlen_session"]);
+
+  ALNApplication *distinctRoot = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @NO }
+  }];
+  ALNApplication *distinctFirst = [[ALNApplication alloc] initWithConfig:@{ @"environment" : @"test", @"session" : firstSession }];
+  ALNApplication *distinctSecond = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : @{ @"enabled" : @YES,
+      @"secret" : @"mounted-second-cookie-test-secret-0123456789", @"cookieName" : @"second_session" }
+  }];
+  XCTAssertTrue([distinctRoot mountApplication:distinctFirst atPrefix:@"/first"]);
+  XCTAssertTrue([distinctRoot mountApplication:distinctSecond atPrefix:@"/second"]);
+  XCTAssertTrue([distinctRoot startWithError:&error], @"%@", error);
+}
+
+- (void)testMountedSharedSessionChildWriteWinsParentLegacyRefresh {
+  NSString *secret = @"mounted-shared-cookie-test-secret-0123456789";
+  NSDictionary *session = @{ @"enabled" : @YES, @"secret" : secret };
+  ALNApplication *parent = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : session,
+    @"security" : @{ @"routePolicies" : @{
+      @"mounted" : @{ @"pathPrefixes" : @[ @"/embedded" ], @"requireAuth" : @YES }
+    } }
+  }];
+  ALNApplication *child = [[ALNApplication alloc] initWithConfig:@{
+    @"environment" : @"test", @"session" : session
+  }];
+  [parent registerRouteMethod:@"GET" path:@"/sign-in" name:@"parent_sign_in"
+              controllerClass:[Phase3DMountedController class] action:@"signIn"];
+  [child registerRouteMethod:@"GET" path:@"/touch" name:@"child_touch"
+             controllerClass:[Phase3DMountedController class] action:@"touchSession"];
+  XCTAssertTrue([parent mountApplication:child atPrefix:@"/embedded"]);
+  XCTAssertTrue([parent startWithError:NULL]);
+  ALNResponse *login = [parent dispatchRequest:[self requestWithMethod:@"GET" path:@"/sign-in"
+                                                   queryString:@"" headers:@{}]];
+  NSString *cookie = [[[login headerForName:@"Set-Cookie"] ?: @"" componentsSeparatedByString:@";"] firstObject];
+  NSString *token = [[cookie componentsSeparatedByString:@"="] lastObject];
+  ALNSessionMiddleware *decoder = [[ALNSessionMiddleware alloc] initWithSecret:secret
+                                                                     cookieName:@"arlen_session"
+                                                                  maxAgeSeconds:600 secure:NO sameSite:@"Lax"];
+  NSDictionary *decoded = [decoder sessionDictionaryFromCookieValue:token];
+  XCTAssertNotNil(decoded);
+  NSString *legacyCookie = [self legacySessionCookieForSession:decoded secret:secret];
+  ALNResponse *touched = [parent dispatchRequest:[self requestWithMethod:@"GET"
+                                              path:@"/embedded/touch" queryString:@""
+                                           headers:@{ @"cookie" : legacyCookie }]];
+  XCTAssertEqual((NSInteger)200, touched.statusCode);
+  NSArray *cookies = [touched headerValuesForName:@"Set-Cookie"];
+  XCTAssertEqual((NSUInteger)1, [cookies count]);
+  NSString *freshPair = [[[cookies firstObject] ?: @"" componentsSeparatedByString:@";"] firstObject];
+  NSString *freshToken = [[freshPair componentsSeparatedByString:@"="] lastObject];
+  NSDictionary *freshSession = [decoder sessionDictionaryFromCookieValue:freshToken];
+  XCTAssertEqualObjects(@"child-write", freshSession[@"child_marker"]);
 }
 
 - (void)testControllerWebSocketAndSSEContracts {

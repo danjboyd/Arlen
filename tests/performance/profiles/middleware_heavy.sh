@@ -5,6 +5,7 @@ MAKE_TARGETS=(boomhauer)
 SERVER_BINARY="./build/boomhauer"
 SERVER_ARGS=(--port "{port}")
 SERVER_ENV=(
+  "ARLEN_PROPANE_WORKERS=1"
   "ARLEN_SESSION_ENABLED=1"
   "ARLEN_SESSION_SECRET=phase3c-session-secret-0123456789abcdef"
   "ARLEN_CSRF_ENABLED=1"

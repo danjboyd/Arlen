@@ -126,9 +126,9 @@
               <% if (columnIndex == 0) { %>
                 <a href="<%= [paths objectForKey:@"html_index"] %>/<%= recordID %>"><%= [record objectForKey:primaryField] ?: value %></a>
               <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSDictionary class]]) { %>
-                <a href="<%= [value objectForKey:@"href"] ?: @"#" %>"><%= [value objectForKey:@"label"] ?: [value objectForKey:@"href"] ?: @"" %></a>
+                <a href="<%= ALNEOCSafeLinkURL([value objectForKey:@"href"]) %>"><%= [value objectForKey:@"label"] ?: [value objectForKey:@"href"] ?: @"" %></a>
               <% } else if ([kind isEqual:@"link"] && [value isKindOfClass:[NSString class]]) { %>
-                <a href="<%= value %>"><%= value %></a>
+                <a href="<%= ALNEOCSafeLinkURL(value) %>"><%= value %></a>
               <% } else if ([value isKindOfClass:[NSArray class]]) { %>
                 <%= [value componentsJoinedByString:@", "] %>
               <% } else if ([value respondsToSelector:@selector(boolValue)] && [kind isEqual:@"boolean"]) { %>

@@ -13,6 +13,12 @@
 #import "ALNTOTP.h"
 #import "ALNTestClient.h"
 
+@interface ALNAuthModuleRuntime (SessionRotationRaceTesting)
+- (BOOL)recordRotatedSessionStampForContext:(ALNContext *)context
+                             validatedStamp:(NSString *)validatedStamp
+                                      error:(NSError **)error;
+@end
+
 // Login and step-up start a fresh session: pre-login keys (including the CSRF
 // token) do not carry over, except the documented `return_to`.
 @interface AuthSessionRegenerationTests : XCTestCase
@@ -292,6 +298,45 @@
                                             headers:@{ @"content-type" : @"application/x-www-form-urlencoded" }
                                                body:[logout dataUsingEncoding:NSUTF8StringEncoding]];
   XCTAssertEqual((NSInteger)302, loggedOut.statusCode, @"%@", [loggedOut bodyText]);
+}
+
+- (void)testStepUpCannotAdoptGenerationRevokedDuringRotation {
+  XCTSkipUnless([[self pgTestDSN] length] > 0, @"ARLEN_PG_TEST_DSN is not set");
+  ALNApplication *app = [self authApplication];
+  NSString *email = [self uniqueEmail];
+  ALNTestClient *client = [self manualCSRFClientForApplication:app];
+  ALNResponse *registered = [self postJSON:@"/auth/api/register"
+                                      body:@{ @"email" : email, @"display_name" : @"Rotation",
+                                              @"password" : @"session-regen-password-123" }
+                                     token:[client csrfToken] client:client];
+  XCTAssertEqual((NSInteger)200, registered.statusCode, @"%@", [registered bodyText]);
+  NSDictionary *originalSession = [client session];
+  NSString *validatedStamp = originalSession[@"aln.auth_module.session_stamp"][@"stamp"];
+  XCTAssertTrue([validatedStamp length] > 0);
+
+  ALNContext *control = [self contextWithSession:originalSession];
+  XCTAssertTrue([ALNAuthSession elevateAuthenticatedSessionForMethod:@"totp" assuranceLevel:2
+                                                      authenticatedAt:nil context:control error:NULL]);
+  NSError *error = nil;
+  XCTAssertTrue([[ALNAuthModuleRuntime sharedRuntime] recordRotatedSessionStampForContext:control
+                                                                            validatedStamp:validatedStamp error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(validatedStamp, control.session[@"aln.auth_module.session_stamp"][@"stamp"]);
+
+  ALNContext *revoked = [self contextWithSession:originalSession];
+  XCTAssertTrue([ALNAuthSession elevateAuthenticatedSessionForMethod:@"totp" assuranceLevel:2
+                                                      authenticatedAt:nil context:revoked error:NULL]);
+  ALNPg *database = [[ALNPg alloc] initWithConnectionString:[self pgTestDSN] maxConnections:1 error:&error];
+  XCTAssertNotNil(database);
+  NSString *subject = [ALNAuthSession subjectFromContext:revoked];
+  XCTAssertEqual((NSInteger)1, [database executeCommand:
+      @"UPDATE auth_users SET session_stamp = session_stamp + 1 WHERE subject = $1"
+      parameters:@[ subject ] error:&error]);
+  XCTAssertFalse([[ALNAuthModuleRuntime sharedRuntime] recordRotatedSessionStampForContext:revoked
+                                                                            validatedStamp:validatedStamp error:&error]);
+  XCTAssertEqual(ALNAuthModuleErrorAuthenticationFailed, error.code);
+  [ALNAuthSession clearAuthenticatedSessionForContext:revoked];
+  XCTAssertNil([ALNAuthSession subjectFromContext:revoked]);
 }
 
 @end

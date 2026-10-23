@@ -1,5 +1,16 @@
 # TSAN reliability investigation — 2026-09-21
 
+## v0.3.1 review — 2026-10-21
+
+The nightly check remains informational in configured branch protection, but
+v0.3.1 release is held until confirmed findings are fixed and two consecutive
+full unit plus HTTP-concurrency runs pass with a detecting application canary,
+retained evidence, and no new broad suppressions or test exclusions. Isolated
+normal and instrumented dependency candidates use the shipped GNUstep Base
+`d898f703` pin; diagnostic runs still expose dependency races. No full clean
+run is claimed and no system toolchain replacement has been made. The sections
+below preserve the September investigation and its historical lane policy.
+
 ## Outcome
 
 TSAN remains informational. The old green nightly runs did not establish race
@@ -25,8 +36,9 @@ bash tools/ci/run_linux_thread_race_nightly.sh
 
 The diagnostic compiles `tests/fixtures/sanitizers/tsan_runtime_probe.m` using
 clang and the active GNUstep configuration. It runs startup, synchronized
-monitor, NSLock, NSOperationQueue, and deliberately racy Foundation-callback
-probes both with and without the current suppressions. It retains every log,
+monitor, NSLock, NSOperationQueue (including idle worker retirement), cold
+Foundation singleton/string/regex operations, concurrent dispatch, and deliberately
+racy Foundation-callback probes both with and without the current suppressions. It retains every log,
 compiler command, compiler version, linked library paths, kernel and effective
 suppression text. TSAN logs include library build IDs and offsets even where
 private symbols are stripped.
@@ -42,9 +54,14 @@ On this toolchain the queue probe fails the clean-run requirement.
 The installed toolchain was Debian clang 19.1.7 with GNUstep base 1.31 and
 libobjc 4.6. Base build ID: `7d8b1a2da0aa65efd2b9453dfe58e5b456e5085a`;
 libobjc build ID: `9a78da61cb3af8a76a7274420f415c19c7985055`.
-The executable probes use clang's linked TSAN runtime. XCTest loads the
-instrumented bundle with the existing `clang -print-file-name=libtsan.so`
-preload (GCC 14 libtsan on this installation); both paths remain visible.
+The September executable probes used clang's linked TSAN runtime, while
+XCTest preloaded `clang -print-file-name=libtsan.so` (GCC 14 libtsan on this
+installation). The v0.3.1 harness corrects this mismatch: XCTest preloads clang's
+architecture-specific shared runtime and instrumented children link the same
+runtime with `-shared-libsan`. `test_clang_sanitizer_runtime.py` exercises both
+dlopen and exec with deliberate races and verifies exit 66 plus the named
+application counter. This harness correction does not resolve or suppress the
+remaining dependency findings.
 
 | Finding | Evidence | Disposition |
 | --- | --- | --- |
@@ -115,3 +132,15 @@ No upstream library modification or TSAN gate promotion is part of this change.
 - TSAN diagnostic controls detect the deliberate application race; unsuppressed
   and narrowed runs expose the queue/CLI/configuration findings above. The full
   TSAN suite and HTTP concurrency probe are not certified clean.
+
+## v0.3.1 dependency follow-up
+
+The isolated dependency recipe and reviewable patches are documented in
+`docs/CI_ALIGNMENT.md`. It builds the same pinned sources in normal and thread
+modes without installing into the host toolchain. Expanded diagnostics exercise
+Foundation caches, idle queue retirement, serial-queue enqueue/drain contention,
+dispatch once/apply, semaphore handoff,
+group wait/notification publication, concurrent task signals, and KVC cache
+refresh during method replacement, and autoreleased buffers, alongside the unchanged deliberate-race
+canary. This follow-up does not promote the gate or relax the two consecutive
+full-unit-plus-HTTP acceptance requirement above.

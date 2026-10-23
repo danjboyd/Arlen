@@ -8,6 +8,7 @@
 NSString *const ALNHTTPClientErrorDomain = @"Arlen.HTTPClient";
 
 // Internal seams in ALNHTTPCompat.m.
+extern BOOL ALNHTTPHeadersValid(NSDictionary *headers);
 extern NSTimeInterval ALNHTTPMonotonicNow(void);
 extern NSData *ALNHTTPClientPerformHop(NSURLRequest *request, NSUInteger maxBytes, NSHTTPURLResponse **response,
                                        NSString **receivedPhrase, NSError **error);
@@ -25,26 +26,6 @@ static NSError *HCError(ALNHTTPClientErrorCode code, NSString *reason) {
 static id HCFail(NSError **error, ALNHTTPClientErrorCode code, NSString *reason) {
   if (error) *error = HCError(code, reason);
   return nil;
-}
-
-static BOOL HCHeadersValid(NSDictionary *headers) {
-  NSCharacterSet *token = [NSCharacterSet characterSetWithCharactersInString:
-      @"!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
-  for (id name in headers) {
-    id value = headers[name];
-    if (![name isKindOfClass:[NSString class]] || [name length] == 0 ||
-        [name rangeOfCharacterFromSet:token.invertedSet].location != NSNotFound ||
-        ![value isKindOfClass:[NSString class]]) {
-      return NO;
-    }
-    for (NSUInteger index = 0; index < [value length]; index++) {
-      unichar ch = [value characterAtIndex:index];
-      if (ch == 0 || ch == '\r' || ch == '\n') {
-        return NO;
-      }
-    }
-  }
-  return YES;
 }
 
 // A non-negative integer from an NSNumber (not a boolean) or a decimal string,
@@ -232,7 +213,7 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
     return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Request needs a URL");
   }
   NSString *method = request.HTTPMethod.length ? request.HTTPMethod.uppercaseString : @"GET";
-  if (!HCHeadersValid(request.allHTTPHeaderFields)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
+  if (!ALNHTTPHeadersValid(request.allHTTPHeaderFields)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
   if (![@[ @"GET", @"HEAD", @"POST", @"PUT", @"PATCH", @"DELETE" ] containsObject:method]) {
     return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Unsupported HTTP method");
   }
@@ -293,7 +274,7 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
 
 - (ALNHTTPClientResult *)GETURL:(NSURL *)url headers:(NSDictionary *)headers error:(NSError **)error {
   if (![url isKindOfClass:[NSURL class]]) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Request needs a URL");
-  if (!HCHeadersValid(headers)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
+  if (!ALNHTTPHeadersValid(headers)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
   request.HTTPMethod = @"GET";
   for (NSString *name in headers) [request setValue:headers[name] forHTTPHeaderField:name];
@@ -305,7 +286,7 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
   if (![url isKindOfClass:[NSURL class]]) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Request needs a URL");
   NSData *body = object ? [ALNJSONSerialization dataWithJSONObject:object options:0 error:NULL] : nil;
   if (!body) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Request body is not JSON serializable");
-  if (!HCHeadersValid(headers)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
+  if (!ALNHTTPHeadersValid(headers)) return HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP headers");
   NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
   request.HTTPMethod = @"POST";
   request.HTTPBody = body;

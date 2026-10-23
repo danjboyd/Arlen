@@ -1,6 +1,7 @@
 #import "ALNNotificationsCatalog.h"
 #import "ALNConfig.h"
 #import "ALNJSONSerialization.h"
+#import "ALNPercentDecoding.h"
 #import "ALNNotificationsModule.h"
 
 #import "../../admin-ui/Sources/ALNAdminUIModule.h"
@@ -287,9 +288,7 @@ static NSString *NMConfiguredPath(NSDictionary *moduleConfig, NSString *key, NSS
 }
 
 static NSString *NMQueryDecodeComponent(NSString *component) {
-  NSString *withSpaces = [[component ?: @"" stringByReplacingOccurrencesOfString:@"+" withString:@" "]
-      stringByRemovingPercentEncoding];
-  return withSpaces ?: @"";
+  return ALNPercentDecodedString(component ?: @"", YES) ?: @"";
 }
 
 static NSDictionary *NMJSONParametersFromBody(NSData *body) {
@@ -504,6 +503,24 @@ static NSDictionary *NMWebhookPreviewRepresentation(NSDictionary *request) {
     @"body" : bodyText ?: @"",
     @"metadata" : NMNormalizeDictionary(normalized[@"metadata"]),
   };
+}
+
+// The preview may contain bearer headers and signed URL query parameters.
+// Keep only delivery metadata in durable audit records.
+static NSDictionary *NMSafeOutboxEntry(id rawEntry) {
+  NSDictionary *entry = NMNormalizeDictionary(rawEntry);
+  if (![NMLowerTrimmedString(entry[@"channel"]) isEqualToString:@"webhook"]) return entry;
+  NSMutableDictionary *safe = [entry mutableCopy];
+  safe[@"recipient"] = @"webhook";
+  safe[@"message"] = @{ @"method" : NMTrimmedString(NMNormalizeDictionary(entry[@"message"])[@"method"]) };
+  safe[@"error"] = [NMTrimmedString(entry[@"error"]) length] > 0 ? @"webhook delivery failed" : @"";
+  return safe;
+}
+
+static NSArray *NMSafeOutboxEntries(NSArray *entries) {
+  NSMutableArray *safe = [NSMutableArray arrayWithCapacity:[entries count]];
+  for (id entry in entries) [safe addObject:NMSafeOutboxEntry(entry)];
+  return safe;
 }
 
 static NSArray<NSString *> *NMRecipientsFromInAppEntry(NSDictionary *entry);
@@ -1130,7 +1147,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   }
   [self.lock lock];
   NSArray *outbox = [state[@"outboxEntries"] isKindOfClass:[NSArray class]] ? state[@"outboxEntries"] : @[];
-  [self.outboxEntries addObjectsFromArray:outbox];
+  [self.outboxEntries addObjectsFromArray:NMSafeOutboxEntries(outbox)];
   NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
   NSDictionary *inboxByRecipient = [state[@"inboxByRecipient"] isKindOfClass:[NSDictionary class]]
                                        ? state[@"inboxByRecipient"]
@@ -1155,12 +1172,13 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                : self.nextEntrySequence;
   self.lastPersistedState = [state copy];
   [self.lock unlock];
+  if (![outbox isEqualToArray:NMSafeOutboxEntries(outbox)] && ![self persistStateWithError:error]) return NO;
   return YES;
 }
 
 - (void)replaceStateLockedFromDocument:(NSDictionary *)state {
   [self.outboxEntries removeAllObjects];
-  [self.outboxEntries addObjectsFromArray:NMNormalizeArray(state[@"outboxEntries"])];
+  [self.outboxEntries addObjectsFromArray:NMSafeOutboxEntries(NMNormalizeArray(state[@"outboxEntries"]))];
   NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
   [self.inboxByRecipient removeAllObjects];
   for (NSString *recipient in NMNormalizeDictionary(state[@"inboxByRecipient"])) {
@@ -1263,6 +1281,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
   NSMutableArray *outbox = NMMergeChangedEntries(NMNormalizeArray(authoritative[@"outboxEntries"]),
                                                 NMNormalizeArray(baseline[@"outboxEntries"]),
                                                 self.outboxEntries, self.maxOutboxEntries);
+  outbox = [NMSafeOutboxEntries(outbox) mutableCopy];
   NSDictionary *authoritativeInbox = NMNormalizeDictionary(authoritative[@"inboxByRecipient"]);
   NSDictionary *baselineInbox = NMNormalizeDictionary(baseline[@"inboxByRecipient"]);
   NSMutableDictionary *inbox = [NSMutableDictionary dictionaryWithDictionary:authoritativeInbox];
@@ -1314,7 +1333,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
                                       errorMessage:(NSString *)errorMessage {
   [self.lock lock];
   self.nextEntrySequence += 1;
-  NSDictionary *entry = @{
+  NSDictionary *entry = NMSafeOutboxEntry(@{
     @"entryID" : [NSString stringWithFormat:@"notification-%@", [[NSUUID UUID] UUIDString].lowercaseString],
     @"notification" : NMTrimmedString(identifier),
     @"channel" : NMLowerTrimmedString(channel),
@@ -1326,7 +1345,7 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     @"timestamp" : @([[NSDate date] timeIntervalSince1970]),
     @"message" : NMNormalizeDictionary(message),
     @"error" : NMTrimmedString(errorMessage),
-  };
+  });
   [self.outboxEntries addObject:entry];
   NMTrimOldestEntries(self.outboxEntries, self.maxOutboxEntries);
   [self.lock unlock];
@@ -1672,8 +1691,12 @@ static NSArray<NSString *> *NMPreferenceRecipientsFromPayloadAndEntry(NSDictiona
     if (message != nil) {
       NSMutableDictionary *headers = [NSMutableDictionary dictionary];
       for (id key in message.headers ?: @{}) {
-        NSString *lower = [[key description] lowercaseString];
-        if (![@[ @"to", @"cc", @"bcc" ] containsObject:lower]) {
+        NSString *lower = [NMTrimmedString([key description]) lowercaseString];
+        BOOL recipientHeader = [@[ @"to", @"cc", @"bcc", @"reply-to", @"sender", @"return-path",
+                                     @"disposition-notification-to", @"mail-followup-to", @"mail-reply-to",
+                                     @"errors-to", @"envelope-to" ] containsObject:lower] ||
+                               [lower hasPrefix:@"resent-"];
+        if (!recipientHeader) {
           headers[key] = message.headers[key];
         }
       }

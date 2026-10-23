@@ -46,7 +46,9 @@ to_absolute_path() {
   if [[ -z "$raw" ]]; then
     return 1
   fi
-  if [[ "$raw" = /* ]]; then
+  if aln_platform_is_msys && command -v cygpath >/dev/null 2>&1; then
+    cygpath -au "$raw"
+  elif [[ "$raw" = /* ]]; then
     printf '%s\n' "$raw"
   else
     printf '%s\n' "$app_root/$raw"
@@ -204,7 +206,8 @@ phase39_has_nonempty_assignment() {
   phase39_config_blob | sed -nE "s/.*${key}[[:space:]]*=[[:space:]]*\"([^\"]+)\"[[:space:]]*;.*/\\1/p" | grep -q '.'
 }
 
-if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
+phase39_environment_kind="$(printf '%s' "$environment" | tr '[:upper:]' '[:lower:]')"
+if [[ "$phase39_environment_kind" != "development" && "$phase39_environment_kind" != "test" && -f "$app_config_path" ]]; then
   phase39_worker_count="${ARLEN_PROPANE_WORKERS:-}"
   if [[ ! "$phase39_worker_count" =~ ^[0-9]+$ ]]; then
     phase39_worker_count="$(phase39_last_numeric_assignment "workerCount")"
@@ -214,7 +217,12 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
   fi
 
   phase39_has_durable_state=0
-  if phase39_config_blob | grep -Eq 'durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*;'; then
+  # Inspect the state dictionary itself; another module may also have a
+  # durable flag, which must not silence this app-state warning. The last
+  # declaration wins when an environment overlay supplies its own state.
+  phase39_state_declaration="$(phase39_config_blob | tr '\n' ' ' |
+    sed -nE 's/.*[;{[:space:]]state[[:space:]]*=[[:space:]]*\{([^{}]*)\}.*/\1/p')"
+  if [[ "$phase39_state_declaration" =~ durable[[:space:]]*=[[:space:]]*(YES|1|true)[[:space:]]*\; ]]; then
     phase39_has_durable_state=1
   fi
   phase39_state_durable="$(printf '%s' "${ARLEN_STATE_DURABLE:-}" | tr '[:upper:]' '[:lower:]')"
@@ -222,19 +230,14 @@ if [[ "$environment" == "production" && -f "$app_config_path" ]]; then
     phase39_has_durable_state=1
   fi
 
-  phase39_has_database_signal=0
-  if [[ -n "${ARLEN_DATABASE_URL:-}" ]] || phase39_has_nonempty_assignment "connectionString"; then
-    phase39_has_database_signal=1
-  fi
-
-  if (( phase39_worker_count > 1 && phase39_has_durable_state == 0 && phase39_has_database_signal == 0 )); then
+  if (( phase39_worker_count > 1 && phase39_has_durable_state == 0 )); then
     add_check "multi_worker_state" "warn" \
-      "production uses $phase39_worker_count propane workers without a declared durable state signal" \
-      "Each propane worker has isolated process-local memory. Declare state.durable=YES with a durable mode/target, or configure a database-backed state signal for request-spanning app data."
+      "$environment uses $phase39_worker_count propane workers without declared durable app state" \
+      "Each propane worker has isolated process-local memory. Set state.durable=YES only after verifying request-spanning app state is shared; a database URL alone is insufficient."
   else
     add_check "multi_worker_state" "pass" \
       "multi-worker state contract is quiet for $environment workerCount=$phase39_worker_count" \
-      "Warnings are quiet when workerCount <= 1, state.durable=YES, or a database connection string is configured."
+      "Warnings are quiet when workerCount <= 1 or state.durable=YES."
   fi
 
   phase39_operability_restricted=""
@@ -388,6 +391,21 @@ else
     fi
   else
     add_check "platform" "pass" "platform: GNUstep/Linux bootstrap path"
+  fi
+
+  if [[ "$(uname -s)" == Linux && -f "$repo_root/tools/setup_runtime.py" ]]; then
+    if runtime_result="$(python3 "$repo_root/tools/setup_runtime.py" check --full 2>&1)"; then
+      if source "$repo_root/tools/source_gnustep_env.sh" >/dev/null; then
+        add_check "patched_runtime" "pass" "Arlen patched runtime verified: $runtime_result"
+      else
+        add_check "patched_runtime" "fail" "Failed to select patched runtime environment"
+      fi
+    else
+      runtime_severity=warn
+      [[ ! -f "$repo_root/.arlen-dist" && ! -f "$repo_root/.arlen-runtime" && -z "${ARLEN_RUNTIME_PREFIX:-}" ]] || runtime_severity=fail
+      add_check "patched_runtime" "$runtime_severity" "$runtime_result" \
+        "Run python3 $repo_root/tools/setup_runtime.py build; manual/offline hosts can select --prefix /final/patched/prefix. Generic unpatched GNUstep is not release-qualified."
+    fi
   fi
 
   gnustep_script="$(bash "$repo_root/tools/resolve_gnustep.sh" 2>/dev/null || true)"

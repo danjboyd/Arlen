@@ -1,5 +1,12 @@
 # Getting Started
 
+On Windows, `boomhauer --watch` stops its app and build-error server when the
+watch process is terminated, including a forced process-tree termination.
+See [Windows setup](GETTING_STARTED_WINDOWS.md) for the supported CLANG64 path.
+Native watch helper header updates invalidate packaged prebuilt tools.
+Automatic build-error recovery also handles same-size source edits on large
+Windows checkouts.
+
 Install Arlen, create an app, and run it locally. This page covers Linux;
 use [Getting Started on macOS](GETTING_STARTED_MACOS.md) or
 [Getting Started on Windows](GETTING_STARTED_WINDOWS.md) for those platforms.
@@ -23,12 +30,17 @@ under `~/.local/share/arlen`, and writes a launcher to `~/.local/bin`. It
 configures future bash/zsh shells automatically. The final `export` in the
 command above makes `arlen` available immediately in the current shell.
 The launcher loads the GNUstep environment for you.
+When automatic setup needs GNUstep, it checks the bootstrap script against a
+SHA256 pinned in the Arlen installer before executing it.
 
 Check the result:
 
 ```bash
 arlen doctor
 ```
+
+On Windows, framework-root overrides for this bootstrap check may use native
+drive-letter, UNC, or MSYS paths.
 
 Then continue to **Create Your First App** below. No repository checkout is
 needed to develop an app.
@@ -48,23 +60,72 @@ working release. For the complete options, see [CLI Reference](CLI_REFERENCE.md)
 
 ### Manual toolchain setup
 
-Arlen requires clang, `libobjc2`, and `gnustep-base`; GCC-built distro GNUstep
-packages are not compatible. The automatic setup uses the managed
-[gnustep-cli](https://github.com/danjboyd/gnustep-cli-new) Linux `v0.1.0`
-toolchain. Its supported distribution/architecture combinations are listed
-above; Debian 12, Ubuntu 24.04, and Ubuntu arm64 are not covered by that path.
+Linux releases require Arlen's pinned, patched clang/libobjc2, libdispatch and
+GNUstep Base runtime. Generic clang GNUstep and GCC-built distro packages do
+not satisfy the release contract. Automatic setup builds the existing custom
+[gnustep-cli builder](https://github.com/danjboyd/gnustep-cli-new) natively,
+using the target lock in `tools/runtime/` and the three race patches plus the Ubuntu clang compatibility patch in
+`tools/ci/tsan-toolchain/` and `tools/runtime/patches/`. It supports Debian 13 amd64/arm64 and Ubuntu 26.04
+amd64, using each distribution's ICU and clang. Debian 12, Ubuntu 24.04 and
+Ubuntu arm64 are outside this automatic path.
 
-For an existing clang-built GNUstep installation, use `--no-setup`.
-Include `make`, `python3`, OpenSSL development headers (`libssl-dev` on
-Debian/Ubuntu), and the SQLite runtime (`libsqlite3-0`). For PostgreSQL,
-install `libpq5` as well, or `libpq-dev` if you need headers. Arlen discovers
-the managed toolchain when `/usr/GNUstep` is absent. See the
-[Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the build contract.
+Normal runtime setup restores GNUstep's `-O2` default for framework and generated
+app builds through explicit tools-make/Base configure inputs. GNUstep debug
+flags can still remove optimization, and existing explicit client flags keep
+their precedence. An older prefix with include-only defaults must be rebuilt
+at a new versioned prefix; setup never changes that older prefix in place.
+
+The runtime is built directly at `<install-prefix>/runtimes/<target>-<lock-id>`.
+GNUstep embeds that absolute path: keep it in place for every release that
+uses it. The framework can move through the installer's staging/activation
+steps; the runtime cannot. `ARLEN_RUNTIME_ROOT=/absolute/path` chooses another
+Arlen-owned runtime root before installation. Runtime paths must have no
+whitespace. Setup leaves managed GNUstep installations and system loader
+configuration alone. Native compilation requires network access, disk space
+for sources/builds, and several minutes; the installer asks before installing
+apt prerequisites or starting it.
+
+For manual or offline installation, provision the same patched runtime at its
+final prefix first, then select it explicitly:
+
+```bash
+export ARLEN_RUNTIME_PREFIX=/absolute/final/patched-prefix
+bash tools/install.sh --archive /path/to/arlen-X.Y.Z.tar.gz --no-setup
+```
+
+`--no-setup` never downloads or builds a runtime. It verifies the supplied
+runtime's component pins, patch digests and ELF checksums, and requires `make`,
+`python3`, clang, OpenSSL development headers and the SQLite runtime. Use
+`libpq5` for PostgreSQL apps. `--no-build` only unpacks; run runtime setup or
+selection before using native tools. A missing/invalid selected runtime fails
+with instructions instead of falling back to a generic installation.
+
+For a source checkout, build or select the runtime with:
+
+```bash
+python3 tools/setup_runtime.py build
+# Or, for an already built matching prefix (no fetch/build):
+python3 tools/setup_runtime.py select --prefix /absolute/final/patched-prefix
+source tools/source_gnustep_env.sh
+```
+
+The explicit `build` command uses the existing pinned builder backend; it does
+not install apt packages. See [Toolchain Matrix](TOOLCHAIN_MATRIX.md) for the
+prerequisite list. The selected prefix is saved in the local, untracked
+`.arlen-runtime` file. `ARLEN_RUNTIME_PREFIX` overrides that file; either
+selection takes precedence over stale ambient `GNUSTEP_SH`, makefile and
+`gnustep-config` settings. With no selection, contributor bootstrap retains
+its existing explicit GNUstep and `/usr/GNUstep` resolution. `arlen doctor`
+warns that such an unpatched contributor environment is not release-qualified;
+installed releases require the patched runtime. Production `propane` and
+`jobs-worker` source the same selected environment before running native
+binaries. A packaged service on another host needs that host's matching final
+runtime prefix in `ARLEN_RUNTIME_PREFIX` and permission to read/execute it.
 
 ### From a git checkout
 
 Use a checkout to work on Arlen itself or to track `main`. Provision the
-clang GNUstep toolchain above first; use `./bin/arlen` in place of the installed
+patched clang GNUstep runtime above first; use `./bin/arlen` in place of the installed
 `arlen` command in this guide:
 
 ```bash
@@ -125,6 +186,11 @@ curl -i http://127.0.0.1:3000/healthz
 curl -i http://127.0.0.1:3000/openapi
 ```
 
+When you add routes that read query or form parameters, Arlen decodes valid
+percent-encoded UTF-8 once and treats `+` as a space. Malformed escapes and
+encoded NUL are kept whole in core query values; see the
+[App Authoring Guide](APP_AUTHORING_GUIDE.md#5-params-validation-session-and-auth-helpers).
+
 `boomhauer` watches app files by default and rebuilds when inputs change.
 Arlen reserves `/healthz`, `/readyz`, `/livez`, `/metrics`, and `/clusterz`
 for built-in operability, so app routes should not reuse those paths.
@@ -133,6 +199,10 @@ access; see
 [Configuration Reference](CONFIGURATION_REFERENCE.md#6-rate-limits-and-security-headers)
 for `observability.operabilityToken` and `observability.operabilityLoopbackOnly`
 (`arlen doctor --env production` warns until one is set).
+The same doctor command warns in production-like environments when multiple
+propane workers lack `state.durable = YES`. A database URL alone does not clear
+the warning. A passing state check records your declaration; it does not verify
+that each app-owned store is shared.
 
 When using `propane` for production, repeated worker startup failures exhaust
 its configured retry limit and return exit status `3`. A worker exiting during
@@ -179,6 +249,10 @@ arlen check
 `arlen config` prints secret values (session secrets, connection-string
 passwords and similar) as `[redacted]`; pass `--show-secrets` to see them.
 
+`arlen deploy init` writes generated secret environment examples through the
+private atomic writer. The containing directory is restricted before payload
+creation; permission failures stop generation instead of leaving a secret file.
+
 Use `arlen routes` when you want to inspect registration order, route names,
 and whether each route came from plist configuration or Objective-C code.
 
@@ -193,6 +267,8 @@ arlen generate test Hello --request --route /hello
 See [Testing Workflow](TESTING_WORKFLOW.md#app-request-tests) for the
 `ALNTestClient` API. `arlen test --app` also works on Windows (MSYS2
 `CLANG64`); see [Windows CLANG64](WINDOWS_CLANG64.md).
+On GNUstep, Arlen builds its bundled XCTest library before the app test bundle
+and uses the matching headers, so no system XCTest installation is needed.
 
 These commands also work on macOS, where they build with the Apple toolchain
 instead of `make`. `arlen check` runs the Apple verification lane there, and
@@ -253,6 +329,9 @@ After ordinary routes and services work, install and explicitly enable the
 [MCP module](MCP_MODULE.md) to expose selected capabilities to MCP clients.
 OpenAPI inclusion does not expose tools. The [catalog example](../examples/mcp_app/README.md)
 shows route and service registration with bearer authentication.
+MCP 1.0.6 filters tool listings by roles, scopes, assurance, authentication
+age, and route policies without running handlers. Tool calls still enforce the
+full route checks.
 
 ## OAuth-protected MCP and REST
 
@@ -283,7 +362,14 @@ URLs, credentials, response bodies, and custom loader error details.
 
 For file-upload forms, use `[ctx.request uploadsForName:@"document"]` and `formParams`; see [Multipart Uploads](MULTIPART_UPLOADS.md) for examples and request limits.
 
+For host-local PostgreSQL readiness, deploy doctor uses libpq in process when
+a DSN is configured. Install libpq on the target host; the check fails if the
+library is unavailable or the configured server is not ready.
+
 ## Background work in separate processes
+
+`propane` passes merged configuration to its Python parser through an inherited
+file descriptor, keeping configuration secrets out of the parser process arguments.
 
 Configure `ALNPostgresJobAdapter` before registering the jobs module when web
 processes enqueue work for a separate worker. Apply its initial migration, use
@@ -339,8 +425,49 @@ again; see [Auth Module](AUTH_MODULE.md#sessions-and-roles).
 SMS MFA also needs the auth module's attempt-limit migration. Send and code
 verification limits are stored in PostgreSQL so an old session cookie cannot
 restore them; locked requests return 429 with `Retry-After`.
+TOTP and SMS step-up retain the validated session generation; a concurrent
+password reset or logout-all revocation makes step-up fail and clears that session.
+Remove `authModule.mfa.sms.testVerificationCode` from production-like configs;
+the auth module rejects this test-only bypass at startup.
+Upgrade vendored `jobs` to 1.1.4 and `auth` to 1.7.5 before relying on manual
+job restrictions and queued auth-mail link origins.
+
+Auth session refresh precedes `security.routePolicies` checks, so a revoked
+session cannot pass a `requireAuth` policy.
+If you add session middleware in code after creating the app and before
+registering the auth module, it is placed before route policies so auth can
+refresh the loaded session before authorization.
+
+If SMS is already verified, adding a TOTP authenticator requires a recent MFA
+step-up. Upgrade vendored `auth` modules to 1.7.5.
+
+Auth passwords preserve surrounding spaces on every path. If older registration
+flows removed those spaces, sign in with the stored form before changing the
+password. Upgrade vendored `auth` modules to 1.7.5.
+
+Upgrade vendored `auth` modules to 1.7.6 and restart the app for the concurrent
+password-reset and session-schema cache correction. Schema metadata is owned
+by the auth runtime and reset when its database adapter changes; missing-table
+and failed probes still retry. No additional migration is needed for this fix.
+
+Mounted child requests are checked against the parent application's matching
+`security.routePolicies` before the child receives them. A parent `requireAuth`
+policy uses the parent's session configuration.
+
 The built-in admin users search treats `%` and `_` as literal characters in
 `q` and `roles` filters; see [Admin UI Module](ADMIN_UI_MODULE.md).
+Admin UI CSV exports escape formula-like cells for spreadsheet use; JSON exports
+keep the original values. Upgrade vendored `admin-ui` modules to 1.1.3.
+
+Admin UI resource link fields allow relative, HTTP(S), and mailto targets;
+unsafe targets render as `#` with admin-ui 1.1.3.
+Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
+search with tenant or other resource visibility filters.
+Upgrade vendored `search` modules to 1.2.3 for bounded per-query fuzzy scoring
+of repeated words in the default engine. Result ranking and query limits stay
+the same.
+Route policies cover format-suffixed requests to a protected route, such as
+`/admin.json` for `/admin`; assurance limits also apply to compiled fast routes.
 Production apps keep `/openapi.json` and its docs routes closed unless they set
 `openapi.publicInProduction = YES`; route metadata includes privileged API
 paths. Local development keeps the OpenAPI routes enabled.
@@ -348,9 +475,9 @@ The ops module coordinates persisted dashboard history across processes when
 they share its configured persistence path; see [Ops Module](OPS_MODULE.md).
 New auth registrations now receive a generic accepted response and sign in
 after verification. They do not get an authenticated session from the register
-request. Existing apps that require the old flow can opt in with
-`authModule.registration.autoLogin = YES`, which reveals whether an address is
-already registered; see [Auth Module](AUTH_MODULE.md).
+request. The old `authModule.registration.autoLogin = YES` flow is available
+only in `development` and `test` because it reveals whether an address is
+registered; see [Auth Module](AUTH_MODULE.md).
 For production registration and password reset, configure a PostgreSQL jobs
 adapter, apply its schema, run the jobs worker, and set
 `authModule.publicBaseURL`. Auth mail is queued; the request does not wait for
@@ -384,15 +511,31 @@ Web Push channel: `arlen webpush generate-keys` prints a VAPID key pair for the
 server environment. See [Notifications Module: Web Push](NOTIFICATIONS_MODULE.md#web-push).
 Notification workers sharing a persistence path coordinate writes across
 processes and refresh inbox, outbox, and preference reads from shared state.
+For signed-in users queueing their own notification, the module replaces the
+email recipient and removes address-bearing mail headers such as `Reply-To` and
+`Resent-*`; upgrade vendored notification copies to 1.3.1 for this behavior.
 Jobs workers sharing a persistence path also refresh reads and transact operator-state changes;
 job claim durability still depends on the configured jobs adapter.
 Search workers refresh shared state and reject conflicting rebuild/update results
 instead of overwriting newer state. External engines still require one reindex
 worker per resource unless the backend fences publication; see [Search Module](SEARCH_MODULE.md).
+Search query filters also constrain promoted results, so a promoted record that
+does not match `filter.<field>` or a per-resource filter is omitted.
 
 `arlen module add ops` works without jobs, notifications, storage, or search.
+With ops 1.1.1, operator views show queue, notification, and storage status
+without individual job, outbox, or storage records; admins retain detail.
 Missing module summaries are marked unavailable. See [Ops Module](OPS_MODULE.md)
 for authentication requirements when composing a partial module installation.
+Notifications 1.3.2 removes webhook URLs and headers from persisted outbox
+records; upgrade vendored modules and rotate older exports or backups that held
+webhook credentials.
+
+Session cookies use `Path=/` across a mounted app tree. Use distinct
+`session.cookieName` values for any enabled sessions with different secrets,
+including siblings or descendants behind a session-disabled app. Startup
+rejects a shared name with different secrets. A shared name and secret, as used
+by the admin UI child app, remains supported.
 
 For company sign-in, add `auth`, configure an OIDC provider and an application
 identity resolver, and explicitly disable stub/password access if your copied
@@ -450,6 +593,10 @@ CI provisioning validates that runtime. Stop old workers before the one-time
 legacy import; see [Storage Module](STORAGE_MODULE.md) and
 [Notifications Module](NOTIFICATIONS_MODULE.md#incremental-persistence-and-upgrading)
 for migration and backup rules.
+Storage 1.4.2 refuses cached object reads and downloads after a catalog reload
+fails; repairing the catalog permits a later successful reload. Backend
+exceptions release writer locks and force a reload of persisted state. Upgrade
+vendored storage modules with `arlen module upgrade`.
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.
@@ -477,3 +624,77 @@ backends. See [Live UI](LIVE_UI.md) for receive-only channels and reconnect
 behavior. Custom Windows CLANG64 build scripts must include
 `_FILE_OFFSET_BITS=64` and rebuild application objects after upgrading; standard
 CLI and make paths set it automatically.
+
+Redis cache configuration: `ALNRedisCacheAdapter` rejects literal NUL and `%00`
+in Redis URLs before parsing. If adapter initialization reports this error,
+correct `ARLEN_REDIS_URL` (or the URL passed by your application); no connection
+is made using a truncated destination. Ordinary percent-encoded credentials
+remain supported.
+
+## Request limits with multiple workers
+
+The built-in request rate limiter requires one worker. Startup rejects
+`rateLimit.enabled = YES` when multiple workers are configured (the propane
+default is four). Select `propane --workers 1` or the propane accessory
+`workerCount = 1`, or disable the built-in limiter and enforce the budget at
+ingress. v0.3.0 only warned about multiplied budgets; startup now fails closed.
+See [propane's state contract](PROPANE.md#multi-worker-state-contract).
+
+An unfilled EOC `content` yield escapes its context fallback; `ALNView` still
+renders the captured page body as HTML in a filled content slot.
+
+`renderNegotiatedTemplate:context:jsonObject:error:` uses only `jsonObject` for
+JSON responses; nil produces `{}`. Responses include `Vary: Accept` so caches
+separate HTML and JSON variants.
+Template rendering restores thread-local options and composition slots when a
+body or layout throws. Exceptions still propagate to the caller; failed renders
+do not leave slot content available to later renders on the same worker thread.
+Nested rendering preserves the enclosing render state.
+
+ORM transaction exceptions now restore context connection state. Throwing
+savepoint blocks roll back their writes before an enclosing transaction can
+continue; PostgreSQL and MSSQL connections close if that cleanup fails. See
+[Arlen ORM](ARLEN_ORM.md) for the adapter contract.
+
+Live keyed broadcasts require explicit server-selected container and key values.
+Publish helpers omit requester-specific metadata and tracing IDs; direct live
+responses retain request defaults. See [Live UI](LIVE_UI.md).
+
+PostgreSQL and MSSQL decimal result decoding rejects text longer than 40
+characters or containing more than 38 digits with a query error. This also
+applies to PostgreSQL numeric arrays. Select wider values as text when exact
+arbitrary precision is required; see `docs/GETTING_STARTED_DATA_LAYER.md`.
+
+Synchronous HTTP compatibility helpers reject invalid header names and values
+before transport, including CR/LF injection and embedded NUL. They return
+`NSURLErrorDomain/NSURLErrorBadURL`; see [HTTP Client](HTTP_CLIENT.md).
+
+With llhttp enabled, chunked uploads enforce the selected route's decoded body
+limit and spool above `spoolThresholdBytes` while receiving. Chunk framing is
+processed incrementally within the existing encoded envelope cap. The legacy
+backend continues to reject chunked transfer coding. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Legacy storage plist catalogs use private temporary creation and atomic replacement
+on Windows; the parent directory ACL is unchanged. See
+[Storage Module](STORAGE_MODULE.md) for upgrade and filesystem guidance.
+
+Request body deadlines and minimum rates also apply to the final body fragment,
+including uploads spooled to disk. A late completion receives `408` and its
+incomplete spool is removed. Each keep-alive request starts its own body clock.
+
+Windows uses a bounded graceful close after HTTP parser rejection or session/worker
+queue admission rejection to preserve the error response when input is queued. See
+[Configuration Reference](CONFIGURATION_REFERENCE.md).
+
+Native runtime qualification also runs the fixed-date contract in
+`tests/fixtures/runtime/icu_runtime_contract.m`. It verifies Chicago winter and
+summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
+`NSDateFormatter`, and records the actual ICU library/data/timezone versions.
+Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
+without an external timezone-data override. Native-control and ICU failure logs
+are retained by the installer smoke's artifact cleanup path.
+
+HTTP signal shutdown uses a lock-free atomic stop flag shared with workers,
+including Windows console-control shutdown. Supported clang builds enforce
+lock-free access at compile time; shutdown commands and limits are unchanged.

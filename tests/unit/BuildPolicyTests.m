@@ -110,6 +110,22 @@
   return ALNTestRunShellCapture(command, exitCode);
 }
 
+- (void)testPropaneKeepsMergedConfigurationOutOfProcessArguments {
+#if defined(_WIN32)
+  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  NSString *repoRoot = ALNTestRepoRoot();
+  NSString *command = [NSString stringWithFormat:@"bash %@ %@ 2>&1",
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:
+          @"tests/fixtures/propane/config_private_input_check.sh"]),
+      ALNTestShellQuote([repoRoot stringByAppendingPathComponent:@"bin/propane"])];
+  int exitCode = -1;
+  NSString *output = [self runShellCapture:command exitCode:&exitCode];
+  XCTAssertEqual(0, exitCode, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"private config input and unredacted worker settings preserved"], @"%@", output);
+}
+
 // Issue 222: propane's FD-pressure check used to build the per-target
 // breakdown (a readlink per descriptor) for every worker on every check, even
 // when nothing was logged, stalling the single-threaded manager loop.
@@ -776,10 +792,34 @@
   NSString *script = [self readFile:scriptPath];
 
   XCTAssertTrue([script containsString:@"file_fingerprint_fields() {"]);
-  XCTAssertTrue([script containsString:@"stat -c %y \"$path\""],
-                @"watch mode should keep sub-second mtime precision");
-  XCTAssertTrue([script containsString:@"stat -c %z \"$path\""],
-                @"watch mode should keep sub-second ctime precision");
+  NSRange start = [script rangeOfString:@"file_fingerprint_fields() {"];
+  if (start.location == NSNotFound) return;
+  NSRange end = [script rangeOfString:@"\n}\n" options:0
+                               range:NSMakeRange(start.location, script.length - start.location)];
+  XCTAssertNotEqual(NSNotFound, end.location);
+  if (end.location == NSNotFound) return;
+  NSString *definition = [script substringWithRange:
+      NSMakeRange(start.location, NSMaxRange(end) - start.location)];
+  // Check the emitted fields, not whether stat is invoked once or separately.
+  // Synthetic high-resolution metadata keeps the probe portable to BSD hosts.
+  NSString *fixtureRoot = [self createTempDirectoryWithPrefix:@"watch-metadata"];
+  if (fixtureRoot == nil) return;
+  @try {
+    NSString *probePath = [fixtureRoot stringByAppendingPathComponent:@"probe.sh"];
+    NSString *probe = [NSString stringWithFormat:
+        @"set -eu\n"
+         "stat() { printf '%%s\\n' \"$2\" | sed -e 's/%%s/7/g' "
+         "-e 's/%%y/mtime.123456789/g' -e 's/%%z/ctime.987654321/g'; }\n"
+         "%@\nfile_fingerprint_fields ignored\n", definition];
+    XCTAssertTrue([self writeFile:probePath content:probe]);
+    int code = -1;
+    NSString *output = [self runShellCapture:
+        [NSString stringWithFormat:@"bash %@", [self shellQuoted:probePath]] exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertEqualObjects(@"7|mtime.123456789|ctime.987654321\n", output);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:fixtureRoot error:nil];
+  }
   XCTAssertTrue([script containsString:
                               @"append_fingerprint_entries \"$framework_root\" \"framework\" src modules GNUmakefile tools/eocc.m"],
                 @"watch mode should invalidate on framework module header changes");
@@ -1251,7 +1291,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"
@@ -1282,7 +1322,11 @@
     XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS= ARGS=EXTRA_OBJC_FLAGS= EOC_TOOL="],
                   @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@"eocc transpile module-transpile"], @"%@", makeLog);
-    XCTAssertTrue([makeLog containsString:@"MAKE_EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer ARGS=EXTRA_OBJC_FLAGS=-fsanitize=thread -fno-omit-frame-pointer EOC_TOOL="],
+    NSString *instrumentedFlags = [NSString stringWithFormat:
+        @"-fsanitize=thread -fno-omit-frame-pointer -shared-libsan -Wl,-rpath,%@ -Wno-unused-command-line-argument", fakeBin];
+    NSString *instrumentedInvocation = [NSString stringWithFormat:
+        @"MAKE_EXTRA_OBJC_FLAGS=%@ ARGS=EXTRA_OBJC_FLAGS=%@ EOC_TOOL=", instrumentedFlags, instrumentedFlags];
+    XCTAssertTrue([makeLog containsString:instrumentedInvocation],
                   @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@" -o "], @"%@", makeLog);
     XCTAssertTrue([makeLog containsString:@"arlen"], @"%@", makeLog);
@@ -1388,7 +1432,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"
@@ -1487,7 +1531,7 @@
     NSString *fakeClang = [fakeBin stringByAppendingPathComponent:@"clang"];
     NSString *fakeClangContents =
         [NSString stringWithFormat:@"#!/usr/bin/env bash\n"
-                                   "if [[ \"${1:-}\" == \"-print-file-name=libtsan.so\" ]]; then\n"
+                                   "if [[ \"${1:-}\" == -print-file-name=libclang_rt.tsan-*.so ]]; then\n"
                                    "  printf '%%s\\n' %@\n"
                                    "  exit 0\n"
                                    "fi\n"

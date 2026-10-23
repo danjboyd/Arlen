@@ -53,6 +53,7 @@ static NSString *ALNHostDeployProfile(void) {
 }
 
 @interface DeploymentIntegrationTests : XCTestCase
+
 @end
 
 @implementation DeploymentIntegrationTests
@@ -353,10 +354,12 @@ static NSString *ALNHostDeployProfile(void) {
          "-fobjc-arc -DARLEN_ENABLE_YYJSON=0 -DARLEN_ENABLE_LLHTTP=0 %@ "
          "-I%@/src/Arlen -I%@/src/Arlen/HTTP -I%@/src/Arlen/Support "
          "%@ %@/src/Arlen/Support/ALNJSONSerialization.m %@/src/Arlen/Support/ALNPlatform.m "
+         "%@/src/Arlen/Support/ALNPercentDecoding.m "
          "%@/src/Arlen/HTTP/ALNRequest.m %@/src/Arlen/HTTP/ALNMultipart.m "
          "-o %@ $(gnustep-config --base-libs) -ldispatch %@ -lcrypto",
         [self gnustepSourceCommandForRepoRoot:repoRoot], ALNTestPlatformObjCFlags(), repoRoot, repoRoot, repoRoot,
-        sourcePath, repoRoot, repoRoot, repoRoot, repoRoot, binaryPath, ALNTestPlatformLinkLibraries()]
+        sourcePath, repoRoot, repoRoot, repoRoot, repoRoot, repoRoot, binaryPath,
+        ALNTestPlatformLinkLibraries()]
                                        exitCode:&code];
     XCTAssertEqual(0, code, @"%@", compileOutput);
 
@@ -1789,6 +1792,42 @@ static NSString *ALNHostDeployProfile(void) {
     [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
+}
+
+- (void)testDeployInitSecuresSecretFilesBeforePayloadAndFailsClosedOnPermissionError {
+#if !defined(__linux__)
+  XCTSkip(@"this permission fault-injection fixture uses Linux syscalls and /proc");
+#endif
+  NSString *binary = ALNTestArlenCLIPath();
+  XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:binary],
+                @"Build the CLI before running deployment permission checks");
+  NSString *fixture = ALNTestPathFromRepoRoot(@"tests/fixtures/deploy/private_secret_mode_check.py");
+  NSString *command = [NSString stringWithFormat:@"python3 %@ %@ 2>&1",
+      ALNTestShellQuote(fixture), ALNTestShellQuote(binary)];
+  int code = -1;
+  NSString *output = [self runShellCapture:command exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"secret payload stayed private; permission failure wrote no payload"], @"%@", output);
+}
+
+- (void)testDeployDoctorKeepsConfiguredDatabaseCredentialsOutOfChildArguments {
+#if defined(_WIN32)
+  XCTSkip(@"deployment hosting is not supported on Windows until 0.4.0 (#200)");
+#endif
+  XCTSkipUnless([ALNTestEnvironmentString(@"ARLEN_PG_TEST_DSN") length] > 0,
+                @"ARLEN_PG_TEST_DSN is not set");
+  NSString *binary = ALNTestArlenCLIPath();
+  XCTAssertTrue([[NSFileManager defaultManager] isExecutableFileAtPath:binary],
+                @"Build the CLI before running deploy readiness checks");
+  NSString *fixture = ALNTestPathFromRepoRoot(@"tests/fixtures/deploy/host_local_private_probe.py");
+  NSString *command = [NSString stringWithFormat:@"python3 %@ %@ 2>&1",
+      ALNTestShellQuote(fixture), ALNTestShellQuote(binary)];
+  int code = -1;
+  NSString *output = [self runShellCapture:command exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:
+      @"host-local readiness passed without external credential arguments"], @"%@", output);
 }
 
 - (void)testArlenDeployDoctorValidatesExplicitDatabaseModeAndRequiredEnvironmentKeys {
@@ -4674,6 +4713,28 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *phase9hDir = [fixtureRoot stringByAppendingPathComponent:@"phase9h"];
     NSString *phase9iDir = [fixtureRoot stringByAppendingPathComponent:@"phase9i"];
 
+    // This test supplies synthetic lane artifacts, so its risk register must
+    // also be a fixture. The real register's review date must continue to gate
+    // actual releases rather than making this positive generator test expire.
+    NSString *riskPath = [fixtureRoot stringByAppendingPathComponent:@"known_risks.json"];
+    NSDateFormatter *riskDate = [[NSDateFormatter alloc] init];
+    riskDate.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
+    riskDate.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    riskDate.dateFormat = @"yyyy-MM-dd";
+    NSDate *now = [NSDate date];
+    NSDictionary *riskFixture = @{
+      @"version" : @"phase9j-known-risk-register-v1",
+      @"lastUpdated" : [riskDate stringFromDate:now],
+      @"risks" : @[ @{
+        @"id" : @"fixture-active-risk", @"title" : @"Synthetic generator input",
+        @"status" : @"active", @"severity" : @"medium", @"owner" : @"test-fixture",
+        @"targetDate" : [riskDate stringFromDate:[now dateByAddingTimeInterval:365 * 24 * 60 * 60]],
+      } ],
+    };
+    NSData *riskData = [NSJSONSerialization dataWithJSONObject:riskFixture options:0 error:NULL];
+    XCTAssertNotNil(riskData);
+    XCTAssertTrue([riskData writeToFile:riskPath atomically:YES]);
+
     XCTAssertTrue([self writeFile:[phase5eDir stringByAppendingPathComponent:@"manifest.json"]
                           content:@"{\n"
                                   "  \"version\": \"phase5e-confidence-v1\"\n"
@@ -4723,8 +4784,10 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *command = [NSString stringWithFormat:
         @"cd %@ && python3 ./tools/ci/generate_phase9j_release_certification_pack.py "
          "--repo-root %@ --output-dir %@ --release-id rc-test-001 "
-         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@",
-        repoRoot, repoRoot, outputRoot, phase5eDir, phase9hDir, phase9iDir];
+         "--phase5e-dir %@ --phase9h-dir %@ --phase9i-dir %@ --risk-register %@",
+        [self shellQuoted:repoRoot], [self shellQuoted:repoRoot], [self shellQuoted:outputRoot],
+        [self shellQuoted:phase5eDir], [self shellQuoted:phase9hDir], [self shellQuoted:phase9iDir],
+        [self shellQuoted:riskPath]];
     NSString *output = [self runShellCapture:command exitCode:&code];
     XCTAssertEqual(0, code, @"%@", output);
     XCTAssertTrue([output containsString:@"phase9j-certification: generated artifacts"], @"%@", output);
@@ -6082,5 +6145,68 @@ static NSString *ALNHostDeployProfile(void) {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
 }
+
+- (void)testBuiltDoctorReportsProductionMultiWorkerState {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"doctor-multi-worker-state"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+
+  @try {
+    NSString *configPath = [appRoot stringByAppendingPathComponent:@"config/app.plist"];
+    int code = 0;
+    NSString *buildOutput = [self runMakeAtRepoRoot:repoRoot target:@"arlen" exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", buildOutput);
+#if defined(__APPLE__)
+    NSString *binary = [repoRoot stringByAppendingPathComponent:@"build/apple/arlen"];
+#else
+    NSString *binary = [repoRoot stringByAppendingPathComponent:@"build/arlen"];
+#endif
+    NSPredicate *stateCheck = [NSPredicate predicateWithFormat:@"id == %@", @"multi_worker_state"];
+    NSArray<NSDictionary *> *cases = @[
+      @{ @"name" : @"database URL with explicit non-durable state",
+         @"env" : @"production", @"workers" : @4, @"durable" : @"NO", @"status" : @"warn" },
+      @{ @"name" : @"durable state declaration",
+         @"env" : @"production", @"workers" : @4, @"durable" : @"YES", @"status" : @"pass" },
+      @{ @"name" : @"production-like staging",
+         @"env" : @"staging", @"workers" : @4, @"durable" : @"NO", @"status" : @"warn" },
+      @{ @"name" : @"single worker",
+         @"env" : @"production", @"workers" : @1, @"durable" : @"NO", @"status" : @"pass" },
+      @{ @"name" : @"development",
+         @"env" : @"development", @"workers" : @4, @"durable" : @"NO", @"status" : @"absent" },
+    ];
+    for (NSDictionary *item in cases) {
+      NSString *config = [NSString stringWithFormat:
+          @"{ propaneAccessories = { workerCount = %@; }; state = { durable = %@; }; "
+          @"database = { connectionString = \"postgresql://db.example.test/app\"; }; "
+          @"otherFeature = { durable = YES; }; }",
+          item[@"workers"], item[@"durable"]];
+      XCTAssertTrue([self writeFile:configPath content:config]);
+      NSArray<NSString *> *commands = @[
+        [NSString stringWithFormat:@"cd %@ && ARLEN_FRAMEWORK_ROOT=%@ %@ doctor --env %@ --json",
+                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
+                                   [self shellQuoted:binary], [self shellQuoted:item[@"env"]]],
+        [NSString stringWithFormat:@"cd %@ && %@/bin/arlen-doctor --env %@ --json",
+                                   [self shellQuoted:appRoot], [self shellQuoted:repoRoot],
+                                   [self shellQuoted:item[@"env"]]],
+      ];
+      for (NSString *command in commands) {
+        NSString *output = [self runShellCapture:command exitCode:&code];
+        NSDictionary *doctor = [self parseJSONDictionaryFromOutput:output context:item[@"name"]];
+        NSArray *checks = [doctor[@"checks"] filteredArrayUsingPredicate:stateCheck];
+        NSString *expected = item[@"status"];
+        if ([expected isEqualToString:@"absent"]) {
+          XCTAssertEqual((NSUInteger)0, [checks count], @"%@\n%@", command, output);
+        } else {
+          XCTAssertEqual((NSUInteger)1, [checks count], @"%@\n%@", command, output);
+          XCTAssertEqualObjects(expected, [checks firstObject][@"status"], @"%@\n%@", command, output);
+        }
+      }
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:nil];
+  }
+}
+
 
 @end

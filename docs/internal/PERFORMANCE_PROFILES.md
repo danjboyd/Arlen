@@ -39,6 +39,11 @@ Profiles live in `tests/performance/profiles/`:
 
 Each profile defines server target, launch env, readiness path, and scenario list.
 
+`middleware_heavy` explicitly configures one propane process worker for its
+direct `boomhauer` server, matching the process-local rate limiter's contract.
+Sessions, CSRF, rate limits and security headers stay enabled; client
+concurrency, scenarios, request counts and performance thresholds are unchanged.
+
 ## 2. Running Perf
 
 Default gate:
