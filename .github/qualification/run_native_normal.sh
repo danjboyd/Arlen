@@ -19,6 +19,7 @@ trap '"$pg_bin/pg_ctl" -D "$pg_root/data" -m immediate -w stop >/dev/null 2>&1 |
 mkdir "$pg_root/socket"
 "$pg_bin/pg_ctl" -D "$pg_root/data" -l "$out/pg-server.log" -o "-k $pg_root/socket -c listen_addresses=''" -w start
 export ARLEN_PG_TEST_DSN="host=$pg_root/socket dbname=postgres user=arlen_v032"
+make vendored-xctest > "$out/xctest-bootstrap.log" 2>&1
 make -j4 test-unit > "$out/unit.log" 2>&1
 make -j4 test-integration > "$out/integration.log" 2>&1
 bash tools/ci/run_runtime_concurrency_gate.sh > "$out/http-concurrency.log" 2>&1
