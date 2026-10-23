@@ -17,6 +17,33 @@ runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
 
 
+class RuntimeTargetTests(unittest.TestCase):
+    def test_supported_targets_select_a_distribution_and_architecture_specific_lock(self):
+        cases = (("debian", "13", "x86_64", "debian-13-amd64"),
+                 ("debian", "13", "aarch64", "debian-13-arm64"),
+                 ("ubuntu", "24.04", "aarch64", "ubuntu-24.04-arm64"),
+                 ("ubuntu", "26.04", "x86_64", "ubuntu-26.04-amd64"))
+        for distro, version, machine, expected in cases:
+            with self.subTest(target=expected), \
+                    patch.object(runtime.platform, "freedesktop_os_release", return_value={"ID": distro, "VERSION_ID": version}), \
+                    patch.object(runtime.platform, "machine", return_value=machine):
+                self.assertEqual(runtime.target(), expected)
+                self.assertEqual(runtime.lock_for_host().name, expected + ".lock.json")
+                self.assertTrue(runtime.lock_for_host().is_file())
+
+    def test_other_ubuntu_architectures_and_older_distributions_remain_unsupported(self):
+        for distro, version, machine in (("ubuntu", "24.04", "x86_64"),
+                                        ("ubuntu", "26.04", "aarch64"),
+                                        ("ubuntu", "22.04", "aarch64"),
+                                        ("debian", "12", "aarch64"),
+                                        ("ubuntu", "24.04", "riscv64")):
+            with self.subTest(distro=distro, version=version, machine=machine), \
+                    patch.object(runtime.platform, "freedesktop_os_release", return_value={"ID": distro, "VERSION_ID": version}), \
+                    patch.object(runtime.platform, "machine", return_value=machine):
+                with self.assertRaisesRegex(ValueError, "supported native runtime targets"):
+                    runtime.lock_for_host()
+
+
 class RuntimeDeliveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="arlen-runtime-test-")
@@ -82,6 +109,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         hashes = {
             "debian-13-amd64": "df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34",
             "debian-13-arm64": "ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e",
+            "ubuntu-24.04-arm64": "2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3",
             "ubuntu-26.04-amd64": "89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125"}
         for target, sha in hashes.items():
             path = ROOT / "tools/runtime" / (target + ".lock.json")
@@ -92,6 +120,34 @@ class RuntimeDeliveryTests(unittest.TestCase):
                     # O2 is supplied by OPTFLAG to C and ObjC; no extra ObjC O2
                     # remains after GNUstep debug=yes filters OPTFLAG.
                     self.assertEqual(component["configure_args"], ["CFLAGS=-O2", "OBJCFLAGS="])
+
+    def test_noble_stages_only_the_existing_three_runtime_race_patches(self):
+        with patch.object(runtime, "target", return_value="ubuntu-24.04-arm64"):
+            staged = runtime.stage_lock(self.work)
+        lock = json.loads(staged.read_text())
+        self.assertEqual(staged.name, "ubuntu-24.04-arm64.lock.json")
+        self.assertEqual(runtime.digest(staged), "2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3")
+        self.assertEqual(lock["components"], json.loads(self.lock.read_text())["components"])
+        patches = [entry for component in lock["components"] for entry in component["patches"]]
+        self.assertEqual(len(patches), 3)
+        for entry in patches:
+            self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])
+
+    def test_noble_rejects_another_distribution_or_architecture_without_rewriting_provenance(self):
+        original = self.fixture()
+        with patch.object(runtime, "target", return_value="ubuntu-24.04-arm64"), \
+                patch.object(runtime.platform, "machine", return_value="aarch64"):
+            for distro, machine in (("debian-13", "aarch64"),
+                                   ("ubuntu-26.04", "aarch64"),
+                                   ("ubuntu-24.04", "x86_64")):
+                with self.subTest(distro=distro, machine=machine):
+                    prov = dict(original, build_host={"os_version": distro, "machine": machine})
+                    path = self.prefix / runtime.PROVENANCE
+                    path.write_text(json.dumps(prov))
+                    before = path.read_bytes()
+                    with self.assertRaisesRegex(ValueError, "another distribution or architecture"):
+                        runtime.validate(self.prefix, full=True)
+                    self.assertEqual(path.read_bytes(), before)
 
     def test_validation_rejects_an_old_unoptimized_component_without_relabeling_it(self):
         original = self.fixture()

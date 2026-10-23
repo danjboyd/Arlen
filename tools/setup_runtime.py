@@ -41,8 +41,8 @@ def target():
     release = platform.freedesktop_os_release()
     arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
     name = f"{release.get('ID')}-{release.get('VERSION_ID')}-{arch}"
-    if name not in ("debian-13-amd64", "debian-13-arm64", "ubuntu-26.04-amd64"):
-        raise ValueError("supported native runtime targets: Debian 13 amd64/arm64, Ubuntu 26.04 amd64")
+    if name not in ("debian-13-amd64", "debian-13-arm64", "ubuntu-24.04-arm64", "ubuntu-26.04-amd64"):
+        raise ValueError("supported native runtime targets: Debian 13 amd64/arm64, Ubuntu 24.04 arm64, Ubuntu 26.04 amd64")
     return name
 
 

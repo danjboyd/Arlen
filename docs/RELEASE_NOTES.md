@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-23
+
+- Add automatic Linux runtime setup for Ubuntu 24.04 LTS on arm64 (aarch64),
+  using a distinct native runtime lock and the distribution's ICU and clang.
+  The public installer CI adds this native target while retaining Debian 13
+  amd64/arm64 and Ubuntu 26.04 amd64 coverage.
+- Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
+  defaults, explicit application compiler flags, and existing release gates.
+  See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) and the
+  [Known Risk Register](KNOWN_RISK_REGISTER.md).
+
 ## 0.3.1 — 2026-10-22
 
 This patch release corrects authorization, request handling, persistence and

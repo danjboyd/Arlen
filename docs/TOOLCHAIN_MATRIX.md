@@ -1,6 +1,6 @@
 # Arlen Toolchain Matrix
 
-Last updated: 2026-10-22
+Last updated: 2026-10-23
 
 This document records known-good local toolchain baselines for Arlen onboarding and CI parity.
 
@@ -27,9 +27,10 @@ Windows is supported for development from 0.3.0. Production (`propane`,
 Linux release setup builds a normal, uninstrumented runtime with the existing
 custom builder at commit `5469b5dfd442f1091475fa6600cfd487af878e8f`. Its source
 archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03197`.
-Locks under `tools/runtime/` identify Debian 13 amd64/arm64 and Ubuntu 26.04
-amd64 independently. All use identical component revisions and three race-patch digests;
-Ubuntu additionally pins one clang 21 compatibility patch.
+Locks under `tools/runtime/` identify Debian 13 amd64/arm64, Ubuntu 24.04
+arm64 (aarch64), and Ubuntu 26.04 amd64 independently. All use identical
+component revisions and three race-patch digests; Ubuntu 26.04 additionally
+pins one clang 21 compatibility patch.
 The normal production locks configure `CFLAGS=-O2` and explicit empty
 `OBJCFLAGS` for tools-make and Base. GNUstep's `OPTFLAG` then supplies `-O2`
 to C and Objective-C clients by default. Keeping optimization out of
@@ -41,6 +42,7 @@ patches are unchanged.
 | --- | --- |
 | Debian 13 amd64 | `df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34` |
 | Debian 13 arm64 | `ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e` |
+| Ubuntu 24.04 arm64 | `2859175da9d3d23e24768a70c990f10d96b155e8675a4de5bd634f1cc1c8b3b3` |
 | Ubuntu 26.04 amd64 | `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125` |
 
 The earlier Debian lock `2bc1f69a6f2b4073adaa0c8892204995bc2b0672d1d136ffb2af611cd5d15058`
@@ -52,7 +54,7 @@ flags, ELF hashes, functional behavior, native concurrency, ICU and performance;
 old-prefix results do not establish those new-prefix results.
 The patches are shared with the diagnostic toolchain in
 `tools/ci/tsan-toolchain/`; production output has no TSan instrumentation.
-Ubuntu's extra `tools/runtime/patches/libdispatch-clang21.patch` preserves the
+Ubuntu 26.04's extra `tools/runtime/patches/libdispatch-clang21.patch` preserves the
 32-bit epoll complement conversion explicitly, with `-Werror` retained.
 
 Native build dependencies on supported Debian/Ubuntu hosts:
@@ -71,7 +73,10 @@ The helper builds directly at its final absolute prefix and records source,
 patch, build-host and ELF provenance. It refuses system/managed roots and
 existing invalid prefixes. It never replaces a managed gnustep-cli pin or
 changes `ld.so.conf`. Native target qualification must cover the actual CPU,
-compiler and ICU: Debian uses clang 19/ICU 76, Ubuntu uses clang 21/ICU 78.
+compiler and ICU: Debian uses clang 19/ICU 76 and Ubuntu 26.04 uses
+clang 21/ICU 78. Ubuntu 24.04 arm64 uses its own distribution packages; native
+qualification records their exact versions. Runtimes built for Debian or a
+newer Ubuntu release cannot be selected on Ubuntu 24.04.
 The public install CI runs the installed app and fourteen concurrency controls
 on each native target, including arm64. These normal controls exercise weak
 memory paths; race-detector acceptance remains the separate instrumented TSan
@@ -79,7 +84,7 @@ gate. A successful amd64 run alone does not establish arm64 qualification.
 See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) for selection
 and service paths.
 
-Ubuntu's compatibility patch SHA256 is
+Ubuntu 26.04's compatibility patch SHA256 is
 `ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d`;
 its target lock SHA256 is
 `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125`.
@@ -89,7 +94,7 @@ complement back to `uint32_t` explicitly preserves high event bits and the
 original arithmetic while satisfying clang 21's signedness diagnostics.
 The compatibility patch does not change the dedicated TSan recipe. The
 normal locks separately include the explicit optimization inputs above. Runtime staging
-checks each exact patch path and SHA256; Ubuntu prefix validation requires the
+checks each exact patch path and SHA256; Ubuntu 26.04 prefix validation requires the
 additional patch in its installed provenance. The no-build regression suite
 compiles the exact new return expression with `-Werror`, `-Wconversion` and
 `-Wsign-conversion`, then checks all 65,536 disarmed masks against twelve
@@ -199,9 +204,13 @@ gnustep-cli builds a toolchain per distribution:
 | Debian 13 (arm64) | `linux-arm64-clang` | 76 | 2.41 | 19 |
 | Ubuntu 26.04 LTS | `linux-ubuntu2604-amd64-clang` | 78 | 2.43 | 21 |
 
-Both are verified with Arlen by the `linux-public-toolchain` CI lane, which
-runs in clean containers (arm64 on a GitHub arm runner). Debian 12,
-Ubuntu 24.04, and Ubuntu arm64 have not been verified with Arlen. Besides the toolchain's own host prerequisites, Arlen
+These managed toolchain baselines were verified with Arlen by the
+`linux-public-toolchain` CI lane in clean containers (arm64 on a GitHub arm
+runner). The current release path uses Arlen's patched normal runtime locks
+above, including the separate Ubuntu 24.04 arm64 target; this historical
+managed-toolchain table does not certify an interchangeable managed runtime.
+Debian 12, Ubuntu 24.04 amd64, and Ubuntu 26.04 arm64 remain outside automatic
+setup. Besides the toolchain's own host prerequisites, Arlen
 needs `libssl-dev`. The GnuTLS libcurl that the toolchain installs
 (`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. The
 check covered bootstrap `setup --user`, `make all`, `arlen new`, and
