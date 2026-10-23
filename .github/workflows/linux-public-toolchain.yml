@@ -1,85 +1,60 @@
-name: linux-public-toolchain
-
-# Runs the public Linux installer in clean containers. It builds the pinned
-# patched runtime natively at its final prefix, installs a source archive, serves
-# a new app and runs native concurrency controls. The ordinary user has no
-# /usr/GNUstep. It is not a merge-gate lane; see docs/CI_ALIGNMENT.md.
+name: v032-native-strict-qualification
 
 on:
-  pull_request:
-    paths:
-      - "tools/install.sh"
-      - "tools/setup_runtime.py"
-      - "tools/runtime/**"
-      - "tools/ci/tsan-toolchain/**"
-      - "tests/fixtures/sanitizers/tsan_runtime_probe.m"
-      - "tests/fixtures/runtime/**"
-      - "bin/**"
-      - "tools/release/**"
-      - "tools/source_gnustep_env.sh"
-      - "tools/resolve_gnustep.sh"
-      - "GNUmakefile"
-      - ".github/workflows/linux-public-toolchain.yml"
-  release:
-    types: [published]
-  schedule:
-    - cron: "17 6 * * 1"
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact full candidate commit to qualify
+        required: true
+        type: string
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
-  public-toolchain:
-    name: linux-public-toolchain / ${{ matrix.image }} ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.image }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { image: "debian:13", arch: amd64, runner: ubuntu-latest }
-          - { image: "debian:13", arch: arm64, runner: ubuntu-24.04-arm }
-          - { image: "ubuntu:26.04", arch: amd64, runner: ubuntu-latest }
-          - { image: "ubuntu:24.04", arch: arm64, runner: ubuntu-24.04-arm }
+  native-strict:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
     steps:
-      - name: Install base packages
-        run: |
-          apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates curl git sudo
-
-      - name: Checkout
+      - name: Checkout qualification harness
         uses: actions/checkout@v4
         with:
+          path: harness
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
           submodules: recursive
-
-      - name: Create an unprivileged user
+      - name: Verify native target and immutable source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
-          useradd --create-home --shell /bin/bash arlen
-          echo 'arlen ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/arlen
-          git config --system --add safe.directory '*'
-          chown -R arlen:arlen "$GITHUB_WORKSPACE"
-
-      - name: Package Arlen and smoke-test the install
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_REF"
+          test "$(uname -m)" = aarch64
+          . /etc/os-release
+          test "$ID:$VERSION_ID" = ubuntu:24.04
+      - name: Install diagnostic and PostgreSQL prerequisites
         run: |
-          sudo -u arlen -H bash -c 'set -euo pipefail
-            cd "$0"
-            test ! -e /usr/GNUstep
-            bash tools/release/package_framework.sh --version 0.0.0 --kind source --out "$HOME/dist"
-            export ARLEN_RUNTIME_EVIDENCE_DIR="$0/build/native-runtime-evidence"
-            bash tools/release/smoke_install.sh "$HOME/dist/arlen-0.0.0.tar.gz"' \
-            "$GITHUB_WORKSPACE"
-
-      - name: Runtime delivery regression checks
-        run: python3 tools/ci/test_runtime_delivery.py
-
-      - name: Upload native runtime provenance and controls
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libclang-rt-18-dev postgresql postgresql-client
+      - name: Build and verify the candidate normal runtime
+        run: bash source/tools/ci/setup_normal_runtime.sh --install-dependencies
+      - name: Run unchanged native strict pair
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: bash harness/.github/qualification/run_native_strict.sh "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/harness/.github/qualification" "$RUNNER_TEMP/v032-native-evidence"
+      - name: Preserve native qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-runtime-${{ matrix.arch }}-${{ strategy.job-index }}
-          path: build/native-runtime-evidence
-          if-no-files-found: warn
+          name: v032-native-arm64-strict-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-native-evidence
+            ${{ runner.temp }}/arlen-normal-runtime
+            ${{ runner.temp }}/native-thread/**/manifest.json
+            ${{ runner.temp }}/native-thread/**/identity.json
+            ${{ runner.temp }}/native-thread/**/build.log
+          include-hidden-files: true
+          if-no-files-found: error

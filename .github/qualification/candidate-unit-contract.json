@@ -1,0 +1,128 @@
+{
+  "frozen_commit": "33f2cd2079e4c19a8b8af9dc16d43c7d16efd9ff",
+  "inventory_sha256": "83632508da1e6a617eba9895f97f4f8e4f1c76c20466c834d46ce26be9cedb67",
+  "unit_methods": 1372,
+  "unit_passed": 1355,
+  "unit_skipped": 17,
+  "skips": [
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testDashPrefixedPathsAreNotReadAsFindOptions",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testFingerprintChangeClearsObjectRoot",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testLinkTracksInputMtimesAndInputList",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testObjectTracksSourceAndHeadersFromDepfile",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testReleasePrebuiltManifestTrustsMatchingSources",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/AppleBuildCacheTests/testSDKPathIsTheSameForEverySDKAlias",
+      "category": "platform",
+      "reason_fragment": "The Apple build cache helpers run only on macOS",
+      "source": "tests/unit/AppleBuildCacheTests.m",
+      "source_sha256": "f1103aa1db407ba53f741fee22db6deef28e945462a0143a22d2fa9e262d2b9e"
+    },
+    {
+      "id": "ArlenUnitTests/ArlenNewCommandTests/testBoomhauerBuildsAnAppWhosePathContainsASpace",
+      "category": "existing-sanitizer-build-avoidance",
+      "reason_fragment": "boomhauer would rebuild the shared repo framework without sanitizers",
+      "source": "tests/unit/ArlenNewCommandTests.m",
+      "source_sha256": "1d0acee4bdc110bb63fe7b6a3387b086a11babdf157bb15e0aa3b33ec7c0ef00"
+    },
+    {
+      "id": "ArlenUnitTests/ArlenNewCommandTests/testBoomhauerRefusesAnAliasDirectoryOthersCanWrite",
+      "category": "existing-sanitizer-build-avoidance",
+      "reason_fragment": "boomhauer would rebuild the shared repo framework without sanitizers",
+      "source": "tests/unit/ArlenNewCommandTests.m",
+      "source_sha256": "1d0acee4bdc110bb63fe7b6a3387b086a11babdf157bb15e0aa3b33ec7c0ef00"
+    },
+    {
+      "id": "ArlenUnitTests/ArlenWorkflowToolchainTests/testAppleRunsTestSuitesAndPerfWithoutMake",
+      "category": "platform",
+      "reason_fragment": "Apple toolchain dispatch runs only on macOS",
+      "source": "tests/unit/ArlenWorkflowToolchainTests.m",
+      "source_sha256": "074ce54d82d19e2fdf72b5eb41a808876eaf4bf076214f7783d56b0c327b189e"
+    },
+    {
+      "id": "ArlenUnitTests/FileResponseTests/testWindowsReadDescriptorHasIndependentPositionOnPinnedObject",
+      "category": "platform",
+      "reason_fragment": "POSIX file responses use positioned pread",
+      "source": "tests/unit/FileResponseTests.m",
+      "source_sha256": "fc20408c7d7b769552938ae537762204e572d04a4b2c37b5f0d7cebcb59fcb75"
+    },
+    {
+      "id": "ArlenUnitTests/FileResponseTests/testWindowsSparseFileKeeps64BitSizesAndRangeOffsets",
+      "category": "platform",
+      "reason_fragment": "Windows file-offset ABI regression",
+      "source": "tests/unit/FileResponseTests.m",
+      "source_sha256": "fc20408c7d7b769552938ae537762204e572d04a4b2c37b5f0d7cebcb59fcb75"
+    },
+    {
+      "id": "ArlenUnitTests/Phase17BTests/testMSSQLAdapterConformanceSuiteRunsWhenExplicitTestDSNIsProvided",
+      "category": "optional-MSSQL-unconfigured",
+      "reason_fragment": "ARLEN_MSSQL_TEST_DSN is not set",
+      "source": "tests/unit/Phase17BTests.m",
+      "source_sha256": "3d50690660c0b311b8323b1d543683e4cd71136c832973a880540e6a8a03e492"
+    },
+    {
+      "id": "ArlenUnitTests/Phase17BTests/testMSSQLAdapterMaterializesTypedCommonScalarsWhenExplicitTestDSNIsProvided",
+      "category": "optional-MSSQL-unconfigured",
+      "reason_fragment": "ARLEN_MSSQL_TEST_DSN is not set",
+      "source": "tests/unit/Phase17BTests.m",
+      "source_sha256": "3d50690660c0b311b8323b1d543683e4cd71136c832973a880540e6a8a03e492"
+    },
+    {
+      "id": "ArlenUnitTests/Phase17BTests/testMSSQLEmbeddedNULTextParameterRoundTripsWhenExplicitTestDSNIsProvided",
+      "category": "optional-MSSQL-unconfigured",
+      "reason_fragment": "ARLEN_MSSQL_TEST_DSN is not set",
+      "source": "tests/unit/Phase17BTests.m",
+      "source_sha256": "3d50690660c0b311b8323b1d543683e4cd71136c832973a880540e6a8a03e492"
+    },
+    {
+      "id": "ArlenUnitTests/Phase17BTests/testMSSQLResultWrappersBatchExecutionAndSavepointsWhenExplicitTestDSNIsProvided",
+      "category": "optional-MSSQL-unconfigured",
+      "reason_fragment": "ARLEN_MSSQL_TEST_DSN is not set",
+      "source": "tests/unit/Phase17BTests.m",
+      "source_sha256": "3d50690660c0b311b8323b1d543683e4cd71136c832973a880540e6a8a03e492"
+    },
+    {
+      "id": "ArlenUnitTests/Phase3ETests/testRedisCacheAdapterConformanceSuiteWhenConfigured",
+      "category": "optional-Redis-unconfigured",
+      "reason_fragment": "ARLEN_REDIS_TEST_URL is not set",
+      "source": "tests/unit/Phase3ETests.m",
+      "source_sha256": "5a957b8392462ce0ef8b148d435d96b5ea2ca0042439f6fa6416c261a0dfac21"
+    },
+    {
+      "id": "ArlenUnitTests/Phase7DTests/testWindowsPrivateStorageDACLRejectsBroadInheritedAccess",
+      "category": "platform",
+      "reason_fragment": "Windows DACL evidence requires native Windows",
+      "source": "tests/unit/Phase7DTests.m",
+      "source_sha256": "7da56a791d88d2aa16a94015c93b0198b74402019123b716d5197186cc2c7785"
+    }
+  ]
+}
