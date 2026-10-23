@@ -691,3 +691,7 @@ summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
 Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
 without an external timezone-data override. Native-control and ICU failure logs
 are retained by the installer smoke's artifact cleanup path.
+
+HTTP signal shutdown uses a lock-free atomic stop flag shared with workers,
+including Windows console-control shutdown. Supported clang builds enforce
+lock-free access at compile time; shutdown commands and limits are unchanged.

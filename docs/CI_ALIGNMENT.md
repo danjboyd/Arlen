@@ -988,3 +988,9 @@ No compiler-warning category, benchmark baseline, threshold, classifier,
 required check name or branch-protection context changes. The two full TSan
 runs remain a separate final-source gate using the existing bootstrap/thread
 recipe; its normal provenance reference must name the newly qualified prefix.
+
+The HTTP server uses a compile-time-checked lock-free atomic signal stop flag.
+Qualification checks both real signal/console shutdown and the instrumented
+probe's initial and restarted processes; handler code must not acquire a lock
+or call Foundation. Native Windows console checks create a real process group
+before targeting a console-control event.

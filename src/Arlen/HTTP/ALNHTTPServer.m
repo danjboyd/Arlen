@@ -18,6 +18,7 @@
 #import <sys/stat.h>
 #import <time.h>
 #include <signal.h>
+#include <stdatomic.h>
 #import "Support/ALNPlatform.h"
 #import "Support/ALNPositiveInteger.h"
 
@@ -143,7 +144,10 @@ typedef struct {
 typedef intptr_t ALNSocketHandle;
 
 static const ALNSocketHandle ALNInvalidSocketHandle = (ALNSocketHandle)-1;
-static volatile sig_atomic_t gSignalStopRequested = 0;
+static _Atomic(sig_atomic_t) gSignalStopRequested = 0;
+// Signal handlers may only use atomic operations that cannot acquire a lock.
+_Static_assert(__atomic_always_lock_free(sizeof(gSignalStopRequested), 0),
+               "HTTP signal-stop flag must always be lock-free");
 
 static void *ALNReallocWithFaults(void *pointer, size_t size);
 
@@ -260,7 +264,7 @@ static WINBOOL WINAPI ALNConsoleControlHandler(DWORD controlType) {
   case CTRL_BREAK_EVENT:
   case CTRL_CLOSE_EVENT:
   case CTRL_SHUTDOWN_EVENT:
-    gSignalStopRequested = 1;
+    atomic_store_explicit(&gSignalStopRequested, 1, memory_order_relaxed);
     return TRUE;
   default:
     return FALSE;
@@ -562,11 +566,11 @@ static void ALNWakeChannelClose(ALNSocketHandle readEnd, ALNSocketHandle writeEn
 
 static void ALNHandleSignal(int sig) {
   (void)sig;
-  gSignalStopRequested = 1;
+  atomic_store_explicit(&gSignalStopRequested, 1, memory_order_relaxed);
 }
 
 static BOOL ALNSignalStopRequested(void) {
-  return (gSignalStopRequested != 0);
+  return (atomic_load_explicit(&gSignalStopRequested, memory_order_relaxed) != 0);
 }
 
 static BOOL ALNInstallSignalHandler(int sig) {
@@ -5594,7 +5598,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
 - (int)runWithHost:(NSString *)host
       portOverride:(NSInteger)portOverride
               once:(BOOL)once {
-  gSignalStopRequested = 0;
+  atomic_store_explicit(&gSignalStopRequested, 0, memory_order_relaxed);
   self.shouldRun = YES;
   [self resetHTTPWorkerPoolState];
 

@@ -2044,3 +2044,7 @@ summer offsets through `NSTimeZone`, exact POSIX-locale date formatting through
 Install `tzdata` for system zoneinfo; each target keeps its distribution's ICU
 without an external timezone-data override. Native-control and ICU failure logs
 are retained by the installer smoke's artifact cleanup path.
+
+HTTP server shutdown requests from POSIX signals and Windows console controls
+use a lock-free atomic stop flag shared with worker threads. Existing signal
+registrations and cooperative shutdown behavior remain the same.

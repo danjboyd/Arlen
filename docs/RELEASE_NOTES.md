@@ -13,6 +13,9 @@ or services use it; see [Getting Started](GETTING_STARTED.md#manual-toolchain-se
 Release qualification and remaining limitations are documented in the
 [Known Risk Register](KNOWN_RISK_REGISTER.md).
 
+- HTTP signal and console shutdown flags now use lock-free atomic accesses
+  across handlers and worker threads.
+
 - Runtime concurrency qualification now rejects server shutdown errors and
   sanitizer reports, and retains separate logs for every server generation.
 
