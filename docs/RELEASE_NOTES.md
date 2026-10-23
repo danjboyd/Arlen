@@ -143,7 +143,8 @@ Release qualification and remaining limitations are documented in the
   on the default in-memory engine. It retains ranking, highlighting, resource
   filters, and the existing query limits. Query history updates now copy only
   their bounded history for rollback while retaining state reload and atomic
-  persistence behavior.
+  persistence behavior. Failed state writes also report an execution error when
+  Foundation does not provide a file error.
 
 - Storage module 1.4.3 creates Windows legacy plist catalogs with an owner-only
   protected DACL before writing and retains the last catalog on failed replacement.
