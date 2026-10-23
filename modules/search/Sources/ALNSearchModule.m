@@ -24,6 +24,7 @@ static NSUInteger const ALNSearchHistoryLimit = 30;
 static NSUInteger const ALNSearchGenerationHistoryLimit = 6;
 // Queries longer than this are rejected with a validation error (HTTP 422).
 static NSUInteger const ALNSearchMaxQueryLength = 256;
+static NSUInteger const ALNSearchFuzzyTokenCacheMaxEntries = 512;
 // "Did you mean" suggestions are skipped for queries longer than this; they
 // compare the whole query against single indexed terms.
 static NSUInteger const ALNSearchSuggestionsMaxQueryLength = 64;
@@ -1404,7 +1405,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
               query:(NSString *)query
                mode:(NSString *)mode
           highlight:(NSString **)highlight {
-  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:nil highlight:highlight];
+  return [self scoreText:text weight:weight query:query mode:mode queryTrigrams:nil fuzzyTokenMetrics:nil highlight:highlight];
 }
 
 - (double)scoreText:(NSString *)text
@@ -1412,6 +1413,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
               query:(NSString *)query
                mode:(NSString *)mode
       queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
           highlight:(NSString **)highlight {
   NSString *source = STStringifyValue(text);
   NSString *needle = STLowerTrimmedString(query);
@@ -1438,8 +1440,21 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
     } else {
       NSSet<NSString *> *needleTrigrams = queryTrigrams ?: [self trigramsForString:needle];
       for (NSString *token in [self tokensForText:source]) {
-        double trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
-        NSUInteger distance = [self fuzzyEditDistanceBetween:token and:needle];
+        NSArray<NSNumber *> *metrics = fuzzyTokenMetrics[token];
+        double trigram;
+        NSUInteger distance;
+        if (metrics != nil) {
+          trigram = [metrics[0] doubleValue];
+          distance = [metrics[1] unsignedIntegerValue];
+        } else {
+          trigram = [self trigramSimilarityForString:token otherTrigrams:needleTrigrams];
+          distance = [self fuzzyEditDistanceBetween:token and:needle];
+          if (fuzzyTokenMetrics != nil && [fuzzyTokenMetrics count] < ALNSearchFuzzyTokenCacheMaxEntries) {
+            // Cache only query/token metrics; field weights and highlight choice
+            // still follow the original document and field traversal order.
+            fuzzyTokenMetrics[token] = @[ @(trigram), @(distance) ];
+          }
+        }
         if (trigram < 0.25 && distance > 2U) {
           continue;
         }
@@ -1486,7 +1501,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                            generation:generation
                                 query:query
                                  mode:mode
-                        queryTrigrams:nil];
+                        queryTrigrams:nil
+                    fuzzyTokenMetrics:nil];
 }
 
 - (nullable NSDictionary *)rankedMatchForDocument:(NSDictionary *)document
@@ -1494,7 +1510,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                        generation:(NSNumber *)generation
                                             query:(NSString *)query
                                              mode:(NSString *)mode
-                                    queryTrigrams:(NSSet<NSString *> *)queryTrigrams {
+                                    queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+                                fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics {
   NSString *needle = STTrimmedString(query);
   NSString *resolvedHighlight = @"";
   double score = 0.0;
@@ -1514,6 +1531,7 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                   query:needle
                                    mode:mode
                           queryTrigrams:queryTrigrams
+                      fuzzyTokenMetrics:fuzzyTokenMetrics
                               highlight:&fieldHighlight];
     if (fieldScore > 0.0 && ![matchedFields containsObject:field]) {
       [matchedFields addObject:field];
@@ -1840,6 +1858,9 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
   NSUInteger suggestionsLimit = STClampedSuggestionLimit(options[@"suggestionsLimit"], 3U);
   NSString *rankingQuery = STLowerTrimmedString(normalizedQuery);
   NSSet<NSString *> *queryTrigrams = ([rankingQuery length] > 0) ? [self trigramsForString:rankingQuery] : nil;
+  // Shared only within this query; repeated field words need one fuzzy metric
+  // calculation regardless of document count or field weight.
+  NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *fuzzyTokenMetrics = [NSMutableDictionary dictionary];
 
   for (NSDictionary *metadata in STNormalizeArray(resourceMetadata)) {
     NSString *identifier = STLowerTrimmedString(metadata[@"identifier"]);
@@ -1889,7 +1910,8 @@ static NSUInteger STLevenshteinDistance(NSString *left, NSString *right) {
                                                generation:snapshot[@"generation"]
                                                     query:normalizedQuery
                                                      mode:queryMode
-                                            queryTrigrams:queryTrigrams];
+                                            queryTrigrams:queryTrigrams
+                                        fuzzyTokenMetrics:fuzzyTokenMetrics];
       if (ranked == nil && [normalizedQuery length] > 0) {
         continue;
       }

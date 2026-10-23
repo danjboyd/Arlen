@@ -463,6 +463,9 @@ Admin UI resource link fields allow relative, HTTP(S), and mailto targets;
 unsafe targets render as `#` with admin-ui 1.1.3.
 Upgrade vendored `search` modules to 1.2.2 before using PostgreSQL full-text
 search with tenant or other resource visibility filters.
+Upgrade vendored `search` modules to 1.2.3 for bounded per-query fuzzy scoring
+of repeated words in the default engine. Result ranking and query limits stay
+the same.
 Route policies cover format-suffixed requests to a protected route, such as
 `/admin.json` for `/admin`; assurance limits also apply to compiled fast routes.
 Production apps keep `/openapi.json` and its docs routes closed unless they set

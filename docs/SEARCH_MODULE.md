@@ -97,6 +97,12 @@ results before building facets, autocomplete, and suggestions. Upgrade to
 search 1.2.2 when tenant, soft-delete, archived, or app-defined visibility
 filters are used with this engine.
 
+Search 1.2.3 also avoids repeating fuzzy token similarity and edit calculations
+for the same word within one query on the default in-memory engine. The cache
+is bounded to 512 distinct tokens per query; ranking weights, highlights, and
+the 256-character query limit are unchanged. Upgrade a vendored `search`
+module to receive this improvement.
+
 `ALNPostgresSearchEngine` reads
 `searchModule.engine.postgres.connectionString` first and falls back to
 `database.connectionString`.
