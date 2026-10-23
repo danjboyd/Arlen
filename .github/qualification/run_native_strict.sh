@@ -37,8 +37,9 @@ import hashlib,json,os,subprocess,sys
 from pathlib import Path
 thread,out,normal,ref=sys.argv[1:];thread=Path(thread);out=Path(out);normal=Path(normal)
 m=json.loads((thread/'manifest.json').read_text());p=json.loads((normal/'gnustep-toolchain-provenance.json').read_text());digest=lambda f:hashlib.sha256(Path(f).read_bytes()).hexdigest()
-assert p['build_host']['machine']=='aarch64' and p['build_host']['os_version']=='ubuntu-24.04'
-assert p['lock']['sha256']=='a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d'
+supported={('aarch64','ubuntu-24.04'):'a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d',
+           ('x86_64','debian-13'):'df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34'}
+assert p['lock']['sha256']==supported[(p['build_host']['machine'],p['build_host']['os_version'])]
 assert all(digest(f)==h for f,h in m['artifacts'].items())
 assert json.loads(Path('tools/ci/tsan-toolchain/sources.json').read_text())==m['sources']
 assert digest('tools/ci/build_tsan_toolchain.py')==m['builder']
@@ -110,4 +111,4 @@ for kind in ('http','unit'):
 (out/f'run-{n}-four-dso-receipt.json').write_text(json.dumps(records,indent=2)+'\n')
 PY
 done
-printf '%s\n' 'Two consecutive native arm64 strict full-unit/HTTP/diagnostic/canary runs passed; exact evidence still requires review.' > "$out/pair-completed.txt"
+printf '%s\n' 'Two consecutive native strict full-unit/HTTP/diagnostic/canary runs passed; exact evidence still requires review.' > "$out/pair-completed.txt"

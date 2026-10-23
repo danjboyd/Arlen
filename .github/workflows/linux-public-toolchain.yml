@@ -11,7 +11,7 @@ on:
         description: Qualification lane
         type: choice
         default: strict
-        options: [strict, normal, public]
+        options: [strict, strict-debian, normal, public]
 
 permissions:
   contents: read
@@ -56,6 +56,54 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: v032-native-arm64-strict-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-native-evidence
+            ${{ runner.temp }}/arlen-normal-runtime
+            ${{ runner.temp }}/native-thread/**/manifest.json
+            ${{ runner.temp }}/native-thread/**/identity.json
+            ${{ runner.temp }}/native-thread/**/build.log
+          include-hidden-files: true
+          if-no-files-found: error
+
+  native-debian-strict:
+    if: ${{ inputs.lane == 'strict-debian' }}
+    runs-on: [self-hosted, Linux, X64, arlen, iep-apt]
+    timeout-minutes: 150
+    steps:
+      - name: Checkout qualification harness
+        uses: actions/checkout@v4
+        with:
+          path: harness
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+          submodules: recursive
+      - name: Verify native target and immutable source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_REF"
+          test "$(uname -m)" = x86_64
+          . /etc/os-release
+          test "$ID:$VERSION_ID" = debian:13
+      - name: Install diagnostic and PostgreSQL prerequisites
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends unixodbc-dev lsof postgresql postgresql-client
+      - name: Build and verify the candidate normal runtime
+        run: bash source/tools/ci/setup_normal_runtime.sh --install-dependencies
+      - name: Run unchanged native strict pair
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: bash harness/.github/qualification/run_native_strict.sh "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/harness/.github/qualification" "$RUNNER_TEMP/v032-native-evidence"
+      - name: Preserve native qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v032-native-debian-strict-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/v032-native-evidence
             ${{ runner.temp }}/arlen-normal-runtime
