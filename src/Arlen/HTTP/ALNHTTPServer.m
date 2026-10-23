@@ -24,6 +24,7 @@
 
 #if defined(_WIN32)
 #include <io.h>
+#include <process.h>
 #include <aclapi.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -35,6 +36,7 @@ typedef SSIZE_T ssize_t;
 #define SHUT_RDWR SD_BOTH
 #endif
 #else
+#include <pthread.h>
 #import <arpa/inet.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
@@ -4259,6 +4261,67 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
 @end
 
+// Join the native thread, including Foundation/OpenSSL thread-local cleanup.
+// A detached NSThread can still be serving a request when the server returns
+// and process-wide library cleanup begins.
+static void ALNRunHTTPBackgroundThread(void *context) {
+  @autoreleasepool {
+    void (^body)(void) = (__bridge_transfer id)context;
+    body();
+  }
+}
+#if defined(_WIN32)
+static unsigned __stdcall ALNHTTPBackgroundThreadMain(void *context) {
+  ALNRunHTTPBackgroundThread(context);
+  return 0;
+}
+#else
+static void *ALNHTTPBackgroundThreadMain(void *context) {
+  ALNRunHTTPBackgroundThread(context);
+  return NULL;
+}
+#endif
+
+@interface ALNHTTPBackgroundThread : NSObject {
+#if defined(_WIN32)
+  HANDLE _thread;
+#else
+  pthread_t _thread;
+#endif
+  BOOL _started;
+}
+- (BOOL)startWithBody:(void (^)(void))body;
+- (BOOL)join;
+@end
+
+@implementation ALNHTTPBackgroundThread
+- (BOOL)startWithBody:(void (^)(void))body {
+  void *context = (__bridge_retained void *)[body copy];
+#if defined(_WIN32)
+  _thread = (HANDLE)_beginthreadex(NULL, 0, ALNHTTPBackgroundThreadMain, context, 0, NULL);
+  _started = (_thread != NULL);
+#else
+  _started = (pthread_create(&_thread, NULL, ALNHTTPBackgroundThreadMain, context) == 0);
+#endif
+  if (!_started) {
+    id releasedBody = (__bridge_transfer id)context;
+    (void)releasedBody;
+  }
+  return _started;
+}
+- (BOOL)join {
+  if (!_started) return YES;
+#if defined(_WIN32)
+  if (WaitForSingleObject(_thread, INFINITE) != WAIT_OBJECT_0) return NO;
+  CloseHandle(_thread);
+#else
+  if (pthread_join(_thread, NULL) != 0) return NO;
+#endif
+  _started = NO;
+  return YES;
+}
+@end
+
 @interface ALNHTTPServer ()
 
 @property(nonatomic, strong, readwrite) ALNApplication *application;
@@ -4278,6 +4341,7 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 @property(nonatomic, strong) NSMutableArray *pendingHTTPClientFDs;
 @property(nonatomic, assign) NSUInteger pendingHTTPClientFDHeadIndex;
 @property(nonatomic, assign) BOOL httpWorkerPoolStarted;
+@property(nonatomic, strong) NSMutableArray<ALNHTTPBackgroundThread *> *httpBackgroundThreads;
 @property(nonatomic, strong) NSMutableSet *resumedHTTPClientFDs;
 // Monotonic accept time (ms) of each queued new connection, keyed like
 // pendingHTTPClientFDs; taken by serveClient for the first head deadline.
@@ -4334,6 +4398,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     _pendingHTTPClientFDs = [NSMutableArray array];
     _pendingHTTPClientFDHeadIndex = 0;
     _httpWorkerPoolStarted = NO;
+    _httpBackgroundThreads = [NSMutableArray array];
     _resumedHTTPClientFDs = [NSMutableSet set];
     _httpClientAcceptTimes = [NSMutableDictionary dictionary];
     _keepAliveParkAfterMilliseconds = 5;
@@ -4464,6 +4529,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   [self.httpWorkerQueueCondition lock];
   [self.httpWorkerQueueCondition broadcast];
   [self.httpWorkerQueueCondition unlock];
+  [self wakeIdleConnectionWatcher];
 }
 
 - (BOOL)shouldContinueRunning {
@@ -4600,14 +4666,11 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   [self.httpWorkerQueueCondition unlock];
 
   for (NSUInteger idx = 0; idx < workerCount; idx++) {
-    @try {
-      [NSThread detachNewThreadSelector:@selector(runHTTPWorkerLoop:)
-                               toTarget:self
-                             withObject:@(idx)];
-    } @catch (NSException *exception) {
-      (void)exception;
+    ALNHTTPBackgroundThread *thread = [[ALNHTTPBackgroundThread alloc] init];
+    if (![thread startWithBody:^{ [self runHTTPWorkerLoop:@(idx)]; }]) {
       return NO;
     }
+    [self.httpBackgroundThreads addObject:thread];
   }
   if (workerCount > 0) {
     [self startIdleConnectionWatcher];
@@ -4634,10 +4697,10 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   self.idleConnectionWakeReadFD = readEnd;
   self.idleConnectionWakeWriteFD = writeEnd;
   self.idleConnectionWatcherRunning = YES;
-  @try {
-    [NSThread detachNewThreadSelector:@selector(runIdleConnectionWatcher:) toTarget:self withObject:nil];
-  } @catch (NSException *exception) {
-    (void)exception;
+  ALNHTTPBackgroundThread *thread = [[ALNHTTPBackgroundThread alloc] init];
+  if ([thread startWithBody:^{ [self runIdleConnectionWatcher:nil]; }]) {
+    [self.httpBackgroundThreads addObject:thread];
+  } else {
     self.idleConnectionWatcherRunning = NO;
     ALNWakeChannelClose(readEnd, writeEnd);
     self.idleConnectionWakeReadFD = ALNInvalidSocketHandle;
@@ -4795,6 +4858,15 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     ALNWakeChannelClose(wakeRead, wakeWrite);
     [self.idleConnectionLock unlock];
   }
+}
+
+- (BOOL)waitForHTTPBackgroundThreads {
+  BOOL joined = YES;
+  for (ALNHTTPBackgroundThread *thread in self.httpBackgroundThreads) {
+    joined = [thread join] && joined;
+  }
+  [self.httpBackgroundThreads removeAllObjects];
+  return joined;
 }
 
 - (void)resetHTTPWorkerPoolState {
@@ -5834,6 +5906,12 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     }
     self.serverSocketFD = ALNInvalidSocketHandle;
     [self requestStop];
+    // Keep the application and its libraries alive until every HTTP worker
+    // and idle watcher has finished, including native thread destructors.
+    if (![self waitForHTTPBackgroundThreads]) {
+      fprintf(stderr, "%s: failed to join HTTP background threads\n", [self.serverName UTF8String]);
+      exitCode = 1;
+    }
     [ALNRealtimeHub sharedHub].fanout = nil;
     [self.application shutdown];
   }

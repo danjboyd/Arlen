@@ -11,6 +11,9 @@
 - Fix GNU Make 4.3 directory-message contamination of `gnustep-config`
   output on Ubuntu 24.04. The target-specific query patch preserves other
   make options, debug filtering, and explicit application compiler flags.
+- Drain HTTP workers and the idle connection watcher before server return and
+  application teardown, including native thread-local cleanup. This prevents
+  process-wide OpenSSL cleanup racing an in-flight request during shutdown.
 - Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
   defaults, explicit application compiler flags, and existing release gates.
   See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) and the

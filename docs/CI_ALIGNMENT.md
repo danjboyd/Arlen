@@ -999,3 +999,12 @@ Qualification checks both real signal/console shutdown and the instrumented
 probe's initial and restarted processes; handler code must not acquire a lock
 or call Foundation. Native Windows console checks create a real process group
 before targeting a console-control event.
+
+### Native Linux shutdown qualification
+
+The HTTP runtime probe retains initial and restarted server logs and rejects
+shutdown errors or sanitizer reports. HTTP workers and the idle watcher use
+joinable native threads so application/process teardown follows thread-local
+library cleanup. The unit inventory includes a blocked-worker and thread-local
+cleanup regression. The Linux deploy permission fault probe uses `fchmodat`,
+available on aarch64, without changing the permission assertions.
