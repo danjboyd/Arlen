@@ -271,3 +271,9 @@ do not replace it with global `MAKEFLAGS`, installed config edits, warning
 suppression, or an unconditional Arlen compiler override. Old include-only
 prefixes are preserved controls and fail the new normal configure-input check.
 Fresh-prefix native/performance qualification is required after a lock change.
+
+Runtime concurrency probe changes must preserve server-process qualification:
+run `python3 tools/ci/test_runtime_concurrency_probe.py` and the maintained
+runtime concurrency gate. Each server generation must exit zero without a
+sanitizer report, including during restart and final shutdown. Keep all separate
+server logs; see [CI alignment](docs/CI_ALIGNMENT.md) for artifact locations.

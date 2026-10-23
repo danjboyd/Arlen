@@ -4,9 +4,11 @@ import base64
 import json
 import os
 import random
+import re
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -360,6 +362,38 @@ def run_mixed_probe_once(port: int, expect_keep_alive: bool, publish_fd: int) ->
         raise RuntimeError(f"final health check failed: {final!r}")
 
 
+def stop_server(server: subprocess.Popen[str], log_path: str) -> List[str]:
+    """Reap one generation and check its complete output, including shutdown."""
+    errors: List[str] = []
+    try:
+        if server.poll() is None:
+            server.terminate()
+        try:
+            rc = server.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            errors.append("server shutdown timed out")
+            server.kill()
+            rc = server.wait(timeout=5)
+        if rc != 0:
+            errors.append(f"server exited with status {rc}")
+    except Exception as exc:  # Keep a primary probe failure visible during cleanup.
+        errors.append(f"server cleanup failed: {exc}")
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as log:
+            # Scan every line: a report can precede a long tail of normal output.
+            for line in log:
+                if re.search(
+                    r"(?:WARNING|ERROR|FATAL|SUMMARY):\s*(?:Thread|Address|Leak|Memory|UndefinedBehavior)Sanitizer"
+                    r"|(?:^|\s)runtime error:", line
+                ):
+                    errors.append(f"sanitizer report: {line.strip()}")
+                    break
+    except OSError as exc:
+        errors.append(f"cannot read server log: {exc}")
+    print(f"runtime concurrency server exit={server.returncode}; log retained: {log_path}", flush=True)
+    return errors
+
+
 def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -> None:
     port = reserve_port()
     command = [binary, "--port", str(port)]
@@ -368,20 +402,28 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
 
     overlap_stop: Optional[threading.Event] = None
     load_thread: Optional[threading.Thread] = None
-    fd, log_path = tempfile.mkstemp(prefix=f"runtime_concurrency_{mode}_", suffix=".log")
-    os.close(fd)
+    log_dir = os.environ.get(
+        "ARLEN_RUNTIME_CONCURRENCY_LOG_DIR", "build/release_confidence/runtime_concurrency"
+    )
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = ""
+    server: Optional[subprocess.Popen[str]] = None
 
     publish_read, publish_write = os.pipe()
     server_env = dict(os.environ, ARLEN_CONCURRENCY_PUBLISH_FD=str(publish_read))
-    succeeded = False
 
     def start_server() -> subprocess.Popen[str]:
-        with open(log_path, "w", encoding="utf-8") as log_handle:
+        nonlocal log_path
+        fd, log_path = tempfile.mkstemp(
+            prefix=f"runtime_concurrency_{mode}_", suffix=".log", dir=log_dir
+        )
+        print(f"runtime concurrency server log: {log_path}", flush=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as log_handle:
             return subprocess.Popen(command, stdout=log_handle, stderr=subprocess.STDOUT, text=True,
                                     env=server_env, pass_fds=(publish_read,))
 
-    server = start_server()
     try:
+        server = start_server()
         try:
             wait_ready(port)
         except RuntimeError as exc:
@@ -429,12 +471,10 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
         load_thread.start()
         time.sleep(0.25)
 
-        server.terminate()
-        try:
-            server.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            server.kill()
-            server.wait(timeout=5)
+        shutdown_errors = stop_server(server, log_path)
+        server = None
+        if shutdown_errors:
+            raise RuntimeError("; ".join(shutdown_errors) + f"; log={log_path}")
 
         server = start_server()
         try:
@@ -454,25 +494,21 @@ def run_mode(binary: str, mode: str, expect_keep_alive: bool, iterations: int) -
             raise RuntimeError("; ".join(overlap_errors))
 
         run_mixed_probe_once(port, expect_keep_alive, publish_write)
-        succeeded = True
     finally:
         if overlap_stop is not None:
             overlap_stop.set()
         if load_thread is not None:
             load_thread.join(timeout=5)
-        if server.poll() is None:
-            server.terminate()
-            try:
-                server.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait(timeout=5)
+        primary_error = sys.exc_info()[1]
+        shutdown_errors = stop_server(server, log_path) if server is not None else []
         os.close(publish_read)
         os.close(publish_write)
-        if succeeded and os.path.exists(log_path):
-            os.remove(log_path)
-        elif not succeeded:
-            print(f"runtime concurrency server log retained: {log_path}", flush=True)
+        if shutdown_errors:
+            detail = "; ".join(shutdown_errors) + f"; log={log_path}"
+            if primary_error is not None:
+                print(f"runtime concurrency cleanup also failed: {detail}", file=sys.stderr, flush=True)
+            else:
+                raise RuntimeError(detail)
 
 
 def main() -> int:

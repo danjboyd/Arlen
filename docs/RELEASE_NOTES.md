@@ -13,6 +13,9 @@ or services use it; see [Getting Started](GETTING_STARTED.md#manual-toolchain-se
 Release qualification and remaining limitations are documented in the
 [Known Risk Register](KNOWN_RISK_REGISTER.md).
 
+- Runtime concurrency qualification now rejects server shutdown errors and
+  sanitizer reports, and retains separate logs for every server generation.
+
 - GNUstep app tests build and use the bundled XCTest library and headers
   together, including on clean toolchains without system XCTest.
 

@@ -55,6 +55,14 @@ jobs:
         run: |
           python3 ./tools/ci/junit_report.py test-results --title "linux-sanitizers XCTest results"
 
+      - name: Upload runtime concurrency server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-sanitizers-runtime-concurrency-${{ github.run_id }}
+          path: build/release_confidence/runtime_concurrency/**
+          if-no-files-found: warn
+
       - name: Upload sanitizer confidence artifacts
         if: github.event_name == 'workflow_dispatch' || failure()
         uses: actions/upload-artifact@v4

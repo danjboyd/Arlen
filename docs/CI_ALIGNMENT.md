@@ -815,7 +815,21 @@ The same probe also verifies server-originated delivery to both subscribers
 (concurrent mode) and the single subscriber (serialized mode). Its separate
 `runtime-concurrency-fixture` executable accepts a command only through a pipe
 inherited from the test runner; ordinary `boomhauer` has no publishing hook or
-new network route. Failed probe runs retain their server log for diagnosis.
+new network route. Every server generation, including the restarted server,
+must exit zero and have no sanitizer diagnostic anywhere in its complete log.
+A forced shutdown after the existing eight-second wait fails the probe; the
+five-second kill cleanup does not convert it to a pass. Cleanup diagnostics
+also remain visible when an earlier request assertion fails.
+
+Passing and failing generations keep separate logs under
+`build/release_confidence/runtime_concurrency` by default; set
+`ARLEN_RUNTIME_CONCURRENCY_LOG_DIR` to use another evidence directory. Linux
+quality and sanitizer workflows always upload these logs. The thread-race lane
+sets that directory inside its existing TSan artifact directory, so both strict
+release runs retain every initial/restarted concurrent/serialized server log.
+The Python negative controls verify shutdown exit failures, reports despite a
+zero exit, distinct restart logs and preservation of primary request failures.
+Existing lane names, required checks, workloads and time limits are unchanged.
 
 ### Linux sanitizer runtime consistency
 
