@@ -201,6 +201,11 @@ static NSDictionary *Phase27StreamingDocumentForRecord(NSDictionary *record, NSD
                mode:(NSString *)mode queryTrigrams:(NSSet<NSString *> *)queryTrigrams
   fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
           highlight:(NSString **)highlight;
+- (double)scoreText:(NSString *)text weight:(NSUInteger)weight query:(NSString *)query
+               mode:(NSString *)mode queryTrigrams:(NSSet<NSString *> *)queryTrigrams
+  fuzzyTokenMetrics:(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *)fuzzyTokenMetrics
+  fuzzyFieldResults:(NSMutableDictionary<NSString *, NSArray *> *)fuzzyFieldResults
+          highlight:(NSString **)highlight;
 @end
 
 // The boxed implementation the default engine used before it moved to a scalar buffer.
@@ -765,6 +770,7 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
   XCTAssertNotNil(engineClass);
   id engine = [[engineClass alloc] init];
   NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *metrics = [NSMutableDictionary dictionary];
+  NSMutableDictionary<NSString *, NSArray *> *fieldResults = [NSMutableDictionary dictionary];
   for (NSString *text in @[ @"Warehouse shelves", @"Warehouse inventory", @"Caf\u00e9 warehouse" ]) {
     for (NSNumber *weight in @[ @1, @9 ]) {
       NSString *originalHighlight = nil;
@@ -776,9 +782,19 @@ static NSUInteger Phase27ReferenceLevenshtein(NSString *lhs, NSString *rhs) {
                      fuzzyTokenMetrics:metrics highlight:&cachedHighlight];
       XCTAssertEqual(original, cached, @"%@ weight %@", text, weight);
       XCTAssertEqualObjects(originalHighlight, cachedHighlight, @"%@ weight %@", text, weight);
+      for (NSUInteger repeat = 0; repeat < 2U; repeat++) {
+        NSString *fieldHighlight = nil;
+        double fieldScore = [engine scoreText:text weight:[weight unsignedIntegerValue]
+                                         query:@"wharehouse" mode:@"fuzzy" queryTrigrams:nil
+                             fuzzyTokenMetrics:metrics fuzzyFieldResults:fieldResults
+                                     highlight:&fieldHighlight];
+        XCTAssertEqual(original, fieldScore, @"%@ weight %@", text, weight);
+        XCTAssertEqualObjects(originalHighlight, fieldHighlight, @"%@ weight %@", text, weight);
+      }
     }
   }
   XCTAssertGreaterThan([metrics count], (NSUInteger)0);
+  XCTAssertGreaterThan([fieldResults count], (NSUInteger)0);
 }
 
 - (void)testReindexStreamsBuildBatchesInsteadOfUsingLegacySnapshotContract {
