@@ -812,6 +812,10 @@ by stamp, and `003_auth_revoked_sessions.sql` lets signing out refuse other
 copies of the session cookie. Until each is applied, the module logs one
 warning naming it (see [Auth Module](AUTH_MODULE.md#sessions-and-roles)).
 
+Upgrade vendored `auth` to 1.7.6 and restart the app to apply the concurrent
+password-reset/schema-cache correction. This fix requires no new migration or
+configuration; missing-schema and failed probes remain retryable.
+
 First-party module surfaces after install:
 
 - `auth`: stable JSON under `/auth/api/...`; HTML ownership under `/auth/...` is controlled by `authModule.ui.mode` (`module-ui`, `headless`, or `generated-app-ui`). The module also adds embeddable server-rendered MFA fragments, `/auth/api/mfa` factor discovery, and optional disabled-by-default SMS/Twilio Verify MFA support. SMS send and verification limits use PostgreSQL account counters; locked requests return 429 with `Retry-After`, and unavailable attempt-limit storage returns 503. A nonempty `authModule.mfa.sms.testVerificationCode` is accepted only in development and test; other environments reject it at startup. Queued auth-mail jobs use the configured `authModule.publicBaseURL` for links, ignoring a different payload origin. Auth session refresh runs before `security.routePolicies` evaluates `requireAuth`. A verified SMS factor requires recent AAL2 before new TOTP provisioning or verification; discovery omits the secret until step-up. Password inputs keep leading and trailing spaces across registration, sign-in, change, and reset. TOTP/SMS step-up retains the validated session generation and fails if concurrent revocation changes it.

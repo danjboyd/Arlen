@@ -445,6 +445,11 @@ Auth passwords preserve surrounding spaces on every path. If older registration
 flows removed those spaces, sign in with the stored form before changing the
 password. Upgrade vendored `auth` modules to 1.7.5.
 
+Upgrade vendored `auth` modules to 1.7.6 and restart the app for the concurrent
+password-reset and session-schema cache correction. Schema metadata is owned
+by the auth runtime and reset when its database adapter changes; missing-table
+and failed probes still retry. No additional migration is needed for this fix.
+
 Mounted child requests are checked against the parent application's matching
 `security.routePolicies` before the child receives them. A parent `requireAuth`
 policy uses the parent's session configuration.

@@ -67,6 +67,13 @@ Release qualification and remaining limitations are documented in the
   whitespace exactly, matching password reset and policy validation. Upgrade
   vendored auth modules.
 
+- Auth 1.7.6 keeps session-schema metadata in the auth runtime instead of
+  attaching it to a shared database adapter during requests. This removes the
+  observed GNUstep class-pointer race during concurrent password resets.
+  Replacing the adapter resets the cache; missing tables and failed probes
+  remain retryable. Upgrade vendored auth modules and restart the app; this
+  correction requires no new migration or configuration.
+
 - Ops 1.1.1 removes individual jobs, notification outbox/fanout, and storage
   records from operator HTML and JSON summaries and drilldowns while keeping status
   metrics. Admins retain full detail. Upgrade vendored `ops` modules.

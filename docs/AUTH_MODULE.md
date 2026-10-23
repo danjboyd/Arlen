@@ -1,5 +1,12 @@
 # Auth Module
 
+Auth 1.7.6 keeps optional session-schema metadata in the auth runtime, keyed to
+its current database adapter. Concurrent password resets and session refreshes
+no longer attach metadata to an already shared adapter. Missing tables and
+failed probes remain retryable; replacing the adapter clears its cached schema
+features. Upgrade vendored auth copies with `arlen module upgrade auth` and
+restart the app. This correction requires no new migration or configuration.
+
 Auth 1.7.2 uses the configured `publicBaseURL` when a queued auth-mail job
 builds a verification or password-reset link. Queued payloads cannot replace
 that configured origin. Upgrade the vendored auth module with the jobs module.

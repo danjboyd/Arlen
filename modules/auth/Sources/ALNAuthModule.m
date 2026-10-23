@@ -1010,6 +1010,9 @@ static NSString *AMStubHS256JWT(NSDictionary *claims, NSString *sharedSecret) {
 @property(nonatomic, assign) BOOL attemptLimitSchemaAvailable;
 @property(nonatomic, assign) BOOL attemptLimitSchemaWarningLogged;
 @property(nonatomic, strong) NSLock *attemptLimitSchemaLock;
+@property(nonatomic, strong) ALNPg *authSchemaDatabase;
+@property(nonatomic, strong) id authSchemaFeatures;
+@property(nonatomic, strong) NSLock *authSchemaLock;
 @property(nonatomic, strong) ALNAuthModuleTwilioVerifyClient *smsVerifyClient;
 @property(nonatomic, copy) NSDictionary *partialTemplateOverrides;
 @property(nonatomic, copy) NSString *stubProviderEmail;
@@ -1408,6 +1411,7 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
     _bootstrapAdminEmails = @[];
     _environmentName = @"development";
     _attemptLimitSchemaLock = [[NSLock alloc] init];
+    _authSchemaLock = [[NSLock alloc] init];
     _mfaMaxFailures = 5U;
     _mfaLockoutSeconds = 30U;
     _mfaMaxLockoutSeconds = 900U;
@@ -1808,6 +1812,10 @@ static id AMInstantiateHookClass(NSDictionary *hooksConfig,
                                       ? [rawAcquireTimeout doubleValue]
                                       : 2.0;
   self.database = [[ALNPg alloc] initWithConnectionString:connectionString maxConnections:maxConnections error:&dbError];
+  [self.authSchemaLock lock];
+  self.authSchemaFeatures = nil;
+  self.authSchemaDatabase = nil;
+  [self.authSchemaLock unlock];
   // Wait briefly for a busy pool instead of failing at once; requests that
   // still cannot get a connection answer 503 (see AMErrorIsDatabaseUnavailable).
   self.database.acquireTimeout = (acquireTimeout >= 0.0) ? acquireTimeout : 2.0;

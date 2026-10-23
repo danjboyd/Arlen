@@ -248,7 +248,7 @@ with `arlen module upgrade` and apply each module's migration instructions:
 
 | Module | Version |
 | --- | --- |
-| `auth` | `1.7.5` |
+| `auth` | `1.7.6` |
 | `admin-ui` | `1.1.3` |
 | `jobs` | `1.1.4` |
 | `notifications` | `1.3.2` |
