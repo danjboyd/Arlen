@@ -200,6 +200,12 @@ jobs:
               test ! -e /usr/GNUstep
               sudo -u arlen -H python3 /harness/verify_public_unix.py --expected-version 0.3.2 --expected-source "$SOURCE_REF" --output /evidence/actual-public
             '
+      - name: Restore ownership of the owned container evidence
+        if: always()
+        run: |
+          if [[ -d "$RUNNER_TEMP/v032-public-evidence" ]]; then
+            sudo chown -R --no-dereference "$(id -u):$(id -g)" "$RUNNER_TEMP/v032-public-evidence"
+          fi
       - name: Preserve actual public installer evidence
         if: always()
         uses: actions/upload-artifact@v4
