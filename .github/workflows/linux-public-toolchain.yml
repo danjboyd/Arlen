@@ -7,12 +7,18 @@ on:
         description: Exact full candidate commit to qualify
         required: true
         type: string
+      lane:
+        description: Qualification lane
+        type: choice
+        default: strict
+        options: [strict, normal]
 
 permissions:
   contents: read
 
 jobs:
   native-strict:
+    if: ${{ inputs.lane == 'strict' || inputs.lane == '' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 150
     steps:
@@ -56,5 +62,50 @@ jobs:
             ${{ runner.temp }}/native-thread/**/manifest.json
             ${{ runner.temp }}/native-thread/**/identity.json
             ${{ runner.temp }}/native-thread/**/build.log
+          include-hidden-files: true
+          if-no-files-found: error
+
+  native-normal:
+    if: ${{ inputs.lane == 'normal' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout qualification harness
+        uses: actions/checkout@v4
+        with:
+          path: harness
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+          submodules: recursive
+      - name: Verify native target and immutable source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_REF"
+          test "$(uname -m)" = aarch64
+          . /etc/os-release
+          test "$ID:$VERSION_ID" = ubuntu:24.04
+      - name: Install diagnostic and PostgreSQL prerequisites
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lsof postgresql postgresql-client
+      - name: Build and verify the candidate normal runtime
+        run: bash source/tools/ci/setup_normal_runtime.sh --install-dependencies
+      - name: Run full native normal unit, integration, and HTTP checks
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: bash harness/.github/qualification/run_native_normal.sh "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/harness/.github/qualification" "$RUNNER_TEMP/v032-native-normal-evidence"
+      - name: Preserve native qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v032-native-arm64-normal-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-native-normal-evidence
+            ${{ runner.temp }}/arlen-normal-runtime
           include-hidden-files: true
           if-no-files-found: error
