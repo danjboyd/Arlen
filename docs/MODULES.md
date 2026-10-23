@@ -253,7 +253,7 @@ with `arlen module upgrade` and apply each module's migration instructions:
 | `jobs` | `1.1.4` |
 | `notifications` | `1.3.2` |
 | `ops` | `1.1.1` |
-| `search` | `1.2.2` |
+| `search` | `1.2.3` |
 | `storage` | `1.4.2` |
 | `mcp` | `1.0.6` |
 

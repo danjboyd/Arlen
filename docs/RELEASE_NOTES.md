@@ -145,6 +145,10 @@ Release qualification and remaining limitations are documented in the
   modules before using tenant, soft-delete, or app-defined visibility rules
   with the PostgreSQL search engine.
 
+- Search 1.2.3 bounds repeated fuzzy token metric work to one query on the
+  default in-memory engine. It retains ranking, highlighting, resource filters,
+  and the existing query limits.
+
 - Storage module 1.4.3 creates Windows legacy plist catalogs with an owner-only
   protected DACL before writing and retains the last catalog on failed replacement.
   The canonical storage privacy regression now runs on Windows and POSIX.
