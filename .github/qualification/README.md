@@ -7,3 +7,5 @@ The public lane refuses an incomplete or wrong latest release, then uses the def
 The normal harness builds the vendored XCTest runner serially before parallel framework compilation. Its separate XCTest and preload host libraries lack a parallel link dependency; this matches the serial runner preparation used by maintained CI and leaves release source untouched.
 
 The canonical two-run strict Linux gate can also run on the existing native Debian 13 x64 CI runner. It uses the same immutable source, original Debian lock, pinned thread recipe, 1372-method identity/17-skip contract, four server generations, diagnostics/canaries, and actual DSO hashes. Additional ARM64 strict results are retained separately; they do not stand in for normal ARM64 functional qualification.
+
+Full-suite native runners install unixodbc-dev so the ordinary transport-availability tests exercise their existing paths and preserve the original skip mapping. This is a qualification prerequisite, not a new runtime installer dependency or an added test exclusion.

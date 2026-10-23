@@ -44,7 +44,7 @@ jobs:
       - name: Install diagnostic and PostgreSQL prerequisites
         run: |
           sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libclang-rt-18-dev postgresql postgresql-client
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libclang-rt-18-dev unixodbc-dev lsof postgresql postgresql-client
       - name: Build and verify the candidate normal runtime
         run: bash source/tools/ci/setup_normal_runtime.sh --install-dependencies
       - name: Run unchanged native strict pair
@@ -140,7 +140,7 @@ jobs:
       - name: Install diagnostic and PostgreSQL prerequisites
         run: |
           sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends lsof postgresql postgresql-client
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends unixodbc-dev lsof postgresql postgresql-client
       - name: Build and verify the candidate normal runtime
         run: bash source/tools/ci/setup_normal_runtime.sh --install-dependencies
       - name: Run full native normal unit, integration, and HTTP checks
