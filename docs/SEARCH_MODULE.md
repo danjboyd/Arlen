@@ -103,6 +103,8 @@ the default in-memory engine. Each query cache is bounded to 512 entries;
 ranking weights, highlights, and the 256-character query limit are unchanged.
 Query history updates retain the same state lock, reload, and atomic persistence
 behavior while copying only the bounded history needed to undo a failed update.
+Failed state writes report an execution error even when Foundation supplies no
+underlying file error; the prior state remains available.
 Upgrade a vendored `search` module to receive this improvement.
 
 `ALNPostgresSearchEngine` reads

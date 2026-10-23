@@ -567,7 +567,11 @@ static BOOL STWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   if (data == nil) {
     return NO;
   }
-  return [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  BOOL written = [data writeToFile:statePath options:NSDataWritingAtomic error:error];
+  if (!written && error != NULL && *error == nil) {
+    *error = STError(ALNSearchModuleErrorExecutionFailed, @"could not write search state", nil);
+  }
+  return written;
 }
 
 // Where to send a user who needs higher assurance: the auth module's configurable
