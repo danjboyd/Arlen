@@ -54,72 +54,76 @@ static NSArray *SMNormalizeArray(id value) {
   return [value isKindOfClass:[NSArray class]] ? value : @[];
 }
 
-typedef struct {
-  __unsafe_unretained Class stringClass;
-  __unsafe_unretained Class numberClass;
-  __unsafe_unretained Class dataClass;
-  __unsafe_unretained Class dateClass;
-  __unsafe_unretained Class arrayClass;
-  __unsafe_unretained Class dictionaryClass;
-  __unsafe_unretained id nullValue;
-} SMPropertyListContext;
-
-// Most catalog keys have no surrounding whitespace. Keep Unicode and control
-// boundaries on the existing Foundation trimming path.
-static NSString *SMPropertyListKey(id value, const SMPropertyListContext *context) {
-  if (![value isKindOfClass:context->stringClass]) {
+static id SMPropertyListValue(id value) {
+  if (value == nil || value == [NSNull null]) {
     return @"";
   }
-  NSString *key = value;
-  NSUInteger length = [key length];
-  if (length > 0) {
-    unichar first = [key characterAtIndex:0];
-    unichar last = [key characterAtIndex:length - 1];
-    if (first > 0x20 && first < 0x7f && last > 0x20 && last < 0x7f) {
-      return key;
-    }
-  }
-  return SMTrimmedString(key);
-}
-
-static id SMPropertyListValueWithContext(id value, const SMPropertyListContext *context) {
-  if (value == nil || value == context->nullValue) {
-    return @"";
-  }
-  if ([value isKindOfClass:context->stringClass] || [value isKindOfClass:context->numberClass] ||
-      [value isKindOfClass:context->dataClass] || [value isKindOfClass:context->dateClass]) {
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
     return value;
   }
-  if ([value isKindOfClass:context->arrayClass]) {
-    NSMutableArray *items = [NSMutableArray arrayWithCapacity:[(NSArray *)value count]];
+  if ([value isKindOfClass:[NSArray class]]) {
+    NSMutableArray *items = [NSMutableArray array];
     for (id entry in (NSArray *)value) {
-      [items addObject:SMPropertyListValueWithContext(entry, context)];
+      [items addObject:SMPropertyListValue(entry)];
     }
     return items;
   }
-  if ([value isKindOfClass:context->dictionaryClass]) {
-    NSMutableDictionary *dictionary = [NSMutableDictionary dictionaryWithCapacity:[(NSDictionary *)value count]];
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
     for (id rawKey in [(NSDictionary *)value allKeys]) {
-      NSString *key = SMPropertyListKey(rawKey, context);
+      NSString *key = SMTrimmedString(rawKey);
       if ([key length] == 0) {
         continue;
       }
-      dictionary[key] = SMPropertyListValueWithContext([(NSDictionary *)value objectForKey:rawKey], context);
+      dictionary[key] = SMPropertyListValue([(NSDictionary *)value objectForKey:rawKey]);
     }
     return dictionary;
   }
   return [value description] ?: @"";
 }
 
-static id SMPropertyListValue(id value) {
-  // Resolve immutable type/sentinel objects once per catalog, rather than once
-  // per value. Containers still receive independent copies for XML writers.
-  SMPropertyListContext context = {
-    [NSString class], [NSNumber class], [NSData class], [NSDate class],
-    [NSArray class], [NSDictionary class], [NSNull null],
-  };
-  return SMPropertyListValueWithContext(value, &context);
+#if defined(GNUSTEP)
+// GNUstep's XML writer accepts shared containers. A catalog that needs no key
+// or value conversions can be serialized directly instead of copying its tree.
+static BOOL SMPropertyListIsCanonical(id value) {
+  if ([value isKindOfClass:[NSString class]] || [value isKindOfClass:[NSNumber class]] ||
+      [value isKindOfClass:[NSData class]] || [value isKindOfClass:[NSDate class]]) {
+    return YES;
+  }
+  if ([value isKindOfClass:[NSArray class]]) {
+    for (id entry in (NSArray *)value) {
+      if (!SMPropertyListIsCanonical(entry)) {
+        return NO;
+      }
+    }
+    return YES;
+  }
+  if ([value isKindOfClass:[NSDictionary class]]) {
+    for (id rawKey in (NSDictionary *)value) {
+      if (![rawKey isKindOfClass:[NSString class]]) {
+        return NO;
+      }
+      NSString *key = rawKey;
+      NSUInteger length = [key length];
+      if (length == 0) {
+        return NO;
+      }
+      unichar first = [key characterAtIndex:0];
+      unichar last = [key characterAtIndex:length - 1];
+      if (!(first > 0x20 && first < 0x7f && last > 0x20 && last < 0x7f) &&
+          ![SMTrimmedString(key) isEqualToString:key]) {
+        return NO;
+      }
+      if (!SMPropertyListIsCanonical([(NSDictionary *)value objectForKey:rawKey])) {
+        return NO;
+      }
+    }
+    return YES;
+  }
+  return NO;
 }
+#endif
 
 static NSString *SMResolvedPersistencePath(ALNApplication *application, NSDictionary *moduleConfig) {
   NSDictionary *persistence = [moduleConfig[@"persistence"] isKindOfClass:[NSDictionary class]]
@@ -313,7 +317,12 @@ static BOOL SMWritePropertyListAtPath(NSString *path, NSDictionary *payload, NSE
   // XML, not binary: GNUstep's binary writer takes time quadratic in the
   // number of objects (seconds past a few thousand, all under the state
   // lock). Reading detects the format, so older binary files still load.
-  NSData *data = [NSPropertyListSerialization dataWithPropertyList:SMPropertyListValue(payload)
+#if defined(GNUSTEP)
+  id propertyList = SMPropertyListIsCanonical(payload) ? payload : SMPropertyListValue(payload);
+#else
+  id propertyList = SMPropertyListValue(payload);
+#endif
+  NSData *data = [NSPropertyListSerialization dataWithPropertyList:propertyList
                                                             format:NSPropertyListXMLFormat_v1_0
                                                            options:0
                                                              error:error];

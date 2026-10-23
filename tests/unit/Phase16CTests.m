@@ -1066,6 +1066,52 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertTrue([data writeToFile:statePath atomically:YES]);
 }
 
+- (void)testLegacyPlistCanonicalMetadataKeepsSharedContainersAndValues {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                         attachmentAdapter:[self filesystemAdapterAtPath:[tempDir stringByAppendingPathComponent:@"attachments"]]
+                                               persistence:nil];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:runtime withApplication:app]);
+  NSMutableString *name = [NSMutableString stringWithString:@"shared & <value>"];
+  NSDictionary *shared = @{
+    @"name" : name,
+    @"items" : @[ @1, @2 ],
+    @"bytes" : [@"bytes" dataUsingEncoding:NSUTF8StringEncoding],
+  };
+  NSMutableArray *copies = [NSMutableArray arrayWithCapacity:5000];
+  for (NSUInteger index = 0; index < 5000; index++) {
+    [copies addObject:shared];
+  }
+  NSDictionary *metadata = @{ @"shared" : copies, @"κλειδί" : @"value" };
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                     name:@"shared.txt"
+                                              contentType:@"text/plain"
+                                                     data:[@"body" dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:metadata
+                                                    error:&error];
+  XCTAssertNotNil(object, @"%@", error);
+  XCTAssertNil(error);
+  if (object == nil) return;
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  NSDictionary *state = [NSPropertyListSerialization propertyListWithData:[NSData dataWithContentsOfFile:statePath]
+                                                                  options:NSPropertyListImmutable
+                                                                   format:&format
+                                                                    error:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  XCTAssertEqual(NSPropertyListXMLFormat_v1_0, format);
+  NSDictionary *actual = state[@"objectsByIdentifier"][object[@"objectID"]][@"metadata"];
+  XCTAssertEqual((NSUInteger)5000, [actual[@"shared"] count]);
+  XCTAssertTrue([metadata isEqualToDictionary:actual]);
+  ALNStorageModuleRuntime *reopened = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:reopened withApplication:app]);
+  NSDictionary *loaded = [reopened objectRecordForIdentifier:object[@"objectID"] error:&error];
+  XCTAssertNotNil(loaded, @"%@", error);
+  XCTAssertTrue([metadata isEqualToDictionary:loaded[@"metadata"]]);
+}
+
 - (void)testLegacyPlistMetadataNormalizationPreservesValuesAndSharedContainers {
   NSString *tempDir = [self temporaryDirectory];
   NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
