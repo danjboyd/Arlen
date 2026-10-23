@@ -38,13 +38,15 @@
   NSUInteger _selectCount;
   NSMutableDictionary *_values;
   NSMutableArray *_clientFDs;
-  volatile BOOL _stopping;
+  // Shared with the accept and client threads; volatile is not synchronization.
+  BOOL _stopping;
 }
 
 - (instancetype)init {
   self = [super init];
   if (self) {
     _listenFD = -1;
+    __atomic_store_n(&_stopping, NO, __ATOMIC_RELAXED);
     _lock = [[NSLock alloc] init];
     _values = [NSMutableDictionary dictionary];
     _clientFDs = [NSMutableArray array];
@@ -81,7 +83,7 @@
 }
 
 - (void)stop {
-  _stopping = YES;
+  __atomic_store_n(&_stopping, YES, __ATOMIC_RELEASE);
   [self dropClientConnections];
 }
 
@@ -117,7 +119,7 @@
 - (void)acceptLoop {
   @autoreleasepool {
     int listenFD = _listenFD;
-    while (!_stopping) {
+    while (!__atomic_load_n(&_stopping, __ATOMIC_ACQUIRE)) {
       struct pollfd descriptor = { listenFD, POLLIN, 0 };
       int ready = poll(&descriptor, 1, 50);
       if (ready <= 0) {
@@ -222,7 +224,7 @@ static NSData *ALNFakeRedisASCII(NSString *text) {
 
 - (void)serveClient:(NSNumber *)descriptor {
   int fd = [descriptor intValue];
-  while (!_stopping) {
+  while (!__atomic_load_n(&_stopping, __ATOMIC_ACQUIRE)) {
     @autoreleasepool {
       NSArray *parts = ALNFakeRedisReadCommand(fd);
       if ([parts count] == 0) {

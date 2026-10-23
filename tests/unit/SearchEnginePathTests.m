@@ -34,13 +34,15 @@
   int _listenFD;
   NSLock *_lock;
   NSMutableArray<NSString *> *_requestLines;
-  volatile BOOL _stopping;
+  // Shared with the accept thread; volatile is not synchronization.
+  BOOL _stopping;
 }
 
 - (instancetype)init {
   self = [super init];
   if (self) {
     _listenFD = -1;
+    __atomic_store_n(&_stopping, NO, __ATOMIC_RELAXED);
     _lock = [[NSLock alloc] init];
     _requestLines = [NSMutableArray array];
   }
@@ -72,7 +74,7 @@
 }
 
 - (void)stop {
-  _stopping = YES;
+  __atomic_store_n(&_stopping, YES, __ATOMIC_RELEASE);
 }
 
 - (NSArray<NSString *> *)requestLines {
@@ -85,7 +87,7 @@
 - (void)acceptLoop {
   @autoreleasepool {
     int listenFD = _listenFD;
-    while (!_stopping) {
+    while (!__atomic_load_n(&_stopping, __ATOMIC_ACQUIRE)) {
       struct pollfd descriptor = { listenFD, POLLIN, 0 };
       if (poll(&descriptor, 1, 50) <= 0) {
         continue;
