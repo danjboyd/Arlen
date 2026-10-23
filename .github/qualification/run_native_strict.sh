@@ -80,7 +80,7 @@ if p.exists() or p.is_symlink():
  dest=out/'test-generated-var/module_state/jobs-production.plist.lock';dest.parent.mkdir(parents=True);p.rename(dest);p.parent.rmdir();Path('var').rmdir()
 s=json.loads((out/'summary.json').read_text());u=json.loads((out/'tsan/summary.json').read_text());d=json.loads((out/'diagnostics/summary.json').read_text())
 assert s['status']=='pass' and s['engine']=='tsan' and s['exit_code']==0
-assert u['status']=='pass' and u['runtime_probe_completed'] and u['unit_methods_started']==1374 and u['unit_assertion_failures']==0 and u['sanitizer_warnings']==0 and u['tsan_excluded_tests']==[]
+assert u['status']=='pass' and u['runtime_probe_completed'] and u['unit_methods_started']==1375 and u['unit_assertion_failures']==0 and u['sanitizer_warnings']==0 and u['tsan_excluded_tests']==[]
 assert d['status']=='pass' and len(d['runs'])==30 and all(x['valid'] for x in d['runs'])
 c=[x for x in d['runs'] if x['mode']=='canary'];assert len(c)==2 and all(x['exit_code']==66 and x['canary_detected'] for x in c)
 import re

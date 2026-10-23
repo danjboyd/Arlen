@@ -38,7 +38,7 @@ for bundle,logname in [('ArlenUnitTests','unit'),('ArlenIntegrationTests','integ
    assert current;started.append(bundle+'/'+current+'/'+m.group(1))
  assert Counter(started)==Counter(expected)
  receipts[bundle]={'methods':len(expected),'passed':len(cases)-len(actual),'skipped':list(actual),'failures':0,'inventory_sha256':hashlib.sha256(inventory.read_bytes()).hexdigest()}
-assert receipts['ArlenUnitTests']['methods']==1374
+assert receipts['ArlenUnitTests']['methods']==1375
 p=json.loads((out/'normal-provenance.json').read_text())
 assert p['lock']['sha256']=='a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d'
 assert p['build_host']['machine']=='aarch64' and p['build_host']['os_version']=='ubuntu-24.04'
