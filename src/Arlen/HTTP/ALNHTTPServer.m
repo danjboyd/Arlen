@@ -4261,13 +4261,27 @@ static const NSUInteger ALNEventStreamDeliveryQueueLimit = 1024;
 
 @end
 
-// Join the native thread, including Foundation/OpenSSL thread-local cleanup.
-// A detached NSThread can still be serving a request when the server returns
-// and process-wide library cleanup begins.
+// Join native threads, including Foundation/OpenSSL thread-local cleanup.
+@interface ALNHTTPBackgroundThread : NSObject {
+#if defined(_WIN32)
+  HANDLE _thread;
+#else
+  pthread_t _thread;
+#endif
+  BOOL _started;
+  BOOL _ready;
+  NSCondition *_startupCondition;
+  void (^_body)(void);
+}
+- (BOOL)startWithBody:(void (^)(void))body;
+- (void)runBody;
+- (BOOL)join;
+@end
+
 static void ALNRunHTTPBackgroundThread(void *context) {
   @autoreleasepool {
-    void (^body)(void) = (__bridge_transfer id)context;
-    body();
+    ALNHTTPBackgroundThread *thread = (__bridge_transfer id)context;
+    [thread runBody];
   }
 }
 #if defined(_WIN32)
@@ -4282,21 +4296,11 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
 }
 #endif
 
-@interface ALNHTTPBackgroundThread : NSObject {
-#if defined(_WIN32)
-  HANDLE _thread;
-#else
-  pthread_t _thread;
-#endif
-  BOOL _started;
-}
-- (BOOL)startWithBody:(void (^)(void))body;
-- (BOOL)join;
-@end
-
 @implementation ALNHTTPBackgroundThread
 - (BOOL)startWithBody:(void (^)(void))body {
-  void *context = (__bridge_retained void *)[body copy];
+  _body = [body copy];
+  _startupCondition = [[NSCondition alloc] init];
+  void *context = (__bridge_retained void *)self;
 #if defined(_WIN32)
   _thread = (HANDLE)_beginthreadex(NULL, 0, ALNHTTPBackgroundThreadMain, context, 0, NULL);
   _started = (_thread != NULL);
@@ -4304,10 +4308,25 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
   _started = (pthread_create(&_thread, NULL, ALNHTTPBackgroundThreadMain, context) == 0);
 #endif
   if (!_started) {
-    id releasedBody = (__bridge_transfer id)context;
-    (void)releasedBody;
+    id releasedThread = (__bridge_transfer id)context;
+    (void)releasedThread;
+    _body = nil;
+    return NO;
   }
-  return _started;
+  // GNUstep's first foreign-thread registration changes process-wide state.
+  // Complete it before the caller can start another native HTTP thread.
+  [_startupCondition lock];
+  while (!_ready) [_startupCondition wait];
+  [_startupCondition unlock];
+  return YES;
+}
+- (void)runBody {
+  (void)[NSThread currentThread];
+  [_startupCondition lock];
+  _ready = YES;
+  [_startupCondition broadcast];
+  [_startupCondition unlock];
+  _body();
 }
 - (BOOL)join {
   if (!_started) return YES;
@@ -4318,6 +4337,8 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
   if (pthread_join(_thread, NULL) != 0) return NO;
 #endif
   _started = NO;
+  _body = nil;
+  _startupCondition = nil;
   return YES;
 }
 @end
