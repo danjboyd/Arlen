@@ -26,6 +26,8 @@ static void (^gPhase16DApplyHook)(void) = nil;
 @end
 @interface ALNSearchModuleRuntime (TransactionTestAccess)
 - (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write error:(NSError **)error;
+- (BOOL)stateTransaction:(BOOL (^)(NSError **))block write:(BOOL)write
+ rollbackRecentQueriesOnly:(BOOL)rollbackRecentQueriesOnly error:(NSError **)error;
 - (void)enqueueReplayOperation:(NSDictionary *)payload forResourceIdentifier:(NSString *)identifier metadata:(NSDictionary *)metadata;
 - (NSDictionary *)drainReplayOperationsForResourceIdentifier:(NSString *)identifier mode:(NSString *)mode error:(NSError **)error;
 - (NSDictionary *)applyIncrementalOperation:(NSString *)operation resourceIdentifier:(NSString *)identifier record:(NSDictionary *)record error:(NSError **)error;
@@ -213,6 +215,92 @@ static void Phase16DResetOrderStore(void) {
   NSDictionary *workerSummary = [[ALNJobsModuleRuntime sharedRuntime] runWorkerAt:[NSDate date] limit:10 error:&error];
   XCTAssertNotNil(workerSummary);
   XCTAssertNil(error);
+}
+
+- (void)testQueryHistoryRollbackOnBlockFailureAndExceptionPreservesTransactionDepth {
+  NSString *statePath = [[self temporaryDirectory] stringByAppendingPathComponent:@"search-state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:statePath];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedActiveIndexForRuntime:runtime];
+  NSArray *historyBefore = [[runtime valueForKey:@"recentQueries"] copy];
+  NSData *diskBefore = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil(diskBefore);
+
+  NSError *error = nil;
+  XCTAssertFalse([runtime stateTransaction:^BOOL(NSError **transactionError) {
+    [[runtime valueForKey:@"recentQueries"] addObject:@{ @"query" : @"failed" }];
+    if (transactionError) *transactionError = [NSError errorWithDomain:@"SearchHistoryTest" code:1 userInfo:nil];
+    return NO;
+  } write:YES rollbackRecentQueriesOnly:YES error:&error]);
+  XCTAssertEqualObjects(@"SearchHistoryTest", error.domain);
+  XCTAssertEqualObjects(historyBefore, [runtime valueForKey:@"recentQueries"]);
+  XCTAssertEqualObjects(diskBefore, [NSData dataWithContentsOfFile:statePath]);
+
+  BOOL caught = NO;
+  @try {
+    [runtime stateTransaction:^BOOL(NSError **transactionError) {
+      [[runtime valueForKey:@"recentQueries"] addObject:@{ @"query" : @"exception" }];
+      @throw [NSException exceptionWithName:@"SearchHistoryTestException" reason:@"rollback" userInfo:nil];
+    } write:YES rollbackRecentQueriesOnly:YES error:NULL];
+  } @catch (NSException *exception) {
+    caught = YES;
+    XCTAssertEqualObjects(@"SearchHistoryTestException", exception.name);
+  }
+  XCTAssertTrue(caught);
+  XCTAssertEqualObjects(historyBefore, [runtime valueForKey:@"recentQueries"]);
+  XCTAssertEqualObjects(diskBefore, [NSData dataWithContentsOfFile:statePath]);
+
+  error = nil;
+  XCTAssertTrue([runtime stateTransaction:^BOOL(NSError **transactionError) {
+    XCTAssertEqual((NSUInteger)1, [[runtime valueForKey:@"stateTransactionDepth"] unsignedIntegerValue]);
+    return [runtime stateTransaction:^BOOL(NSError **nestedError) {
+      [[runtime valueForKey:@"recentQueries"] addObject:@{ @"query" : @"nested" }];
+      return YES;
+    } write:YES rollbackRecentQueriesOnly:YES error:transactionError];
+  } write:YES error:&error]);
+  XCTAssertNil(error);
+  XCTAssertEqual((NSUInteger)0, [[runtime valueForKey:@"stateTransactionDepth"] unsignedIntegerValue]);
+  XCTAssertEqualObjects(@"nested", [[runtime valueForKey:@"recentQueries"] lastObject][@"query"]);
+}
+
+- (void)testQueryHistoryRollbackOnPersistentWriteFailureKeepsDiskAndFreshRuntime {
+  NSString *directory = [self temporaryDirectory];
+  NSString *statePath = [directory stringByAppendingPathComponent:@"search-state.plist"];
+  ALNApplication *app = [self applicationWithStatePath:statePath];
+  [self registerModulesForApplication:app];
+  ALNSearchModuleRuntime *runtime = [ALNSearchModuleRuntime sharedRuntime];
+  [self seedActiveIndexForRuntime:runtime];
+  NSArray *historyBefore = [[runtime valueForKey:@"recentQueries"] copy];
+  NSData *diskBefore = [NSData dataWithContentsOfFile:statePath];
+  XCTAssertNotNil(diskBefore);
+
+  // The read/reload succeeds from the real file. Inside the block, redirect
+  // only the attempted atomic write to an existing directory so it fails
+  // deterministically without relying on platform-specific file permissions.
+  NSError *error = nil;
+  BOOL succeeded = NO;
+  @try {
+    succeeded = [runtime stateTransaction:^BOOL(NSError **transactionError) {
+      [[runtime valueForKey:@"recentQueries"] addObject:@{ @"query" : @"write-failed" }];
+      [runtime setValue:directory forKey:@"statePath"];
+      return YES;
+    } write:YES rollbackRecentQueriesOnly:YES error:&error];
+  } @finally {
+    [runtime setValue:statePath forKey:@"statePath"];
+  }
+  XCTAssertFalse(succeeded);
+  XCTAssertNotNil(error);
+  XCTAssertEqualObjects(historyBefore, [runtime valueForKey:@"recentQueries"]);
+  XCTAssertEqualObjects(diskBefore, [NSData dataWithContentsOfFile:statePath]);
+
+  ALNSearchModuleRuntime *fresh = [[ALNSearchModuleRuntime alloc] init];
+  error = nil;
+  XCTAssertTrue([[ALNJobsModuleRuntime sharedRuntime] configureWithApplication:app error:&error], @"%@", error);
+  XCTAssertNil(error);
+  XCTAssertTrue([fresh configureWithApplication:app error:&error], @"%@", error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects(historyBefore, [fresh valueForKey:@"recentQueries"]);
 }
 
 - (void)testFullReindexAndIncrementalSyncShareJobContractAndPersistGenerationState {
