@@ -254,7 +254,7 @@ with `arlen module upgrade` and apply each module's migration instructions:
 | `notifications` | `1.3.2` |
 | `ops` | `1.1.1` |
 | `search` | `1.2.3` |
-| `storage` | `1.4.2` |
+| `storage` | `1.4.3` |
 | `mcp` | `1.0.6` |
 
 CI enforces this with `tools/ci/check_module_versions.py`. Framework
