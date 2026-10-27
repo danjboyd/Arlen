@@ -18,8 +18,8 @@ def verify(contract, inventory, junit, log, lane):
     require(hashlib.sha256(inventory.read_bytes()).hexdigest() == contract['inventory_sha256'],
             'frozen unit inventory hash mismatch')
     expected = inventory.read_text().splitlines()
-    require(len(expected) == len(set(expected)) == contract['unit_methods'] == 1375,
-            'unit inventory is not exactly 1375 unique methods')
+    require(len(expected) == len(set(expected)) == contract['unit_methods'] == 1393,
+            'unit inventory is not exactly 1393 unique methods')
     source_root = inventory.parents[3]
     for skip in contract['skips']:
         require(hashlib.sha256((source_root / skip['source']).read_bytes()).hexdigest() == skip['source_sha256'],
@@ -76,7 +76,7 @@ def verify(contract, inventory, junit, log, lane):
     require(set(skips) == set(expected_skips), 'expected skip mapping differs from actual profile')
     require(len(skips) == int(xml.attrib['skipped']) == contract['unit_skipped'] == 17,
             'JUnit skipped total is not exactly the mapped 17')
-    require(len(cases) - len(skips) == contract['unit_passed'] == 1358, 'completed pass count mismatch')
+    require(len(cases) - len(skips) == contract['unit_passed'] == 1376, 'completed pass count mismatch')
     return {'status': 'pass', 'frozen_source': contract['frozen_commit'],
             'inventory_sha256': contract['inventory_sha256'], 'expected_methods': len(expected),
             'logged_method_starts': len(started), 'unique_logged_methods': len(set(started)),
@@ -94,7 +94,7 @@ def main():
     result = verify(json.loads(args.contract.read_text()), args.inventory, args.junit, args.log,
                     json.loads(args.lane_summary.read_text()))
     args.output.write_text(json.dumps(result, indent=2) + '\n')
-    print('Frozen full unit receipt: 1375 starts / 1375 unique JUnit methods / 1358 pass / 17 mapped skips')
+    print('Frozen full unit receipt: 1393 starts / 1393 unique JUnit methods / 1376 pass / 17 mapped skips')
 
 
 if __name__ == '__main__':
