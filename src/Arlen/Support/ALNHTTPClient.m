@@ -12,6 +12,34 @@ extern BOOL ALNHTTPHeadersValid(NSDictionary *headers);
 extern NSTimeInterval ALNHTTPMonotonicNow(void);
 extern NSData *ALNHTTPClientPerformHop(NSURLRequest *request, NSUInteger maxBytes, NSHTTPURLResponse **response,
                                        NSString **receivedPhrase, NSError **error);
+extern BOOL ALNHTTPClientStreamHop(NSURLRequest *request, NSUInteger maxBytes, NSTimeInterval deadline,
+    NSTimeInterval idleTimeout, ALNHTTPClientCancellation *cancellation,
+    ALNHTTPClientResponseHandler onResponse, ALNHTTPClientDataHandler onData,
+    NSHTTPURLResponse **response, NSUInteger *receivedBytes, NSError **error);
+
+@interface ALNHTTPClientCancellation ()
+@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, assign) BOOL cancellationRequested;
+@end
+
+@implementation ALNHTTPClientCancellation
+- (instancetype)init {
+  self = [super init];
+  if (self) _lock = [NSLock new];
+  return self;
+}
+- (void)cancel {
+  [_lock lock];
+  _cancellationRequested = YES;
+  [_lock unlock];
+}
+- (BOOL)isCancelled {
+  [_lock lock];
+  BOOL cancelled = _cancellationRequested;
+  [_lock unlock];
+  return cancelled;
+}
+@end
 
 @interface ALNHTTPClientResult (ALNHTTPClientInternal)
 - (instancetype)initWithResponse:(NSHTTPURLResponse *)response body:(NSData *)body
@@ -86,7 +114,7 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
     return HCFail(error, ALNHTTPClientErrorInvalidConfiguration, @"HTTP client configuration must be a dictionary");
   }
   NSSet *known = [NSSet setWithArray:@[ @"allowedHosts", @"timeoutSeconds", @"maxResponseBytes", @"maxRedirects",
-                                        @"allowHTTP" ]];
+                                        @"allowHTTP", @"idleTimeoutSeconds", @"streamingTimeoutSeconds" ]];
   for (id key in configuration) {
     if (![known containsObject:key]) {
       return HCFail(error, ALNHTTPClientErrorInvalidConfiguration,
@@ -111,6 +139,8 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
   long long timeout = HCInteger(configuration[@"timeoutSeconds"]);
   long long maxBytes = HCInteger(configuration[@"maxResponseBytes"]);
   long long redirects = HCInteger(configuration[@"maxRedirects"]);
+  long long idleTimeout = HCInteger(configuration[@"idleTimeoutSeconds"]);
+  long long streamingTimeout = HCInteger(configuration[@"streamingTimeoutSeconds"]);
   if (timeout == -2 || timeout == 0 || timeout > 300) {
     return HCFail(error, ALNHTTPClientErrorInvalidConfiguration, @"HTTP client timeoutSeconds must be 1 to 300");
   }
@@ -120,6 +150,13 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
   }
   if (redirects == -2 || redirects > 10) {
     return HCFail(error, ALNHTTPClientErrorInvalidConfiguration, @"HTTP client maxRedirects must be 0 to 10");
+  }
+  if (idleTimeout == -2 || idleTimeout == 0 || idleTimeout > 300) {
+    return HCFail(error, ALNHTTPClientErrorInvalidConfiguration, @"HTTP client idleTimeoutSeconds must be 1 to 300");
+  }
+  if (streamingTimeout == -2 || streamingTimeout == 0 || streamingTimeout > 86400) {
+    return HCFail(error, ALNHTTPClientErrorInvalidConfiguration,
+                  @"HTTP client streamingTimeoutSeconds must be 1 to 86400");
   }
   id allowHTTP = configuration[@"allowHTTP"];
   if (allowHTTP && ![allowHTTP isKindOfClass:[NSNumber class]]) {
@@ -132,6 +169,8 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
     _maxResponseBytes = maxBytes > 0 ? (NSUInteger)maxBytes : 1048576;
     _maxRedirects = redirects > 0 ? (NSUInteger)redirects : 0;
     _allowHTTP = [allowHTTP boolValue];
+    _idleTimeout = idleTimeout > 0 ? (NSTimeInterval)idleTimeout : 30;
+    _streamingTimeout = streamingTimeout > 0 ? (NSTimeInterval)streamingTimeout : 900;
   }
   return self;
 }
@@ -177,6 +216,12 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
 
 - (void)logRequest:(NSURLRequest *)request result:(ALNHTTPClientResult *)result error:(NSError *)error
          redirects:(NSUInteger)redirects started:(NSTimeInterval)started {
+  [self logRequest:request response:result.response bytes:result.body.length error:error
+         redirects:redirects started:started];
+}
+
+- (void)logRequest:(NSURLRequest *)request response:(NSHTTPURLResponse *)response bytes:(NSUInteger)bytes
+             error:(NSError *)error redirects:(NSUInteger)redirects started:(NSTimeInterval)started {
   if (!self.logger) return;
   NSMutableDictionary *fields = [NSMutableDictionary dictionaryWithDictionary:@{
     @"event" : @"http_client.request",
@@ -186,14 +231,107 @@ static BOOL HCHasHeader(NSURLRequest *request, NSString *name) {
     @"redirects" : @(redirects),
     @"duration_ms" : @((NSInteger)llround(MAX(0, ALNHTTPMonotonicNow() - started) * 1000)),
   }];
-  if (result) {
-    fields[@"status"] = @(result.response.statusCode);
-    fields[@"bytes"] = @(result.body.length);
+  if (!error && response) {
+    fields[@"status"] = @(response.statusCode);
+    fields[@"bytes"] = @(bytes);
     [self.logger info:@"outbound http request" fields:fields];
   } else {
     fields[@"error_code"] = @(error.code);
     fields[@"reason"] = error.localizedDescription ?: @"";
     [self.logger warn:@"outbound http request failed" fields:fields];
+  }
+}
+
+- (BOOL)streamRequest:(NSURLRequest *)request cancellation:(ALNHTTPClientCancellation *)cancellation
+          onResponse:(ALNHTTPClientResponseHandler)onResponse onData:(ALNHTTPClientDataHandler)onData
+               error:(NSError **)error {
+  NSTimeInterval started = ALNHTTPMonotonicNow();
+  NSUInteger followed = 0, received = 0;
+  NSHTTPURLResponse *response = nil;
+  NSError *failure = nil;
+  // Stabilize caller-owned request state and blocks before entering libcurl.
+  NSURLRequest *stable = [request isKindOfClass:[NSURLRequest class]] ? [request copy] : nil;
+  BOOL success = [self streamRequest:stable started:started cancellation:cancellation
+      onResponse:[onResponse copy] onData:[onData copy] response:&response
+      followed:&followed received:&received error:&failure];
+  if (stable.URL) [self logRequest:stable response:response bytes:received error:failure
+                       redirects:followed started:started];
+  if (error) *error = failure;
+  return success;
+}
+
+- (BOOL)streamRequest:(NSURLRequest *)request started:(NSTimeInterval)started
+        cancellation:(ALNHTTPClientCancellation *)cancellation onResponse:(ALNHTTPClientResponseHandler)onResponse
+              onData:(ALNHTTPClientDataHandler)onData response:(NSHTTPURLResponse **)response
+            followed:(NSUInteger *)followed received:(NSUInteger *)received error:(NSError **)error {
+  if (!request.URL || !onResponse || !onData || request.HTTPBodyStream ||
+      (cancellation && ![cancellation isKindOfClass:[ALNHTTPClientCancellation class]])) {
+    HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Streaming needs a URL, callbacks, and a supported request body");
+    return NO;
+  }
+  NSString *method = request.HTTPMethod.length ? request.HTTPMethod.uppercaseString : @"GET";
+  if (!ALNHTTPHeadersValid(request.allHTTPHeaderFields) ||
+      ![@[ @"GET", @"HEAD", @"POST", @"PUT", @"PATCH", @"DELETE" ] containsObject:method]) {
+    HCFail(error, ALNHTTPClientErrorInvalidRequest, @"Invalid HTTP method or headers");
+    return NO;
+  }
+  NSError *rejection = [self rejectionForURL:request.URL];
+  if (rejection) { if (error) *error = rejection; return NO; }
+  if (!isfinite(started)) {
+    HCFail(error, ALNHTTPClientErrorTransport, @"Monotonic clock unavailable");
+    return NO;
+  }
+  NSTimeInterval deadline = started + self.streamingTimeout;
+  BOOL credentials = HCHasHeader(request, @"Authorization") || HCHasHeader(request, @"Cookie");
+  NSMutableURLRequest *hop = [request mutableCopy];
+  hop.HTTPMethod = method;
+  [hop setValue:nil forHTTPHeaderField:@"Host"];
+  for (;;) {
+    __block NSError *redirectFailure = nil;
+    __block NSURL *next = nil;
+    __block BOOL deliver = NO;
+    NSHTTPURLResponse *hopResponse = nil;
+    NSUInteger hopBytes = 0;
+    NSError *failure = nil;
+    BOOL complete = ALNHTTPClientStreamHop(hop, self.maxResponseBytes - *received, deadline, self.idleTimeout,
+        cancellation, ^BOOL(NSHTTPURLResponse *http) {
+          NSString *location = nil;
+          for (NSString *key in http.allHeaderFields) {
+            if ([key caseInsensitiveCompare:@"Location"] == NSOrderedSame) location = http.allHeaderFields[key];
+          }
+          NSInteger status = http.statusCode;
+          BOOL redirect = location.length && (status == 301 || status == 302 || status == 303 || status == 307 || status == 308);
+          deliver = !redirect || self.maxRedirects == 0 || credentials;
+          if (deliver) return onResponse(http);
+          if (*followed == self.maxRedirects) {
+            redirectFailure = HCError(ALNHTTPClientErrorTooManyRedirects, @"Too many redirects");
+            return NO;
+          }
+          next = [[NSURL URLWithString:location relativeToURL:hop.URL] absoluteURL];
+          if (!next || [self rejectionForURL:next]) {
+            redirectFailure = HCError(ALNHTTPClientErrorRedirectNotAllowed, @"Redirect target is not an allowed URL");
+            return NO;
+          }
+          return YES;
+        }, ^BOOL(NSData *data) {
+          return !deliver || onData(data);
+        }, &hopResponse, &hopBytes, &failure);
+    *received += hopBytes;
+    if (deliver) *response = hopResponse;
+    if (!complete) { if (error) *error = redirectFailure ?: failure; return NO; }
+    if (deliver) return YES;
+    (*followed)++;
+    NSInteger status = hopResponse.statusCode;
+    if ((status == 303 && ![method isEqualToString:@"HEAD"]) ||
+        ((status == 301 || status == 302) && [method isEqualToString:@"POST"])) {
+      method = @"GET";
+      hop.HTTPMethod = method;
+      hop.HTTPBody = nil;
+      [hop setValue:nil forHTTPHeaderField:@"Content-Length"];
+      [hop setValue:nil forHTTPHeaderField:@"Content-Type"];
+      [hop setValue:nil forHTTPHeaderField:@"Transfer-Encoding"];
+    }
+    hop.URL = next;
   }
 }
 

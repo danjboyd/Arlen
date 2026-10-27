@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `ALNHTTPClient` adds opt-in incremental responses through
+  `streamRequest:cancellation:onResponse:onData:error:`. Serial callbacks run
+  on the calling worker without buffering the body. A thread-safe token cancels
+  silent streams; separate idle/total deadlines and a cumulative byte limit
+  bound the operation. Buffered calls retain their existing behavior. The SSE
+  reader remains deferred. See [Outbound HTTP client](HTTP_CLIENT.md).
+
 ## 0.3.1 — 2026-10-22
 
 This patch release corrects authorization, request handling, persistence and

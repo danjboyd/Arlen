@@ -1,4 +1,4 @@
-# Synchronous HTTP client
+# Outbound HTTP client
 
 Import `ALNHTTPCompat.h` (also included by `Arlen.h`). Run synchronous requests on
 a worker when blocking the caller would stall application request handling.
@@ -30,6 +30,8 @@ ALNHTTPClientResult *result =
 | `maxResponseBytes` | 1048576 (at most 64 MiB) | Response body limit, checked against `Content-Length` and while streaming. |
 | `maxRedirects` | 0 (at most 10) | With 0 a 3xx is returned as the result (`stoppedAtRedirectLimit`). |
 | `allowHTTP` | NO | Allow plain `http` URLs, for example a loopback service. |
+| `idleTimeoutSeconds` | 30 (1–300) | Streaming only: maximum silence between incoming response bytes, including waiting for headers. |
+| `streamingTimeoutSeconds` | 900 (1–86400) | Streaming only: one total deadline, redirects included. Buffered requests still use `timeoutSeconds`. |
 
 The configuration is checked at construction; unknown keys and out-of-range
 values are errors. Then, per request:
@@ -58,6 +60,78 @@ Requests are synchronous and use the same libcurl transport as
 cookie store, TLS and asynchronous DNS required). The allowlist checks host
 names, not resolved addresses, so it does not defend against an allowed name
 that resolves somewhere unexpected.
+
+## Incremental response delivery
+
+Use `streamRequest:cancellation:onResponse:onData:error:` for vendor streams,
+SSE wire data, NDJSON, or downloads. It is synchronous: run it on an application
+worker so it does not block request handling. Headers and data callbacks run
+serially on that same worker, and none run after the method returns. The client
+does not retain the response body or create an unbounded callback queue.
+
+```objc
+ALNHTTPClient *streamClient = [[ALNHTTPClient alloc] initWithConfiguration:@{
+  @"allowedHosts" : @[ @"api.vendor.example" ],
+  @"idleTimeoutSeconds" : @30,
+  @"streamingTimeoutSeconds" : @900,
+} error:&error];
+ALNHTTPClientCancellation *stop = [ALNHTTPClientCancellation new];
+// Keep `stop` in the app's operation state. A Stop button or browser disconnect
+// can call [stop cancel] from another thread, even while the vendor is silent.
+NSURLRequest *request = [NSURLRequest requestWithURL:
+    [NSURL URLWithString:@"https://api.vendor.example/events"]];
+NSFileHandle *output = [NSFileHandle fileHandleWithStandardOutput];
+BOOL complete = [streamClient streamRequest:request cancellation:stop
+    onResponse:^BOOL(NSHTTPURLResponse *response) {
+      // Inspect status/headers once, before receiving any body bytes.
+      return YES;
+    } onData:^BOOL(NSData *data) {
+      [output writeData:data];
+      return YES;
+    } error:&error];
+if (!complete) {
+  // Earlier bytes may already have been written. Mark this operation failed
+  // or cancelled; do not treat that partial output as a complete response.
+}
+```
+
+The streaming contract is:
+
+- `onResponse` runs once for the final response. Interim responses, proxy CONNECT
+  headers, followed redirects and their bodies, and trailers are not exposed.
+  With redirects disabled, or with `Authorization`/`Cookie`, a 3xx is the final
+  response, matching the buffered API. HTTP error statuses remain responses.
+- `onData` receives arbitrary nonempty byte chunks in order. Chunks may divide
+  UTF-8 characters, SSE lines/events, or JSON records. They are not HTTP chunk
+  frames. Retain the `NSData` if it is needed after the callback. Arlen does not
+  yet provide an SSE reader or automatic event reconnection.
+- Return `NO` from either callback to stop with `ALNHTTPClientErrorCancelled`.
+  The optional token is thread-safe and permanently cancelled once used; a
+  pre-cancelled token prevents a connection. Cancellation is checked between
+  callbacks and roughly every 100 ms while waiting on the transport. It cannot
+  interrupt application code inside a callback; keep callbacks short. Slow
+  callbacks naturally slow network consumption, and their time counts toward
+  the deadlines.
+- `idleTimeoutSeconds` measures silence between incoming header/body bytes,
+  including connection setup and waiting for the first response. Outgoing
+  uploads do not reset it. A stall fails with `ALNHTTPClientErrorIdleTimedOut`.
+  `streamingTimeoutSeconds` caps the complete request chain and fails with
+  `ALNHTTPClientErrorTimedOut`; heartbeats cannot extend it. Configuration values
+  use the same integer/decimal-string validation as the other bounds.
+- `maxResponseBytes` counts the running total of body bytes across all hops,
+  including discarded redirect bodies, and rejects oversized `Content-Length`
+  declarations. A chunk that would exceed the remaining budget is not delivered.
+  TLS verification, host checks on every hop, credential redirect restrictions,
+  and sanitized logging/errors match the existing client. Content encodings
+  are not implicitly decoded.
+- `YES` means the response completed. Disconnects, cancellation, timeouts and
+  size failures return `NO` and a sanitized error after any earlier delivered
+  data. Callback exceptions become `ALNHTTPClientErrorTransport` without exposing
+  their names or descriptions. The caller owns partial-output cleanup.
+- Set request bodies with `HTTPBody`; `HTTPBodyStream` is rejected before
+  connecting. POST-to-GET redirects and 307/308 body replay retain the existing
+  method rules. The buffered request methods and compatibility helpers retain
+  their existing deadlines, buffering and error behavior.
 
 ## Existing helpers
 

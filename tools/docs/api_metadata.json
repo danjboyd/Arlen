@@ -191,7 +191,7 @@
       "usage_example": "ALNHTTPClientResult *result = ALNSynchronousHTTPResult(request, 3, ALNHTTPRedirectLimitReturnResponse, &error);\nif (result) {\n  NSData *body = result.body;\n  NSString *phrase = result.receivedReasonPhrase; // nil for HTTP/2 or HTTP/3\n}"
     },
     "ALNHTTPClient": {
-      "summary": "Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).",
+      "summary": "Outbound HTTP client with buffered and opt-in incremental delivery, cancellation, idle/total deadlines, a fixed host allowlist, cumulative streaming byte limits, credential-safe redirects, and sanitized logging. See [HTTP client](../HTTP_CLIENT.md).",
       "usage_example": "NSError *error = nil;\nALNHTTPClient *client = [[ALNHTTPClient alloc] initWithConfiguration:@{\n  @\"allowedHosts\" : @[ @\"api.vendor.example\" ],\n  @\"timeoutSeconds\" : @10,\n} error:&error];\nALNHTTPClientResult *result = [client POSTJSONObject:@{ @\"ticket\" : @42 }\n    toURL:[NSURL URLWithString:@\"https://api.vendor.example/v1/events\"]\n    headers:@{ @\"Authorization\" : @\"Bearer ...\" } error:&error];"
     },
     "ALNMarkdown": {
@@ -207,6 +207,10 @@
     "ALNMarkdownInlineSpanSyntax": {
       "summary": "Custom inline span syntax such as `⟦red⟧text⟦/red⟧`, delivered as ALNMarkdownNodeTypeInlineSpan nodes.",
       "usage_example": "ALNMarkdownOptions *options = [ALNMarkdownOptions defaultOptions];\noptions.inlineSpans = @[ [ALNMarkdownInlineSpanSyntax syntaxWithIdentifier:@\"color\"\n                                                         openingDelimiter:@\"⟦\"\n                                                         closingDelimiter:@\"⟧\"\n                                                                    names:[NSSet setWithArray:@[ @\"red\" ]]] ];"
+    },
+    "ALNHTTPClientCancellation": {
+      "summary": "Thread-safe, single-use cancellation token for an outbound HTTP stream. Cancellation is permanent, works during transport silence, and may be requested from any thread. See [Streaming HTTP](../HTTP_CLIENT.md#incremental-response-delivery).",
+      "usage_example": "ALNHTTPClientCancellation *stop = [ALNHTTPClientCancellation new];\n// Store before starting streamRequest:cancellation:onResponse:onData:error:.\n// A Stop button or browser disconnect may call this from another thread:\n[stop cancel];"
     }
   },
   "properties": {
@@ -287,6 +291,15 @@
     },
     "ALNDataverseClient|retrySleeper": {
       "purpose": "Optional injected sleeper receiving the policy delay; nil uses NSThread. Configure before concurrent use."
+    },
+    "ALNHTTPClient|idleTimeout": {
+      "purpose": "Streaming-only incoming-byte idle deadline in seconds; default 30, configured with idleTimeoutSeconds."
+    },
+    "ALNHTTPClient|streamingTimeout": {
+      "purpose": "Streaming-only total deadline across redirects in seconds; default 900, configured with streamingTimeoutSeconds."
+    },
+    "ALNHTTPClientCancellation|cancelled": {
+      "purpose": "Thread-safe cancellation state. Once YES it remains YES; create a new token for another operation."
     }
   },
   "methods": {
@@ -429,6 +442,14 @@
     "ALNMarkdownNode|textContent": {
       "purpose": "Return the node's text with markup removed.",
       "usage": "Breaks become spaces; code and raw HTML contribute their literal text."
+    },
+    "ALNHTTPClient|streamRequest:cancellation:onResponse:onData:error:": {
+      "purpose": "Deliver the final response headers and arbitrary body byte chunks synchronously, without buffering the response body.",
+      "usage": "Run on an application worker. Both callbacks run serially on that thread and may return NO to cancel. Use the token to cancel during silence. On NO inspect the sanitized error; earlier bytes remain partial output and are not a successful response."
+    },
+    "ALNHTTPClientCancellation|cancel": {
+      "purpose": "Permanently request cancellation of this operation from any thread.",
+      "usage": "Calling repeatedly is safe. A pre-cancelled token prevents the stream from connecting. Cancellation does not interrupt callback code; callbacks must return promptly."
     }
   }
 }

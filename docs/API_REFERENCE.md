@@ -10,9 +10,9 @@ python3 tools/docs/generate_api_reference.py
 
 - Generated from source headers and metadata (deterministic output)
 - Public headers: `94`
-- Symbols: `166`
-- Public methods: `1133`
-- Public properties: `525`
+- Symbols: `167`
+- Public methods: `1135`
+- Public properties: `528`
 
 ## API Surface Boundary
 
@@ -173,7 +173,8 @@ python3 tools/docs/generate_api_reference.py
 - [ALNFileJobAdapter](api/ALNFileJobAdapter.md): Filesystem-persisted job queue with cross-process locking; no crashed-worker lease recovery.
 - [ALNFileMailAdapter](api/ALNFileMailAdapter.md): Filesystem-backed mail adapter that writes deliveries to disk for auditing/testing.
 - [ALNFileSystemAttachmentAdapter](api/ALNFileSystemAttachmentAdapter.md): Filesystem-backed attachment adapter for durable binary storage.
-- [ALNHTTPClient](api/ALNHTTPClient.md): Outbound HTTP client for third-party APIs: a host allowlist fixed at construction, one total deadline, a response size limit, redirects off by default and never for credential-bearing requests, and errors and logs without headers, bodies or query strings. See [HTTP client](../HTTP_CLIENT.md).
+- [ALNHTTPClient](api/ALNHTTPClient.md): Outbound HTTP client with buffered and opt-in incremental delivery, cancellation, idle/total deadlines, a fixed host allowlist, cumulative streaming byte limits, credential-safe redirects, and sanitized logging. See [HTTP client](../HTTP_CLIENT.md).
+- [ALNHTTPClientCancellation](api/ALNHTTPClientCancellation.md): Thread-safe, single-use cancellation token for an outbound HTTP stream. Cancellation is permanent, works during transport silence, and may be requested from any thread. See [Streaming HTTP](../HTTP_CLIENT.md#incremental-response-delivery).
 - [ALNHTTPClientResult](api/ALNHTTPClientResult.md): Complete final HTTP response returned by `ALNSynchronousHTTPResult` and `ALNHTTPClient`, including received phrase availability and redirect-budget termination. See [HTTP client](../HTTP_CLIENT.md).
 - [ALNInMemoryAttachmentAdapter](api/ALNInMemoryAttachmentAdapter.md): In-memory adapter implementation useful for development and tests.
 - [ALNInMemoryCacheAdapter](api/ALNInMemoryCacheAdapter.md): In-memory adapter implementation useful for development and tests.

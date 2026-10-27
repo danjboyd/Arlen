@@ -19,6 +19,7 @@ preview, and what is in flight. For engineering history, see
 | Area | Capability |
 |---|---|
 | HTTP | HTML and JSON routing, controllers, middleware, route metadata |
+| Outbound HTTP | Allowlisted buffered requests and opt-in incremental responses, cancellation, idle/total deadlines, byte limits and sanitized logs; SSE reader deferred |
 | Templates | EOC (`.html.eoc`) transpiler, layouts, partials, forms, live fragments |
 | Markdown | CommonMark + GFM via vendored cmark-gfm: node tree, safe HTML and plain-text renderers, custom inline spans, `ALNEOCMarkdownHTML` |
 | Auth | Sessions, CSRF, rate limiting, password reset, TOTP MFA, recovery codes, passkeys/WebAuthn, OIDC/provider login, including configurable auth-module OIDC/Entra with app-owned identity resolution |

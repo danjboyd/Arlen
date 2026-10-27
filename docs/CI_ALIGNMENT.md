@@ -1,5 +1,16 @@
 # CI Alignment
 
+Outbound HTTP streaming is covered by `HTTPClientTests` in the existing Linux
+quality job and in the complete unit bundles on Apple and Windows. The focused
+Linux step also runs `HTTPCompatTests` and `MetadataTransportTests` to protect
+buffered helpers sharing the libcurl transport. The committed test inventory
+tracks the additional methods. Tests use a loopback peer: a gate requires a data
+callback before the server can finish, and separate cases exercise silent
+cancellation, initial/mid-body idle deadlines, partial disconnects, cumulative
+redirect byte limits, callback ordering, and sanitized logs. Existing sanitizer
+unit lanes discover the same tests. Required check names and branch protection
+remain unchanged.
+
 Last updated: 2026-10-21
 
 This document defines the intended shape of Arlen CI so workflow names,

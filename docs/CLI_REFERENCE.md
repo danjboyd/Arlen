@@ -1852,6 +1852,12 @@ Invalid limits fail configuration loading with the offending key in the error.
 
 ## HTTP and data client contracts
 
+`ALNHTTPClient` supports opt-in incremental response delivery. Its
+`idleTimeoutSeconds` and `streamingTimeoutSeconds` settings apply only to
+streaming calls; buffered calls retain `timeoutSeconds`. Cancellation, callback
+ordering and partial failures are documented in
+[Outbound HTTP client](HTTP_CLIENT.md#incremental-response-delivery).
+
 Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
 redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
 The existing synchronous helper defaults remain unchanged. The result API uses
