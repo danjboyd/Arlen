@@ -3,6 +3,7 @@
 #import "ALNHTTPClient.h"
 #import "ALNLogger.h"
 #import "../shared/ALNTestSupport.h"
+#import <dispatch/dispatch.h>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -23,9 +24,15 @@
       stringByAppendingPathComponent:[NSString stringWithFormat:@"arlen-http-client-%@.trace",
                                                                 [[NSUUID UUID] UUIDString]]];
   [[NSFileManager defaultManager] createFileAtPath:_tracePath contents:[NSData data] attributes:nil];
+  [self startPeerWithTLS:NO];
+}
+
+- (void)startPeerWithTLS:(BOOL)tls {
   _peer = [NSTask new];
   _peer.launchPath = ALNTestToolPath(@"python3");
-  _peer.arguments = @[ @"tests/fixtures/http/metadata_server.py", @"--trace", _tracePath ];
+  _peer.arguments = @[ @"tests/fixtures/http/metadata_server.py", @"--trace", _tracePath,
+                       @"--gate", [_tracePath stringByAppendingString:@".gate"] ];
+  if (tls) _peer.arguments = [_peer.arguments arrayByAddingObject:@"--tls"];
   // Sanitizer lanes preload runtimes into xctest; an uninstrumented python
   // child must not inherit them.
   NSMutableDictionary *environment = [[[NSProcessInfo processInfo] environment] mutableCopy];
@@ -46,6 +53,7 @@
 - (void)tearDown {
   (void)ALNTestStopServerTask(_peer);
   [[NSFileManager defaultManager] removeItemAtPath:_tracePath error:nil];
+  [[NSFileManager defaultManager] removeItemAtPath:[_tracePath stringByAppendingString:@".gate"] error:nil];
   [super tearDown];
 }
 
@@ -88,6 +96,12 @@
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"timeoutSeconds" : @0 },
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"timeoutSeconds" : @301 },
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"timeoutSeconds" : @YES },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"idleTimeoutSeconds" : @0 },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"idleTimeoutSeconds" : @301 },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"idleTimeoutSeconds" : @YES },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"streamingTimeoutSeconds" : @0 },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"streamingTimeoutSeconds" : @86401 },
+    @{ @"allowedHosts" : @[ @"api.example.com" ], @"streamingTimeoutSeconds" : @1.5 },
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"maxResponseBytes" : @0 },
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"maxRedirects" : @11 },
     @{ @"allowedHosts" : @[ @"api.example.com" ], @"allowHTTP" : @"yes" },
@@ -113,6 +127,326 @@
   XCTAssertEqual(10.0, client.timeout);
   XCTAssertEqual((NSUInteger)1048576, client.maxResponseBytes);
   XCTAssertEqual((NSUInteger)0, client.maxRedirects);
+  XCTAssertEqual(30.0, client.idleTimeout);
+  XCTAssertEqual(900.0, client.streamingTimeout);
+  client = [self clientWith:@{ @"idleTimeoutSeconds" : @"2", @"streamingTimeoutSeconds" : @"86400" }];
+  XCTAssertEqual(2.0, client.idleTimeout);
+  XCTAssertEqual(86400.0, client.streamingTimeout);
+}
+
+- (void)testStreamDeliversBeforeServerCanFinishOnTheCallingThread {
+  ALNHTTPClient *client = [self clientWith:nil];
+  NSMutableArray *order = [NSMutableArray array];
+  NSMutableData *body = [NSMutableData data];
+  NSThread *caller = [NSThread currentThread];
+  NSError *error = nil;
+  BOOL complete = [client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-gated"]]
+      cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) {
+        XCTAssertEqualObjects(caller, [NSThread currentThread]);
+        XCTAssertEqual(200, response.statusCode);
+        [order addObject:@"headers"];
+        return YES;
+      } onData:^BOOL(NSData *data) {
+        XCTAssertEqualObjects(caller, [NSThread currentThread]);
+        XCTAssertEqualObjects(@"headers", order.firstObject);
+        [order addObject:@"data"];
+        [body appendData:data];
+        // The peer cannot send its second part until this callback runs. A
+        // buffered implementation times out, rather than satisfying this test.
+        XCTAssertTrue([[NSFileManager defaultManager] createFileAtPath:[_tracePath stringByAppendingString:@".gate"]
+            contents:[NSData data] attributes:nil]);
+        return YES;
+      } error:&error];
+  XCTAssertTrue(complete, @"%@", error);
+  XCTAssertNil(error);
+  XCTAssertEqualObjects([@"data: first\n\ndata: second\n\n" dataUsingEncoding:NSUTF8StringEncoding], body);
+  XCTAssertTrue(order.count >= 3);
+  NSUInteger headerCount = [[order filteredArrayUsingPredicate:
+      [NSPredicate predicateWithFormat:@"SELF == %@", @"headers"]] count];
+  XCTAssertEqual((NSUInteger)1, headerCount);
+}
+
+- (void)testStreamCancellationInterruptsSilenceBeforeHeadersAndBetweenChunks {
+  for (NSString *path in @[ @"/sleep", @"/stream-stall" ]) {
+    ALNHTTPClientCancellation *token = [ALNHTTPClientCancellation new];
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+      [NSThread sleepForTimeInterval:0.2]; // sleep-ok: cancel while the peer deliberately withholds response bytes
+      [token cancel];
+    });
+    __block NSUInteger bytes = 0;
+    NSError *error = nil;
+    NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
+    BOOL complete = [[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:path]]
+        cancellation:token onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+        onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error];
+    XCTAssertFalse(complete);
+    XCTAssertEqual(ALNHTTPClientErrorCancelled, error.code, @"%@", error);
+    XCTAssertTrue(token.cancelled);
+    XCTAssertTrue([NSDate timeIntervalSinceReferenceDate] - started < 1.5);
+    XCTAssertEqual([path isEqual:@"/sleep"] ? (NSUInteger)0 : (NSUInteger)3, bytes);
+    XCTAssertEqual(0L, dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)));
+#if !OS_OBJECT_USE_OBJC
+    dispatch_release(group);
+#endif
+  }
+}
+
+- (void)testPreCancelledStreamNeverConnects {
+  ALNHTTPClientCancellation *token = [ALNHTTPClientCancellation new];
+  [token cancel];
+  [token cancel];
+  NSError *error = nil;
+  BOOL complete = [[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/ok"]]
+      cancellation:token onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Unexpected headers"); return YES; }
+      onData:^BOOL(NSData *data) { XCTFail(@"Unexpected data"); return YES; } error:&error];
+  XCTAssertFalse(complete);
+  XCTAssertEqual(ALNHTTPClientErrorCancelled, error.code);
+  XCTAssertEqual((NSUInteger)0, self.trace.count);
+}
+
+- (void)testStreamCallbackCanCancelAtHeadersOrData {
+  for (NSNumber *atHeaders in @[ @YES, @NO ]) {
+    __block NSUInteger callbacks = 0;
+    NSError *error = nil;
+    BOOL complete = [[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-stall"]]
+        cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return !atHeaders.boolValue; }
+        onData:^BOOL(NSData *data) { callbacks++; return NO; } error:&error];
+    XCTAssertFalse(complete);
+    XCTAssertEqual(ALNHTTPClientErrorCancelled, error.code, @"%@", error);
+    XCTAssertEqual(atHeaders.boolValue ? (NSUInteger)0 : (NSUInteger)1, callbacks);
+  }
+}
+
+- (void)testStreamIdleTimeoutIncludesInitialSilenceAndMidBodyStall {
+  for (NSString *path in @[ @"/sleep", @"/stream-stall" ]) {
+    ALNHTTPClient *client = [self clientWith:@{ @"idleTimeoutSeconds" : @1, @"streamingTimeoutSeconds" : @5 }];
+    __block NSUInteger bytes = 0;
+    NSError *error = nil;
+    NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
+    BOOL complete = [client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:path]]
+        cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+        onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error];
+    NSTimeInterval elapsed = [NSDate timeIntervalSinceReferenceDate] - started;
+    XCTAssertFalse(complete);
+    XCTAssertEqual(ALNHTTPClientErrorIdleTimedOut, error.code, @"%@", error);
+    XCTAssertTrue(elapsed >= 0.9 && elapsed < 2.5, @"%f", elapsed);
+    XCTAssertEqual([path isEqual:@"/sleep"] ? (NSUInteger)0 : (NSUInteger)3, bytes);
+  }
+}
+
+- (void)testStreamTotalDeadlineCannotBeExtendedByIncomingBytes {
+  ALNHTTPClient *client = [self clientWith:@{ @"idleTimeoutSeconds" : @1, @"streamingTimeoutSeconds" : @1 }];
+  __block NSUInteger bytes = 0;
+  NSError *error = nil;
+  BOOL complete = [client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-heartbeat"]]
+      cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+      onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error];
+  XCTAssertFalse(complete);
+  XCTAssertEqual(ALNHTTPClientErrorTimedOut, error.code, @"%@", error);
+  XCTAssertTrue(bytes > 0 && bytes < 12);
+}
+
+- (void)testStreamUsesItsOwnTotalDeadlineAndRefreshesIdleOnBytes {
+  ALNHTTPClient *client = [self clientWith:@{ @"timeoutSeconds" : @1, @"idleTimeoutSeconds" : @1,
+                                            @"streamingTimeoutSeconds" : @5 }];
+  __block NSUInteger bytes = 0;
+  NSError *error = nil;
+  XCTAssertTrue([client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-heartbeat"]]
+      cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+      onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)12, bytes);
+  // The new streaming settings do not relax the buffered one-second deadline.
+  XCTAssertNil([client GETURL:[self URLForPath:@"/stream-heartbeat"] headers:nil error:&error]);
+  XCTAssertEqual(ALNHTTPClientErrorTimedOut, error.code);
+}
+
+- (void)testStreamDisconnectAfterPartialDataIsFailure {
+  NSMutableData *body = [NSMutableData data];
+  NSError *error = nil;
+  XCTAssertFalse([[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-broken"]]
+      cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+      onData:^BOOL(NSData *data) { [body appendData:data]; return YES; } error:&error]);
+  XCTAssertEqualObjects([@"abc" dataUsingEncoding:NSUTF8StringEncoding], body);
+  XCTAssertEqualObjects(ALNHTTPClientErrorDomain, error.domain);
+  XCTAssertEqual(ALNHTTPClientErrorTransport, error.code);
+}
+
+- (void)testStreamByteLimitCoversDeclaredChunkedAndRedirectBodies {
+  for (NSString *path in @[ @"/declared", @"/chunked", @"/budget/2" ]) {
+    NSUInteger limit = [path isEqual:@"/budget/2"] ? 12 : 16;
+    __block NSUInteger bytes = 0;
+    NSError *error = nil;
+    ALNHTTPClient *client = [self clientWith:@{ @"maxResponseBytes" : @(limit), @"maxRedirects" : @3 }];
+    XCTAssertFalse([client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:path]]
+        cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+        onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error]);
+    XCTAssertEqual(ALNHTTPClientErrorResponseTooLarge, error.code, @"%@: %@", path, error);
+    XCTAssertTrue(bytes <= limit);
+    if ([path isEqual:@"/budget/2"]) XCTAssertEqual((NSUInteger)0, bytes, @"Followed redirect bodies must be hidden");
+  }
+  __block NSUInteger bytes = 0;
+  NSError *error = nil;
+  XCTAssertTrue([[self clientWith:@{ @"maxResponseBytes" : @32 }] streamRequest:
+      [NSURLRequest requestWithURL:[self URLForPath:@"/exact"]] cancellation:nil
+      onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+      onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error], @"%@", error);
+  XCTAssertEqual((NSUInteger)32, bytes);
+}
+
+- (void)testStreamReportsFinalHeadersOnceAndIgnoresTrailers {
+  for (NSString *path in @[ @"/reason-interim", @"/reason-redirect", @"/stream-trailers", @"/stream-lf", @"/status" ]) {
+    NSMutableData *body = [NSMutableData data];
+    __block NSHTTPURLResponse *headers = nil;
+    __block NSUInteger responses = 0;
+    NSError *error = nil;
+    XCTAssertTrue([[self clientWith:@{ @"maxRedirects" : @3 }] streamRequest:
+        [NSURLRequest requestWithURL:[self URLForPath:path]] cancellation:nil
+        onResponse:^BOOL(NSHTTPURLResponse *response) { headers = response; responses++; return YES; }
+        onData:^BOOL(NSData *data) { [body appendData:data]; return YES; } error:&error], @"%@", error);
+    XCTAssertEqual((NSUInteger)1, responses);
+    XCTAssertEqual([path isEqual:@"/status"] ? 503 : 200, headers.statusCode);
+    XCTAssertNil(headers.allHeaderFields[@"X-Stale"]);
+    XCTAssertNil(headers.allHeaderFields[@"X-Trailer"]);
+    XCTAssertEqualObjects([@"{}" dataUsingEncoding:NSUTF8StringEncoding], body);
+  }
+}
+
+- (void)testStreamRedirectsShareOneDeadline {
+  ALNHTTPClient *client = [self clientWith:@{ @"streamingTimeoutSeconds" : @1, @"maxRedirects" : @3 }];
+  NSError *error = nil;
+  XCTAssertFalse([client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/stream-slow-redirect/2"]]
+      cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Unexpected final response"); return YES; }
+      onData:^BOOL(NSData *data) { XCTFail(@"Unexpected final body"); return YES; } error:&error]);
+  XCTAssertEqual(ALNHTTPClientErrorTimedOut, error.code, @"%@", error);
+  XCTAssertEqual((NSUInteger)2, self.trace.count);
+}
+
+- (void)testStreamRedirectMethodAndBodyReplayRules {
+  ALNHTTPClient *client = [self clientWith:@{ @"maxRedirects" : @2 }];
+  for (NSNumber *status in @[ @303, @307, @308 ]) {
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
+        [self URLForPath:[NSString stringWithFormat:@"/method/%@", status]]];
+    request.HTTPMethod = @"POST";
+    request.HTTPBody = [@"posted" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"ignored.invalid" forHTTPHeaderField:@"Host"];
+    NSMutableData *body = [NSMutableData data];
+    NSError *error = nil;
+    XCTAssertTrue([client streamRequest:request cancellation:nil
+        onResponse:^BOOL(NSHTTPURLResponse *response) { XCTAssertEqual(200, response.statusCode); return YES; }
+        onData:^BOOL(NSData *data) { [body appendData:data]; return YES; } error:&error], @"%@", error);
+    NSDictionary *echo = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
+    XCTAssertEqualObjects(status.integerValue == 303 ? @"GET" : @"POST", echo[@"method"]);
+    XCTAssertEqualObjects(status.integerValue == 303 ? @"" : @"posted", echo[@"body"]);
+    XCTAssertEqualObjects(status.integerValue == 303 ? nil : @"text/plain", echo[@"headers"][@"content-type"]);
+    XCTAssertFalse([echo[@"headers"][@"host"] containsString:@"ignored"]);
+  }
+}
+
+- (void)testStreamLogsNeverExposeRequestOrCallbackSecrets {
+  int fds[2];
+  XCTAssertTrue(ALNTestCreatePipe(fds, YES));
+  ALNLogger *logger = [[ALNLogger alloc] initWithFormat:@"json"];
+  logger.minimumLevel = ALNLogLevelInfo;
+  logger.outputFileDescriptor = fds[1];
+  ALNHTTPClient *client = [self clientWith:nil];
+  client.logger = logger;
+  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok?SECRET-QUERY"]];
+  request.HTTPMethod = @"POST";
+  request.HTTPBody = [@"SECRET-BODY" dataUsingEncoding:NSUTF8StringEncoding];
+  [request setValue:@"Bearer SECRET-TOKEN" forHTTPHeaderField:@"Authorization"];
+  NSError *error = nil;
+  XCTAssertTrue([client streamRequest:request cancellation:nil
+      onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
+      onData:^BOOL(NSData *data) { return YES; } error:&error], @"%@", error);
+  XCTAssertFalse([client streamRequest:request cancellation:nil
+      onResponse:^BOOL(NSHTTPURLResponse *response) { [NSException raise:@"SECRET-CALLBACK" format:@"SECRET"]; return YES; }
+      onData:^BOOL(NSData *data) { return YES; } error:&error]);
+  close(fds[1]);
+  NSMutableData *data = [NSMutableData data];
+  char bytes[4096];
+  ssize_t length;
+  while ((length = read(fds[0], bytes, sizeof(bytes))) > 0) [data appendBytes:bytes length:(NSUInteger)length];
+  close(fds[0]);
+  NSString *logs = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+  XCTAssertTrue([logs containsString:@"http_client.request"]);
+  XCTAssertTrue([logs containsString:@"Stream callback failed"]);
+  XCTAssertFalse([logs containsString:@"SECRET"], @"%@", logs);
+  XCTAssertFalse([error.description containsString:@"SECRET"]);
+}
+
+- (void)testStreamCredentialRedirectAndAllowlistProtections {
+  ALNHTTPClient *client = [self clientWith:@{ @"maxRedirects" : @2 }];
+  for (NSString *credential in @[ @"Authorization", @"Cookie" ]) {
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/redirect"]];
+    [request setValue:@"SECRET" forHTTPHeaderField:credential];
+    __block NSInteger status = 0;
+    NSUInteger before = self.trace.count;
+    NSError *error = nil;
+    XCTAssertTrue([client streamRequest:request cancellation:nil
+        onResponse:^BOOL(NSHTTPURLResponse *response) { status = response.statusCode; return YES; }
+        onData:^BOOL(NSData *data) { return YES; } error:&error], @"%@", error);
+    XCTAssertEqual(302, status);
+    XCTAssertEqual(before + 1, self.trace.count);
+  }
+  for (NSString *path in @[ @"/cross-origin", @"/redirect-file", @"/loop" ]) {
+    NSError *error = nil;
+    XCTAssertFalse([client streamRequest:[NSURLRequest requestWithURL:[self URLForPath:path]] cancellation:nil
+        onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Unexpected final headers"); return YES; }
+        onData:^BOOL(NSData *data) { XCTFail(@"Unexpected data"); return YES; } error:&error]);
+    XCTAssertEqual([path isEqual:@"/loop"] ? ALNHTTPClientErrorTooManyRedirects : ALNHTTPClientErrorRedirectNotAllowed,
+                   error.code, @"%@", error);
+  }
+}
+
+- (void)testStreamRejectsInvalidRequestsBeforeTransport {
+  ALNHTTPClient *client = [self clientWith:nil];
+  NSMutableURLRequest *badHeader = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
+  [badHeader setValue:@"bad\nvalue" forHTTPHeaderField:@"X-Test"];
+  NSMutableURLRequest *badMethod = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
+  badMethod.HTTPMethod = @"TRACE";
+  NSMutableURLRequest *bodyStream = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
+  bodyStream.HTTPBodyStream = [NSInputStream inputStreamWithData:[NSData data]];
+  for (NSURLRequest *request in @[ badHeader, badMethod, bodyStream,
+        [NSURLRequest requestWithURL:[NSURL URLWithString:@"http://evil.example/secret?SECRET"]] ]) {
+    NSError *error = nil;
+    XCTAssertFalse([client streamRequest:request cancellation:nil
+        onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Unexpected headers"); return YES; }
+        onData:^BOOL(NSData *data) { XCTFail(@"Unexpected data"); return YES; } error:&error]);
+    XCTAssertNotNil(error);
+    XCTAssertFalse([error.description containsString:@"SECRET"]);
+  }
+  XCTAssertEqual((NSUInteger)0, self.trace.count);
+}
+
+- (void)testStreamCallbackExceptionsBecomeSanitizedErrors {
+  for (NSNumber *inHeaders in @[ @YES, @NO ]) {
+    NSError *error = nil;
+    XCTAssertFalse([[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:@"/ok"]]
+        cancellation:nil onResponse:^BOOL(NSHTTPURLResponse *response) {
+          if (inHeaders.boolValue) [NSException raise:@"SECRET-HEADER" format:@"SECRET"];
+          return YES;
+        } onData:^BOOL(NSData *data) {
+          [NSException raise:@"SECRET-DATA" format:@"SECRET"];
+          return YES;
+        } error:&error]);
+    XCTAssertEqual(ALNHTTPClientErrorTransport, error.code);
+    XCTAssertFalse([error.description containsString:@"SECRET"]);
+  }
+}
+
+- (void)testStreamRejectsUntrustedTLSBeforeAnyResponseCallback {
+  (void)ALNTestStopServerTask(_peer);
+  [self startPeerWithTLS:YES];
+  XCTAssertTrue(_port > 0);
+  NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://127.0.0.1:%ld/ok", (long)_port]];
+  NSError *error = nil;
+  XCTAssertFalse([[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:url] cancellation:nil
+      onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Untrusted TLS must not deliver headers"); return YES; }
+      onData:^BOOL(NSData *data) { XCTFail(@"Untrusted TLS must not deliver data"); return YES; } error:&error]);
+  XCTAssertEqual(ALNHTTPClientErrorTransport, error.code, @"%@", error);
+  XCTAssertEqual((NSUInteger)0, self.trace.count);
 }
 
 - (void)testContentEncodingDoesNotEnableImplicitBrotliDecoding {

@@ -95,11 +95,13 @@ jobs:
           source tools/source_gnustep_env.sh
           make test-integration-filter TEST=OpsOptionalModulesIntegrationTests
 
-      - name: Verify configurable OIDC login and bounded token transport
+      - name: Verify configurable OIDC login and outbound HTTP transports
         run: |
           source tools/source_gnustep_env.sh
           make test-unit-filter TEST=AuthModuleOIDCTests
           make test-unit-filter TEST=MetadataTransportTests
+          make test-unit-filter TEST=HTTPClientTests
+          make test-unit-filter TEST=HTTPCompatTests
 
       - name: Verify concurrent security-header first use in fresh processes
         run: |

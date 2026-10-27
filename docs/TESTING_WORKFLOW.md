@@ -1,5 +1,21 @@
 # Testing Workflow
 
+For outbound HTTP transport changes, run the focused regression suites after
+sourcing `tools/source_gnustep_env.sh` on GNUstep:
+
+```bash
+make test-unit-filter TEST=HTTPClientTests
+make test-unit-filter TEST=HTTPCompatTests
+make test-unit-filter TEST=MetadataTransportTests
+```
+
+The HTTP client suite uses a loopback wire peer and covers buffered calls and
+incremental streaming. Its gated stream cannot finish before a data callback
+runs; other cases cover cancellation during silence, idle/total deadlines,
+redirects, byte limits, partial failures and safe logs. These tests are part of
+the existing Linux, Apple and Windows unit lanes. New test methods also require
+`make update-test-inventory` and a committed inventory update.
+
 This guide describes the fastest path from a bug report to a permanent Arlen
 regression test. For testing your own app, start with
 [App request tests](#app-request-tests).

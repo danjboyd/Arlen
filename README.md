@@ -24,6 +24,10 @@ OpenAPI docs, a PostgreSQL-first data layer, and realtime WebSocket/SSE. Auth
 with passkeys and OIDC, admin and job dashboards, and a production process
 manager are first-party modules, not plugins you have to vet.
 
+For outbound vendor APIs, the [HTTP client](docs/HTTP_CLIENT.md) supports both
+buffered requests and incremental responses, with cancellation, deadlines,
+host allowlists and byte limits.
+
 <p align="center">
   <img src="docs/images/tech-demo.gif" width="900"
        alt="Arlen tech demo: EOC-rendered pages, route params, implicit JSON, and a live UI table filtering and a keyed feed updating in place">

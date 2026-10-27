@@ -1,4 +1,5 @@
 #import "ALNHTTPCompat.h"
+#import "ALNHTTPClient.h"
 #include <math.h>
 #include <time.h>
 #if defined(_WIN32)
@@ -642,6 +643,241 @@ NSData *ALNHTTPClientPerformHop(NSURLRequest *request, NSUInteger maxBytes, NSHT
   return nil;
 #endif
 }
+
+#if defined(GNUSTEP) || defined(__APPLE__)
+// Streaming reuses the buffered transport's request configuration and header
+// parser, but never appends body bytes to its buffer. One multi handle is driven
+// on the caller's thread so cancellation/deadlines also work during silence.
+typedef struct {
+  ALNSynchronousTransfer headers;
+  void *url;
+  void *cancellation;
+  void *onResponse;
+  void *onData;
+  NSError *__strong *failure;
+  NSHTTPURLResponse *__strong *response;
+  NSUInteger limit;
+  NSUInteger received;
+  NSInteger status;
+  BOOL headersDelivered;
+  NSTimeInterval deadline;
+  NSTimeInterval lastActivity;
+  NSTimeInterval idleTimeout;
+} ALNStreamingTransfer;
+
+static void ALNStreamFail(ALNStreamingTransfer *stream, ALNHTTPClientErrorCode code, NSString *reason) {
+  if (!*stream->failure) {
+    *stream->failure = [NSError errorWithDomain:ALNHTTPClientErrorDomain code:code
+                                     userInfo:@{NSLocalizedDescriptionKey : reason}];
+  }
+}
+
+static BOOL ALNStreamCheck(ALNStreamingTransfer *stream) {
+  if (*stream->failure) return NO;
+  if ([(__bridge ALNHTTPClientCancellation *)stream->cancellation isCancelled]) {
+    ALNStreamFail(stream, ALNHTTPClientErrorCancelled, @"Request cancelled");
+    return NO;
+  }
+  NSTimeInterval now = MetadataNow();
+  if (!isfinite(now) || now >= stream->deadline) {
+    ALNStreamFail(stream, ALNHTTPClientErrorTimedOut, @"Streaming total deadline exceeded");
+    return NO;
+  }
+  if (now - stream->lastActivity >= stream->idleTimeout) {
+    ALNStreamFail(stream, ALNHTTPClientErrorIdleTimedOut, @"Streaming idle deadline exceeded");
+    return NO;
+  }
+  return YES;
+}
+
+static size_t ALNStreamHeader(char *bytes, size_t size, size_t count, void *context) {
+  ALNStreamingTransfer *stream = context;
+  @autoreleasepool {
+    if (!ALNStreamCheck(stream) || (size && count > NSUIntegerMax / size)) return 0;
+    size_t length = size * count;
+    if (length) stream->lastActivity = MetadataNow();
+    // Trailers are not another response and cannot mutate the delivered headers.
+    if (stream->headersDelivered) return length;
+    if (length >= 5 && memcmp(bytes, "HTTP/", 5) == 0) {
+      NSString *line = [[NSString alloc] initWithBytes:bytes length:length encoding:NSISOLatin1StringEncoding];
+      NSScanner *scanner = [NSScanner scannerWithString:line ?: @""];
+      [scanner scanUpToString:@" " intoString:NULL];
+      [scanner scanInteger:&stream->status];
+    }
+    size_t accepted = ALNSynchronousHeader(bytes, size, count, &stream->headers);
+    if (accepted != length || stream->headers.exceeded) {
+      ALNStreamFail(stream, ALNHTTPClientErrorResponseTooLarge, @"Response exceeds maxResponseBytes");
+      return 0;
+    }
+    // With no remaining body budget, the shared parser's zero/unbounded limit
+    // needs an explicit declared-length check as well.
+    if (stream->limit == 0 && length >= 15 && strncasecmp(bytes, "Content-Length:", 15) == 0) {
+      NSString *value = [[NSString alloc] initWithBytes:bytes + 15 length:length - 15 encoding:NSASCIIStringEncoding];
+      if (value.longLongValue > 0) {
+        ALNStreamFail(stream, ALNHTTPClientErrorResponseTooLarge, @"Response exceeds maxResponseBytes");
+        return 0;
+      }
+    }
+    BOOL endOfHeaders = (length == 2 && bytes[0] == '\r' && bytes[1] == '\n') ||
+                        (length == 1 && bytes[0] == '\n');
+    if (endOfHeaders && stream->status >= 200) {
+      stream->headersDelivered = YES;
+      *stream->response = [[NSHTTPURLResponse alloc] initWithURL:(__bridge NSURL *)stream->url
+          statusCode:stream->status HTTPVersion:(__bridge NSString *)stream->headers.httpVersion
+          headerFields:(__bridge NSDictionary *)stream->headers.headers];
+      @try {
+        ALNHTTPClientResponseHandler handler = (__bridge ALNHTTPClientResponseHandler)stream->onResponse;
+        if (!handler(*stream->response)) {
+          ALNStreamFail(stream, ALNHTTPClientErrorCancelled, @"Request cancelled");
+          return 0;
+        }
+      } @catch (NSException *exception) {
+        ALNStreamFail(stream, ALNHTTPClientErrorTransport, @"Stream callback failed");
+        return 0;
+      }
+      if (!ALNStreamCheck(stream)) return 0;
+    }
+    return length;
+  }
+}
+
+static size_t ALNStreamWrite(char *bytes, size_t size, size_t count, void *context) {
+  ALNStreamingTransfer *stream = context;
+  @autoreleasepool {
+    if (!ALNStreamCheck(stream) || (size && count > NSUIntegerMax / size)) return 0;
+    size_t length = size * count;
+    if (!length) return 0;
+    if (length > stream->limit - stream->received) {
+      ALNStreamFail(stream, ALNHTTPClientErrorResponseTooLarge, @"Response exceeds maxResponseBytes");
+      return 0;
+    }
+    if (!stream->headersDelivered) {
+      ALNStreamFail(stream, ALNHTTPClientErrorTransport, @"Missing final response headers");
+      return 0;
+    }
+    stream->lastActivity = MetadataNow();
+    stream->received += length;
+    @try {
+      ALNHTTPClientDataHandler handler = (__bridge ALNHTTPClientDataHandler)stream->onData;
+      if (!handler([NSData dataWithBytes:bytes length:length])) {
+        ALNStreamFail(stream, ALNHTTPClientErrorCancelled, @"Request cancelled");
+        return 0;
+      }
+    } @catch (NSException *exception) {
+      ALNStreamFail(stream, ALNHTTPClientErrorTransport, @"Stream callback failed");
+      return 0;
+    }
+    return ALNStreamCheck(stream) ? length : 0;
+  }
+}
+
+// Internal seam: each hop is allowlisted by ALNHTTPClient, never follows a
+// redirect itself, and reports only sanitized errors. Callback objects and
+// request data remain strongly owned by the synchronous caller for its lifetime.
+BOOL ALNHTTPClientStreamHop(NSURLRequest *request, NSUInteger maxBytes, NSTimeInterval deadline,
+    NSTimeInterval idleTimeout, ALNHTTPClientCancellation *cancellation,
+    ALNHTTPClientResponseHandler onResponse, ALNHTTPClientDataHandler onData,
+    NSHTTPURLResponse **response, NSUInteger *receivedBytes, NSError **error) {
+  NSError *failure = nil;
+  NSHTTPURLResponse *http = nil;
+  NSMutableData *unusedBody = [NSMutableData data];
+  NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+  NSMutableString *version = [NSMutableString string], *phrase = [NSMutableString string];
+  ALNStreamingTransfer stream = {
+    .headers = {(__bridge void *)unusedBody, (__bridge void *)headers,
+                (__bridge void *)version, (__bridge void *)phrase, NO, maxBytes, NO},
+    .url = (__bridge void *)request.URL, .cancellation = (__bridge void *)cancellation,
+    .onResponse = (__bridge void *)onResponse, .onData = (__bridge void *)onData,
+    .failure = &failure, .response = &http, .limit = maxBytes,
+    .deadline = deadline, .lastActivity = MetadataNow(), .idleTimeout = idleTimeout,
+  };
+  CURL *curl = NULL;
+  CURLM *multi = NULL;
+  struct curl_slist *list = NULL;
+  BOOL added = NO, listOK = YES, hasContentType = NO;
+  CURLcode result = CURLE_FAILED_INIT;
+  if (!ALNStreamCheck(&stream)) goto cleanup;
+  if (!ALNHTTPHeadersValid(request.allHTTPHeaderFields) || !ALNCurlGlobalReady() ||
+      (curl_version_info(CURLVERSION_NOW)->features & (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) !=
+          (CURL_VERSION_ASYNCHDNS | CURL_VERSION_SSL)) goto cleanup;
+  curl = curl_easy_init();
+  multi = curl_multi_init();
+  if (!curl || !multi) goto cleanup;
+  for (NSString *name in request.allHTTPHeaderFields) {
+    NSString *line = [NSString stringWithFormat:@"%@: %@", name, request.allHTTPHeaderFields[name]];
+    struct curl_slist *next = curl_slist_append(list, line.UTF8String);
+    if (!next) { listOK = NO; break; }
+    list = next;
+    if ([name caseInsensitiveCompare:@"Content-Type"] == NSOrderedSame) hasContentType = YES;
+  }
+  if (listOK) {
+    struct curl_slist *next = curl_slist_append(list, "Expect:");
+    listOK = next != NULL;
+    if (next) list = next;
+  }
+  if (listOK && request.HTTPBody.length && !hasContentType) {
+    struct curl_slist *next = curl_slist_append(list, "Content-Type:");
+    listOK = next != NULL;
+    if (next) list = next;
+  }
+  if (!listOK) goto cleanup;
+  char message[CURL_ERROR_SIZE] = {0};
+  result = ALNSynchronousConfigure(curl, request.URL.absoluteString, request.HTTPMethod.uppercaseString ?: @"GET",
+      request.HTTPBody, list, 0, deadline - MetadataNow(), message, &stream.headers);
+  if (result != CURLE_OK) goto cleanup;
+#define STREAM_OPTION(option, value) do { result = curl_easy_setopt(curl, option, value); if (result != CURLE_OK) goto cleanup; } while (0)
+  STREAM_OPTION(CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
+  STREAM_OPTION(CURLOPT_WRITEFUNCTION, ALNStreamWrite);
+  STREAM_OPTION(CURLOPT_WRITEDATA, &stream);
+  STREAM_OPTION(CURLOPT_HEADERFUNCTION, ALNStreamHeader);
+  STREAM_OPTION(CURLOPT_HEADERDATA, &stream);
+#undef STREAM_OPTION
+  if (curl_multi_add_handle(multi, curl) != CURLM_OK) { result = CURLE_FAILED_INIT; goto cleanup; }
+  added = YES;
+  result = CURLE_RECV_ERROR;
+  for (;;) {
+    if (!ALNStreamCheck(&stream)) break;
+    int running = 0;
+    if (curl_multi_perform(multi, &running) != CURLM_OK) break;
+    if (!ALNStreamCheck(&stream)) break;
+    int remaining = 0;
+    CURLMsg *message;
+    while ((message = curl_multi_info_read(multi, &remaining))) {
+      if (message->msg == CURLMSG_DONE) result = message->data.result;
+    }
+    if (!running) break;
+#if LIBCURL_VERSION_NUM >= 0x074200
+    if (curl_multi_poll(multi, NULL, 0, 100, NULL) != CURLM_OK) break;
+#else
+    int descriptors = 0;
+    if (curl_multi_wait(multi, NULL, 0, 90, &descriptors) != CURLM_OK) break;
+    if (!descriptors) [NSThread sleepForTimeInterval:0.01];
+#endif
+  }
+cleanup:
+  if (added) curl_multi_remove_handle(multi, curl);
+  if (multi) curl_multi_cleanup(multi);
+  if (curl) curl_easy_cleanup(curl);
+  curl_slist_free_all(list);
+  if (!failure && result == CURLE_OPERATION_TIMEDOUT)
+    ALNStreamFail(&stream, ALNHTTPClientErrorTimedOut, @"Streaming total deadline exceeded");
+  if (!failure && (result != CURLE_OK || !stream.headersDelivered))
+    ALNStreamFail(&stream, ALNHTTPClientErrorTransport, @"Streaming transport failed");
+  if (response) *response = http;
+  if (receivedBytes) *receivedBytes = stream.received;
+  if (error) *error = failure;
+  return failure == nil;
+}
+#else
+BOOL ALNHTTPClientStreamHop(NSURLRequest *request, NSUInteger maxBytes, NSTimeInterval deadline,
+    NSTimeInterval idleTimeout, ALNHTTPClientCancellation *cancellation,
+    ALNHTTPClientResponseHandler onResponse, ALNHTTPClientDataHandler onData,
+    NSHTTPURLResponse **response, NSUInteger *receivedBytes, NSError **error) {
+  if (error) *error = [NSError errorWithDomain:ALNHTTPClientErrorDomain code:ALNHTTPClientErrorTransport
+      userInfo:@{NSLocalizedDescriptionKey : @"Streaming transport unavailable"}];
+  return NO;
+}
+#endif
 
 #if defined(__APPLE__)
 @interface ALNSynchronousSessionDelegate : NSObject <NSURLSessionTaskDelegate>

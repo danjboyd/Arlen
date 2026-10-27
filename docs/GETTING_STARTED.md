@@ -397,6 +397,10 @@ for a complete configuration example and buffering limits.
 
 ## HTTP and data client contracts
 
+For vendor streams and downloads, `ALNHTTPClient` offers opt-in incremental
+delivery with serial callbacks, cancellation, and separate idle/total deadlines.
+Run it on an application worker; see [Outbound HTTP client](HTTP_CLIENT.md#incremental-response-delivery).
+
 Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
 redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
 The existing synchronous helper defaults remain unchanged. The result API uses
