@@ -4,6 +4,10 @@
 
 ## 0.3.2 — 2026-10-23
 
+This release includes the opt-in streaming API as a maintainer-approved pre-1.0
+exception to the usual minor-release policy for additive features. Existing
+buffered client behavior and defaults remain compatible.
+
 - Add automatic Linux runtime setup for Ubuntu 24.04 LTS on arm64 (aarch64),
   using a distinct native runtime lock and the distribution's ICU and clang.
   The public installer CI adds this native target while retaining Debian 13

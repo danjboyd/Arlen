@@ -7,6 +7,17 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// Native request setters may normalize invalid header values before the client
+// sees them. Supply the raw value through an immutable request fixture instead.
+@interface ALNHTTPClientInvalidHeadersRequest : NSURLRequest
+@end
+@implementation ALNHTTPClientInvalidHeadersRequest
+- (NSDictionary<NSString *, NSString *> *)allHTTPHeaderFields {
+  return @{ @"X-Test" : @"bad\nvalue" };
+}
+- (id)copyWithZone:(NSZone *)zone { return self; }
+@end
+
 // GitHub issue 99: ALNHTTPClient, an outbound client with a required host
 // allowlist, one total deadline, a response size limit and safe redirects.
 @interface HTTPClientTests : XCTestCase
@@ -409,19 +420,22 @@
 
 - (void)testStreamRejectsInvalidRequestsBeforeTransport {
   ALNHTTPClient *client = [self clientWith:nil];
-  NSMutableURLRequest *badHeader = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
-  [badHeader setValue:@"bad\nvalue" forHTTPHeaderField:@"X-Test"];
+  NSURLRequest *badHeader = [[ALNHTTPClientInvalidHeadersRequest alloc] initWithURL:[self URLForPath:@"/ok"]];
+  NSURLRequest *rawCopy = [badHeader copy];
+  XCTAssertEqualObjects(@"bad\nvalue", rawCopy.allHTTPHeaderFields[@"X-Test"]);
   NSMutableURLRequest *badMethod = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
   badMethod.HTTPMethod = @"TRACE";
   NSMutableURLRequest *bodyStream = [NSMutableURLRequest requestWithURL:[self URLForPath:@"/ok"]];
-  bodyStream.HTTPBodyStream = [NSInputStream inputStreamWithData:[NSData data]];
+  bodyStream.HTTPMethod = @"POST";
+  bodyStream.HTTPBodyStream = [NSInputStream inputStreamWithData:[@"payload" dataUsingEncoding:NSUTF8StringEncoding]];
+  XCTAssertNotNil(bodyStream.HTTPBodyStream);
   for (NSURLRequest *request in @[ badHeader, badMethod, bodyStream,
         [NSURLRequest requestWithURL:[NSURL URLWithString:@"http://evil.example/secret?SECRET"]] ]) {
     NSError *error = nil;
     XCTAssertFalse([client streamRequest:request cancellation:nil
         onResponse:^BOOL(NSHTTPURLResponse *response) { XCTFail(@"Unexpected headers"); return YES; }
         onData:^BOOL(NSData *data) { XCTFail(@"Unexpected data"); return YES; } error:&error]);
-    XCTAssertNotNil(error);
+    XCTAssertNotNil(error, @"method=%@, bodyStream=%@", request.HTTPMethod, request.HTTPBodyStream);
     XCTAssertFalse([error.description containsString:@"SECRET"]);
   }
   XCTAssertEqual((NSUInteger)0, self.trace.count);

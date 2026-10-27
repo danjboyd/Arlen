@@ -27,6 +27,11 @@ Data-layer release details live in `docs/ARLEN_DATA.md`.
 While Arlen is on `0.x`, minor releases may still change public API; such
 changes are called out in the release notes with migration guidance.
 
+Maintainer-approved exception for `0.3.2`: the opt-in outbound HTTP streaming API
+ships alongside its runtime/platform updates as a scoped, compatible addition.
+Existing buffered APIs and defaults retain their contracts. This pre-1.0
+exception does not change the general versioning policy or release gates.
+
 The framework version lives in `ALNModuleSystemFrameworkVersion`
 (`src/Arlen/Core/ALNModuleSystem.m`). It always names the latest released
 version: bump it only in the release commit, never between releases.
