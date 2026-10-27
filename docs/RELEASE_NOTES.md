@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.3.2 — 2026-10-23
+## 0.3.2 — 2026-10-27
 
 This release includes the opt-in streaming API as a maintainer-approved pre-1.0
 exception to the usual minor-release policy for additive features. Existing
@@ -21,6 +21,9 @@ buffered client behavior and defaults remain compatible.
 - Storage 1.4.4 avoids unnecessary normalization copies for already compatible
   GNUstep legacy plist catalogs, preserving XML, metadata conversions, and older
   binary reads.
+  Streamed downloads also use the legacy nested checksum when the top-level
+  field is absent, fixing upgrade-time download failures without catalog
+  backfilling or relaxing attachment verification.
   Upgrade vendored copies with `arlen module upgrade storage`.
 - Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
   defaults, explicit application compiler flags, and existing release gates.

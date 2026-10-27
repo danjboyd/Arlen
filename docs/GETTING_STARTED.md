@@ -608,6 +608,9 @@ Storage 1.4.2 refuses cached object reads and downloads after a catalog reload
 fails; repairing the catalog permits a later successful reload. Backend
 exceptions release writer locks and force a reload of persisted state. Upgrade
 vendored storage modules with `arlen module upgrade`.
+Storage 1.4.4 also restores streamed downloads for legacy records whose checksum
+is nested under `analysis`; catalog import does not need a backfill. See
+[Storage migration and verification](STORAGE_MODULE.md).
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.

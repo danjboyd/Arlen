@@ -2404,7 +2404,7 @@ static NSDictionary *SMAttachmentAdapterCapabilities(id<ALNAttachmentAdapter> ad
   NSFileHandle *handle = [self.attachmentAdapter openAttachmentFileForID:stored[@"attachmentID"] metadata:&adapterMetadata error:error];
   if (handle == nil) return nil;
   struct stat fileStat;
-  NSString *expected = SMTrimmedString(stored[@"checksumSHA256"]);
+  NSString *expected = SMRecordChecksum(stored);
   BOOL valid = fstat(handle.fileDescriptor, &fileStat) == 0 && S_ISREG(fileStat.st_mode) &&
                (unsigned long long)fileStat.st_size == [stored[@"sizeBytes"] unsignedLongLongValue] &&
                expected.length > 0 &&
