@@ -170,7 +170,10 @@
   for (NSString *path in @[ @"/sleep", @"/stream-stall" ]) {
     ALNHTTPClientCancellation *token = [ALNHTTPClientCancellation new];
     dispatch_group_t group = dispatch_group_create();
+    dispatch_semaphore_t bodyArrived = dispatch_semaphore_create(0);
+    BOOL betweenChunks = [path isEqual:@"/stream-stall"];
     dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+      if (betweenChunks) dispatch_semaphore_wait(bodyArrived, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
       [NSThread sleepForTimeInterval:0.2]; // sleep-ok: cancel while the peer deliberately withholds response bytes
       [token cancel];
     });
@@ -179,15 +182,19 @@
     NSTimeInterval started = [NSDate timeIntervalSinceReferenceDate];
     BOOL complete = [[self clientWith:nil] streamRequest:[NSURLRequest requestWithURL:[self URLForPath:path]]
         cancellation:token onResponse:^BOOL(NSHTTPURLResponse *response) { return YES; }
-        onData:^BOOL(NSData *data) { bytes += data.length; return YES; } error:&error];
+        onData:^BOOL(NSData *data) { bytes += data.length; dispatch_semaphore_signal(bodyArrived); return YES; } error:&error];
     XCTAssertFalse(complete);
     XCTAssertEqual(ALNHTTPClientErrorCancelled, error.code, @"%@", error);
     XCTAssertTrue(token.cancelled);
     XCTAssertTrue([NSDate timeIntervalSinceReferenceDate] - started < 1.5);
     XCTAssertEqual([path isEqual:@"/sleep"] ? (NSUInteger)0 : (NSUInteger)3, bytes);
-    XCTAssertEqual(0L, dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)));
+    long finished = dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC));
+    XCTAssertEqual(0L, finished);
 #if !OS_OBJECT_USE_OBJC
-    dispatch_release(group);
+    if (finished == 0) {
+      dispatch_release(group);
+      dispatch_release(bodyArrived);
+    }
 #endif
   }
 }
