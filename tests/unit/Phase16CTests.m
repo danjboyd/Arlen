@@ -739,18 +739,22 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
     ALNStorageModuleRuntime *runtime = runtimes[writer];
     dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
       for (NSUInteger idx = 0; idx < perWriter; idx++) {
-        NSError *error = nil;
-        NSString *name = [NSString stringWithFormat:@"w%lu-%lu.txt", (unsigned long)writer, (unsigned long)idx];
-        NSDictionary *object = [runtime storeObjectInCollection:@"plain"
-                                                           name:name
-                                                    contentType:@"text/plain"
-                                                           data:[name dataUsingEncoding:NSUTF8StringEncoding]
-                                                       metadata:nil
-                                                          error:&error];
-        if (object == nil) {
-          [resultsLock lock];
-          [failures addObject:[NSString stringWithFormat:@"%@: %@", name, error.localizedDescription ?: @"?"]];
-          [resultsLock unlock];
+        // Match the server's per-request pool: one writer performs many
+        // requests, rather than retaining every catalog refresh until exit.
+        @autoreleasepool {
+          NSError *error = nil;
+          NSString *name = [NSString stringWithFormat:@"w%lu-%lu.txt", (unsigned long)writer, (unsigned long)idx];
+          NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                             name:name
+                                                      contentType:@"text/plain"
+                                                             data:[name dataUsingEncoding:NSUTF8StringEncoding]
+                                                         metadata:nil
+                                                            error:&error];
+          if (object == nil) {
+            [resultsLock lock];
+            [failures addObject:[NSString stringWithFormat:@"%@: %@", name, error.localizedDescription ?: @"?"]];
+            [resultsLock unlock];
+          }
         }
       }
     });
