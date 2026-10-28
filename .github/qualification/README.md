@@ -4,6 +4,19 @@ This branch is an evidence harness, not a release source change. The workflow ch
 
 The public lane refuses an incomplete or wrong latest release, then uses the default public installer without an archive or version override in a fresh pinned Ubuntu Minimal ARM64 container on the native VM. It preserves user-flow logs and the normal runtime controls/provenance. Dispatch this lane only after actual v0.3.2 assets are verified.
 
+The `public-debian`, `public-macos`, and `public-windows` lanes exercise the same
+actual public latest on a cold native Debian 13 container, a fresh Apple ARM64
+host, and the existing supported Windows development runner. They bind the
+installed metadata to the tagged merge commit, whose tree must equal the
+qualified candidate. Unix homes and install prefixes are isolated. Windows
+reuses the tagged maintained six-step installer/first-app contract, changing
+only installer selection to the checksum-verified downloaded public script
+(without passing its Archive or Version options), source/helper paths, and the
+evidence destination. The maintained per-user PATH mutex and restoration stay
+intact, with restoration checked before releasing the mutex. These are
+post-publication evidence lanes; they do not change release source or broaden
+Windows beyond its existing development-platform qualification.
+
 The normal harness builds the vendored XCTest runner serially before parallel framework compilation. Its separate XCTest and preload host libraries lack a parallel link dependency; this matches the serial runner preparation used by maintained CI and leaves release source untouched.
 
 The canonical two-run strict Linux gate can also run on the existing native Debian 13 x64 CI runner. It uses the same immutable source, original Debian lock, pinned thread recipe, 1393-method identity/17-skip contract, four server generations, diagnostics/canaries, and actual DSO hashes. Additional ARM64 strict results are retained separately; they do not stand in for normal ARM64 functional qualification.

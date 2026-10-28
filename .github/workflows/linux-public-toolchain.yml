@@ -11,7 +11,7 @@ on:
         description: Qualification lane
         type: choice
         default: strict
-        options: [strict, strict-debian, native-race, normal, public]
+        options: [strict, strict-debian, native-race, normal, public, public-debian, public-macos, public-windows]
 
 permissions:
   contents: read
@@ -265,4 +265,135 @@ jobs:
             ${{ runner.temp }}/v032-public-evidence/actual-public/normal-provenance.json
             ${{ runner.temp }}/v032-public-evidence/actual-public/native-normal-controls
             ${{ runner.temp }}/public-latest.json
+          if-no-files-found: error
+
+  public-debian:
+    if: ${{ inputs.lane == 'public-debian' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - name: Verify complete public latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/danjboyd/Arlen/releases/latest > "$RUNNER_TEMP/public-latest.json"
+          python3 - "$RUNNER_TEMP/public-latest.json" <<'PYCODE'
+          import json,sys
+          r=json.load(open(sys.argv[1]))
+          assert r['tag_name']=='v0.3.2' and not r['draft'] and not r['prerelease']
+          assert {a['name'] for a in r['assets']}=={'arlen-0.3.2.tar.gz','arlen-0.3.2-macos-arm64.tar.gz','arlen-0.3.2-windows-x64.zip','install.sh','install.ps1','SHA256SUMS'}
+          PYCODE
+      - name: Actual public latest on cold Debian 13 amd64
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          mkdir "$RUNNER_TEMP/v032-public-debian"
+          docker pull debian:13
+          docker image inspect debian:13 --format '{{json .RepoDigests}}' > "$RUNNER_TEMP/debian-image-digests.json"
+          docker run --rm --cpus=4 --memory=12g --pids-limit=2048 \
+            -e SOURCE_REF="$SOURCE_REF" \
+            -v "$GITHUB_WORKSPACE/harness/.github/qualification:/harness:ro" \
+            -v "$RUNNER_TEMP/v032-public-debian:/evidence" \
+            debian:13 bash -c '
+              set -euo pipefail
+              test "$(uname -m)" = x86_64
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git sudo python3
+              useradd --create-home --shell /bin/bash arlen
+              echo "arlen ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/arlen
+              chown arlen:arlen /evidence
+              test ! -e /usr/GNUstep
+              sudo -u arlen -H python3 /harness/verify_public_unix.py --expected-version 0.3.2 --expected-source "$SOURCE_REF" --output /evidence/actual-public
+            '
+      - name: Restore owned evidence permissions
+        if: always()
+        run: sudo chown -R --no-dereference "$(id -u):$(id -g)" "$RUNNER_TEMP/v032-public-debian"
+      - name: Preserve public Debian evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v032-public-debian-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-public-debian/actual-public/*.log
+            ${{ runner.temp }}/v032-public-debian/actual-public/summary.json
+            ${{ runner.temp }}/v032-public-debian/actual-public/normal-provenance.json
+            ${{ runner.temp }}/v032-public-debian/actual-public/native-normal-controls
+            ${{ runner.temp }}/public-latest.json
+            ${{ runner.temp }}/debian-image-digests.json
+          if-no-files-found: error
+
+  public-macos:
+    if: ${{ inputs.lane == 'public-macos' }}
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - name: Select full Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      - name: Verify complete public latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/danjboyd/Arlen/releases/latest > "$RUNNER_TEMP/public-latest.json"
+          python3 - "$RUNNER_TEMP/public-latest.json" <<'PYCODE'
+          import json,sys
+          r=json.load(open(sys.argv[1]))
+          assert r['tag_name']=='v0.3.2' and not r['draft'] and not r['prerelease']
+          assert {a['name'] for a in r['assets']}=={'arlen-0.3.2.tar.gz','arlen-0.3.2-macos-arm64.tar.gz','arlen-0.3.2-windows-x64.zip','install.sh','install.ps1','SHA256SUMS'}
+          PYCODE
+      - name: Actual public latest installer and first app
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          python3 harness/.github/qualification/verify_public_unix.py --expected-version 0.3.2 --expected-source "$SOURCE_REF" --output "$RUNNER_TEMP/v032-public-macos"
+      - name: Preserve public macOS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v032-public-macos-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-public-macos/*.log
+            ${{ runner.temp }}/v032-public-macos/summary.json
+            ${{ runner.temp }}/public-latest.json
+          if-no-files-found: error
+
+  public-windows:
+    if: ${{ inputs.lane == 'public-windows' }}
+    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout evidence harness
+        uses: actions/checkout@v4
+        with:
+          path: harness
+      - name: Checkout exact tagged source for maintained installer contract
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+      - name: Verify public latest installer and first app
+        shell: powershell
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          if ($env:SOURCE_REF -notmatch '^[0-9a-f]{40}$') { throw 'Expected immutable source SHA' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File harness\.github\qualification\verify_public_windows.ps1 -SourceRoot source -ExpectedSource $env:SOURCE_REF -OutputDir "$env:RUNNER_TEMP\v032-public-windows-${{ github.run_id }}"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual public Windows acceptance failed' }
+      - name: Preserve public Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v032-public-windows-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/*.json
+            ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/*.ps1
+            ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/maintained-contract
+            ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/work/boomhauer.log*
           if-no-files-found: error
