@@ -24,6 +24,10 @@ OpenAPI docs, a PostgreSQL-first data layer, and realtime WebSocket/SSE. Auth
 with passkeys and OIDC, admin and job dashboards, and a production process
 manager are first-party modules, not plugins you have to vet.
 
+For outbound vendor APIs, the [HTTP client](docs/HTTP_CLIENT.md) supports both
+buffered requests and incremental responses, with cancellation, deadlines,
+host allowlists and byte limits.
+
 <p align="center">
   <img src="docs/images/tech-demo.gif" width="900"
        alt="Arlen tech demo: EOC-rendered pages, route params, implicit JSON, and a live UI table filtering and a keyed feed updating in place">
@@ -79,7 +83,7 @@ The installer checks release checksums, sets up supported prerequisites, and
 adds `arlen` to future shells. The final `export` makes it available in this
 terminal too. Linux setup builds Arlen's pinned patched GNUstep runtime in a
 versioned, fixed prefix using the distribution's ICU and clang. Normal GNUstep
-client builds default to `-O2`, with explicit debug flags retaining control. Ubuntu's lock
+client builds default to `-O2`, with explicit debug flags retaining control. The Ubuntu 26.04 lock
 includes a pinned clang 21 compatibility patch; see
 [manual/offline setup](docs/GETTING_STARTED.md#manual-toolchain-setup).
 `--yes` allows prerequisite installation; Linux may ask for your
@@ -97,7 +101,7 @@ needed and adds `arlen` to the current shell and your user PATH.
 
 | Platform | Installation support |
 |---|---|
-| Linux | Automatic setup on Debian 13 (amd64/arm64) and Ubuntu 26.04 LTS (amd64). Other systems need a manually provisioned clang-built GNUstep toolchain. |
+| Linux | Automatic setup on Debian 13 (amd64/arm64), Ubuntu 24.04 LTS (arm64/aarch64), and Ubuntu 26.04 LTS (amd64). Other systems need a manually provisioned clang-built GNUstep toolchain. |
 | macOS | Apple Silicon, macOS 14 or later; Xcode Command Line Tools and Homebrew at `/opt/homebrew`. Prebuilt tools; full Xcode is needed for `arlen test`. Intel Macs are not supported. |
 | Windows | x64 with PowerShell 5.1; managed MSYS2 CLANG64 toolchain. Native development is supported; deploy production apps to Linux or macOS. |
 

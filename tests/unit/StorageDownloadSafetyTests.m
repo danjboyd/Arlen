@@ -240,6 +240,73 @@
   }
 }
 
+- (void)testLegacyNestedChecksumStreamsAfterImportAndRejectsCorruption {
+  ALNApplication *original = self.app;
+  for (NSString *backend in @[ @"plist", @"sqlite" ]) {
+    NSString *root = ALNTestTemporaryDirectory(@"storage-legacy-checksum");
+    @try {
+      ALNStorageModuleRuntime *seed = [self persistentRuntimeAt:root backend:@"plist"];
+      NSData *body = [@"legacy-data" dataUsingEncoding:NSUTF8StringEncoding];
+      NSError *error = nil;
+      NSDictionary *object = [seed storeObjectInCollection:@"files" name:@"legacy.txt"
+          contentType:@"text/plain" data:body metadata:nil error:&error];
+      XCTAssertNotNil(object, @"%@", error);
+      NSString *statePath = [root stringByAppendingPathComponent:@"state.plist"];
+      NSMutableDictionary *state = [NSPropertyListSerialization propertyListWithData:
+          [NSData dataWithContentsOfFile:statePath] options:NSPropertyListMutableContainersAndLeaves
+          format:NULL error:&error];
+      XCTAssertNotNil(state, @"%@", error);
+      NSMutableDictionary *stored = state[@"objectsByIdentifier"][object[@"objectID"]];
+      NSString *checksum = stored[@"checksumSHA256"];
+      XCTAssertEqual((NSUInteger)64, checksum.length);
+      NSMutableDictionary *analysis = [stored[@"analysis"] mutableCopy] ?: [NSMutableDictionary dictionary];
+      analysis[@"checksumSHA256"] = checksum;
+      stored[@"analysis"] = analysis;
+      [stored removeObjectForKey:@"checksumSHA256"];
+      XCTAssertTrue([state writeToFile:statePath atomically:YES]);
+
+      ALNStorageModuleRuntime *runtime = [self persistentRuntimeAt:root backend:backend];
+      NSString *token = [runtime issueDownloadTokenForObjectID:object[@"objectID"] expiresIn:60 error:&error];
+      XCTAssertNotNil(token, @"%@", error);
+      // The buffered path already reads the legacy field. The streaming path
+      // must verify the same checksum and return those bytes too.
+      XCTAssertEqualObjects(body, [runtime downloadDataForToken:token metadata:NULL error:&error]);
+      NSFileHandle *handle = [runtime openDownloadFileForToken:token metadata:NULL error:&error];
+      XCTAssertNotNil(handle, @"%@: %@", backend, error);
+      XCTAssertEqualObjects(body, [handle readDataToEndOfFile]);
+      [handle closeFile];
+
+      // Reading/importing the legacy record does not backfill or rewrite its
+      // checksum. SQLite and explicit plist installations keep the old shape.
+      NSDictionary *persisted = nil;
+      if ([backend isEqualToString:@"sqlite"]) {
+        ALNStorageCatalog *catalog = [[ALNStorageCatalog alloc] initWithPath:
+            [statePath stringByAppendingString:@".sqlite3"] legacyPath:statePath error:&error];
+        persisted = [catalog readStateWithError:&error];
+      } else {
+        persisted = [NSDictionary dictionaryWithContentsOfFile:statePath];
+      }
+      XCTAssertNotNil(persisted, @"%@", error);
+      NSDictionary *legacy = persisted[@"objectsByIdentifier"][object[@"objectID"]];
+      XCTAssertNil(legacy[@"checksumSHA256"]);
+      XCTAssertEqualObjects(checksum, legacy[@"analysis"][@"checksumSHA256"]);
+
+      NSString *attachment = [[root stringByAppendingPathComponent:@"state-attachments"]
+          stringByAppendingPathComponent:[object[@"attachmentID"] stringByAppendingString:@".bin"]];
+      NSData *corrupt = [@"tamper-data" dataUsingEncoding:NSUTF8StringEncoding];
+      XCTAssertEqual(body.length, corrupt.length);
+      XCTAssertTrue(ALNTestReplaceFilePath(corrupt, attachment));
+      error = nil;
+      XCTAssertNil([runtime openDownloadFileForToken:token metadata:NULL error:&error]);
+      XCTAssertEqual((NSInteger)ALNStorageModuleErrorNotFound, error.code);
+      XCTAssertNil([runtime downloadDataForToken:token metadata:NULL error:NULL]);
+    } @finally {
+      [self restoreApplication:original];
+      [[NSFileManager defaultManager] removeItemAtPath:root error:NULL];
+    }
+  }
+}
+
 - (void)testCatalogWriterExceptionReleasesLocksAndDiscardsUncommittedState {
   ALNApplication *original = self.app;
   NSString *root = ALNTestTemporaryDirectory(@"storage-write-exception");

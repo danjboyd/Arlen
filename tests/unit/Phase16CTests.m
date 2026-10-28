@@ -739,18 +739,22 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
     ALNStorageModuleRuntime *runtime = runtimes[writer];
     dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
       for (NSUInteger idx = 0; idx < perWriter; idx++) {
-        NSError *error = nil;
-        NSString *name = [NSString stringWithFormat:@"w%lu-%lu.txt", (unsigned long)writer, (unsigned long)idx];
-        NSDictionary *object = [runtime storeObjectInCollection:@"plain"
-                                                           name:name
-                                                    contentType:@"text/plain"
-                                                           data:[name dataUsingEncoding:NSUTF8StringEncoding]
-                                                       metadata:nil
-                                                          error:&error];
-        if (object == nil) {
-          [resultsLock lock];
-          [failures addObject:[NSString stringWithFormat:@"%@: %@", name, error.localizedDescription ?: @"?"]];
-          [resultsLock unlock];
+        // Match the server's per-request pool: one writer performs many
+        // requests, rather than retaining every catalog refresh until exit.
+        @autoreleasepool {
+          NSError *error = nil;
+          NSString *name = [NSString stringWithFormat:@"w%lu-%lu.txt", (unsigned long)writer, (unsigned long)idx];
+          NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                             name:name
+                                                      contentType:@"text/plain"
+                                                             data:[name dataUsingEncoding:NSUTF8StringEncoding]
+                                                         metadata:nil
+                                                            error:&error];
+          if (object == nil) {
+            [resultsLock lock];
+            [failures addObject:[NSString stringWithFormat:@"%@: %@", name, error.localizedDescription ?: @"?"]];
+            [resultsLock unlock];
+          }
         }
       }
     });
@@ -1064,6 +1068,132 @@ static NSInteger gPhase16CRemainingVariantFailures = 0;
   XCTAssertNotNil(data, @"%@", serializeError);
   if (data == nil) return;
   XCTAssertTrue([data writeToFile:statePath atomically:YES]);
+}
+
+- (void)testLegacyPlistCanonicalMetadataKeepsSharedContainersAndValues {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                         attachmentAdapter:[self filesystemAdapterAtPath:[tempDir stringByAppendingPathComponent:@"attachments"]]
+                                               persistence:nil];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:runtime withApplication:app]);
+  NSMutableString *name = [NSMutableString stringWithString:@"shared & <value>"];
+  NSDictionary *shared = @{
+    @"name" : name,
+    @"items" : @[ @1, @2 ],
+    @"bytes" : [@"bytes" dataUsingEncoding:NSUTF8StringEncoding],
+  };
+  NSMutableArray *copies = [NSMutableArray arrayWithCapacity:5000];
+  for (NSUInteger index = 0; index < 5000; index++) {
+    [copies addObject:shared];
+  }
+  NSDictionary *metadata = @{ @"shared" : copies, @"κλειδί" : @"value" };
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                     name:@"shared.txt"
+                                              contentType:@"text/plain"
+                                                     data:[@"body" dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:metadata
+                                                    error:&error];
+  XCTAssertNotNil(object, @"%@", error);
+  XCTAssertNil(error);
+  if (object == nil) return;
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  NSDictionary *state = [NSPropertyListSerialization propertyListWithData:[NSData dataWithContentsOfFile:statePath]
+                                                                  options:NSPropertyListImmutable
+                                                                   format:&format
+                                                                    error:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  XCTAssertEqual(NSPropertyListXMLFormat_v1_0, format);
+  NSDictionary *actual = state[@"objectsByIdentifier"][object[@"objectID"]][@"metadata"];
+  XCTAssertEqual((NSUInteger)5000, [actual[@"shared"] count]);
+  XCTAssertTrue([metadata isEqualToDictionary:actual]);
+  ALNStorageModuleRuntime *reopened = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:reopened withApplication:app]);
+  NSDictionary *loaded = [reopened objectRecordForIdentifier:object[@"objectID"] error:&error];
+  XCTAssertNotNil(loaded, @"%@", error);
+  XCTAssertTrue([metadata isEqualToDictionary:loaded[@"metadata"]]);
+}
+
+- (void)testLegacyPlistMetadataNormalizationPreservesValuesAndSharedContainers {
+  NSString *tempDir = [self temporaryDirectory];
+  NSString *statePath = [tempDir stringByAppendingPathComponent:@"storage-state.plist"];
+  ALNApplication *app = [self storageApplicationWithStatePath:statePath
+                                         attachmentAdapter:[self filesystemAdapterAtPath:[tempDir stringByAppendingPathComponent:@"attachments"]]
+                                               persistence:nil];
+  ALNStorageModuleRuntime *runtime = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:runtime withApplication:app]);
+
+  NSData *bytes = [@"metadata bytes" dataUsingEncoding:NSUTF8StringEncoding];
+  NSDate *date = [NSDate dateWithTimeIntervalSince1970:1234567890];
+  NSURL *url = [NSURL URLWithString:@"https://example.test/object"];
+  NSDictionary *shared = @{ @" value " : @[ @1, [NSNull null], bytes, date, url ] };
+  NSDictionary *values = @{
+    @"ascii" : @"kept",
+    @"internal space" : @"kept too",
+    @"\u2003unicode\u2003" : @"trimmed",
+    @"\tcontrol\n" : @"trimmed too",
+    @"" : @"discarded",
+    @"  " : @"discarded too",
+    @42 : @"non-string key discarded",
+    @"first" : shared,
+    @"second" : shared,
+    @"array" : @[ shared, shared ],
+  };
+  NSMutableDictionary *metadata = [NSMutableDictionary dictionary];
+  NSError *error = nil;
+  NSDictionary *object = [runtime storeObjectInCollection:@"plain"
+                                                     name:@"metadata.txt"
+                                              contentType:@"text/plain"
+                                                     data:[@"body" dataUsingEncoding:NSUTF8StringEncoding]
+                                                 metadata:metadata
+                                                    error:&error];
+  XCTAssertNotNil(object, @"%@", error);
+  XCTAssertNil(error);
+  if (object == nil) return;
+
+  // Exercise the catalog writer separately from the attachment adapter's own
+  // metadata serialization. The record retains the caller's metadata container.
+  [metadata addEntriesFromDictionary:values];
+  XCTAssertNotNil([self storeObjectInRuntime:runtime named:@"next.txt" body:@"next"]);
+
+  NSDictionary *expectedValues = @{ @"value" : @[ @1, @"", bytes, date, [url description] ] };
+  // Compare to this platform's Foundation XML round trip, including date parsing.
+  NSData *expectedData = [NSPropertyListSerialization dataWithPropertyList:expectedValues
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:&error];
+  XCTAssertNotNil(expectedData, @"%@", error);
+  NSDictionary *expectedShared = [NSPropertyListSerialization propertyListWithData:expectedData
+                                                                           options:NSPropertyListImmutable
+                                                                            format:NULL
+                                                                             error:&error];
+  XCTAssertNotNil(expectedShared, @"%@", error);
+  NSDictionary *expected = @{
+    @"ascii" : @"kept",
+    @"internal space" : @"kept too",
+    @"unicode" : @"trimmed",
+    @"control" : @"trimmed too",
+    @"first" : expectedShared,
+    @"second" : expectedShared,
+    @"array" : @[ expectedShared, expectedShared ],
+  };
+  NSData *written = [NSData dataWithContentsOfFile:statePath];
+  NSPropertyListFormat format = NSPropertyListOpenStepFormat;
+  NSDictionary *state = [NSPropertyListSerialization propertyListWithData:written
+                                                                  options:NSPropertyListImmutable
+                                                                   format:&format
+                                                                    error:&error];
+  XCTAssertNotNil(state, @"%@", error);
+  XCTAssertEqual(NSPropertyListXMLFormat_v1_0, format);
+  XCTAssertEqualObjects(expected, state[@"objectsByIdentifier"][object[@"objectID"]][@"metadata"]);
+
+  ALNStorageModuleRuntime *reopened = [[ALNStorageModuleRuntime alloc] init];
+  XCTAssertNil([self configureRuntime:reopened withApplication:app]);
+  NSDictionary *loaded = [reopened objectRecordForIdentifier:object[@"objectID"] error:&error];
+  XCTAssertNotNil(loaded, @"%@", error);
+  XCTAssertEqualObjects(expected, loaded[@"metadata"]);
 }
 
 - (void)testLargeCatalogWritesStayWellUnderTheLockTimeout {

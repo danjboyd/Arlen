@@ -64,6 +64,17 @@ before copying it and any journal. Do not restore only the obsolete plist.
 format for unmigrated installations. There is no automatic fallback when SQLite
 is unavailable, and switching a migrated path back to plist is refused.
 
+Storage module 1.4.4 avoids unnecessary normalization copies when a GNUstep
+legacy plist catalog already has valid values and trimmed, nonempty string keys.
+Catalogs needing metadata conversions retain the existing normalization path.
+XML output, private atomic writes, older binary reads, and the Apple serializer's
+container copying are unchanged.
+Streamed downloads also recognize legacy checksums stored only in
+`analysis.checksumSHA256`, matching buffered downloads. This works with explicit
+plist catalogs and imported SQLite catalogs without backfilling stored records.
+Size and checksum verification still reject changed or corrupted attachments.
+Upgrade a vendored storage module with `arlen module upgrade storage`.
+
 Storage module 1.4.3 creates each Windows legacy plist temporary file exclusively
 with a protected DACL granting access only to the current process token user,
 before writing catalog bytes. The handle is not inherited by child processes.

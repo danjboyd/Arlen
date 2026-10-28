@@ -1,5 +1,21 @@
 # Testing Workflow
 
+For outbound HTTP transport changes, run the focused regression suites after
+sourcing `tools/source_gnustep_env.sh` on GNUstep:
+
+```bash
+make test-unit-filter TEST=HTTPClientTests
+make test-unit-filter TEST=HTTPCompatTests
+make test-unit-filter TEST=MetadataTransportTests
+```
+
+The HTTP client suite uses a loopback wire peer and covers buffered calls and
+incremental streaming. Its gated stream cannot finish before a data callback
+runs; other cases cover cancellation during silence, idle/total deadlines,
+redirects, byte limits, partial failures and safe logs. These tests are part of
+the existing Linux, Apple and Windows unit lanes. New test methods also require
+`make update-test-inventory` and a committed inventory update.
+
 This guide describes the fastest path from a bug report to a permanent Arlen
 regression test. For testing your own app, start with
 [App request tests](#app-request-tests).
@@ -640,6 +656,13 @@ bundle against an ASAN+UBSan build, skipping the app-root tests listed in
 like the thread-race lane; see `docs/CI_ALIGNMENT.md`. After adding an
 integration test that builds an app root, run
 `python3 tools/ci/classify_sanitizer_integration_skips.py --write`.
+
+The storage concurrent-writer regressions drain an autorelease pool after each
+write, matching the HTTP server's request lifetime. Keeping every catalog
+refresh alive until a writer's entire loop exits can exhaust the 8 GiB Linux CI
+runner under ASan. Both plist and SQLite still run eight writers with 50 writes
+each, retain every failure, and require all 400 records and attachments within
+the original lock and elapsed-time limits. No sanitizer exclusion is added.
 
 The nightly thread-race lane remains informational. Its library-wide
 suppressions and 14 TSAN-only test returns were retired on 2026-09-21;

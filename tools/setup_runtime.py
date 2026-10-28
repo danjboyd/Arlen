@@ -41,8 +41,8 @@ def target():
     release = platform.freedesktop_os_release()
     arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
     name = f"{release.get('ID')}-{release.get('VERSION_ID')}-{arch}"
-    if name not in ("debian-13-amd64", "debian-13-arm64", "ubuntu-26.04-amd64"):
-        raise ValueError("supported native runtime targets: Debian 13 amd64/arm64, Ubuntu 26.04 amd64")
+    if name not in ("debian-13-amd64", "debian-13-arm64", "ubuntu-24.04-arm64", "ubuntu-26.04-amd64"):
+        raise ValueError("supported native runtime targets: Debian 13 amd64/arm64, Ubuntu 24.04 arm64, Ubuntu 26.04 amd64")
     return name
 
 
@@ -143,13 +143,15 @@ def builder(work):
 
 
 def patch_source(component, patch):
-    # Existing race patches remain single-source in CI. Only the Ubuntu lock
-    # declares the separately pinned clang 21 source-compatibility patch.
+    # Existing race patches remain single-source in CI. Target locks declare
+    # separately pinned compiler and make-query compatibility patches.
     canonical = f"patches/{component['name']}/{component['name']}.patch"
     if patch["path"] == canonical:
         return ROOT / "tools/ci/tsan-toolchain" / (component["name"] + ".patch")
     if component["name"] == "libdispatch" and patch["path"] == "patches/libdispatch/libdispatch-clang21.patch":
         return ROOT / "tools/runtime/patches/libdispatch-clang21.patch"
+    if component["name"] == "tools-make" and patch["path"] == "patches/tools-make/gnustep-config-make43.patch":
+        return ROOT / "tools/runtime/patches/gnustep-config-make43.patch"
     raise ValueError(f"unsupported runtime patch path: {patch['path']}")
 
 

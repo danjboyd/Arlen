@@ -76,12 +76,15 @@ Options:
 - `--no-modify-path`: do not edit shell startup files
 - `--yes`: consent to prerequisite installation without an interactive prompt
 
-On Debian 13 (amd64/arm64) and Ubuntu 26.04 (amd64), setup installs native
+On Debian 13 (amd64/arm64), Ubuntu 24.04 (arm64/aarch64), and
+Ubuntu 26.04 (amd64), setup installs native
 build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
 patched normal GNUstep runtime using the checksum-pinned custom builder.
 Each target has a lock under `tools/runtime/`, sharing the same component
-pins, compiler flags and three race-patch digests. Ubuntu adds one pinned
-clang 21 epoll-mask compatibility patch. Builds use the host's ICU and
+pins, compiler flags and three race-patch digests. Ubuntu 26.04 adds one pinned
+clang 21 epoll-mask compatibility patch. Ubuntu 24.04 adds a scoped
+`gnustep-config` compatibility patch for GNU Make 4.3; global make flags and
+explicit client compiler flags are preserved. Builds use the host's ICU and
 clang and at most four jobs. Existing matching runtimes are verified and reused. The normal
 locks set `CFLAGS=-O2` and empty `OBJCFLAGS` for tools-make and Base, supplying
 normal C/ObjC optimization through GNUstep's `OPTFLAG` while preserving debug
@@ -1852,6 +1855,12 @@ Invalid limits fail configuration loading with the offending key in the error.
 
 ## HTTP and data client contracts
 
+`ALNHTTPClient` supports opt-in incremental response delivery. Its
+`idleTimeoutSeconds` and `streamingTimeoutSeconds` settings apply only to
+streaming calls; buffered calls retain `timeoutSeconds`. Cancellation, callback
+ordering and partial failures are documented in
+[Outbound HTTP client](HTTP_CLIENT.md#incremental-response-delivery).
+
 Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
 redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
 The existing synchronous helper defaults remain unchanged. The result API uses
@@ -1964,6 +1973,9 @@ Storage 1.4.2 refuses cached object reads and downloads after a catalog reload
 fails; repairing the catalog permits a later successful reload. Backend
 exceptions release writer locks and force a reload of persisted state. Upgrade
 vendored storage modules with `arlen module upgrade`.
+Storage 1.4.4 reads legacy nested checksums for streamed downloads without
+backfilling imported records; attachment verification still applies. Upgrade the
+vendored module to receive this correction; see [Storage Module](STORAGE_MODULE.md).
 
 Normal-response allocation-error fallbacks use the configured response send
 budget and close the connection after the fallback 500 response.

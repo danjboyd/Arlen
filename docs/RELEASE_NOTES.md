@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.3.2 — 2026-10-27
+
+This release includes the opt-in streaming API as a maintainer-approved pre-1.0
+exception to the usual minor-release policy for additive features. Existing
+buffered client behavior and defaults remain compatible.
+
+- Add automatic Linux runtime setup for Ubuntu 24.04 LTS on arm64 (aarch64),
+  using a distinct native runtime lock and the distribution's ICU and clang.
+  The public installer CI adds this native target while retaining Debian 13
+  amd64/arm64 and Ubuntu 26.04 amd64 coverage.
+- Fix GNU Make 4.3 directory-message contamination of `gnustep-config`
+  output on Ubuntu 24.04. The target-specific query patch preserves other
+  make options, debug filtering, and explicit application compiler flags.
+- Drain HTTP workers and the idle connection watcher before server return and
+  application teardown, including native thread-local cleanup. This prevents
+  process-wide OpenSSL cleanup racing an in-flight request during shutdown.
+- Storage 1.4.4 avoids unnecessary normalization copies for already compatible
+  GNUstep legacy plist catalogs, preserving XML, metadata conversions, and older
+  binary reads.
+  Streamed downloads also use the legacy nested checksum when the top-level
+  field is absent, fixing upgrade-time download failures without catalog
+  backfilling or relaxing attachment verification.
+  Upgrade vendored copies with `arlen module upgrade storage`.
+- Preserve the v0.3.1 runtime component revisions, race patches, normal `-O2`
+  defaults, explicit application compiler flags, and existing release gates.
+  See [Getting Started](GETTING_STARTED.md#manual-toolchain-setup) and the
+  [Known Risk Register](KNOWN_RISK_REGISTER.md).
+
+- `ALNHTTPClient` adds opt-in incremental responses through
+  `streamRequest:cancellation:onResponse:onData:error:`. Serial callbacks run
+  on the calling worker without buffering the body. A thread-safe token cancels
+  silent streams; separate idle/total deadlines and a cumulative byte limit
+  bound the operation. Buffered calls retain their existing behavior. The SSE
+  reader remains deferred. See [Outbound HTTP client](HTTP_CLIENT.md).
+
 ## 0.3.1 — 2026-10-22
 
 This patch release corrects authorization, request handling, persistence and

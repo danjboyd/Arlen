@@ -1,5 +1,6 @@
 """Loopback wire-level metadata regression peer; no external network required."""
 import json
+import os
 import socketserver
 import time
 import ssl
@@ -9,6 +10,7 @@ import tempfile
 
 
 TRACE = sys.argv[sys.argv.index("--trace") + 1] if "--trace" in sys.argv else None
+GATE = sys.argv[sys.argv.index("--gate") + 1] if "--gate" in sys.argv else None
 
 
 def request_host(request):
@@ -49,6 +51,41 @@ class Peer(socketserver.BaseRequestHandler):
                 time.sleep(3)
                 return
             headers = b"HTTP/1.1 200 OK\r\nConnection: close\r\n"
+            if path == b"/stream-gated":
+                self.request.sendall(headers + b"Content-Type: text/event-stream\r\n"
+                                     b"Content-Length: 27\r\n\r\ndata: first\n\n")
+                deadline = time.monotonic() + 5
+                while not (GATE and os.path.exists(GATE)):
+                    if time.monotonic() >= deadline:
+                        return
+                    time.sleep(0.01)
+                self.request.sendall(b"data: second\n\n")
+                return
+            if path in (b"/stream-stall", b"/stream-broken"):
+                self.request.sendall(headers + b"Content-Length: 100\r\n\r\nabc")
+                if path == b"/stream-stall":
+                    time.sleep(5)
+                return
+            if path == b"/stream-heartbeat":
+                self.request.sendall(headers + b"Content-Length: 12\r\n\r\n")
+                for _ in range(12):
+                    self.request.sendall(b"x")
+                    time.sleep(0.25)
+                return
+            if path == b"/stream-trailers":
+                self.request.sendall(headers + b"Transfer-Encoding: chunked\r\n\r\n"
+                                     b"2\r\n{}\r\n0\r\nX-Trailer: hidden\r\n\r\n")
+                return
+            if path == b"/stream-lf":
+                self.request.sendall(b"HTTP/1.1 200 OK\nConnection: close\nContent-Length: 2\n\n{}")
+                return
+            if path.startswith(b"/stream-slow-redirect/"):
+                hops = int(path.rsplit(b"/", 1)[1])
+                time.sleep(0.6)
+                location = b"/stream-slow-redirect/%d" % (hops - 1) if hops else b"/ok"
+                self.request.sendall(b"HTTP/1.1 302 Found\r\nConnection: close\r\nLocation: "
+                                     + location + b"\r\nContent-Length: 0\r\n\r\n")
+                return
             if path.startswith((b"/budget/", b"/absolute-budget/")):
                 hops = int(path.rsplit(b"/", 1)[1])
                 prefix = path.rsplit(b"/", 1)[0]

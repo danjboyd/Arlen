@@ -16,8 +16,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix='arlen-deploy-secret-mode-') as directory:
         workspace = Path(directory)
         probe = workspace / 'mode-probe.so'
-        subprocess.run(['clang', '-shared', '-fPIC', str(source), '-o', str(probe)],
-                       check=True, capture_output=True)
+        compiled = subprocess.run(['clang', '-shared', '-fPIC', str(source), '-o', str(probe)],
+                                  capture_output=True, text=True)
+        if compiled.returncode:
+            sys.stderr.write(compiled.stderr)
+        compiled.check_returncode()
         for deny in (False, True):
             root = workspace / ('denied' if deny else 'allowed')
             app = root / 'app'

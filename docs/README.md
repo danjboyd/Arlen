@@ -27,8 +27,10 @@ Before running repo-local build/test/doc commands, source
 toolchain env directly for the Linux/GNUstep path. On macOS, use
 `GETTING_STARTED_MACOS.md`; on Windows, use `GETTING_STARTED_WINDOWS.md`.
 
-Linux releases use a pinned patched GNUstep runtime built at a fixed prefix,
-with normal `-O2` client defaults and GNUstep debug controls.
+Linux releases support automatic runtime setup on Debian 13 amd64/arm64,
+Ubuntu 24.04 arm64 (aarch64), and Ubuntu 26.04 amd64. They use a pinned patched
+GNUstep runtime built at a fixed prefix, with normal `-O2` client defaults
+and GNUstep debug controls.
 See [runtime setup and manual installation](GETTING_STARTED.md#manual-toolchain-setup)
 for setup, offline selection, and service deployment requirements.
 
@@ -50,7 +52,7 @@ for setup, offline selection, and service deployment requirements.
 
 - [App Authoring Guide](APP_AUTHORING_GUIDE.md): routes, controllers, middleware, and route metadata.
 - [Response Headers and Multiple Cookies](RESPONSE_HEADERS.md): repeated headers, session coexistence, and cookie expiration.
-- [Synchronous HTTP client](HTTP_CLIENT.md): `ALNHTTPClient` for third-party APIs (host allowlist, deadline, size limit, safe redirects and logging), received reason phrases, redirect budgets, transport errors, and platform behavior.
+- [Outbound HTTP client](HTTP_CLIENT.md): buffered requests and incremental delivery, cancellation, idle/total deadlines, host allowlists, byte limits, safe redirects, logging, and platform behavior.
 - [Core Concepts](CORE_CONCEPTS.md): runtime architecture and request lifecycle.
 - [Getting Started: API-First Track](GETTING_STARTED_API_FIRST.md): JSON APIs, schema/auth contracts, and OpenAPI.
 - [Getting Started: HTML-First Track](GETTING_STARTED_HTML_FIRST.md): server-rendered EOC templates, layouts, and forms.

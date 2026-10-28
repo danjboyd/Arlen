@@ -27,6 +27,11 @@ Data-layer release details live in `docs/ARLEN_DATA.md`.
 While Arlen is on `0.x`, minor releases may still change public API; such
 changes are called out in the release notes with migration guidance.
 
+Maintainer-approved exception for `0.3.2`: the opt-in outbound HTTP streaming API
+ships alongside its runtime/platform updates as a scoped, compatible addition.
+Existing buffered APIs and defaults retain their contracts. This pre-1.0
+exception does not change the general versioning policy or release gates.
+
 The framework version lives in `ALNModuleSystemFrameworkVersion`
 (`src/Arlen/Core/ALNModuleSystem.m`). It always names the latest released
 version: bump it only in the release commit, never between releases.
@@ -242,10 +247,10 @@ coverage. No additional branch-protection check name is needed for this step.
 
 ### Linux patched runtime delivery qualification
 
-Source archives ship `tools/setup_runtime.py`, all three target locks and the
+Source archives ship `tools/setup_runtime.py`, all four target locks and the
 three checked race patches and Ubuntu's pinned clang 21 compatibility patch. They fetch the SHA256-pinned existing custom
 builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
-Ubuntu 26.04 amd64 install/app/concurrency evidence from
+Ubuntu 24.04 arm64 and Ubuntu 26.04 amd64 install/app/concurrency evidence from
 `linux-public-toolchain` before release. The runtime is compiled at its final
 versioned prefix; the framework install stage may move, the runtime may not.
 The Linux archive smoke also runs the generated app's request tests
