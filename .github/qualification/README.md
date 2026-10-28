@@ -17,6 +17,13 @@ intact, with restoration checked before releasing the mutex. These are
 post-publication evidence lanes; they do not change release source or broaden
 Windows beyond its existing development-platform qualification.
 
+`public-windows-hosted` runs that same public installer contract on a fresh
+Windows Server 2022 hosted VM, initially without the managed toolchain. The
+unchanged public installer must provision its pinned CLANG64 dependency through
+the normal TLS/checksum path. The original self-hosted public attempt is
+retained if its release-download connection fails; a hosted result does not
+claim to repair that host's network route. No proxy or TLS bypass is added.
+
 The normal harness builds the vendored XCTest runner serially before parallel framework compilation. Its separate XCTest and preload host libraries lack a parallel link dependency; this matches the serial runner preparation used by maintained CI and leaves release source untouched.
 
 The canonical two-run strict Linux gate can also run on the existing native Debian 13 x64 CI runner. It uses the same immutable source, original Debian lock, pinned thread recipe, 1393-method identity/17-skip contract, four server generations, diagnostics/canaries, and actual DSO hashes. Additional ARM64 strict results are retained separately; they do not stand in for normal ARM64 functional qualification.

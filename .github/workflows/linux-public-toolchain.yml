@@ -11,7 +11,7 @@ on:
         description: Qualification lane
         type: choice
         default: strict
-        options: [strict, strict-debian, native-race, normal, public, public-debian, public-macos, public-windows]
+        options: [strict, strict-debian, native-race, normal, public, public-debian, public-macos, public-windows, public-windows-hosted]
 
 permissions:
   contents: read
@@ -365,8 +365,8 @@ jobs:
           if-no-files-found: error
 
   public-windows:
-    if: ${{ inputs.lane == 'public-windows' }}
-    runs-on: [self-hosted, Windows, X64, arlen, msys2-clang64]
+    if: ${{ inputs.lane == 'public-windows' || inputs.lane == 'public-windows-hosted' }}
+    runs-on: ${{ inputs.lane == 'public-windows-hosted' && 'windows-2022' || fromJSON('["self-hosted","Windows","X64","arlen","msys2-clang64"]') }}
     timeout-minutes: 60
     steps:
       - name: Checkout evidence harness
@@ -378,6 +378,15 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           path: source
+      - name: Record cold supported Windows host
+        if: ${{ inputs.lane == 'public-windows-hosted' }}
+        shell: powershell
+        run: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $managed = Test-Path (Join-Path $env:LOCALAPPDATA 'gnustep-cli\usr\bin\env.exe')
+          if ($managed) { throw 'Expected a cold host without the managed toolchain' }
+          $info = @{ os = $os.Caption; version = $os.Version; machine = $env:PROCESSOR_ARCHITECTURE; managed_toolchain_present = $managed; setup = 'Default public Arlen installer must provision its checksum-pinned CLANG64 toolchain' }
+          [IO.File]::WriteAllText("$env:RUNNER_TEMP\public-windows-host.json", ($info | ConvertTo-Json))
       - name: Verify public latest installer and first app
         shell: powershell
         env:
@@ -396,4 +405,5 @@ jobs:
             ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/*.ps1
             ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/maintained-contract
             ${{ runner.temp }}/v032-public-windows-${{ github.run_id }}/work/boomhauer.log*
+            ${{ runner.temp }}/public-windows-host.json
           if-no-files-found: error
