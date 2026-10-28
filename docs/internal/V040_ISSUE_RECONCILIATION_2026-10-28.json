@@ -1,0 +1,1294 @@
+{
+  "snapshot_date": "2026-10-28",
+  "base_commit": "e26a755e0c250ec972c99eca9fb51a4259d48307",
+  "base_tree": "f3b303f828870e51cda529dc36459fcdb365e587",
+  "qualified_source": "499214fa009650b9911ba6745a9d93653d6156ad",
+  "qualified_tree_matches_base": true,
+  "method": "Source/issue reconciliation and retained-evidence extraction only; no new full audit or benchmarks. Issue states unchanged.",
+  "reports": {
+    "normal/ArlenUnitTests": {
+      "run": 40601266486,
+      "qualified_source": "499214fa009650b9911ba6745a9d93653d6156ad",
+      "artifact_relative_path": "artifacts/run-40601266486/v032-native-arm64-normal-40601266486/v032-native-normal-evidence/xctest-results/ArlenUnitTests.xml",
+      "sha256": "1fcbd867bc461b176dcce2cdf59513d1e6283eb589dc48e2b00d9ecf477a915a",
+      "suite_attributes": {
+        "name": "ArlenUnitTests.xctest",
+        "tests": "1393",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "15",
+        "time": "188.996"
+      },
+      "selected_methods": {
+        "Phase7DTests/testFileJobsCoordinateConcurrentProcesses": "passed",
+        "Phase7DTests/testFileJobsPreserveJobsDuringInterleavedProcessTransactions": "passed",
+        "Phase16ATests/testJobsOperatorStateTransactionsAcrossProcesses": "passed",
+        "Phase16BTests/testNotificationStateTransactionsAcrossProcesses": "passed",
+        "Phase16DTests/testSearchStateTransactionsAcrossProcesses": "passed",
+        "Phase16ETests/testOpsStateTransactionsAcrossProcesses": "passed",
+        "Phase7DTests/testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite": "passed",
+        "Phase7DTests/testDefaultMailRetainsOnlyLastHundredDeliveries": "passed",
+        "ApplicationTests/testMultiWorkerRateLimitFailsBeforeStartup": "passed",
+        "ConfigTests/testRateLimitStartupUsesDefaultWorkersAndEnvironmentOverrides": "passed",
+        "ResponseTests/testSerializedHeaderBytesAreExact_Issue245": "passed",
+        "ResponseTests/testPreparedHeadersPreserveValidationSnapshotsOrderingAndOverrides": "passed",
+        "MiddlewareTests/testSecurityHeaderSubclassRetainsValidatedDynamicOverrides": "passed",
+        "LoggerTests/testShouldLogLevelRespectsMinimumLevel": "passed",
+        "LoggerTests/testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033": "passed",
+        "LoggerTests/testTextLoggerEscapesControlCharactersInFields": "passed",
+        "ApplicationTests/testOperabilityEndpointsAreDisabledInProductionUntilAccessIsConfigured": "passed",
+        "ApplicationTests/testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted": "passed",
+        "ApplicationTests/testOpenAPIRouteCatalogRequiresExplicitProductionOptIn": "passed",
+        "MCPModuleTests/testToolsListOnlyShowsToolsTheCallerMayCall": "passed",
+        "MCPModuleTests/testToolsListUsesAssuranceAgeAndRoutePoliciesWithoutRunningTools": "passed",
+        "Phase13ETests/testBearerLinksStoreOnlyTokenDigests": "passed",
+        "Phase13ETests/testPasswordResetTokenIsSingleUseAndRetiresOlderTokens": "passed",
+        "Phase13ETests/testPasswordChangeRetiresOutstandingResetTokens": "passed",
+        "Phase13FTests/testUnknownEmailLoginStillVerifiesADummyPasswordHash": "passed",
+        "Phase13ETests/testRegistrationDoesNotRevealExistingAddressOrStartSessionByDefault": "passed",
+        "Phase13ETests/testDurableAuthMailQueuesBeforeSendingAndKeepsUnknownAddressesGeneric": "passed",
+        "Phase13ETests/testDurableAuthMailQueueFailureRollsBackRegistrationAndKeepsResetResponsesGeneric": "passed",
+        "Phase13ETests/testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest": "passed",
+        "AuthMFALimitsTests/testTOTPLocksAfterRepeatedFailuresAndResetsOnSuccess": "passed",
+        "Phase27SearchTests/testPostgresAutocompleteTreatsLikeWildcardsLiterally": "passed"
+      }
+    },
+    "normal/ArlenIntegrationTests": {
+      "run": 40601266486,
+      "qualified_source": "499214fa009650b9911ba6745a9d93653d6156ad",
+      "artifact_relative_path": "artifacts/run-40601266486/v032-native-arm64-normal-40601266486/v032-native-normal-evidence/xctest-results/ArlenIntegrationTests.xml",
+      "sha256": "f489d25bcc5f1d6ecbffc1ab11b1b15d2633b1f424a131af3b4f07a15f5bc1ce",
+      "suite_attributes": {
+        "name": "ArlenIntegrationTests.xctest",
+        "tests": "266",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "2",
+        "time": "1287.264"
+      },
+      "selected_methods": {
+        "DeploymentIntegrationTests/testArlenGeneratePluginPresetsCreateServiceTemplates": "passed",
+        "DeploymentIntegrationTests/testBuiltDoctorReportsProductionMultiWorkerState": "passed",
+        "HTTPIntegrationTests/testPropaneRejectsMultiWorkerRateLimiterBeforeLaunchingWorkers": "passed",
+        "HTTPIntegrationTests/testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends": "passed",
+        "DeploymentIntegrationTests/testReleaseBuildActivateAndRollbackScripts": "passed",
+        "DeploymentIntegrationTests/testReleaseSmokeScriptValidatesDeployRunbook_ARLEN_BUG_019": "passed",
+        "Phase13AuthAdminIntegrationTests/testAuthModuleSupportsSMSFactorManagementAndKeepsTOTPPreferred": "passed",
+        "Phase14NotificationsIntegrationTests/testInboxRendersOnlySafeDeepLinksAndPaginates": "passed"
+      }
+    },
+    "strict1/ArlenUnitTests": {
+      "run": 40601263147,
+      "qualified_source": "499214fa009650b9911ba6745a9d93653d6156ad",
+      "artifact_relative_path": "artifacts/run-40601263147/v032-native-debian-strict-40601263147/v032-native-evidence/run-1/xctest-results/ArlenUnitTests.xml",
+      "sha256": "ecc5119d8f4abddcf276be0d7324c741fbbaf2330b7bb0041f535292c9389228",
+      "suite_attributes": {
+        "name": "ArlenUnitTests.xctest",
+        "tests": "1393",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "17",
+        "time": "442.687"
+      },
+      "selected_methods": {
+        "Phase7DTests/testFileJobsCoordinateConcurrentProcesses": "passed",
+        "Phase7DTests/testFileJobsPreserveJobsDuringInterleavedProcessTransactions": "passed",
+        "Phase16ATests/testJobsOperatorStateTransactionsAcrossProcesses": "passed",
+        "Phase16BTests/testNotificationStateTransactionsAcrossProcesses": "passed",
+        "Phase16DTests/testSearchStateTransactionsAcrossProcesses": "passed",
+        "Phase16ETests/testOpsStateTransactionsAcrossProcesses": "passed",
+        "Phase7DTests/testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite": "passed",
+        "Phase7DTests/testDefaultMailRetainsOnlyLastHundredDeliveries": "passed",
+        "ApplicationTests/testMultiWorkerRateLimitFailsBeforeStartup": "passed",
+        "ConfigTests/testRateLimitStartupUsesDefaultWorkersAndEnvironmentOverrides": "passed",
+        "ResponseTests/testSerializedHeaderBytesAreExact_Issue245": "passed",
+        "ResponseTests/testPreparedHeadersPreserveValidationSnapshotsOrderingAndOverrides": "passed",
+        "MiddlewareTests/testSecurityHeaderSubclassRetainsValidatedDynamicOverrides": "passed",
+        "LoggerTests/testShouldLogLevelRespectsMinimumLevel": "passed",
+        "LoggerTests/testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033": "passed",
+        "LoggerTests/testTextLoggerEscapesControlCharactersInFields": "passed",
+        "ApplicationTests/testOperabilityEndpointsAreDisabledInProductionUntilAccessIsConfigured": "passed",
+        "ApplicationTests/testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted": "passed",
+        "ApplicationTests/testOpenAPIRouteCatalogRequiresExplicitProductionOptIn": "passed",
+        "MCPModuleTests/testToolsListOnlyShowsToolsTheCallerMayCall": "passed",
+        "MCPModuleTests/testToolsListUsesAssuranceAgeAndRoutePoliciesWithoutRunningTools": "passed",
+        "Phase13ETests/testBearerLinksStoreOnlyTokenDigests": "passed",
+        "Phase13ETests/testPasswordResetTokenIsSingleUseAndRetiresOlderTokens": "passed",
+        "Phase13ETests/testPasswordChangeRetiresOutstandingResetTokens": "passed",
+        "Phase13FTests/testUnknownEmailLoginStillVerifiesADummyPasswordHash": "passed",
+        "Phase13ETests/testRegistrationDoesNotRevealExistingAddressOrStartSessionByDefault": "passed",
+        "Phase13ETests/testDurableAuthMailQueuesBeforeSendingAndKeepsUnknownAddressesGeneric": "passed",
+        "Phase13ETests/testDurableAuthMailQueueFailureRollsBackRegistrationAndKeepsResetResponsesGeneric": "passed",
+        "Phase13ETests/testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest": "passed",
+        "AuthMFALimitsTests/testTOTPLocksAfterRepeatedFailuresAndResetsOnSuccess": "passed",
+        "Phase27SearchTests/testPostgresAutocompleteTreatsLikeWildcardsLiterally": "passed"
+      }
+    },
+    "strict2/ArlenUnitTests": {
+      "run": 40601263147,
+      "qualified_source": "499214fa009650b9911ba6745a9d93653d6156ad",
+      "artifact_relative_path": "artifacts/run-40601263147/v032-native-debian-strict-40601263147/v032-native-evidence/run-2/xctest-results/ArlenUnitTests.xml",
+      "sha256": "22ab26290458193e664c2be3a04d87fb7949b91dfb5d5c36b21e649b62bfc17e",
+      "suite_attributes": {
+        "name": "ArlenUnitTests.xctest",
+        "tests": "1393",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "17",
+        "time": "449.408"
+      },
+      "selected_methods": {
+        "Phase7DTests/testFileJobsCoordinateConcurrentProcesses": "passed",
+        "Phase7DTests/testFileJobsPreserveJobsDuringInterleavedProcessTransactions": "passed",
+        "Phase16ATests/testJobsOperatorStateTransactionsAcrossProcesses": "passed",
+        "Phase16BTests/testNotificationStateTransactionsAcrossProcesses": "passed",
+        "Phase16DTests/testSearchStateTransactionsAcrossProcesses": "passed",
+        "Phase16ETests/testOpsStateTransactionsAcrossProcesses": "passed",
+        "Phase7DTests/testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite": "passed",
+        "Phase7DTests/testDefaultMailRetainsOnlyLastHundredDeliveries": "passed",
+        "ApplicationTests/testMultiWorkerRateLimitFailsBeforeStartup": "passed",
+        "ConfigTests/testRateLimitStartupUsesDefaultWorkersAndEnvironmentOverrides": "passed",
+        "ResponseTests/testSerializedHeaderBytesAreExact_Issue245": "passed",
+        "ResponseTests/testPreparedHeadersPreserveValidationSnapshotsOrderingAndOverrides": "passed",
+        "MiddlewareTests/testSecurityHeaderSubclassRetainsValidatedDynamicOverrides": "passed",
+        "LoggerTests/testShouldLogLevelRespectsMinimumLevel": "passed",
+        "LoggerTests/testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033": "passed",
+        "LoggerTests/testTextLoggerEscapesControlCharactersInFields": "passed",
+        "ApplicationTests/testOperabilityEndpointsAreDisabledInProductionUntilAccessIsConfigured": "passed",
+        "ApplicationTests/testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted": "passed",
+        "ApplicationTests/testOpenAPIRouteCatalogRequiresExplicitProductionOptIn": "passed",
+        "MCPModuleTests/testToolsListOnlyShowsToolsTheCallerMayCall": "passed",
+        "MCPModuleTests/testToolsListUsesAssuranceAgeAndRoutePoliciesWithoutRunningTools": "passed",
+        "Phase13ETests/testBearerLinksStoreOnlyTokenDigests": "passed",
+        "Phase13ETests/testPasswordResetTokenIsSingleUseAndRetiresOlderTokens": "passed",
+        "Phase13ETests/testPasswordChangeRetiresOutstandingResetTokens": "passed",
+        "Phase13FTests/testUnknownEmailLoginStillVerifiesADummyPasswordHash": "passed",
+        "Phase13ETests/testRegistrationDoesNotRevealExistingAddressOrStartSessionByDefault": "passed",
+        "Phase13ETests/testDurableAuthMailQueuesBeforeSendingAndKeepsUnknownAddressesGeneric": "passed",
+        "Phase13ETests/testDurableAuthMailQueueFailureRollsBackRegistrationAndKeepsResetResponsesGeneric": "passed",
+        "Phase13ETests/testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest": "passed",
+        "AuthMFALimitsTests/testTOTPLocksAfterRepeatedFailuresAndResetsOnSuccess": "passed",
+        "Phase27SearchTests/testPostgresAutocompleteTreatsLikeWildcardsLiterally": "passed"
+      }
+    }
+  },
+  "windows_regression": {
+    "run": 40601183776,
+    "ci_commit": "700e27861cd9328f3fa1fdd0be669e53badd8818",
+    "tree": "f3b303f828870e51cda529dc36459fcdb365e587",
+    "archive_sha256": "016958bf82b8ed5b63a0ce80580e99f2d6ad48f35de06ca356edd78a16fe2e87",
+    "method": "Phase24WindowsRuntimeParityTests/testBoomhauerWatchChildrenExitAfterForceKill",
+    "result": "passed; class summary4testsPASSED",
+    "scope": "Existing native Windows CI log; no rerun. Interactive Ctrl+C not newly validated."
+  },
+  "records": [
+    {
+      "issue": "275",
+      "status": "fixed",
+      "title": "Windows watch children after force-kill",
+      "assessment": "Windows watch launches now use a native helper instead of the MSYS2 setsid branch. The helper owns a kill-on-close Windows Job Object, launches the server suspended, assigns it before resuming, and waits for the exact parent process. Both app and build-error servers use this path.",
+      "sources": [
+        {
+          "path": "bin/boomhauer",
+          "line": 1283,
+          "sha256": "876e51cdd3cd03af5eedc298ce4a697f7c3aa2390bad8fe43c2228a626e9a047",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/bin/boomhauer#L1283"
+        },
+        {
+          "path": "tools/ALNWindowsWatchChild.h",
+          "line": 25,
+          "sha256": "5f452a8f09dbbbfdb63dfe82fd9e28dd2a94d32e710065389e8278bc17960957",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/ALNWindowsWatchChild.h#L25"
+        },
+        {
+          "path": "tools/boomhauer.m",
+          "line": 2158,
+          "sha256": "4ac0fa3d44253ddbc67865a119d46800a84bd7b2c73ccf69b4363243b9fa1682",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/boomhauer.m#L2158"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/phase24/Phase24WindowsRuntimeParityTests.m",
+          "line": 278,
+          "sha256": "9c9df859437fdc8a53c0e844bc2d04afc2cc2c1a070e350a9e30f43b17f086c6",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/phase24/Phase24WindowsRuntimeParityTests.m#L278",
+          "method": "testBoomhauerWatchChildrenExitAfterForceKill"
+        }
+      ],
+      "proposal": "Propose closing #275 for the reported force-kill orphan/port leak: both native watch-child modes have a passing Windows lifetime regression on the released tree. Keep interactive console Ctrl+C behavior and broader Windows production supervision with the Windows owner; this proposal does not certify those separate contracts.",
+      "limit": "Windows preview run 40601183776 logs this named regression, followed by all four runtime-parity tests passing. Its synthetic merge 700e27861cd9328f3fa1fdd0be669e53badd8818 has the same tree as main. No Windows fixture/design changes or new native tests were made here."
+    },
+    {
+      "issue": "282",
+      "status": "fixed",
+      "title": "File-backed queue duplication, lost updates and shared default path",
+      "assessment": "ALNFileJobAdapter takes an exclusive sibling .lock around reload/mutate/persist operations, including initialization and leases. The queue-jobs generator uses `<app-root>/var/jobs/state.plist` instead of a shared temporary directory and fails registration if initialization fails. Generated timers can still run in multiple HTTP workers because queue claims now coordinate.",
+      "sources": [
+        {
+          "path": "src/Arlen/Support/ALNServices.m",
+          "line": 1210,
+          "sha256": "f847b9d1049699d727c81c38342ba28930b0818d2d4a4be4fceabbad920f2220",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNServices.m#L1210"
+        },
+        {
+          "path": "tools/arlen.m",
+          "line": 4600,
+          "sha256": "5b2ab87fb809525bc9309bc02483eee64a79b4f15d53246305adca84cecdf6d1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/arlen.m#L4600"
+        },
+        {
+          "path": "docs/PLUGIN_SERVICE_GUIDE.md",
+          "line": 23,
+          "sha256": "96c87b510bbc3acb11b1b72ffd3aaa056efb177b4ae9e9295880f5f9d7ef4f33",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/PLUGIN_SERVICE_GUIDE.md#L23"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase7DTests.m",
+          "line": 217,
+          "sha256": "7da56a791d88d2aa16a94015c93b0198b74402019123b716d5197186cc2c7785",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase7DTests.m#L217",
+          "method": "testFileJobsCoordinateConcurrentProcesses",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase7DTests.m",
+          "line": 264,
+          "sha256": "7da56a791d88d2aa16a94015c93b0198b74402019123b716d5197186cc2c7785",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase7DTests.m#L264",
+          "method": "testFileJobsPreserveJobsDuringInterleavedProcessTransactions",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/integration/DeploymentIntegrationTests.m",
+          "line": 735,
+          "sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/DeploymentIntegrationTests.m#L735",
+          "method": "testArlenGeneratePluginPresetsCreateServiceTemplates",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose closing #282 for concurrent file-queue duplicate leasing/lost enqueues and the cross-app default-path collision. The retained regressions cover independent producers/consumers and interleaved transactions. Use PostgreSQL/dedicated jobs workers when crashed-lease recovery is required.",
+      "limit": "The file adapter still has no crashed-worker lease recovery or exactly-once side-effect guarantee. Moving every generated timer to a dedicated worker is an architectural option, not a prerequisite for the specific locking fix. Existing generated apps must regenerate or adopt the new template."
+    },
+    {
+      "issue": "251",
+      "status": "partial",
+      "title": "Shared module state and doctor warning",
+      "assessment": "The reported notification preference/inbox lost updates are addressed by authoritative shared state and SQLite catalog transactions. Jobs operator state, search module state and ops history use cross-process reload/mutate/commit paths. Both doctor entrypoints now require state.durable=YES or one worker; a database URL alone no longer silences the warning. The default pending-job adapter remains ALNInMemoryJobAdapter, so pending jobs are still process-local until an application selects a shared adapter.",
+      "sources": [
+        {
+          "path": "modules/notifications/Sources/ALNNotificationsModule.m",
+          "line": 1212,
+          "sha256": "a21d00d14c680d8ec6d680b9b5883dd9ac718bb668988a04a9182661994f792b",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/notifications/Sources/ALNNotificationsModule.m#L1212"
+        },
+        {
+          "path": "modules/jobs/Sources/ALNJobsModule.m",
+          "line": 635,
+          "sha256": "4ca5911e1e29ec0331233c7675baad7ff61778b172ec31c192ad371bc87f805b",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/jobs/Sources/ALNJobsModule.m#L635"
+        },
+        {
+          "path": "modules/search/Sources/ALNSearchModule.m",
+          "line": 4557,
+          "sha256": "6994e303a1b445c3bb9b4d0639351a5ad2eafb8da4e41739df67f814442756dc",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/search/Sources/ALNSearchModule.m#L4557"
+        },
+        {
+          "path": "modules/ops/Sources/ALNOpsModule.m",
+          "line": 808,
+          "sha256": "5c2e9b27d2a68ad3bce4cb8f75ed4b3a949008f983ec2f1bace238a7f02ec230",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/ops/Sources/ALNOpsModule.m#L808"
+        },
+        {
+          "path": "tools/arlen.m",
+          "line": 1211,
+          "sha256": "5b2ab87fb809525bc9309bc02483eee64a79b4f15d53246305adca84cecdf6d1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/arlen.m#L1211"
+        },
+        {
+          "path": "bin/arlen-doctor",
+          "line": 236,
+          "sha256": "5d9063c4e7e0f2d649d31f40c40c97bc1d6175e8c059688dbb31afcc645c3268",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/bin/arlen-doctor#L236"
+        },
+        {
+          "path": "src/Arlen/Core/ALNApplication.m",
+          "line": 1151,
+          "sha256": "ffc9225524b9e64b5964e61c9be1ea6b3472ea318135adcf5807f6cc84b32a36",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Core/ALNApplication.m#L1151"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase16ATests.m",
+          "line": 230,
+          "sha256": "9f1642f99bc9a247daec4cf9efa385c82a0681e575feeaf45f67983e3df86c96",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase16ATests.m#L230",
+          "method": "testJobsOperatorStateTransactionsAcrossProcesses",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase16BTests.m",
+          "line": 567,
+          "sha256": "58ce90d43103e01ca6f6daf49bba99eb790dafff2ffef76224bac061cd195e4b",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase16BTests.m#L567",
+          "method": "testNotificationStateTransactionsAcrossProcesses",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase16DTests.m",
+          "line": 475,
+          "sha256": "bb422e6466d1ca0c86e74de5fb1f657ed9c4e61fff2d9e1f53538a49cadd1468",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase16DTests.m#L475",
+          "method": "testSearchStateTransactionsAcrossProcesses",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase16ETests.m",
+          "line": 219,
+          "sha256": "de9416382244be9d339b4628393654ec06ce5055cc1878621063eb76f8a29273",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase16ETests.m#L219",
+          "method": "testOpsStateTransactionsAcrossProcesses",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/integration/DeploymentIntegrationTests.m",
+          "line": 6149,
+          "sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/DeploymentIntegrationTests.m#L6149",
+          "method": "testBuiltDoctorReportsProductionMultiWorkerState",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Keep #251 open for the remaining default-adapter/deployment contract, or close only after moving that residual into an explicitly reviewed follow-up. Record the notification, jobs-operator, search, ops lost-update fixes and database-URL warning fix as completed sub-items; do not describe default in-memory pending jobs as shared.",
+      "limit": "state.durable is an operator declaration, not automatic per-module backend verification. Use one scheduler; enqueue and scheduler bookkeeping are separate. External search engine publication still needs one writer per resource or backend fencing. docs/PROPANE.md still says an existing database contract can satisfy the first warning version: that sentence is historical wording that disagrees with current doctor code/tests and merits a focused docs follow-up. No owner source was changed."
+    },
+    {
+      "issue": "283",
+      "status": "fixed",
+      "title": "Bounded default in-memory cache and mail retention",
+      "assessment": "The default cache now keeps at most 1,024 entries, updates LRU order on hits/writes, and sweeps expired entries when writing a non-null value. The mail adapter retains only the latest 100 deliveries. These are the two unbounded collection growth paths in the report.",
+      "sources": [
+        {
+          "path": "src/Arlen/Support/ALNServices.m",
+          "line": 1873,
+          "sha256": "f847b9d1049699d727c81c38342ba28930b0818d2d4a4be4fceabbad920f2220",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNServices.m#L1873"
+        },
+        {
+          "path": "src/Arlen/Support/ALNServices.m",
+          "line": 1923,
+          "sha256": "f847b9d1049699d727c81c38342ba28930b0818d2d4a4be4fceabbad920f2220",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNServices.m#L1923"
+        },
+        {
+          "path": "src/Arlen/Support/ALNServices.m",
+          "line": 3304,
+          "sha256": "f847b9d1049699d727c81c38342ba28930b0818d2d4a4be4fceabbad920f2220",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNServices.m#L3304"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase7DTests.m",
+          "line": 323,
+          "sha256": "7da56a791d88d2aa16a94015c93b0198b74402019123b716d5197186cc2c7785",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase7DTests.m#L323",
+          "method": "testDefaultCacheIsBoundedLRUAndSweepsExpiredKeysOnWrite",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase7DTests.m",
+          "line": 342,
+          "sha256": "7da56a791d88d2aa16a94015c93b0198b74402019123b716d5197186cc2c7785",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase7DTests.m#L342",
+          "method": "testDefaultMailRetainsOnlyLastHundredDeliveries",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose closing #283 for unbounded entry retention: the cache is capped at 1,024 LRU entries and sweeps expired entries on writes; the mail adapter retains the latest 100 deliveries. Both named regressions passed in the retained release suite.",
+      "limit": "These are entry-count bounds, not byte caps. Up to 100 messages can retain message content, and expired cache entries can remain until another read/write. Optional startup warnings and alternative production adapters are separate improvements; do not claim that the bounded defaults are a production mail delivery service."
+    },
+    {
+      "issue": "252",
+      "status": "fixed",
+      "title": "Prevent multiplied built-in rate budgets under propane",
+      "assessment": "Startup now rejects enabled built-in rate limiting with more than one configured worker, including exported ARLEN_PROPANE_WORKERS/legacy overrides. Propane also refuses before launching workers. The request limiter itself remains process-local; configuration and deployment docs direct multi-worker deployments to an ingress limiter.",
+      "sources": [
+        {
+          "path": "src/Arlen/Core/ALNApplication.m",
+          "line": 2026,
+          "sha256": "ffc9225524b9e64b5964e61c9be1ea6b3472ea318135adcf5807f6cc84b32a36",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Core/ALNApplication.m#L2026"
+        },
+        {
+          "path": "bin/propane",
+          "line": 683,
+          "sha256": "ff8360b4f130e1f7c6451b65ebcd1f062a551127442dfc01b3948b651d464e43",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/bin/propane#L683"
+        },
+        {
+          "path": "docs/CONFIGURATION_REFERENCE.md",
+          "line": 912,
+          "sha256": "1242e77e28a7f6640e10df289303c53cef48e2a4b04887eb9fb6d20d3c43fc16",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/CONFIGURATION_REFERENCE.md#L912"
+        },
+        {
+          "path": "docs/PROPANE.md",
+          "line": 360,
+          "sha256": "a9f8c95193ae22a462f04b7db4bb3e91fa5590770da7521ed10a7ef1e56c254d",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/PROPANE.md#L360"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/ApplicationTests.m",
+          "line": 2982,
+          "sha256": "732824b5708803e7a344770c9fd3d1af9d79621dad21cad73a1acebf961a25ec",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ApplicationTests.m#L2982",
+          "method": "testMultiWorkerRateLimitFailsBeforeStartup",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/ConfigTests.m",
+          "line": 20,
+          "sha256": "7424f9b5cd2ba2f251967fa29a196713a90c091fc255c264dbafbe9d382ae777",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ConfigTests.m#L20",
+          "method": "testRateLimitStartupUsesDefaultWorkersAndEnvironmentOverrides",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/integration/HTTPIntegrationTests.m",
+          "line": 5496,
+          "sha256": "8c5575b502721de9140be96966ac01ce1a1fb484d4d5bcfb3445d248bc4f2f97",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/HTTPIntegrationTests.m#L5496",
+          "method": "testPropaneRejectsMultiWorkerRateLimiterBeforeLaunchingWorkers",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose closing #252 for silently multiplying a configured request budget by the propane worker count. The unsafe configuration now fails before serving or launching workers. Run one worker for the built-in limiter, or disable it and enforce the shared budget at ingress.",
+      "limit": "This is a fail-closed configuration fix, not a shared-store limiter. Independent app instances/hosts still require an external deployment-wide quota. Authentication account limits are a separate mechanism."
+    },
+    {
+      "issue": "245",
+      "status": "partial",
+      "title": "Header serialization and construction cost",
+      "assessment": "The serializer now writes NSData bytes; constant security headers are prepared once per middleware/application instance; validation uses cached character sets, and ordered insertion avoids the redundant linear containsObject scan. The later 3fa59adf construction follow-up resolves some residuals listed in the older handoff. Public setters still validate dynamic inputs. The shared serialization fast path remains restricted to its standard small header layout.",
+      "sources": [
+        {
+          "path": "src/Arlen/HTTP/ALNResponse.m",
+          "line": 852,
+          "sha256": "1bbb0683201e9efc9cf881af220c59093ddb5a0d33620a543860bf922e1099d6",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/HTTP/ALNResponse.m#L852"
+        },
+        {
+          "path": "src/Arlen/HTTP/ALNResponse.m",
+          "line": 564,
+          "sha256": "1bbb0683201e9efc9cf881af220c59093ddb5a0d33620a543860bf922e1099d6",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/HTTP/ALNResponse.m#L564"
+        },
+        {
+          "path": "src/Arlen/MVC/Middleware/ALNSecurityHeadersMiddleware.m",
+          "line": 44,
+          "sha256": "a3c9ae250a9bb6a0cb2b14cbffd436fc959751b454a82de7b2565c31676758a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/MVC/Middleware/ALNSecurityHeadersMiddleware.m#L44"
+        },
+        {
+          "path": "docs/internal/PERFORMANCE_PROFILES.md",
+          "line": 5,
+          "sha256": "31a24ae9e0e0fbb7e82d5dff4c177f241a5296ab8188b29aa17ccb72fd75bd37",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/internal/PERFORMANCE_PROFILES.md#L5"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/ResponseTests.m",
+          "line": 129,
+          "sha256": "2db56ea14ea07860ead947701bb6887ac99a7c126ced1ee46e86e32039854765",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ResponseTests.m#L129",
+          "method": "testSerializedHeaderBytesAreExact_Issue245",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/ResponseTests.m",
+          "line": 12,
+          "sha256": "2db56ea14ea07860ead947701bb6887ac99a7c126ced1ee46e86e32039854765",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ResponseTests.m#L12",
+          "method": "testPreparedHeadersPreserveValidationSnapshotsOrderingAndOverrides",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/MiddlewareTests.m",
+          "line": 1373,
+          "sha256": "8ade1293009c766398036de010ace3e9bf3e23562f27103f212b5164c874114e",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/MiddlewareTests.m#L1373",
+          "method": "testSecurityHeaderSubclassRetainsValidatedDynamicOverrides",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Keep #245 open as a performance residual, or split it before closing the completed byte-serialization and constant-header construction work. Exact wire bytes/ordering/overrides are covered. Do not present this as elimination of the original 35\u201340% end-to-end request CPU share.",
+      "limit": "Release notes retain historical 1.6\u20132x serializer evidence; PERFORMANCE_PROFILES records Windows construction trials (32.1% middleware, 7.2% dynamic32). They are distinct historical microbenchmarks, not new measurements on e26a755e. The standard-header cache is not broadened to the full default 19-header layout. No benchmark campaign was run."
+    },
+    {
+      "issue": "248",
+      "status": "partial",
+      "title": "JSON logger encoding cost",
+      "assessment": "JSON log output now passes serializer UTF-8 data to emitLogData:, appends one newline, and writes the bytes. The NSData-to-NSString-to-NSData round-trip is gone. JSON serialization and a synchronous per-logger sink lock remain, and production access logging is still enabled at the configured INFO threshold.",
+      "sources": [
+        {
+          "path": "src/Arlen/Support/ALNLogger.m",
+          "line": 222,
+          "sha256": "abb2111367261216a38a2790cf845d791257f928641fcf61616399079340ed7f",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNLogger.m#L222"
+        },
+        {
+          "path": "src/Arlen/Support/ALNLogger.m",
+          "line": 229,
+          "sha256": "abb2111367261216a38a2790cf845d791257f928641fcf61616399079340ed7f",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Support/ALNLogger.m#L229"
+        },
+        {
+          "path": "src/Arlen/Core/ALNApplication.m",
+          "line": 5890,
+          "sha256": "ffc9225524b9e64b5964e61c9be1ea6b3472ea318135adcf5807f6cc84b32a36",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Core/ALNApplication.m#L5890"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/LoggerTests.m",
+          "line": 53,
+          "sha256": "0c664f731a7e1f5c5c9d56c0ecf8855e8feae0943cd10390d38ee85b74b8d098",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/LoggerTests.m#L53",
+          "method": "testShouldLogLevelRespectsMinimumLevel",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/LoggerTests.m",
+          "line": 102,
+          "sha256": "0c664f731a7e1f5c5c9d56c0ecf8855e8feae0943cd10390d38ee85b74b8d098",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/LoggerTests.m#L102",
+          "method": "testLoggerDropsAndDoesNotBlockWhenSinkIsFull_ARLEN_BUG_033",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/LoggerTests.m",
+          "line": 182,
+          "sha256": "0c664f731a7e1f5c5c9d56c0ecf8855e8feae0943cd10390d38ee85b74b8d098",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/LoggerTests.m#L182",
+          "method": "testTextLoggerEscapesControlCharactersInFields",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Keep #248 open for the remaining logging-cost question, or split before closing the redundant UTF-8 conversion sub-item. The targeted byte path is shipped; the retained 10\u201315% access-log-line improvement is not a claim that the original 25\u201333% request CPU overhead has disappeared.",
+      "limit": "The original fix commit 328ce73c explicitly says partial. Existing logger regressions cover levels, bounded POSIX backpressure and text escaping; they are not a dedicated JSON byte-equivalence benchmark. Windows sink behavior remains synchronous. No asynchronous sink, lock-free queue or new performance result is claimed."
+    },
+    {
+      "issue": "196",
+      "status": "fixed",
+      "title": "Concurrent upload 500s caused by runner temporary space exhaustion",
+      "assessment": "The issue owner confirmed ENOSPC and explicitly made closure conditional on #203. Current Linux workflows set TMPDIR, TMP and TEMP to a private per-job on-disk runner directory; setting all three matters because GNUstep uses TEMP/TMP. The retained complete native ARM integration report executes the unchanged concurrent 20 MiB multipart/body-limit case successfully.",
+      "sources": [
+        {
+          "path": ".github/workflows/linux-quality.yml",
+          "line": 29,
+          "sha256": "21e28e26ef1d7206ff192e5566d33ed06fea636a166210290a2e03263c77be0c",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/.github/workflows/linux-quality.yml#L29"
+        },
+        {
+          "path": ".github/workflows/linux-sanitizers.yml",
+          "line": 29,
+          "sha256": "4d72bba5c4c740aeae963eb4a2c47cd9bb4453d31afa265a95415a62efa7b57a",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/.github/workflows/linux-sanitizers.yml#L29"
+        },
+        {
+          "path": "tests/fixtures/http/body_limits_probe.py",
+          "line": 1,
+          "sha256": "800708465d1e73095e7037df9deccfdc3526cb00bae80431db01aad3214194a7",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/fixtures/http/body_limits_probe.py#L1"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/integration/HTTPIntegrationTests.m",
+          "line": 4342,
+          "sha256": "8c5575b502721de9140be96966ac01ce1a1fb484d4d5bcfb3445d248bc4f2f97",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/HTTPIntegrationTests.m#L4342",
+          "method": "testPerRouteBodyLimitsSpoolAndBoundMemoryOnBothBackends",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose closing #196: the confirmed runner ENOSPC cause is isolated by the merged per-job TMPDIR/TMP/TEMP setup, and the original both-backends concurrent upload regression passes in retained release evidence. Keep developer-machine fixture leaks tracked separately in #210.",
+      "limit": "This does not claim all test temp leaks are fixed or that arbitrary disk-full multipart failures now return 503. The single issue comment identifies per-job temp isolation as the lasting fix; storage-pressure response policy is separate."
+    },
+    {
+      "issue": "169",
+      "status": "partial",
+      "title": "Clean-checkout deploy-smoke packaging",
+      "assessment": "build_release.sh now packages tools/platform.sh and detects app_lite.m or any src/**/*.m, matching propane. Release certification runs smoke_release.sh against examples/tech_demo, and the retained full integration suite passes the release smoke/runbook regression. However, a missing compiled app still falls through to a manifest path: the promised app_binary_missing guard and specifically named non-main-source regression are absent.",
+      "sources": [
+        {
+          "path": "tools/deploy/build_release.sh",
+          "line": 126,
+          "sha256": "97aab957437bceb70d3efe6d1bb9f3b072c7167b8e82fd78319fa1fd7a4a4c09",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/deploy/build_release.sh#L126"
+        },
+        {
+          "path": "tools/deploy/build_release.sh",
+          "line": 841,
+          "sha256": "97aab957437bceb70d3efe6d1bb9f3b072c7167b8e82fd78319fa1fd7a4a4c09",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/deploy/build_release.sh#L841"
+        },
+        {
+          "path": "tools/deploy/build_release.sh",
+          "line": 830,
+          "sha256": "97aab957437bceb70d3efe6d1bb9f3b072c7167b8e82fd78319fa1fd7a4a4c09",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/deploy/build_release.sh#L830"
+        },
+        {
+          "path": "tools/ci/run_release_certification.sh",
+          "line": 52,
+          "sha256": "198acb989125b5c6e0ed9ccde6a36bc44ae351e2d112755ece1c18bd5f430cad",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/ci/run_release_certification.sh#L52"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/integration/DeploymentIntegrationTests.m",
+          "line": 511,
+          "sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/DeploymentIntegrationTests.m#L511",
+          "method": "testReleaseBuildActivateAndRollbackScripts",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        },
+        {
+          "path": "tests/integration/DeploymentIntegrationTests.m",
+          "line": 597,
+          "sha256": "57e8fe49ca38c7a557adc75f21f496017d5cccf9b664ef3614f55c5108b70474",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/DeploymentIntegrationTests.m#L597",
+          "method": "testReleaseSmokeScriptValidatesDeployRunbook_ARLEN_BUG_019",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Keep #169 open only for the missing fail-fast app_binary_missing diagnostic and explicit non-main-entry-point regression, or move those to a reviewed follow-up before closing the original packaging failures. The platform helper and broad source detection fixes are shipped, and certification now exercises the real tech_demo release smoke.",
+      "limit": "The two existing tests do not specifically instantiate the promised no-main.m fixture; inventory/source searches find no testReleasePackagesBinaryForAppWithoutMainSource. The tagged certification is retained evidence, not a new clean-checkout deploy-smoke run in this reconciliation."
+    },
+    {
+      "issue": "114",
+      "status": "partial",
+      "title": "Expectation-based test waits",
+      "assessment": "Shared ALNTestWaitUntil, ALNTestWaitForTaskExit and ALNTestWaitForTCPPort helpers exist and use XCTWaiter when available. The docs gate runs a non-increasing sleep baseline lint. The current baseline still permits eight unannotated waits in Phase24WindowsRuntimeParityTests.m; the original comment counted nine before later edits.",
+      "sources": [
+        {
+          "path": "tests/shared/ALNTestWait.h",
+          "line": 26,
+          "sha256": "780855e8e2acbe69961abcc0e83c7fe6f115ede0d9f3d0a9c7bf1b0785dd8ea7",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/shared/ALNTestWait.h#L26"
+        },
+        {
+          "path": "tests/shared/ALNTestWait.m",
+          "line": 30,
+          "sha256": "867bcc9d67ebe6b7c623301e3b3d9a08931961e929feb0c73a0f6ec44a4ddef8",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/shared/ALNTestWait.m#L30"
+        },
+        {
+          "path": "tools/ci/check_test_sleeps.py",
+          "line": 26,
+          "sha256": "750ba4affd89e288e34b8f4683bc3392ef0ba7ef1645bb2f1916073df7652750",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tools/ci/check_test_sleeps.py#L26"
+        },
+        {
+          "path": "tests/fixtures/testing/test_sleep_baseline.json",
+          "line": 4,
+          "sha256": "2409ae98604bf760f0cb6c94c2e245c70c6a694a6b0b8ee787c25bb055503f19",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/fixtures/testing/test_sleep_baseline.json#L4"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/phase24/Phase24WindowsRuntimeParityTests.m",
+          "line": 304,
+          "sha256": "9c9df859437fdc8a53c0e844bc2d04afc2cc2c1a070e350a9e30f43b17f086c6",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/phase24/Phase24WindowsRuntimeParityTests.m#L304",
+          "method": "testBoomhauerWatchRecoversFromBuildFailure"
+        }
+      ],
+      "proposal": "Keep #114 open for the remaining eight Windows runtime-parity waits. Shared waiter helpers, the initial conversions and the monotonic lint are complete. Ask the Windows fixture owner to convert or justify the remaining calls individually; no broad lifecycle rewrite is proposed.",
+      "limit": "The current lint passes with eight baseline entries; that is not proof of zero sleeps. Annotated intentional delays and the toolchain fallback remain legitimate. Windows source/fixtures were read only here."
+    },
+    {
+      "issue": "228-H1",
+      "status": "fixed",
+      "title": "Production observability and route-catalog exposure",
+      "assessment": "In environment=production, /metrics and /clusterz return 404 unless a token, loopback-only restriction or explicit operabilityAnonymous opt-in is configured. Token comparison is constant-time, and loopback access rejects forwarded-header proxy traffic. OpenAPI routes are unavailable outside development/test until publicInProduction is enabled.",
+      "sources": [
+        {
+          "path": "src/Arlen/Core/ALNApplication.m",
+          "line": 3197,
+          "sha256": "ffc9225524b9e64b5964e61c9be1ea6b3472ea318135adcf5807f6cc84b32a36",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Core/ALNApplication.m#L3197"
+        },
+        {
+          "path": "src/Arlen/Core/ALNApplication.m",
+          "line": 2610,
+          "sha256": "ffc9225524b9e64b5964e61c9be1ea6b3472ea318135adcf5807f6cc84b32a36",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/src/Arlen/Core/ALNApplication.m#L2610"
+        },
+        {
+          "path": "docs/CONFIGURATION_REFERENCE.md",
+          "line": 468,
+          "sha256": "1242e77e28a7f6640e10df289303c53cef48e2a4b04887eb9fb6d20d3c43fc16",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/CONFIGURATION_REFERENCE.md#L468"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/ApplicationTests.m",
+          "line": 1900,
+          "sha256": "732824b5708803e7a344770c9fd3d1af9d79621dad21cad73a1acebf961a25ec",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ApplicationTests.m#L1900",
+          "method": "testOperabilityEndpointsAreDisabledInProductionUntilAccessIsConfigured",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/ApplicationTests.m",
+          "line": 1856,
+          "sha256": "732824b5708803e7a344770c9fd3d1af9d79621dad21cad73a1acebf961a25ec",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ApplicationTests.m#L1856",
+          "method": "testOperabilityEndpointsStayAnonymousByDefaultAndCanBeRestricted",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/ApplicationTests.m",
+          "line": 1935,
+          "sha256": "732824b5708803e7a344770c9fd3d1af9d79621dad21cad73a1acebf961a25ec",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/ApplicationTests.m#L1935",
+          "method": "testOpenAPIRouteCatalogRequiresExplicitProductionOptIn",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-1 complete for production defaults and explicit access controls. Preserve the documented development/non-production behavior and operator opt-ins; do not claim every custom environment name automatically makes /metrics private.",
+      "limit": "The old 0.3.0 release note says anonymous by default. Current source and 0.3.1 tests supersede that historical statement for environment=production. A custom environment other than production must set its observability controls explicitly."
+    },
+    {
+      "issue": "228-H2",
+      "status": "fixed",
+      "title": "MCP catalog authorization",
+      "assessment": "tools/list filters required roles/scopes, assurance age and route-policy visibility without executing handlers. tools/call retains full enforcement. A deliberately roleless/scopeless tool can still be listed/called by an authenticated subject, as its declared policy allows.",
+      "sources": [
+        {
+          "path": "modules/mcp/Sources/ALNMCPModule.m",
+          "line": 520,
+          "sha256": "7ee409d982a7a515b2cde7d4c1bc77ec9fcf2a41337acd8c3b883f85cee07357",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/mcp/Sources/ALNMCPModule.m#L520"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/MCPModuleTests.m",
+          "line": 213,
+          "sha256": "aa64d6064579577e92f0cc9fc330878f2182dd5f86e6b7553b8b7ca90eddb20f",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/MCPModuleTests.m#L213",
+          "method": "testToolsListOnlyShowsToolsTheCallerMayCall",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/MCPModuleTests.m",
+          "line": 235,
+          "sha256": "aa64d6064579577e92f0cc9fc330878f2182dd5f86e6b7553b8b7ca90eddb20f",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/MCPModuleTests.m#L235",
+          "method": "testToolsListUsesAssuranceAgeAndRoutePoliciesWithoutRunningTools",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-2 complete for unauthorized catalog disclosure. Tool authors must still declare requiredRoles/scopes for sensitive custom tools; a tool with no requirements is intentionally available within its enclosing authentication contract.",
+      "limit": "Catalog filtering is not execution of arbitrary application guards or tool handlers. The regression explicitly retains public.ping for an authenticated visitor, while hidden admin/scoped calls remain denied."
+    },
+    {
+      "issue": "228-H3",
+      "status": "fixed",
+      "title": "Reset and verification token storage",
+      "assessment": "New random reset/verification bearer tokens are transformed by AMStoredBearerToken before insertion; consumption looks up the digest, not the presented plaintext. Existing plaintext links are invalidated by the lookup contract and must be reissued. Single-use consumption and reset invalidation of older tokens are also covered.",
+      "sources": [
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 388,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L388"
+        },
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 2738,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L2738"
+        },
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 2749,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L2749"
+        },
+        {
+          "path": "docs/AUTH_MODULE.md",
+          "line": 170,
+          "sha256": "a55e070bd04b26f991c15953f4fb09bbc6f1208919342f55cf1d9c36078ed591",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/AUTH_MODULE.md#L170"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1152,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1152",
+          "method": "testBearerLinksStoreOnlyTokenDigests",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1203,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1203",
+          "method": "testPasswordResetTokenIsSingleUseAndRetiresOlderTokens",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1256,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1256",
+          "method": "testPasswordChangeRetiresOutstandingResetTokens",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-3 complete for usable plaintext bearer tokens in auth token tables. New rows contain SHA-256 digests and old plaintext links no longer redeem. Request replacement links after upgrading.",
+      "limit": "This does not claim that mailboxes, provider delivery records, old backups or historical rows contain no plaintext. A user-facing bearer link necessarily reaches its intended recipient; this issue is the token-table account-takeover path."
+    },
+    {
+      "issue": "228-H4",
+      "status": "fixed",
+      "title": "Built-in auth enumeration and forgot-password mail timing",
+      "assessment": "Unknown-email login spends an Argon2id verification; registration gives generic responses for existing and new addresses without automatic sign-in. Durable registration/forgot-password paths queue work for both address cases, with token creation and mail outside the HTTP request. Production-like local-password/mail setups reject synchronous mail and registration auto-login. Queue failure returns a generic 503; new-account creation and mail enqueue are atomic.",
+      "sources": [
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 474,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L474"
+        },
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 5397,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L5397"
+        },
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 5612,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L5612"
+        },
+        {
+          "path": "docs/AUTH_MODULE.md",
+          "line": 131,
+          "sha256": "a55e070bd04b26f991c15953f4fb09bbc6f1208919342f55cf1d9c36078ed591",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/docs/AUTH_MODULE.md#L131"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase13FTests.m",
+          "line": 92,
+          "sha256": "f82f6ef3e0f31e2182e777d39dd21e265b23c2d75544fd8f11b70b853a3235ce",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13FTests.m#L92",
+          "method": "testUnknownEmailLoginStillVerifiesADummyPasswordHash",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1569,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1569",
+          "method": "testRegistrationDoesNotRevealExistingAddressOrStartSessionByDefault",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1432,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1432",
+          "method": "testDurableAuthMailQueuesBeforeSendingAndKeepsUnknownAddressesGeneric",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1484,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1484",
+          "method": "testDurableAuthMailQueueFailureRollsBackRegistrationAndKeepsResetResponsesGeneric",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/unit/Phase13ETests.m",
+          "line": 1111,
+          "sha256": "cb5d92362015632cbf29511d1b8e36a41a7244b9125f6b5323e528e8f2fdbdae",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase13ETests.m#L1111",
+          "method": "testUnsafeRegistrationAndMailModesFailStartupOutsideDevelopmentAndTest",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-4 complete for built-in production-like registration/login/forgot-password behavior, including Dan\u2019s forgot-password timing follow-up. Apply the auth/jobs migrations, configure durable jobs/publicBaseURL and run its worker. Preserve separate review of app-owned registration hooks and explicitly enabled development compatibility modes.",
+      "limit": "The request still performs a durable enqueue and registration database work; this is not a zero-latency or mathematically constant-time claim. Custom hooks may reveal timing. Historical 0.3.0 synchronous-mode wording was superseded by the 0.3.1 startup rejection."
+    },
+    {
+      "issue": "228-H5",
+      "status": "partial",
+      "title": "Replayed SMS cookie attempt counters",
+      "assessment": "The cookie still carries UI/session counters, but both SMS send and verification reserve an account-scoped attempt in the database before invoking the provider. They fail closed if the attempt-limit schema is unavailable. This addresses the identified trust boundary in source. No dedicated regression that replays a stale SMS cookie through those two flows was found in the pinned test inventory/source or selected retained release evidence.",
+      "sources": [
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 4318,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L4318"
+        },
+        {
+          "path": "modules/auth/Sources/ALNAuthModule.m",
+          "line": 4467,
+          "sha256": "77fa0896cacafe6a85d9c5719c4337eda6e9a6ba59b34bcf87aeec7a704db1a1",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Sources/ALNAuthModule.m#L4467"
+        },
+        {
+          "path": "modules/auth/Migrations/004_auth_totp_limits.sql",
+          "line": 1,
+          "sha256": "2540fef636e4eaae2882bbde3c1543e7a188087fd9d2d0ec9076ea06502ba5a9",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/auth/Migrations/004_auth_totp_limits.sql#L1"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/AuthMFALimitsTests.m",
+          "line": 237,
+          "sha256": "5e73cf44ce84eb1800889b4a5c11ef4f51a11e0740968b290bd7a3a027b5bad5",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/AuthMFALimitsTests.m#L237",
+          "method": "testTOTPLocksAfterRepeatedFailuresAndResetsOnSuccess",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        },
+        {
+          "path": "tests/integration/Phase13AuthAdminIntegrationTests.m",
+          "line": 1884,
+          "sha256": "d82b2d23422b48aa2a2f91f5b86ed6b6dcf9c618ad14b6d54a260fb28296515c",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/Phase13AuthAdminIntegrationTests.m#L1884",
+          "method": "testAuthModuleSupportsSMSFactorManagementAndKeepsTOTPPreferred",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Keep H-5 open as a narrow verification follow-up: retain the implemented server-side SMS attempt reservations, then add a stale-cookie replay regression for sends and failed verifies proving provider calls remain bounded across sessions/workers and missing-schema handling fails closed. This reconciliation does not assert the old bypass still reproduces.",
+      "limit": "Generic TOTP/account-limit and SMS management tests are related coverage, not direct proof of stale SMS-cookie resistance. No external SMS calls, new fixtures or full audit were run; source review alone is not labeled end-to-end replay validation."
+    },
+    {
+      "issue": "228-H6",
+      "status": "fixed",
+      "title": "Notification inbox link schemes",
+      "assessment": "NMSafeInboxHref accepts http/https URLs with a host or relative paths, rejecting controls, backslashes, protocol-relative links and other schemes. The controller places only the sanitized linkHref into display entries; the HTML template emits a link only when that field is nonempty.",
+      "sources": [
+        {
+          "path": "modules/notifications/Sources/ALNNotificationsModule.m",
+          "line": 176,
+          "sha256": "a21d00d14c680d8ec6d680b9b5883dd9ac718bb668988a04a9182661994f792b",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/notifications/Sources/ALNNotificationsModule.m#L176"
+        },
+        {
+          "path": "modules/notifications/Sources/ALNNotificationsModule.m",
+          "line": 3045,
+          "sha256": "a21d00d14c680d8ec6d680b9b5883dd9ac718bb668988a04a9182661994f792b",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/notifications/Sources/ALNNotificationsModule.m#L3045"
+        },
+        {
+          "path": "modules/notifications/Resources/Templates/inbox/index.html.eoc",
+          "line": 35,
+          "sha256": "a5c50badfdfbab99b47d9182f6b2df1988aacd192f969802ef81c469c6876c31",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/notifications/Resources/Templates/inbox/index.html.eoc#L35"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/integration/Phase14NotificationsIntegrationTests.m",
+          "line": 290,
+          "sha256": "2e490988db4cad603adb26d51089124029effdd270779e484828a350ae80514f",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/integration/Phase14NotificationsIntegrationTests.m#L290",
+          "method": "testInboxRendersOnlySafeDeepLinksAndPaginates",
+          "retained_results": {
+            "normal/ArlenIntegrationTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-6 complete for unsafe link schemes in the HTML inbox. Non-http(s) schemes render without a link; the integration regression exercises safe and unsafe destinations.",
+      "limit": "External http/https links remain allowed by design. This is a scheme-safety rule, not a same-origin-only destination allowlist."
+    },
+    {
+      "issue": "228-H7",
+      "status": "fixed",
+      "title": "PostgreSQL autocomplete LIKE wildcards",
+      "assessment": "STEscapedLikePattern escapes backslash, percent and underscore before appending the intended prefix wildcard. Both LIKE clauses declare the escape character and continue to use bound parameters/resource scope.",
+      "sources": [
+        {
+          "path": "modules/search/Sources/ALNSearchModule.m",
+          "line": 105,
+          "sha256": "6994e303a1b445c3bb9b4d0639351a5ad2eafb8da4e41739df67f814442756dc",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/search/Sources/ALNSearchModule.m#L105"
+        },
+        {
+          "path": "modules/search/Sources/ALNSearchModule.m",
+          "line": 2409,
+          "sha256": "6994e303a1b445c3bb9b4d0639351a5ad2eafb8da4e41739df67f814442756dc",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/modules/search/Sources/ALNSearchModule.m#L2409"
+        }
+      ],
+      "tests": [
+        {
+          "path": "tests/unit/Phase27SearchTests.m",
+          "line": 993,
+          "sha256": "a2499dc21a93d72898ada3962b8bec3c4ddcdbd8af8faef4bf010776aef0190e",
+          "url": "https://github.com/danjboyd/Arlen/blob/e26a755e0c250ec972c99eca9fb51a4259d48307/tests/unit/Phase27SearchTests.m#L993",
+          "method": "testPostgresAutocompleteTreatsLikeWildcardsLiterally",
+          "retained_results": {
+            "normal/ArlenUnitTests": "passed",
+            "strict1/ArlenUnitTests": "passed",
+            "strict2/ArlenUnitTests": "passed"
+          }
+        }
+      ],
+      "proposal": "Propose marking H-7 complete: user-supplied percent/underscore/backslash are literal in the PostgreSQL prefix LIKE pattern. The retained native normal suite executes the PostgreSQL wildcard regression without skipping it.",
+      "limit": "Fuzzy/trigram matching remains intentional in the alternative branch; the fix is not removal of every broad search behavior. ALNSearchModule was read only, and no search benchmarking or owner changes were made."
+    }
+  ],
+  "issue_snapshots": [
+    {
+      "issue": 275,
+      "url": "https://github.com/danjboyd/Arlen/issues/275",
+      "state": "open",
+      "updated_at": "2026-10-17T13:33:51Z",
+      "issue_sha256": "c64f73513f1a2e919f640609a5ab81501045f64ccf9506bc516c2954427684b4",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 282,
+      "url": "https://github.com/danjboyd/Arlen/issues/282",
+      "state": "open",
+      "updated_at": "2026-10-17T21:58:26Z",
+      "issue_sha256": "fcf45edcfee3bfeefc5ba744870c1dbb9e89afe131a36a329688a5f31a245817",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 251,
+      "url": "https://github.com/danjboyd/Arlen/issues/251",
+      "state": "open",
+      "updated_at": "2026-10-17T06:04:38Z",
+      "issue_sha256": "8feabcd54f352be2690f6f2053091a127521750e44ee7a52a31984d7ed7af9a1",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 283,
+      "url": "https://github.com/danjboyd/Arlen/issues/283",
+      "state": "open",
+      "updated_at": "2026-10-17T21:58:28Z",
+      "issue_sha256": "5957bb05bd169d2645e7372e1f17025087b14f0287f3167fab5cdd95d29e2d31",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 252,
+      "url": "https://github.com/danjboyd/Arlen/issues/252",
+      "state": "open",
+      "updated_at": "2026-10-17T06:04:39Z",
+      "issue_sha256": "2e686128bb41268bff0c7f73f787e140b1ddf7bcfbc1d1307059a53fd4212b31",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 245,
+      "url": "https://github.com/danjboyd/Arlen/issues/245",
+      "state": "open",
+      "updated_at": "2026-10-17T05:40:35Z",
+      "issue_sha256": "fc458d8bce280bbc80910c003bcef5ad03663fefc1b8845f858dbd3359ef703a",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 248,
+      "url": "https://github.com/danjboyd/Arlen/issues/248",
+      "state": "open",
+      "updated_at": "2026-10-17T05:40:40Z",
+      "issue_sha256": "bc4f9570d7ad415472e59ca2915660fba2714adea6bf072af1ccf86389604a32",
+      "comments_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "issue": 196,
+      "url": "https://github.com/danjboyd/Arlen/issues/196",
+      "state": "open",
+      "updated_at": "2026-10-16T20:12:47Z",
+      "issue_sha256": "927f8eb92e3634818779dc04ef85349916027ded28cbf11e6616d24f0282273b",
+      "comments_sha256": "005f77c9d5390cf4039660bec7eb05739be40506e9192f7dc49c100d8975ef9a"
+    },
+    {
+      "issue": 169,
+      "url": "https://github.com/danjboyd/Arlen/issues/169",
+      "state": "open",
+      "updated_at": "2026-10-15T23:49:58Z",
+      "issue_sha256": "724d71592bde76120cb3669892a5ba0c4b58ba5036a3c4b73ae29f78608f4c7a",
+      "comments_sha256": "6726bf00d1d60c080ca13a2c37b56a35feaba8d5f38b526a6224297a90a30b07"
+    },
+    {
+      "issue": 114,
+      "url": "https://github.com/danjboyd/Arlen/issues/114",
+      "state": "open",
+      "updated_at": "2026-10-07T20:58:25Z",
+      "issue_sha256": "365c502a3cf69a72949c802cbe6f0884aea49d889135142be71a013044678cb1",
+      "comments_sha256": "6da9dedc0e52a79d7d35f6859ed5ece69d8cbfecc7b7e05b9eac20ec43f095e3"
+    },
+    {
+      "issue": 228,
+      "url": "https://github.com/danjboyd/Arlen/issues/228",
+      "state": "open",
+      "updated_at": "2026-10-18T06:12:41Z",
+      "issue_sha256": "cbdf7fe5e564a794a8a3b10d1b4a141871e9b16ee18705219c920c089981fdac",
+      "comments_sha256": "670957f8d8c01f5888126bdc337fe7c109ac6277dc7d6771b147071a2a91faca"
+    }
+  ]
+}
