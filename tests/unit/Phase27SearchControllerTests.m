@@ -535,6 +535,64 @@
   XCTAssertEqual((NSUInteger)0, [(NSArray *)(payload[@"resources"] ?: @[]) count], @"%@", label);
 }
 
+// #298: promoted results go through the request's explicit filter.* parameters
+// on every query route, whether they arrive in the query string or a JSON body.
+- (void)testPromotedResultsHonorExplicitFiltersOnEveryQueryRoute {
+  ALNApplication *app = [self application];
+  [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
+  [self registerModulesForApplication:app];
+  [self seedSearchIndexesForApplication:app];
+
+  NSArray<NSDictionary *> *cases = @[
+    @{ @"path" : @"/search/api/resources/products/query", @"query" : @"q=priority&filter.category=priority", @"promoted" : @1 },
+    @{ @"path" : @"/search/api/resources/products/query", @"query" : @"q=priority&filter.category=starter", @"promoted" : @0 },
+    @{ @"path" : @"/search/api/resources/products/query", @"query" : @"q=priority&filter.category__in=starter", @"promoted" : @0 },
+    @{ @"path" : @"/search/api/resources/products/query", @"query" : @"q=priority&filter.inventory_count__gte=5", @"promoted" : @0 },
+    @{ @"path" : @"/search/api/query", @"query" : @"q=priority&filter.category=priority", @"promoted" : @1 },
+    @{ @"path" : @"/search/api/query", @"query" : @"q=priority&filter.category=starter", @"promoted" : @0 },
+    @{ @"path" : @"/search/api/query", @"query" : @"q=priority&filter.inventory_count__gte=5", @"promoted" : @0 },
+  ];
+  for (NSDictionary *testCase in cases) {
+    ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:testCase[@"path"]
+                                                             queryString:testCase[@"query"]
+                                                                 headers:@{ @"Accept" : @"application/json" }
+                                                                    body:nil]];
+    NSString *label = [NSString stringWithFormat:@"%@?%@ -> %@", testCase[@"path"], testCase[@"query"],
+                                                 ALNTestStringFromResponse(response)];
+    XCTAssertEqual((NSInteger)200, response.statusCode, @"%@", label);
+    NSDictionary *json = [self JSONObjectFromResponse:response];
+    NSDictionary *payload = [json[@"data"] isKindOfClass:[NSDictionary class]] ? json[@"data"] : @{};
+    NSArray *promoted = [payload[@"promotedResults"] isKindOfClass:[NSArray class]] ? payload[@"promotedResults"] : @[];
+    XCTAssertEqual([testCase[@"promoted"] unsignedIntegerValue], [promoted count], @"%@", label);
+    for (NSDictionary *entry in promoted) {
+      XCTAssertEqualObjects(@"sku-102", entry[@"recordID"], @"%@", label);
+    }
+  }
+
+  NSArray<NSDictionary *> *bodyCases = @[
+    @{ @"body" : @{ @"q" : @"priority", @"filter.category" : @"priority" }, @"promoted" : @1 },
+    @{ @"body" : @{ @"q" : @"priority", @"filter.category" : @"starter" }, @"promoted" : @0 },
+  ];
+  for (NSDictionary *testCase in bodyCases) {
+    NSData *body = [NSJSONSerialization dataWithJSONObject:testCase[@"body"] options:0 error:NULL];
+    ALNResponse *response = [app dispatchRequest:[self requestWithMethod:@"GET"
+                                                                    path:@"/search/api/resources/products/query"
+                                                             queryString:@""
+                                                                 headers:@{
+                                                                   @"Accept" : @"application/json",
+                                                                   @"Content-Type" : @"application/json",
+                                                                 }
+                                                                    body:body]];
+    NSString *label = [NSString stringWithFormat:@"body %@ -> %@", testCase[@"body"], ALNTestStringFromResponse(response)];
+    XCTAssertEqual((NSInteger)200, response.statusCode, @"%@", label);
+    NSDictionary *json = [self JSONObjectFromResponse:response];
+    NSDictionary *payload = [json[@"data"] isKindOfClass:[NSDictionary class]] ? json[@"data"] : @{};
+    XCTAssertEqual([testCase[@"promoted"] unsignedIntegerValue],
+                   [(NSArray *)(payload[@"promotedResults"] ?: @[]) count], @"%@", label);
+  }
+}
+
 - (void)testUnscopedQueryMatchesNothingWhenNoResourceIsVisible {
   ALNApplication *app = [self applicationWithProviderClasses:@[ @"Phase27SearchRoleGatedProvider" ]];
   [app addMiddleware:[[Phase27SearchContextMiddleware alloc] init]];
