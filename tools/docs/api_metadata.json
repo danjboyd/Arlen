@@ -211,6 +211,13 @@
     "ALNHTTPClientCancellation": {
       "summary": "Thread-safe, single-use cancellation token for an outbound HTTP stream. Cancellation is permanent, works during transport silence, and may be requested from any thread. See [Streaming HTTP](../HTTP_CLIENT.md#incremental-response-delivery).",
       "usage_example": "ALNHTTPClientCancellation *stop = [ALNHTTPClientCancellation new];\n// Store before starting streamRequest:cancellation:onResponse:onData:error:.\n// A Stop button or browser disconnect may call this from another thread:\n[stop cancel];"
+    },
+    "ALNSSEReader": {
+      "summary": "Bounded incremental SSE framing for HTTP-client chunks. Strict UTF-8; synchronous callbacks; no retry, reconnect or vendor terminal semantics. Apps must require their own terminal event.",
+      "usage_example": "ALNSSEReader *reader = [ALNSSEReader new];\nBOOL parsed = [reader consumeData:chunk onEvent:^BOOL(ALNSSEEvent *event) {\n  // Validate event.data using the application protocol.\n  return YES;\n} error:&error];\n// At HTTP EOF: discard any unfinished event, without certifying app completion.\nBOOL finished = [reader finishWithError:&error];"
+    },
+    "ALNSSEEvent": {
+      "summary": "Immutable generic SSE event with type, multiline data and persistent last-event ID. Created by ALNSSEReader; carries no vendor-specific completion meaning."
     }
   },
   "properties": {
@@ -300,6 +307,21 @@
     },
     "ALNHTTPClientCancellation|cancelled": {
       "purpose": "Thread-safe cancellation state. Once YES it remains YES; create a new token for another operation."
+    },
+    "ALNSSEReader|maxLineBytes": {
+      "purpose": "Maximum raw bytes per line, excluding CR/LF and including the initial BOM. Default 65536."
+    },
+    "ALNSSEReader|maxEventBytes": {
+      "purpose": "Maximum accumulated UTF-8 data bytes plus one LF per data field. Default 1048576."
+    },
+    "ALNSSEEvent|eventType": {
+      "purpose": "Last event field, or message when empty; reset after each blank line."
+    },
+    "ALNSSEEvent|data": {
+      "purpose": "Joined data fields with the final appended LF removed. May be empty."
+    },
+    "ALNSSEEvent|lastEventID": {
+      "purpose": "Latest valid ID, preserved across events; empty IDs reset it and NUL-containing IDs are ignored."
     }
   },
   "methods": {
@@ -450,6 +472,26 @@
     "ALNHTTPClientCancellation|cancel": {
       "purpose": "Permanently request cancellation of this operation from any thread.",
       "usage": "Calling repeatedly is safe. A pre-cancelled token prevents the stream from connecting. Cancellation does not interrupt callback code; callbacks must return promptly."
+    },
+    "ALNSSEReader|init": {
+      "purpose": "Construct a reader with 65536-byte lines and 1048576-byte event data.",
+      "usage": "Use one reader per HTTP response, on a single caller thread."
+    },
+    "ALNSSEReader|initWithMaxLineBytes:maxEventBytes:error:": {
+      "purpose": "Construct a reader with explicit positive byte limits; zero fails.",
+      "usage": "Event limits count one LF per data field, including the LF removed at dispatch."
+    },
+    "ALNSSEReader|consumeData:onEvent:error:": {
+      "purpose": "Consume arbitrary byte chunks and dispatch complete events inline.",
+      "usage": "Returns NO permanently on strict UTF-8, limit, state or handler-stop errors. Do not reenter; handler exceptions propagate and stop parsing. See [HTTP client](../HTTP_CLIENT.md#bounded-sse-reader)."
+    },
+    "ALNSSEReader|finishWithError:": {
+      "purpose": "Close the reader and discard unfinished input without dispatching.",
+      "usage": "Repeated finish succeeds. Success is not application completion: require an app-defined terminal event."
+    },
+    "ALNSSEEvent|init": {
+      "purpose": "Unavailable; events are created by the reader.",
+      "usage": "Retain an event explicitly if needed after its synchronous callback."
     }
   }
 }
