@@ -57,6 +57,7 @@
 #import "MVC/View/ALNView.h"
 #import "Support/ALNHTTPCompat.h"
 #import "Support/ALNHTTPClient.h"
+#import "Support/ALNSSEReader.h"
 #import "Support/ALNLogger.h"
 #import "Support/ALNLive.h"
 #import "Support/ALNMetrics.h"

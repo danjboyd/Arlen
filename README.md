@@ -26,7 +26,7 @@ manager are first-party modules, not plugins you have to vet.
 
 For outbound vendor APIs, the [HTTP client](docs/HTTP_CLIENT.md) supports both
 buffered requests and incremental responses, with cancellation, deadlines,
-host allowlists and byte limits.
+host allowlists, byte limits and a bounded SSE reader.
 
 <p align="center">
   <img src="docs/images/tech-demo.gif" width="900"

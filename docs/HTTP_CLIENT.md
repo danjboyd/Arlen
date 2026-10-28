@@ -104,7 +104,8 @@ The streaming contract is:
 - `onData` receives arbitrary nonempty byte chunks in order. Chunks may divide
   UTF-8 characters, SSE lines/events, or JSON records. They are not HTTP chunk
   frames. Retain the `NSData` if it is needed after the callback. Arlen does not
-  yet provide an SSE reader or automatic event reconnection.
+  provide automatic event reconnection. For bounded SSE framing, use
+  `ALNSSEReader` as described below.
 - Return `NO` from either callback to stop with `ALNHTTPClientErrorCancelled`.
   The optional token is thread-safe and permanently cancelled once used; a
   pre-cancelled token prevents a connection. Cancellation is checked between
@@ -132,6 +133,99 @@ The streaming contract is:
   connecting. POST-to-GET redirects and 307/308 body replay retain the existing
   method rules. The buffered request methods and compatibility helpers retain
   their existing deadlines, buffering and error behavior.
+
+## Bounded SSE reader
+
+Import `ALNSSEReader.h` (also exported by `Arlen.h`) and create one reader per
+response. Feed each `onData` chunk directly to `consumeData:onEvent:error:`.
+Events are delivered inline on the caller's thread, before consumption returns;
+the reader retains neither the input chunks nor an output queue. Keep callbacks
+short and bound any application-owned event history. The reader is confined to
+one caller; concurrent use and calls back into the reader from its handler are
+unsupported. Reentrant calls fail permanently.
+
+```objc
+ALNSSEReader *reader = [ALNSSEReader new];
+__block NSError *readerError = nil;
+__block BOOL sawTerminal = NO;
+__block BOOL acceptedResponse = NO;
+NSError *httpError = nil;
+BOOL httpComplete = [streamClient streamRequest:request cancellation:stop
+    onResponse:^BOOL(NSHTTPURLResponse *response) {
+      acceptedResponse = response.statusCode == 200 &&
+          [[response.MIMEType lowercaseString] isEqualToString:@"text/event-stream"];
+      return acceptedResponse;
+    } onData:^BOOL(NSData *chunk) {
+      return [reader consumeData:chunk onEvent:^BOOL(ALNSSEEvent *event) {
+        // Decode/validate event.data and apply the app's own protocol here.
+        // "app_done" is an example app-defined event, not an Arlen convention.
+        if ([event.eventType isEqualToString:@"app_done"]) sawTerminal = YES;
+        return YES;
+      } error:&readerError];
+    } error:&httpError];
+BOOL framed = [reader finishWithError:&readerError];
+BOOL complete = httpComplete && acceptedResponse && framed && sawTerminal;
+if (!complete) {
+  NSError *failure = readerError ?: httpError;
+  // Mark output incomplete, including clean HTTP EOF without the app terminal.
+  // `failure` can be nil in that clean-EOF case; report an app protocol failure.
+}
+```
+
+Use an `Accept: text/event-stream` request header and require an encoding your
+application can consume. HTTP content encodings are not decoded by either this
+reader or the streaming transport. The HTTP client's cumulative body budget,
+idle/total deadlines, allowlist and cancellation remain in force independently.
+A parser failure returns `NO` from `onData`, so the HTTP client reports callback
+cancellation; preserve the separate reader error for the actual parsing reason.
+
+The framing rules follow the [SSE field and dispatch format](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream),
+with an explicit strict UTF-8 policy:
+
+- CR, LF and CRLF terminate lines, including CRLF divided across chunks. UTF-8
+  characters and the initial BOM may also span chunks. Exactly one leading BOM
+  is ignored; BOMs elsewhere remain content. Malformed UTF-8 in a completed
+  line fails with `ALNSSEReaderErrorInvalidUTF8`, rather than the replacement
+  decoding used by browser `EventSource`.
+- `data` fields join with LF; the final appended LF is removed at dispatch.
+  A blank line dispatches only if at least one `data` field occurred. `data`
+  without a colon is an empty data field and can dispatch an empty payload.
+- The last `event` field wins; an empty or absent type becomes `message`.
+  Type and data reset at each blank line, even when no event is dispatched.
+  IDs persist across events; an empty `id` resets the ID and IDs containing NUL
+  are ignored. `ALNSSEEvent` exposes immutable `eventType`, `data` and
+  `lastEventID` strings. A colon splits only once, and only one leading ASCII
+  space is removed from a field value. Names are case sensitive.
+- Comments and unknown fields are ignored. `retry` is ignored: this helper does
+  not schedule requests, retry, reconnect, or send `Last-Event-ID` headers.
+- EOF never dispatches an unfinished line or event. `finishWithError:` discards
+  it and closes the reader; repeated finish succeeds, but further consumption
+  fails. Finish is a framing operation and does not certify protocol completion.
+
+Default limits are **65536 raw UTF-8 bytes per line** (excluding its CR/LF,
+including a leading BOM) and **1048576 accumulated data bytes per event**.
+The event budget includes UTF-8 field values and one LF per data field, including
+that final LF removed at dispatch. For example, `data: é` uses three event bytes.
+Event type and persistent ID are each bounded by the line limit. Comments and
+unknown fields are also line-bounded; repeated ignored fields do not accumulate.
+These bounds limit reader storage even for a large input chunk. Use positive
+limits with `initWithMaxLineBytes:maxEventBytes:error:` to change them; zero is
+invalid. Limits are checked before extending the relevant buffer, and arithmetic
+uses remaining capacity to avoid overflow.
+
+Limit, decoding, invalid-state and handler-stop errors are permanent, use
+`ALNSSEReaderErrorDomain`, and contain fixed descriptions without stream content.
+Earlier events remain delivered. A handler returning `NO` stops with
+`ALNSSEReaderErrorStopped`. A thrown handler exception propagates and permanently
+stops the reader; inside the HTTP client's callback it becomes the client's
+sanitized transport error. Create a fresh reader to process another response.
+
+As HelpDesk's streaming validation demonstrated, **apps must require their own
+terminal event**. HTTP success, clean EOF, a final blank line, and successful
+reader finish do not prove that an application response finished. A connection
+can end cleanly between complete SSE events while omitting the app's terminal
+signal. Arlen assigns no vendor-specific terminal-event meaning; the app owns
+payload validation, completion, partial-output handling, and any retry policy.
 
 ## Existing helpers
 
