@@ -149,7 +149,7 @@ static NSError *ALNSSEError(ALNSSEReaderErrorCode code) {
     const unsigned char *bytes = [data bytes];
     NSUInteger length = [data length];
     NSUInteger index = 0;
-    while (index < length) {
+    while (index < length && !_failure) {
       // Release per-line temporaries before continuing through a large chunk.
       @autoreleasepool {
         if (_skipLF) {
@@ -159,19 +159,24 @@ static NSError *ALNSSEError(ALNSSEReaderErrorCode code) {
         NSUInteger start = index;
         NSUInteger remaining = _maxLineBytes - [_line length];
         while (index < length && bytes[index] != '\r' && bytes[index] != '\n') {
-          if (index - start >= remaining) return [self fail:ALNSSEReaderErrorLineTooLarge error:error];
+          if (index - start >= remaining) {
+            [self fail:ALNSSEReaderErrorLineTooLarge error:NULL];
+            break;
+          }
           index++;
         }
-        [_line appendBytes:bytes + start length:index - start];
-        if (index < length) {
-          _skipLF = bytes[index++] == '\r';
-          if (![self processLine:onEvent error:error]) {
-            if (error) *error = _failure;
-            return NO;
+        if (!_failure) {
+          [_line appendBytes:bytes + start length:index - start];
+          if (index < length) {
+            _skipLF = bytes[index++] == '\r';
+            [self processLine:onEvent error:NULL];
           }
         }
       }
     }
+    // _failure owns the error across each drained line pool. Publish through
+    // the caller's autoreleasing output parameter only after leaving the pool.
+    if (_failure) { if (error) *error = _failure; return NO; }
     return YES;
   } @catch (id exception) {
     [self fail:ALNSSEReaderErrorStopped error:NULL];
