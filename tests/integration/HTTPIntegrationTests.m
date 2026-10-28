@@ -16,6 +16,41 @@
 
 @implementation HTTPIntegrationTests
 
+- (void)testMalformedPercentEncodingReceivesHTTP400 {
+  int port = [self randomPort];
+  NSTask *server = [NSTask new];
+  server.launchPath = @"./build/boomhauer";
+  server.arguments = @[ @"--port", [NSString stringWithFormat:@"%d", port] ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    NSString *script = [NSString stringWithFormat:
+        @"import socket\n"
+         "PORT=%d\n"
+         "requests=[\n"
+         " b'GET /?bad=%%zz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n',\n"
+         " b'GET /bad%%00path HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n',\n"
+         " b'POST / HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/x-www-form-urlencoded\\r\\nContent-Length: 7\\r\\nConnection: close\\r\\n\\r\\nbad=%%00',\n"
+         "]\n"
+         "for request in requests:\n"
+         " with socket.create_connection(('127.0.0.1',PORT),timeout=5) as connection:\n"
+         "  connection.sendall(request)\n"
+         "  status=connection.recv(128).split(b'\\r\\n',1)[0]\n"
+         "  if b' 400 ' not in status: raise AssertionError(status)\n"
+         "print('strict-percent-http-400')\n", port];
+    int code = 0;
+    NSString *output = [self runPythonScript:script exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", output);
+    XCTAssertTrue([output containsString:@"strict-percent-http-400"], @"%@", output);
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
 - (void)testRealtimeOriginsReceiveOnlyChannelsAndWindowsStaticPaths {
   int port = [self randomPort];
   NSTask *server = [NSTask new];

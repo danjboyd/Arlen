@@ -1,6 +1,7 @@
 #import "ALNPercentDecoding.h"
 
 #include <stdint.h>
+#include <string.h>
 
 static int ALNPercentHexDigit(unsigned char byte) {
   if (byte >= '0' && byte <= '9') return byte - '0';
@@ -51,11 +52,15 @@ static BOOL ALNPercentBytesAreStrictUTF8(const unsigned char *bytes, NSUInteger 
 NSString *ALNPercentDecodedString(NSString *value, BOOL plusAsSpace) {
   if (![value isKindOfClass:[NSString class]]) return nil;
   NSString *normalized = plusAsSpace ? [value stringByReplacingOccurrencesOfString:@"+" withString:@" "] : value;
-  if ([normalized rangeOfString:@"%"].location == NSNotFound) return normalized;
   NSData *encoded = [normalized dataUsingEncoding:NSUTF8StringEncoding];
   if (encoded == nil) return nil;
   const unsigned char *bytes = encoded.bytes;
   NSUInteger length = encoded.length;
+  if ([normalized rangeOfString:@"%"].location == NSNotFound) {
+    if ((length > 0 && memchr(bytes, 0, length) != NULL) ||
+        !ALNPercentBytesAreStrictUTF8(bytes, length)) return nil;
+    return normalized;
+  }
   NSMutableData *decoded = [NSMutableData dataWithCapacity:length];
   for (NSUInteger index = 0; index < length; index++) {
     unsigned char byte = bytes[index];
@@ -65,9 +70,9 @@ NSString *ALNPercentDecodedString(NSString *value, BOOL plusAsSpace) {
       int low = ALNPercentHexDigit(bytes[index + 2]);
       if (high < 0 || low < 0) return nil;
       byte = (unsigned char)((high << 4) | low);
-      if (byte == 0) return nil;
       index += 2;
     }
+    if (byte == 0) return nil;
     [decoded appendBytes:&byte length:1];
   }
   if (!ALNPercentBytesAreStrictUTF8(decoded.bytes, decoded.length)) return nil;

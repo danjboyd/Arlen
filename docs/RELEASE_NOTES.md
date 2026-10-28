@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- HTTP request targets and URL-encoded form bodies now reject malformed percent
+  escapes, invalid UTF-8, and decoded NUL with `400` on Apple and GNUstep.
+  Query `+` now remains literal; form `+` still means a space. Apps that relied
+  on `+` as a query space should send `%20` instead. Other modules will adopt
+  the shared strict decoder in a later change.
+
 ## 0.3.2 — 2026-10-27
 
 This release includes the opt-in streaming API as a maintainer-approved pre-1.0
