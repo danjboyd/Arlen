@@ -146,7 +146,19 @@
 }
 
 - (NSString *)createTempAppRoot {
-  return ALNTestTemporaryDirectory(@"arlen-config");
+  NSString *root = ALNTestTemporaryDirectory(@"arlen-config");
+  if (root != nil) {
+    [self addTeardownBlock:^{
+      NSFileManager *fileManager = [NSFileManager defaultManager];
+      if (![fileManager fileExistsAtPath:root]) {
+        return;
+      }
+      NSError *error = nil;
+      BOOL removed = [fileManager removeItemAtPath:root error:&error];
+      XCTAssertTrue(removed, @"Failed removing config fixture %@: %@", root, error);
+    }];
+  }
+  return root;
 }
 
 - (BOOL)writeFile:(NSString *)path content:(NSString *)content {
