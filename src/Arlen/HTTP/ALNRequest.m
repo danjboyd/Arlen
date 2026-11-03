@@ -1816,11 +1816,11 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 - (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
   NSData *mapped = ALNPlatformMappedFileData(path, error);
   if (mapped == nil) {
-    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    ALNPlatformRemoveItemWhenUnmapped(path);
     return NO;
   }
   if (!ALNValidateFormBody(mapped, [self headerValueForName:@"content-type"], error)) {
-    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    ALNPlatformRemoveItemWhenUnmapped(path);
     return NO;
   }
   _body = mapped;
