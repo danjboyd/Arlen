@@ -1814,19 +1814,23 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 }
 
 - (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
-  NSData *mapped = ALNPlatformMappedFileData(path, error);
-  if (mapped == nil) {
-    ALNPlatformRemoveItemWhenUnmapped(path);
-    return NO;
+  NSError *failure = nil;
+  BOOL accepted = NO;
+  @autoreleasepool {
+    NSData *mapped = ALNPlatformMappedFileData(path, &failure);
+    if (mapped != nil &&
+        ALNValidateFormBody(mapped, [self headerValueForName:@"content-type"], &failure)) {
+      _body = mapped;
+      self.bodySpoolPath = path;
+      self.cachedFormParams = nil;
+      accepted = YES;
+    }
   }
-  if (!ALNValidateFormBody(mapped, [self headerValueForName:@"content-type"], error)) {
+  if (!accepted) {
     ALNPlatformRemoveItemWhenUnmapped(path);
-    return NO;
+    if (error != NULL) *error = failure;
   }
-  _body = mapped;
-  self.bodySpoolPath = path;
-  self.cachedFormParams = nil;
-  return YES;
+  return accepted;
 }
 
 - (instancetype)initWithMethod:(NSString *)method
