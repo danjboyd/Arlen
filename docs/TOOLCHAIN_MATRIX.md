@@ -28,7 +28,7 @@ Linux release setup builds a normal, uninstrumented runtime with the existing
 custom builder at commit `5469b5dfd442f1091475fa6600cfd487af878e8f`. Its source
 archive SHA256 is `55703ff2354613af3b37c92acc3daef4f33e0d3b7bbc66ede2858a5fd5a03197`.
 Locks under `tools/runtime/` identify Debian 13 amd64/arm64, Ubuntu 24.04
-arm64 (aarch64), and Ubuntu 26.04 amd64 independently. All use identical
+amd64/arm64 (aarch64), and Ubuntu 26.04 amd64 independently. All use identical
 component revisions and three race-patch digests; Ubuntu 26.04 additionally
 pins one clang 21 compatibility patch. Ubuntu 24.04 adds a tools-make
 configuration-query patch for GNU Make 4.3: it removes only the inherited
@@ -45,6 +45,7 @@ patches are unchanged.
 | --- | --- |
 | Debian 13 amd64 | `df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34` |
 | Debian 13 arm64 | `ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e` |
+| Ubuntu 24.04 amd64 | `ccebc596ab5856305a55817f3a88e58b82a0d55302bc2ed428ab495d463afd65` |
 | Ubuntu 24.04 arm64 | `a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d` |
 | Ubuntu 26.04 amd64 | `89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125` |
 
@@ -77,7 +78,7 @@ patch, build-host and ELF provenance. It refuses system/managed roots and
 existing invalid prefixes. It never replaces a managed gnustep-cli pin or
 changes `ld.so.conf`. Native target qualification must cover the actual CPU,
 compiler and ICU: Debian uses clang 19/ICU 76 and Ubuntu 26.04 uses
-clang 21/ICU 78. Ubuntu 24.04 arm64 uses clang 18/ICU 74.2; native
+clang 21/ICU 78. Ubuntu 24.04 amd64/arm64 uses clang 18/ICU 74.2; native
 qualification records their exact package versions. Runtimes built for Debian or a
 newer Ubuntu release cannot be selected on Ubuntu 24.04.
 The public install CI runs the installed app and fourteen concurrency controls
@@ -210,9 +211,9 @@ gnustep-cli builds a toolchain per distribution:
 These managed toolchain baselines were verified with Arlen by the
 `linux-public-toolchain` CI lane in clean containers (arm64 on a GitHub arm
 runner). The current release path uses Arlen's patched normal runtime locks
-above, including the separate Ubuntu 24.04 arm64 target; this historical
+above, including separate Ubuntu 24.04 amd64/arm64 targets; this historical
 managed-toolchain table does not certify an interchangeable managed runtime.
-Debian 12, Ubuntu 24.04 amd64, and Ubuntu 26.04 arm64 remain outside automatic
+Debian 12 and Ubuntu 26.04 arm64 remain outside automatic
 setup. Besides the toolchain's own host prerequisites, Arlen
 needs `libssl-dev`. The GnuTLS libcurl that the toolchain installs
 (`libcurl4-gnutls-dev`) satisfies Arlen's libcurl requirement. The

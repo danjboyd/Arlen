@@ -247,10 +247,11 @@ coverage. No additional branch-protection check name is needed for this step.
 
 ### Linux patched runtime delivery qualification
 
-Source archives ship `tools/setup_runtime.py`, all four target locks and the
-three checked race patches and Ubuntu's pinned clang 21 compatibility patch. They fetch the SHA256-pinned existing custom
+Source archives ship `tools/setup_runtime.py`, all five target locks and the
+three checked race patches, Ubuntu 26.04's pinned clang 21 compatibility patch,
+and Ubuntu 24.04's scoped GNU Make 4.3 query patch. They fetch the SHA256-pinned existing custom
 builder only on explicit runtime setup. Check native Debian 13 amd64/arm64 and
-Ubuntu 24.04 arm64 and Ubuntu 26.04 amd64 install/app/concurrency evidence from
+Ubuntu 24.04 amd64/arm64 and Ubuntu 26.04 amd64 install/app/concurrency evidence from
 `linux-public-toolchain` before release. The runtime is compiled at its final
 versioned prefix; the framework install stage may move, the runtime may not.
 The Linux archive smoke also runs the generated app's request tests

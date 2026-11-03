@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add automatic Linux runtime setup for Ubuntu 24.04 LTS on amd64, alongside
+  the existing native arm64 target. Its separate lock preserves runtime source
+  revisions, race patches, normal optimization flags and the scoped GNU Make
+  4.3 query patch. Public installer CI covers both Ubuntu 24.04 architectures.
+
 ## 0.3.2 — 2026-10-27
 
 This release includes the opt-in streaming API as a maintainer-approved pre-1.0
