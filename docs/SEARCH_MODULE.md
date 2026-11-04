@@ -293,8 +293,10 @@ engine/resource contract:
 Promotions match their configured query text, then pass through the same
 explicit `filter.<field>` constraints and per-resource filters as ordinary
 results. For example, `GET /search/api/resources/products/query?q=priority&filter.category=starter`
-omits a promoted product whose category is `priority`. This also applies to
-filters supplied in a JSON query body.
+omits a promoted product whose category is `priority`. The same holds for the
+unscoped `GET /search/api/query` route and for filters supplied in a JSON query
+body, including operator filters such as `filter.category__in` and
+`filter.inventory_count__gte`.
 
 They also expose:
 

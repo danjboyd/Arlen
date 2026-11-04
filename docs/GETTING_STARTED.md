@@ -401,6 +401,9 @@ For vendor streams and downloads, `ALNHTTPClient` offers opt-in incremental
 delivery with serial callbacks, cancellation, and separate idle/total deadlines.
 Run it on an application worker; see [Outbound HTTP client](HTTP_CLIENT.md#incremental-response-delivery).
 
+For SSE bodies, `ALNSSEReader` adds bounded incremental framing. Apps must
+require their own terminal event; see [Bounded SSE reader](HTTP_CLIENT.md#bounded-sse-reader).
+
 Use `ALNSynchronousHTTPResult` for received HTTP/1.x reason phrases and opt-in
 redirect-boundary responses; see [Synchronous HTTP client](HTTP_CLIENT.md).
 The existing synchronous helper defaults remain unchanged. The result API uses
