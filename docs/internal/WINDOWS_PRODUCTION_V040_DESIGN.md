@@ -185,7 +185,9 @@ Server 2022 x64 owner/runner and separate authorization for implementation and a
 native service/account/deployment actions. Numerical budget defaults remain pending
 measurements; no measurements or service actions were run for this update.
 
-Dan must separately decide whether v0.4.0 waits for this implementation and its
-acceptance evidence. The alternative is to retain Windows development-only/refusal
-for v0.4.0 and revise the public promise accordingly, with production support later.
-Neither release choice is implied by the architecture approval.
+Dan separately decided in ask #2233 on November 4 that v0.4.0 remains Windows
+development-only. Production refusal and this draft stay in place, and public
+support wording is being corrected in a separate draft. The architecture choices
+remain recorded for later implementation; no production release version is
+committed, and no implementation, service action or release is authorized by
+that scope decision.
