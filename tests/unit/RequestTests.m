@@ -120,12 +120,13 @@
                                                    error:&error];
     XCTAssertNotNil(request, @"backend=%@ error=%@", [self backendName:[backendValue unsignedIntegerValue]], error);
     XCTAssertEqualObjects(@"Peggy Hill", [request queryValueForName:@"name"]);
-    XCTAssertEqualObjects(@"a/b", request.queryParams[@"slash"]);
     XCTAssertEqualObjects(@"/path+literal", request.path);
     XCTAssertEqualObjects(@"Bo+bby", [request queryValueForName:@"plus"]);
     XCTAssertEqualObjects(@"space value", [request queryValueForName:@"encoded key"]);
     XCTAssertNil([request queryValueForName:@"encoded+key"]);
     XCTAssertEqualObjects(@"literal+value", [request queryValueForName:@"raw+key"]);
+    XCTAssertNil([request queryValueForName:@"raw%2Bkey"]);
+    XCTAssertEqualObjects(@"a/b", request.queryParams[@"slash"]);
     XCTAssertEqualObjects(@"Bo+bby", request.queryParams[@"plus"]);
     XCTAssertEqualObjects(@"space value", request.queryParams[@"encoded key"]);
     XCTAssertEqualObjects(@"literal+value", request.queryParams[@"raw+key"]);
