@@ -9,10 +9,10 @@ python3 tools/docs/generate_api_reference.py
 ```
 
 - Generated from source headers and metadata (deterministic output)
-- Public headers: `94`
-- Symbols: `167`
-- Public methods: `1135`
-- Public properties: `528`
+- Public headers: `95`
+- Symbols: `169`
+- Public methods: `1140`
+- Public properties: `533`
 
 ## API Surface Boundary
 
@@ -214,6 +214,8 @@ python3 tools/docs/generate_api_reference.py
 - [ALNResponse](api/ALNResponse.md): Mutable HTTP response model for status, headers, buffered bodies, and preflighted file streaming into wire-format bytes.
 - [ALNRetryingAttachmentAdapter](api/ALNRetryingAttachmentAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
 - [ALNRetryingMailAdapter](api/ALNRetryingMailAdapter.md): Retry-wrapper adapter implementation with deterministic retry semantics.
+- [ALNSSEEvent](api/ALNSSEEvent.md): Immutable generic SSE event with type, multiline data and persistent last-event ID. Created by ALNSSEReader; carries no vendor-specific completion meaning.
+- [ALNSSEReader](api/ALNSSEReader.md): Bounded incremental SSE framing for HTTP-client chunks. Strict UTF-8; synchronous callbacks; no retry, reconnect or vendor terminal semantics. Apps must require their own terminal event.
 - [ALNTOTP](api/ALNTOTP.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNTestClient](api/ALNTestClient.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
 - [ALNWebAuthn](api/ALNWebAuthn.md): Support services for auth, metrics, logging, performance, realtime, and adapters.
@@ -311,6 +313,7 @@ python3 tools/docs/generate_api_reference.py
 - `src/Arlen/Support/ALNPostgresJobAdapter.h`
 - `src/Arlen/Support/ALNRealtime.h`
 - `src/Arlen/Support/ALNRecoveryCodes.h`
+- `src/Arlen/Support/ALNSSEReader.h`
 - `src/Arlen/Support/ALNServices.h`
 - `src/Arlen/Support/ALNTOTP.h`
 - `src/Arlen/Support/ALNTestClient.h`
