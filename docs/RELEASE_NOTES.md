@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add regression coverage for promoted search results with explicit `filter.*`
+  parameters on the scoped and unscoped query routes and in JSON query bodies
+  (#298). The behavior itself was fixed in 0.3.1 (search 1.2.1).
+
 ## 0.3.2 — 2026-10-27
 
 This release includes the opt-in streaming API as a maintainer-approved pre-1.0
