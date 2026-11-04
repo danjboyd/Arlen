@@ -11,6 +11,10 @@
   percent-encoded `%2B` remains a literal plus, and URL paths retain literal `+`.
   Direct module parsers keep their own invalid-component fallback policies;
   the HTTP request entrypoint rejects malformed input before dispatch.
+- Add automatic Linux runtime setup for Ubuntu 24.04 LTS on amd64, alongside
+  the existing native arm64 target. Its separate lock preserves runtime source
+  revisions, race patches, normal optimization flags and the scoped GNU Make
+  4.3 query patch. Public installer CI covers both Ubuntu 24.04 architectures.
 
 ## 0.3.2 — 2026-10-27
 
