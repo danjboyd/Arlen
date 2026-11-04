@@ -1487,6 +1487,11 @@ Behavior:
 - launches `.boomhauer/build/boomhauer-app` in first-party jobs-worker mode
 - compiled app binaries now honor `ARLEN_APP_ROOT`, so `arlen jobs worker`, `bin/jobs-worker`, and `propane` all resolve the correct config/public roots even when invoked from the framework checkout
 
+The generic worker drains a per-job autorelease pool before the next attempt,
+including within one `--limit` batch. Completion results, summaries and fatal
+errors survive pool drainage. Long handlers still need their own per-page or
+per-item pools; see [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
+
 Options:
 
 - `--env <name>`
