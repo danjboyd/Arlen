@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add regression coverage for promoted search results with explicit `filter.*`
+  parameters on the scoped and unscoped query routes and in JSON query bodies
+  (#298). The behavior itself was fixed in 0.3.1 (search 1.2.1).
 - HTTP request targets and URL-encoded form bodies now reject malformed percent
   escapes, invalid UTF-8, and decoded NUL with `400` on Apple and GNUstep.
   Query `+` now remains literal; form `+` still means a space. Apps that relied
