@@ -129,6 +129,10 @@ installed releases require the patched runtime. Production `propane` and
 binaries. A packaged service on another host needs that host's matching final
 runtime prefix in `ARLEN_RUNTIME_PREFIX` and permission to read/execute it.
 
+The jobs CLI worker drains temporary autoreleased objects between polls,
+including scheduler work and once/error returns. Keep application-owned inner
+pools for long-running job loops; see [Jobs Module](JOBS_MODULE.md#worker-runner).
+
 ### From a git checkout
 
 Use a checkout to work on Arlen itself or to track `main`. Provision the

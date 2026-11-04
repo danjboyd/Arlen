@@ -1069,6 +1069,8 @@ Build and run the first-party jobs worker loop for the current app root.
  startup (`ARLEN-BUG-018`)
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
+- drains temporary autoreleased objects after each scheduler/worker iteration,
+  before an idle wait or the next poll; once and error returns also drain
 - Windows: not supported for production until 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
 
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app

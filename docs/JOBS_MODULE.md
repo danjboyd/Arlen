@@ -82,6 +82,12 @@ ARLEN_APP_ROOT=/path/to/app ARLEN_FRAMEWORK_ROOT=/path/to/Arlen /path/to/Arlen/b
 
 Use `--run-scheduler` when you want the same process to advance schedule definitions as well as dequeue jobs. In production, `propane` async worker supervision can point `jobWorkerCommand` or `ARLEN_PROPANE_JOB_WORKER_COMMAND` at `framework/bin/jobs-worker`.
 
+The CLI worker drains an autorelease pool after each scheduler/worker iteration,
+before an idle wait or the next poll, and on once/error returns. This bounds
+temporary object lifetimes across polls without clearing retained job state or
+results. A long-running job can still use its own inner pools for large loops;
+keep existing application pools when upgrading the framework.
+
 ## Definition Metadata
 
 Job definitions may publish operator-facing metadata such as:
