@@ -1,10 +1,13 @@
 # Windows production proposal and private lifecycle proof
 
-Status: **draft for architecture review**, based on main
-`e26a755e0c250ec972c99eca9fb51a4259d48307`. Authorized scope: Dan's ask #89,
-option yes. This document and its private fixture do not enable Windows production.
+Status: **architecture choices approved; implementation not authorized**, based on main
+`e26a755e0c250ec972c99eca9fb51a4259d48307`. Original scope: Dan's ask #89,
+option yes. Dan approved the five architecture choices in ask #2071 option a
+on November 4, 2026; that approval authorizes this design update and planning only.
+This document and its private fixture do not enable Windows production.
 The `bin/propane` Windows refusal remains required until the acceptance gate below
-passes and Dan approves the architecture. All proposed settings are propane accessories.
+passes and Dan separately approves enabling production. All proposed settings are
+propane accessories.
 
 ## Current source and issue #275
 
@@ -17,7 +20,7 @@ Thus the reported old path is not grounds to add another containment implementat
 This change does not close #275 or claim its interactive Ctrl+C case was tested.
 The new fixture below tests independent native primitives, not the watch helper.
 
-## Proposed process ownership
+## Approved process ownership
 
 One native propane supervisor owns generation state, the listener and an unnamed
 kill-on-close job per generation. Launch each native worker suspended, assign to
@@ -36,7 +39,7 @@ process handles/jobs. This matters on the VM shared with Performance Dashboard.
 
 ## Listener handoff decision
 
-Recommended first implementation: the supervisor binds once with exclusive address
+Chosen architecture: the supervisor binds once with exclusive address
 ownership and retains the listener across generations. Transfer a Winsock socket to
 the specific suspended worker using `WSADuplicateSocket` plus an authenticated,
 private control channel after the target PID exists. The worker imports the socket
@@ -48,13 +51,13 @@ Readiness must cover configuration validation, listener import and application
 startup; process creation alone is insufficient. Old workers continue serving if
 the candidate fails before commit. After candidate readiness, commit the generation
 under one supervisor state transition, allow new accepts, and tell the old generation
-to stop accepting. A brief accept overlap must be explicitly accepted or replaced
-by a proven accept-permission handshake. The supervisor retains its own socket
+to stop accepting. Dan accepts a brief accept overlap, subject to concurrent-traffic
+acceptance showing that it causes no failed requests. The supervisor retains its own socket
 until final shutdown. A supervisor crash can release the listener and kill workers;
 zero downtime across supervisor crashes is not promised.
 
-Alternative requiring Dan's decision: a stable front proxy owns the public listener
-and generations bind separate private ports. It simplifies generation routing but
+The unselected alternative would use a stable front proxy for the public listener,
+with generations on separate private ports. It simplifies generation routing but
 adds a deployed component and changes remote-address/trust behavior. Independently
 rebinding the same public port is not a zero-downtime reload design.
 
@@ -64,12 +67,14 @@ Proposed states: starting -> ready -> serving -> draining -> exited. Each comman
 contains a protocol version, generation and request identifier; reject stale commands.
 Readiness timeout aborts only the candidate. Reload is serialized; reject or coalesce
 a second request instead of creating unbounded candidates. A failed post-commit
-generation requires a documented rollback policy, never silent resurrection.
+generation requires an explicit rollback step; rollback is never automatic.
 
 Draining disables new accepts and new keep-alive requests while finishing accepted
-requests within an absolute deadline. SSE/WebSocket streams need an explicit bounded
-policy and application-visible reconnect behavior. At deadline terminate the owned
-job, wait for process exit and report forced termination. Shutdown first disables
+requests within an absolute deadline. SSE/WebSocket streams close at the drain
+deadline; clients must reconnect.
+Readiness, drain and restart budgets are configurable propane accessories.
+Propose numerical defaults from native measurements for a later review. At the
+deadline terminate the owned job, wait for process exit and report forced termination. Shutdown first disables
 reload/restart, stops admission, drains, terminates stragglers, then closes the listener.
 No worker may keep the job handle alive. Windows SCM controls must be translated
 to this protocol; console signals alone are not a service shutdown mechanism.
@@ -81,13 +86,15 @@ within a separate jobs deadline; on forced exit rely on the queue backend's exis
 lease/retry behavior. Do not promise exactly-once execution. Acceptance must include
 lease expiry, retries, idempotent handlers, scheduler ownership and duplicate scheduler
 prevention. Starting a replacement must not accidentally start two schedulers.
-Clarify whether jobs-worker is a separate SCM service (recommended for independent
-restart and deployment) or a role under the application supervisor before implementation.
+The jobs-worker is a separate SCM service with independent restart and deployment.
+The scheduler runs only in that service, never in web-worker generations.
 
-## Windows service deployment proposal
+## Approved Windows service direction
 
 Use a native SCM entrypoint with a dedicated least-privilege account, absolute paths,
 explicit working directory, validated propane accessories and private state/log ACLs.
+Initial production support is Windows Server 2022 x64 under a dedicated low-privilege
+service account; Windows 11 remains development-only.
 Never assume an interactive console, user PATH or shell profile. Report START_PENDING,
 RUNNING, STOP_PENDING and STOPPED truthfully with bounded checkpoints/wait hints.
 Keep handlers short; dispatch drain work to the supervisor loop. Define SCM restart
@@ -137,14 +144,48 @@ This private fixture is manually run and does not add or repurpose a CI lane.
 | Compatibility | Existing Linux/macOS behavior, GNUstep clang/runtime pins, package/install contracts and Windows development/watch regressions remain green |
 | Release | Maintained regression tests, representative Windows CI, CI alignment/branch-protection guidance and operator/CLI/getting-started docs updated together |
 
-## Decisions requested from Dan before implementation
+## Decisions approved by Dan on November 4
 
-1. Approve supervisor-owned Winsock transfer, or select a stable front proxy.
-2. Approve native SCM supervisor and the initial supported Windows/service-account matrix.
-3. Choose jobs-worker service ownership and single-scheduler policy.
-4. Set drain/readiness/restart budgets and long-lived stream behavior as propane accessories.
-5. Decide acceptable accept overlap and rollback semantics after generation commit.
+Ask #2071 option a records:
 
-These decisions block shared implementation, not this draft PR. The public guides,
-production guards, runtime ABI/pins, shared runner definitions and Core/MVC/modules
-remain unchanged. The draft is a concrete review artifact rather than an enablement claim.
+1. The supervisor owns the public listener and transfers it with Winsock.
+2. Use native SCM services and dedicated low-privilege accounts. Initial production
+   support is Windows Server 2022 x64; Windows 11 remains development-only.
+3. Jobs-worker is a separate SCM service, with the scheduler only in that service.
+4. Readiness, drain and restart budgets are configurable propane accessories;
+   propose defaults from native measurements for later review. Close SSE/WebSocket
+   streams at the drain deadline and require client reconnect.
+5. Accept brief accept overlap subject to the traffic gate. Rollback after commit
+   is explicit and never automatic.
+
+This records architecture choices, not production readiness. It does not authorize
+shared runtime implementation, service installation, account/ACL changes, lifting
+production refusal, merging this draft or any release. Those need separate gos.
+The six private lifecycle tests still prove only the primitives listed above.
+
+## Provisional remaining work estimate
+
+The lead's planning range is **375–720 minutes of active agent engineering work**
+(about 6–12 hours), plus runner availability and elapsed native CI/qualification.
+This is an estimate from the missing implementation and acceptance gates, not a
+measured delivery promise. The Windows owner is currently offline and has not
+validated the range. Existing green draft checks do not reduce the unimplemented
+listener/HTTP/queue/SCM acceptance work to zero.
+
+| Work package | Active agent minutes | Completion evidence |
+| --- | --- | --- |
+| Winsock listener/control protocol and worker import seam | 90–150 | Target authentication, exclusive bind, stale/malformed commands and candidate failures |
+| Generation state, readiness, drain and reload | 90–180 | Concurrent HTTP reload, slow requests, keep-alive, SSE/WebSocket deadlines and rollback |
+| SCM web/jobs services and accessory/restart policy | 60–120 | Noninteractive lifecycle, scheduler uniqueness and truthful SCM state |
+| Package/install/operator contract and docs | 45–90 | Candidate metadata, rollback paths and maintained operator instructions |
+| Native negative cases and cross-platform regression qualification | 90–180 | Containment, queue recovery, SCM/account and compatibility gates above |
+
+These packages can be prepared incrementally, but require an available Windows
+Server 2022 x64 owner/runner and separate authorization for implementation and any
+native service/account/deployment actions. Numerical budget defaults remain pending
+measurements; no measurements or service actions were run for this update.
+
+Dan must separately decide whether v0.4.0 waits for this implementation and its
+acceptance evidence. The alternative is to retain Windows development-only/refusal
+for v0.4.0 and revise the public promise accordingly, with production support later.
+Neither release choice is implied by the architecture approval.
