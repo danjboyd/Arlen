@@ -110,17 +110,25 @@
   }
 }
 
-- (void)testQueryPlusIsLiteralAndFormPlusIsSpaceAcrossBackends {
+- (void)testQueryAndFormPlusDecodeAsSpaceAcrossBackends {
   NSString *body = @"name=Peggy+Hill&name=Bo%2Bbby";
-  NSString *head = [NSString stringWithFormat:@"POST /?name=Peggy+Hill&slash=a%%2Fb HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %lu\r\n\r\n", (unsigned long)[body length]];
+  NSString *head = [NSString stringWithFormat:@"POST /path+literal?name=Peggy+Hill&slash=a%%2Fb&plus=Bo%%2Bbby&encoded+key=space+value&raw%%2Bkey=literal%%2Bvalue HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: %lu\r\n\r\n", (unsigned long)[body length]];
   NSData *raw = [[head stringByAppendingString:body] dataUsingEncoding:NSUTF8StringEncoding];
   for (NSNumber *backendValue in [self allBackends]) {
     NSError *error = nil;
     ALNRequest *request = [ALNRequest requestFromRawData:raw backend:[backendValue unsignedIntegerValue]
                                                    error:&error];
     XCTAssertNotNil(request, @"backend=%@ error=%@", [self backendName:[backendValue unsignedIntegerValue]], error);
-    XCTAssertEqualObjects(@"Peggy+Hill", [request queryValueForName:@"name"]);
+    XCTAssertEqualObjects(@"Peggy Hill", [request queryValueForName:@"name"]);
     XCTAssertEqualObjects(@"a/b", request.queryParams[@"slash"]);
+    XCTAssertEqualObjects(@"/path+literal", request.path);
+    XCTAssertEqualObjects(@"Bo+bby", [request queryValueForName:@"plus"]);
+    XCTAssertEqualObjects(@"space value", [request queryValueForName:@"encoded key"]);
+    XCTAssertNil([request queryValueForName:@"encoded+key"]);
+    XCTAssertEqualObjects(@"literal+value", [request queryValueForName:@"raw+key"]);
+    XCTAssertEqualObjects(@"Bo+bby", request.queryParams[@"plus"]);
+    XCTAssertEqualObjects(@"space value", request.queryParams[@"encoded key"]);
+    XCTAssertEqualObjects(@"literal+value", request.queryParams[@"raw+key"]);
     XCTAssertEqualObjects(@"Bo+bby", request.formParams[@"name"]);
     XCTAssertEqualObjects((@[ @"Peggy Hill", @"Bo+bby" ]), request.formValues[@"name"]);
   }
@@ -141,7 +149,7 @@
     XCTAssertEqualObjects(@"GET", request.method, @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"/items/list", request.path, @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"HTTP/1.1", request.httpVersion, @"backend=%@", [self backendName:backend]);
-    XCTAssertEqualObjects(@"Peggy+Hill", request.queryParams[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Peggy Hill", request.queryParams[@"name"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"Arlen", request.queryParams[@"city"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"1", request.headers[@"x-test"], @"backend=%@", [self backendName:backend]);
   }
@@ -340,7 +348,7 @@
     NSDictionary *cookiesFirst = request.cookies;
     NSDictionary *cookiesSecond = request.cookies;
 
-    XCTAssertEqualObjects(@"Peggy+Hill", queryParamsFirst[@"name"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"Peggy Hill", queryParamsFirst[@"name"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"Arlen", queryParamsFirst[@"city"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"abc123", cookiesFirst[@"sid"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"admin", cookiesFirst[@"role"], @"backend=%@", [self backendName:backend]);
@@ -366,7 +374,7 @@
 
     XCTAssertEqualObjects(@"Bobby", [request queryValueForName:@"name"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"", [request queryValueForName:@"empty"], @"backend=%@", [self backendName:backend]);
-    XCTAssertEqualObjects(@"value+two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"value two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
     XCTAssertNil([request queryValueForName:@"missing"], @"backend=%@", [self backendName:backend]);
   }
 }
@@ -411,14 +419,14 @@
 
     for (NSUInteger idx = 0; idx < 5; idx++) {
       XCTAssertEqualObjects(@"Bobby", [request queryValueForName:@"name"], @"backend=%@", [self backendName:backend]);
-      XCTAssertEqualObjects(@"value+two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
+      XCTAssertEqualObjects(@"value two", [request queryValueForName:@"encoded key"], @"backend=%@", [self backendName:backend]);
       XCTAssertEqualObjects(@"", [request queryValueForName:@"empty"], @"backend=%@", [self backendName:backend]);
       XCTAssertNil([request queryValueForName:@"missing"], @"backend=%@", [self backendName:backend]);
     }
 
     NSDictionary *queryParams = [request queryParams];
     XCTAssertEqualObjects(@"Bobby", queryParams[@"name"], @"backend=%@", [self backendName:backend]);
-    XCTAssertEqualObjects(@"value+two", queryParams[@"encoded key"], @"backend=%@", [self backendName:backend]);
+    XCTAssertEqualObjects(@"value two", queryParams[@"encoded key"], @"backend=%@", [self backendName:backend]);
     XCTAssertEqualObjects(@"", queryParams[@"empty"], @"backend=%@", [self backendName:backend]);
   }
 }

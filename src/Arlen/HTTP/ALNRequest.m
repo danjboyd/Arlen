@@ -246,7 +246,7 @@ static BOOL ALNQueryBytesNeedDecoding(const char *bytes, size_t length) {
     return NO;
   }
   for (size_t idx = 0; idx < length; idx++) {
-    if (bytes[idx] == '%') {
+    if (bytes[idx] == '%' || bytes[idx] == '+') {
       return YES;
     }
   }
@@ -267,7 +267,7 @@ static NSString *ALNQueryStringFromBytes(const char *bytes, size_t length, BOOL 
   if (![raw isKindOfClass:[NSString class]]) {
     return nil;
   }
-  return decode ? ALNPercentDecodedString(raw, NO) : raw;
+  return decode ? ALNPercentDecodedString(raw, YES) : raw;
 }
 
 static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
@@ -279,7 +279,7 @@ static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
   const char *queryBytes = [query UTF8String];
   const char *nameBytes = [name UTF8String];
   if (queryBytes == NULL || nameBytes == NULL) {
-    NSDictionary *parsed = ALNParseQueryString(query, NO);
+    NSDictionary *parsed = ALNParseQueryString(query, YES);
     id fallback = parsed[name];
     return [fallback isKindOfClass:[NSString class]] ? fallback : nil;
   }
@@ -299,9 +299,10 @@ static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
     size_t keyLength = (equals != NULL) ? (size_t)(equals - pairStart)
                                         : (size_t)(pairEnd - pairStart);
 
-    BOOL keyMatches =
+    BOOL keyNeedsDecoding = ALNQueryBytesNeedDecoding(pairStart, keyLength);
+    BOOL keyMatches = !keyNeedsDecoding &&
         (keyLength == nameLength && memcmp(pairStart, nameBytes, nameLength) == 0);
-    if (!keyMatches && ALNQueryBytesNeedDecoding(pairStart, keyLength)) {
+    if (!keyMatches && keyNeedsDecoding) {
       NSString *decodedKey = ALNQueryStringFromBytes(pairStart, keyLength, YES);
       keyMatches = [decodedKey isEqualToString:name];
     }
@@ -2018,7 +2019,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   if (cached != nil) {
     return cached;
   }
-  NSDictionary *parsed = [ALNParseQueryString(_queryString, NO) copy];
+  NSDictionary *parsed = [ALNParseQueryString(_queryString, YES) copy];
   if (parsed == nil) {
     parsed = @{};
   }
