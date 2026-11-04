@@ -138,8 +138,8 @@ On 2026-10-21 the local serial validation passed 1,325 unit tests (148 existing
 skips), four runtime tests, and 254 integration tests (82 existing skips);
 integration took 1,070.803 seconds. The existing job timeout remains 90 minutes. `make windows-confidence` (packaged
 release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
-development-only Windows scope; it returns with Windows production in 0.4.0
-(#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
+development-only Windows scope; it remains manual through 0.4.0. Promotion
+requires separately qualified Windows production support (#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
 paths that the native `arlen.exe` cannot open.
 
 ## Goal
@@ -234,7 +234,7 @@ visible but non-required:
  authoritative and the lane stays stably green
 - `windows-preview`
  - purpose: validate Windows runtime parity and the unit suite (packaged
- release parity returns with Windows production in 0.4.0)
+ release parity remains manual through 0.4.0)
  - status: preview confidence, not a required merge gate
  - promotion rule: only promote if Windows leaves preview and the lane is
  operationally stable enough to protect real shipped behavior

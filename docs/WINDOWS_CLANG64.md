@@ -1,12 +1,12 @@
 # Windows CLANG64
 
-Last updated: 2026-10-16
+Last updated: 2026-11-04
 
 Windows is supported for **development** from Arlen 0.3.0, on the
 gnustep-cli managed MSYS2 `CLANG64` toolchain. You can install Arlen with
 `install.ps1`, create apps with `arlen new`, build them, and run them under
 `boomhauer`. **Production on Windows is not supported yet**: `propane`,
-`jobs-worker` and service deploys are planned for 0.4.0. To install and get
+supervised `jobs-worker` and service deploys are deferred beyond 0.4.0. To install and get
 started, see [Getting Started on Windows](GETTING_STARTED_WINDOWS.md).
 
 This document covers the `CLANG64` entry path, the Windows CI lanes, and the
@@ -24,7 +24,7 @@ Current scope on `main`:
 - a main-based Windows preview workflow
 
 Development is the supported scope. Production hosting stays out of scope
-until 0.4.0; see the support statement below.
+for 0.4.0; see the support statement below.
 
 Windows watch mode contains each app or build-error server in a native
 kill-on-close job and monitors the watch shell. Force-killing the watch tree
@@ -235,7 +235,7 @@ Minimum assumptions that still remain external on Windows:
 
 ## 5. Not Supported Yet
 
-Planned for 0.4.0:
+Deferred beyond 0.4.0; no production release version is committed:
 
 - `propane` as a production manager. `arlen propane` starts from a Windows
   console, but its worker supervision, reloads and signal handling are not
@@ -254,13 +254,13 @@ Not planned:
   (`arlen-X.Y.Z-windows-x64.zip` through `install.ps1`), `arlen new`, building
   apps, and running them under `boomhauer` with watch mode are supported on
   64-bit Windows with the gnustep-cli managed `CLANG64` toolchain.
-- **Production: not supported until 0.4.0.** Deploy production apps to Linux,
+- **Production: not supported, including in 0.4.0.** Deploy production apps to Linux,
   the authoritative production baseline, or to macOS.
 - The `windows-preview` CI lane runs `make phase24-windows-confidence`,
   `make test-unit`, and `make test-integration` serially, retaining focused
   static/realtime security checks and explicit platform/live-service skips.
   The job keeps its 90-minute budget. `make windows-confidence` (packaged release and deploy
-  parity) is a manual lane until Windows production support lands in 0.4.0.
+  parity) is a manual lane until Windows production support is separately implemented and qualified.
 
 ## Installer Regression Checks
 

@@ -106,8 +106,8 @@
 - (void)testLinkDirectoryKeepsLinkPresentWhileSwapping {
 #if defined(_WIN32)
   // MSYS2 links releases with NTFS junctions, which can't be renamed over;
-  // deploy on Windows is 0.4.0 scope (#200).
-  XCTSkip(@"junction swaps are not atomic on Windows; deploy is 0.4.0 scope");
+  // production deploy on Windows remains deferred beyond 0.4.0 (#200).
+  XCTSkip(@"junction swaps are not atomic on Windows; production deploy remains unsupported");
 #endif
   NSString *root = ALNTestTemporaryDirectory(@"arlen-link-swap");
   XCTAssertNotNil(root);

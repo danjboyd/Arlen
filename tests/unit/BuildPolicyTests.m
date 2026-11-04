@@ -112,7 +112,7 @@
 
 - (void)testPropaneKeepsMergedConfigurationOutOfProcessArguments {
 #if defined(_WIN32)
-  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+  XCTSkip(@"propane production hosting is not supported on Windows, including 0.4.0 (#200)");
 #endif
   NSString *repoRoot = ALNTestRepoRoot();
   NSString *command = [NSString stringWithFormat:@"bash %@ %@ 2>&1",
@@ -155,7 +155,7 @@
 
 - (void)testPropaneLsofProbeFailurePreservesStartupPolicyAndValidCounts {
 #if defined(_WIN32)
-  XCTSkip(@"propane production hosting is not supported on Windows until 0.4.0 (#200)");
+  XCTSkip(@"propane production hosting is not supported on Windows, including 0.4.0 (#200)");
 #endif
   NSString *repoRoot = ALNTestRepoRoot();
   NSString *command = [NSString stringWithFormat:

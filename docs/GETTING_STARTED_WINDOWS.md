@@ -10,7 +10,7 @@ Arlen runs on the [gnustep-cli](https://github.com/danjboyd/gnustep-cli-new)
 managed MSYS2 `CLANG64` GNUstep toolchain.
 
 Production on Windows (`propane`, `jobs-worker`, and service deploys) is not
-supported yet; it is planned for 0.4.0. Deploy to Linux or macOS.
+supported, including in 0.4.0; it is deferred to a later release. Deploy to Linux or macOS.
 
 ## 1. Install Arlen and the Toolchain
 
@@ -175,7 +175,7 @@ More detail on the `CLANG64` lanes and the packaged-release contract is in
 ## 5. Known Limits
 
 - **Production:** `propane`, `jobs-worker` and `arlen deploy` targets are not
-  supported on Windows until 0.4.0.
+  supported on Windows, including in 0.4.0.
 - **Repository-root `boomhauer`:** running `boomhauer` from the framework
   checkout root is not supported on Windows yet. Run it from an app root.
 - **Paths:** Windows long paths are off by default. Keep install roots and

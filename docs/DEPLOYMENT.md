@@ -635,7 +635,8 @@ Windows support statement for deployment:
  as a preview path
 - the repo-native `windows-confidence` lane exercises it, but only by hand:
  it left the Windows self-hosted workflow with 0.3.0's development-only
- Windows scope and returns with Windows production in 0.4.0
+ Windows scope and remains manual through 0.4.0; promotion requires separately
+ qualified Windows production support
 - this is still not a general production support claim for Windows hosts
 
 ### 6.1 Build a release artifact

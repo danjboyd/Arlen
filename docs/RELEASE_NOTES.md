@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windows remains development-only in 0.4.0. Production hosting, supervised jobs
+  workers and service deploys are deferred beyond this release; existing
+  production refusal remains in place.
+
 - Add regression coverage for promoted search results with explicit `filter.*`
   parameters on the scoped and unscoped query routes and in JSON query bodies
   (#298). The behavior itself was fixed in 0.3.1 (search 1.2.1).
