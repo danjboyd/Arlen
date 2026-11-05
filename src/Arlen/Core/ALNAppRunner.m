@@ -66,50 +66,54 @@ static int ALNRunJobsWorker(ALNApplication *application,
 
   NSTimeInterval nextSchedulerAt = runScheduler ? 0.0 : DBL_MAX;
   while (YES) {
-    NSDate *now = [NSDate date];
-    NSTimeInterval nowSeconds = [now timeIntervalSince1970];
+    // Bound scheduler and poll temporaries even when the worker stays busy.
+    // Drain before waiting; return and continue also leave this pool.
+    @autoreleasepool {
+      NSDate *now = [NSDate date];
+      NSTimeInterval nowSeconds = [now timeIntervalSince1970];
 
-    if (runScheduler && nowSeconds >= nextSchedulerAt) {
-      NSError *schedulerError = nil;
-      if ([runtime runSchedulerAt:now error:&schedulerError] == nil) {
-        fprintf(stderr, "jobs worker: scheduler run failed: %s\n",
-                [[schedulerError localizedDescription] UTF8String]);
+      if (runScheduler && nowSeconds >= nextSchedulerAt) {
+        NSError *schedulerError = nil;
+        if ([runtime runSchedulerAt:now error:&schedulerError] == nil) {
+          fprintf(stderr, "jobs worker: scheduler run failed: %s\n",
+                  [[schedulerError localizedDescription] UTF8String]);
+          return 1;
+        }
+        nextSchedulerAt = nowSeconds + schedulerIntervalSeconds;
+      }
+
+      NSError *workerError = nil;
+      NSDictionary *summary = [runtime runWorkerAt:now limit:limit error:&workerError];
+      if (summary == nil) {
+        fprintf(stderr, "jobs worker: worker run failed: %s\n",
+                [[workerError localizedDescription] UTF8String]);
         return 1;
       }
-      nextSchedulerAt = nowSeconds + schedulerIntervalSeconds;
-    }
 
-    NSError *workerError = nil;
-    NSDictionary *summary = [runtime runWorkerAt:now limit:limit error:&workerError];
-    if (summary == nil) {
-      fprintf(stderr, "jobs worker: worker run failed: %s\n",
-              [[workerError localizedDescription] UTF8String]);
-      return 1;
-    }
+      if (once) {
+        return 0;
+      }
 
-    if (once) {
-      return 0;
-    }
+      BOOL reachedRunLimit = [summary[@"reachedRunLimit"] boolValue];
+      NSUInteger leasedCount = [summary[@"leasedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                   ? [summary[@"leasedCount"] unsignedIntegerValue]
+                                   : 0;
+      NSUInteger acknowledgedCount =
+          [summary[@"acknowledgedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
+              ? [summary[@"acknowledgedCount"] unsignedIntegerValue]
+              : 0;
+      NSUInteger retriedCount = [summary[@"retriedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
+                                    ? [summary[@"retriedCount"] unsignedIntegerValue]
+                                    : 0;
+      NSUInteger handlerErrorCount =
+          [summary[@"handlerErrorCount"] respondsToSelector:@selector(unsignedIntegerValue)]
+              ? [summary[@"handlerErrorCount"] unsignedIntegerValue]
+              : 0;
 
-    BOOL reachedRunLimit = [summary[@"reachedRunLimit"] boolValue];
-    NSUInteger leasedCount = [summary[@"leasedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                 ? [summary[@"leasedCount"] unsignedIntegerValue]
-                                 : 0;
-    NSUInteger acknowledgedCount =
-        [summary[@"acknowledgedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [summary[@"acknowledgedCount"] unsignedIntegerValue]
-            : 0;
-    NSUInteger retriedCount = [summary[@"retriedCount"] respondsToSelector:@selector(unsignedIntegerValue)]
-                                  ? [summary[@"retriedCount"] unsignedIntegerValue]
-                                  : 0;
-    NSUInteger handlerErrorCount =
-        [summary[@"handlerErrorCount"] respondsToSelector:@selector(unsignedIntegerValue)]
-            ? [summary[@"handlerErrorCount"] unsignedIntegerValue]
-            : 0;
-
-    BOOL didWork = (leasedCount > 0 || acknowledgedCount > 0 || retriedCount > 0 || handlerErrorCount > 0);
-    if (reachedRunLimit || didWork) {
-      continue;
+      BOOL didWork = (leasedCount > 0 || acknowledgedCount > 0 || retriedCount > 0 || handlerErrorCount > 0);
+      if (reachedRunLimit || didWork) {
+        continue;
+      }
     }
     if (pollIntervalSeconds > 0.0) {
       [NSThread sleepForTimeInterval:pollIntervalSeconds];
