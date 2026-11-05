@@ -4326,10 +4326,12 @@ static NSString *ALNHostDeployProfile(void) {
                                                              attributes:nil
                                                                   error:nil]);
     NSString *linkPath = [bOutput stringByAppendingPathComponent:@"link"];
-    NSError *linkError = nil;
-    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkPath
-                                                        withDestinationPath:aOutput
-                                                                     error:&linkError], @"%@", linkError);
+    int linkCode = 0;
+    NSString *linkOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"cd %@ && source ./tools/platform.sh && aln_platform_link_directory %@ %@",
+        [self shellQuoted:repoRoot], [self shellQuoted:aOutput], [self shellQuoted:linkPath]]
+                                         exitCode:&linkCode];
+    XCTAssertEqual(0, linkCode, @"%@", linkOutput);
 
     NSArray<NSDictionary *> *cases = @[
       @{ @"name" : @"copied manifest", @"root" : aTemplates,
