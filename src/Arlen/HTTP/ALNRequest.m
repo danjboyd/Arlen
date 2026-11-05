@@ -109,13 +109,22 @@ static BOOL ALNParseContentLengthHeaderValue(NSString *value) {
   return YES;
 }
 
-static NSString *ALNURLDecode(NSString *value) {
-  NSString *plusNormalized = [value stringByReplacingOccurrencesOfString:@"+" withString:@" "];
-  NSString *decoded = ALNPercentDecodedString(value, YES);
-  return decoded ?: plusNormalized;
+static NSDictionary *ALNParseQueryString(NSString *query, BOOL formMode);
+static BOOL ALNContentTypeIsFormURLEncoded(NSString *contentType);
+
+static BOOL ALNValidateRequestTarget(NSString *uri, NSError **error) {
+  if (ALNPercentDecodedString(uri, NO) != nil) return YES;
+  if (error != NULL) *error = ALNRequestError(3, @"Invalid percent encoding in request target");
+  return NO;
 }
 
-static NSDictionary *ALNParseQueryString(NSString *query);
+static BOOL ALNValidateFormBody(NSData *body, NSString *contentType, NSError **error) {
+  if (!ALNContentTypeIsFormURLEncoded(contentType) || [body length] == 0) return YES;
+  NSString *encoded = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+  if (ALNPercentDecodedString(encoded, YES) != nil) return YES;
+  if (error != NULL) *error = ALNRequestError(3, @"Invalid percent encoding in form body");
+  return NO;
+}
 
 static BOOL ALNUTF8BytesAreValid(const unsigned char *bytes, size_t length) {
   if (bytes == NULL) {
@@ -237,7 +246,7 @@ static BOOL ALNQueryBytesNeedDecoding(const char *bytes, size_t length) {
     return NO;
   }
   for (size_t idx = 0; idx < length; idx++) {
-    if (bytes[idx] == '+' || bytes[idx] == '%') {
+    if (bytes[idx] == '%' || bytes[idx] == '+') {
       return YES;
     }
   }
@@ -258,7 +267,7 @@ static NSString *ALNQueryStringFromBytes(const char *bytes, size_t length, BOOL 
   if (![raw isKindOfClass:[NSString class]]) {
     return nil;
   }
-  return decode ? ALNURLDecode(raw) : raw;
+  return decode ? ALNPercentDecodedString(raw, YES) : raw;
 }
 
 static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
@@ -270,7 +279,7 @@ static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
   const char *queryBytes = [query UTF8String];
   const char *nameBytes = [name UTF8String];
   if (queryBytes == NULL || nameBytes == NULL) {
-    NSDictionary *parsed = ALNParseQueryString(query);
+    NSDictionary *parsed = ALNParseQueryString(query, YES);
     id fallback = parsed[name];
     return [fallback isKindOfClass:[NSString class]] ? fallback : nil;
   }
@@ -290,9 +299,10 @@ static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
     size_t keyLength = (equals != NULL) ? (size_t)(equals - pairStart)
                                         : (size_t)(pairEnd - pairStart);
 
-    BOOL keyMatches =
+    BOOL keyNeedsDecoding = ALNQueryBytesNeedDecoding(pairStart, keyLength);
+    BOOL keyMatches = !keyNeedsDecoding &&
         (keyLength == nameLength && memcmp(pairStart, nameBytes, nameLength) == 0);
-    if (!keyMatches && ALNQueryBytesNeedDecoding(pairStart, keyLength)) {
+    if (!keyMatches && keyNeedsDecoding) {
       NSString *decodedKey = ALNQueryStringFromBytes(pairStart, keyLength, YES);
       keyMatches = [decodedKey isEqualToString:name];
     }
@@ -316,7 +326,7 @@ static NSString *ALNQueryValueForNameInString(NSString *query, NSString *name) {
   return found ? matchedValue : nil;
 }
 
-static NSDictionary *ALNParseQueryString(NSString *query) {
+static NSDictionary *ALNParseQueryString(NSString *query, BOOL formMode) {
   if ([query length] == 0) {
     return @{};
   }
@@ -328,13 +338,12 @@ static NSDictionary *ALNParseQueryString(NSString *query) {
       continue;
     }
     NSRange equals = [pair rangeOfString:@"="];
-    if (equals.location == NSNotFound) {
-      params[ALNURLDecode(pair)] = @"";
-      continue;
-    }
-    NSString *key = [pair substringToIndex:equals.location];
-    NSString *value = [pair substringFromIndex:equals.location + 1];
-    params[ALNURLDecode(key)] = ALNURLDecode(value);
+    NSString *rawKey = equals.location == NSNotFound ? pair : [pair substringToIndex:equals.location];
+    NSString *rawValue = equals.location == NSNotFound ? @"" : [pair substringFromIndex:equals.location + 1];
+    NSString *key = ALNPercentDecodedString(rawKey, formMode);
+    NSString *value = ALNPercentDecodedString(rawValue, formMode);
+    if (key == nil || value == nil) return nil;
+    params[key] = value;
   }
   return params;
 }
@@ -1277,6 +1286,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
 
   NSString *method = parts[0];
   NSString *uri = parts[1];
+  if (!ALNValidateRequestTarget(uri, error)) return nil;
   NSString *httpVersion = ([parts count] >= 3) ? parts[2] : @"HTTP/1.1";
   if (![httpVersion isKindOfClass:[NSString class]] || [httpVersion length] == 0) {
     httpVersion = @"HTTP/1.1";
@@ -1336,6 +1346,7 @@ static ALNRequest *ALNRequestFromRawDataLegacy(NSData *data, NSError **error) {
     headers[@"host"] = authority;
   }
 
+  if (!ALNValidateFormBody(body, headers[@"content-type"], error)) return nil;
   return [[ALNRequest alloc] initWithMethod:method
                                        path:path
                                 queryString:query
@@ -1446,6 +1457,8 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
     }
     return nil;
   }
+  if (!ALNValidateRequestTarget(path, error) ||
+      !ALNValidateRequestTarget(query, error)) return nil;
   NSString *authority = ALNTakeAbsoluteFormAuthority(&path);
   if (!ALNHostHeaderCountIsValid(state->_hostHeaderCount, httpVersion, authority)) {
     if (error != NULL) {
@@ -1473,6 +1486,7 @@ static ALNRequest *ALNBuildRequestFromLLHTTPState(NSData *sourceData,
                                                                               state->_deferredHeaderNames,
                                                                               state->_deferredHeaderValues)];
   }
+  if (!ALNValidateFormBody(body, [request headerValueForName:@"content-type"], error)) return nil;
   return request;
 }
 
@@ -1801,15 +1815,23 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
 }
 
 - (BOOL)adoptSpooledBodyAtPath:(NSString *)path error:(NSError **)error {
-  NSData *mapped = ALNPlatformMappedFileData(path, error);
-  if (mapped == nil) {
-    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
-    return NO;
+  NSError *failure = nil;
+  BOOL accepted = NO;
+  @autoreleasepool {
+    NSData *mapped = ALNPlatformMappedFileData(path, &failure);
+    if (mapped != nil &&
+        ALNValidateFormBody(mapped, [self headerValueForName:@"content-type"], &failure)) {
+      _body = mapped;
+      self.bodySpoolPath = path;
+      self.cachedFormParams = nil;
+      accepted = YES;
+    }
   }
-  _body = mapped;
-  self.bodySpoolPath = path;
-  self.cachedFormParams = nil;
-  return YES;
+  if (!accepted) {
+    ALNPlatformRemoveItemWhenUnmapped(path);
+    if (error != NULL) *error = failure;
+  }
+  return accepted;
 }
 
 - (instancetype)initWithMethod:(NSString *)method
@@ -1997,7 +2019,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
   if (cached != nil) {
     return cached;
   }
-  NSDictionary *parsed = [ALNParseQueryString(_queryString) copy];
+  NSDictionary *parsed = [ALNParseQueryString(_queryString, YES) copy];
   if (parsed == nil) {
     parsed = @{};
   }
@@ -2067,8 +2089,9 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
     for (NSString *pair in [bodyString componentsSeparatedByString:@"&"]) {
       if (!pair.length) continue;
       NSRange equals = [pair rangeOfString:@"="];
-      NSString *name = ALNURLDecode(equals.location == NSNotFound ? pair : [pair substringToIndex:equals.location]);
-      NSString *value = equals.location == NSNotFound ? @"" : ALNURLDecode([pair substringFromIndex:equals.location+1]);
+      NSString *name = ALNPercentDecodedString(equals.location == NSNotFound ? pair : [pair substringToIndex:equals.location], YES);
+      NSString *value = equals.location == NSNotFound ? @"" : ALNPercentDecodedString([pair substringFromIndex:equals.location+1], YES);
+      if (name == nil || value == nil) continue;
       out[name] = [(out[name] ?: @[]) arrayByAddingObject:value];
     }
   }
@@ -2089,7 +2112,7 @@ static BOOL ALNASCIIBytesEqualLowercaseCString(const unsigned char *bytes,
       [_body length] > 0) {
     NSString *bodyString = [[NSString alloc] initWithData:_body encoding:NSUTF8StringEncoding];
     if ([bodyString isKindOfClass:[NSString class]] && [bodyString length] > 0) {
-      parsed = [ALNParseQueryString(bodyString) copy];
+      parsed = [ALNParseQueryString(bodyString, YES) copy];
       if (parsed == nil) {
         parsed = @{};
       }

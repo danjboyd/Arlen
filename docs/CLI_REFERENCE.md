@@ -30,10 +30,10 @@ expired keys on writes. Configure durable mail delivery and a shared cache for
 production apps that need those guarantees.
 
 Apps run by `arlen boomhauer` or `arlen propane` decode query and form values
-with the same strict UTF-8 percent-decoder on Apple and GNUstep. `+` means a
-space in query/form data, and `%00`, malformed escapes, and invalid UTF-8 are
-not partially decoded. Core query values keep the original component in those
-cases; module form parsers use an empty value and skip an invalid name.
+with the same strict UTF-8 percent-decoder on Apple and GNUstep. `+` stays
+literal in a URL query and means a space only in a URL-encoded form body.
+Malformed escapes, invalid UTF-8, and decoded NUL in a request target or
+URL-encoded form body receive HTTP `400`. Module adoption is tracked separately.
 
 ## Installer (`tools/install.sh`)
 

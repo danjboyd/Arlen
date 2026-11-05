@@ -194,8 +194,9 @@ curl -i http://127.0.0.1:3000/openapi
 ```
 
 When you add routes that read query or form parameters, Arlen decodes valid
-percent-encoded UTF-8 once and treats `+` as a space. Malformed escapes and
-encoded NUL are kept whole in core query values; see the
+percent-encoded UTF-8 once. A literal `+` stays a plus in a URL query and
+becomes a space in a URL-encoded form body. Malformed escapes, invalid UTF-8,
+and decoded NUL in a request target or URL-encoded form body receive HTTP `400`; see the
 [App Authoring Guide](APP_AUTHORING_GUIDE.md#5-params-validation-session-and-auth-helpers).
 
 `boomhauer` watches app files by default and rebuilds when inputs change.

@@ -5,6 +5,12 @@
 - Add regression coverage for promoted search results with explicit `filter.*`
   parameters on the scoped and unscoped query routes and in JSON query bodies
   (#298). The behavior itself was fixed in 0.3.1 (search 1.2.1).
+- HTTP request targets and URL-encoded form bodies now reject malformed percent
+  escapes, invalid UTF-8, and decoded NUL with `400` on Apple and GNUstep.
+  Query and form `+` retain the 0.3.1 behavior of decoding to a space;
+  percent-encoded `%2B` remains a literal plus, and URL paths retain literal `+`.
+  Direct module parsers keep their own invalid-component fallback policies;
+  the HTTP request entrypoint rejects malformed input before dispatch.
 - Add automatic Linux runtime setup for Ubuntu 24.04 LTS on amd64, alongside
   the existing native arm64 target. Its separate lock preserves runtime source
   revisions, race patches, normal optimization flags and the scoped GNU Make
