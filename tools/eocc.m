@@ -1,5 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <openssl/sha.h>
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 #import "ALNDataCompat.h"
 #import "ALNEOCRuntime.h"
@@ -71,6 +74,16 @@ static NSArray<NSString *> *SafeManifestLogicalPathParts(NSString *logicalPath) 
   return parts;
 }
 
+static BOOL PathIsSymbolicLink(NSString *path) {
+#if defined(_WIN32)
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+  return [attributes[NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+#else
+  struct stat info;
+  return lstat([path fileSystemRepresentation], &info) == 0 && S_ISLNK(info.st_mode);
+#endif
+}
+
 // A manifest is a cache, not authority to delete an arbitrary output_path.
 static NSString *SafeStaleOutputPath(NSDictionary *cachedEntry, NSString *outputDir) {
   NSString *logicalPath = [cachedEntry[@"logical_path"] isKindOfClass:[NSString class]]
@@ -87,7 +100,6 @@ static NSString *SafeStaleOutputPath(NSDictionary *cachedEntry, NSString *output
     return nil;
   }
 
-  NSFileManager *fileManager = [NSFileManager defaultManager];
   NSString *resolvedRoot = [[outputDir stringByResolvingSymlinksInPath] stringByStandardizingPath];
   NSString *resolvedCandidate = [[candidate stringByResolvingSymlinksInPath] stringByStandardizingPath];
   if (!PathIsWithinDirectory(resolvedCandidate, resolvedRoot)) {
@@ -100,7 +112,7 @@ static NSString *SafeStaleOutputPath(NSDictionary *cachedEntry, NSString *output
     NSString *component = idx + 1 == [parts count]
                               ? [parts[idx] stringByAppendingString:@".m"] : parts[idx];
     componentPath = [componentPath stringByAppendingPathComponent:component];
-    if ([fileManager destinationOfSymbolicLinkAtPath:componentPath error:nil] != nil) {
+    if (PathIsSymbolicLink(componentPath)) {
       return nil;
     }
   }
