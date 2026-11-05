@@ -38,9 +38,9 @@ Common patterns:
 - `method`: usually `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`
 - `path`: static paths and placeholder segments such as `:id`. A placeholder's
   value is its segment percent-decoded once (`/users/user%3Aabc` gives
-  `user:abc`; `%2F` stays inside the value). A segment with a malformed
-  escape, `%00`, or invalid UTF-8 is kept as sent. Wildcard (`*name`) values are
-  not decoded.
+  `user:abc`; `%2F` stays inside the value). An HTTP target with a malformed
+  escape, `%00`, or invalid UTF-8 receives `400` before route matching.
+  Wildcard (`*name`) values are not decoded.
 - `name`: stable route name used later for route metadata
 - `controllerClass`: Objective-C controller class
 - `action`: selector name without the `:` suffix
@@ -144,11 +144,12 @@ it automatically.
 ## 5. Params, Validation, Session, and Auth Helpers
 
 Arlen merges route, query, and request-body params for common controller reads.
-Query and form values decode `+` as a space and decode valid percent-encoded
-UTF-8 once. Route parameters keep `+` literally. Malformed escapes, invalid
-UTF-8, and `%00` are never partially decoded: a route or core query value stays
-as sent; module form parsers use an empty value and skip an invalid name. For example,
-`?name=Peggy+Hill` yields `Peggy Hill`, but `?name=a%00b` yields `a%00b`.
+Query and form values decode valid percent-encoded UTF-8 once. A literal `+`
+stays a plus in a query or route segment and becomes a space only in a
+URL-encoded form body. Malformed escapes, invalid UTF-8, and decoded NUL in
+a request target or URL-encoded form body receive HTTP `400`. For example,
+`?name=Peggy+Hill` yields `Peggy+Hill`, while a form body of
+`name=Peggy+Hill` yields `Peggy Hill`.
 The helpers you will use most often are:
 
 - `stringParamForName:`

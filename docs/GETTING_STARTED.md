@@ -19,7 +19,7 @@ Paste this command into a bash or zsh terminal:
 bash -o pipefail -c 'curl -fsSL https://github.com/danjboyd/Arlen/releases/latest/download/install.sh | bash -s -- --yes' && export PATH="$HOME/.local/bin:$PATH"
 ```
 
-On Debian 13 (amd64/arm64), Ubuntu 24.04 LTS (arm64/aarch64), and
+On Debian 13 (amd64/arm64), Ubuntu 24.04 LTS (amd64/arm64, aarch64), and
 Ubuntu 26.04 LTS (amd64), the installer can set up missing build prerequisites
 and build Arlen's pinned patched clang GNUstep runtime.
 `--yes` permits setup; installing host packages may ask for your sudo password.
@@ -68,8 +68,8 @@ not satisfy the release contract. Automatic setup builds the existing custom
 using the target lock in `tools/runtime/` and three race patches in
 `tools/ci/tsan-toolchain/`. Ubuntu 26.04 adds the clang compatibility patch in
 `tools/runtime/patches/`. Automatic setup supports Debian 13 amd64/arm64,
-Ubuntu 24.04 arm64 (aarch64), and Ubuntu 26.04 amd64, using each distribution's
-ICU and clang. Debian 12, Ubuntu 24.04 amd64, and Ubuntu 26.04 arm64 remain
+Ubuntu 24.04 amd64/arm64 (aarch64), and Ubuntu 26.04 amd64, using each distribution's
+ICU and clang. Debian 12 and Ubuntu 26.04 arm64 remain
 outside this automatic path. A runtime built on another distribution cannot
 be reused: its libraries and provenance must match the actual host.
 Ubuntu 24.04 uses its packaged GNU Make 4.3. The target lock patches only
@@ -194,8 +194,9 @@ curl -i http://127.0.0.1:3000/openapi
 ```
 
 When you add routes that read query or form parameters, Arlen decodes valid
-percent-encoded UTF-8 once and treats `+` as a space. Malformed escapes and
-encoded NUL are kept whole in core query values; see the
+percent-encoded UTF-8 once. A literal `+` stays a plus in a URL query and
+becomes a space in a URL-encoded form body. Malformed escapes, invalid UTF-8,
+and decoded NUL in a request target or URL-encoded form body receive HTTP `400`; see the
 [App Authoring Guide](APP_AUTHORING_GUIDE.md#5-params-validation-session-and-auth-helpers).
 
 `boomhauer` watches app files by default and rebuilds when inputs change.

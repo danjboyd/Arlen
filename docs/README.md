@@ -28,7 +28,7 @@ toolchain env directly for the Linux/GNUstep path. On macOS, use
 `GETTING_STARTED_MACOS.md`; on Windows, use `GETTING_STARTED_WINDOWS.md`.
 
 Linux releases support automatic runtime setup on Debian 13 amd64/arm64,
-Ubuntu 24.04 arm64 (aarch64), and Ubuntu 26.04 amd64. They use a pinned patched
+Ubuntu 24.04 amd64/arm64 (aarch64), and Ubuntu 26.04 amd64. They use a pinned patched
 GNUstep runtime built at a fixed prefix, with normal `-O2` client defaults
 and GNUstep debug controls.
 See [runtime setup and manual installation](GETTING_STARTED.md#manual-toolchain-setup)
