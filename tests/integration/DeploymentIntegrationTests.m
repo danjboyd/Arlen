@@ -4298,6 +4298,7 @@ static NSString *ALNHostDeployProfile(void) {
     NSString *aTemplate = [aTemplates stringByAppendingPathComponent:@"old.html.eoc"];
     NSString *bTemplate = [bTemplates stringByAppendingPathComponent:@"new.html.eoc"];
     NSString *aGenerated = [aOutput stringByAppendingPathComponent:@"old.html.eoc.m"];
+    NSString *directorySentinel = [bOutput stringByAppendingPathComponent:@"victim.m/keep.txt"];
     NSString *aManifest = [aOutput stringByAppendingPathComponent:@"manifest.json"];
     NSString *bManifest = [bOutput stringByAppendingPathComponent:@"manifest.json"];
 
@@ -4339,7 +4340,10 @@ static NSString *ALNHostDeployProfile(void) {
          @"logical" : @"../../tree-a/generated/old.html.eoc" },
       @{ @"name" : @"symlink below output root", @"root" : bTemplates,
          @"logical" : @"link/old.html.eoc",
-         @"output" : [linkPath stringByAppendingPathComponent:@"old.html.eoc.m"] }
+         @"output" : [linkPath stringByAppendingPathComponent:@"old.html.eoc.m"] },
+      @{ @"name" : @"directory named as generated output", @"root" : bTemplates,
+         @"logical" : @"victim", @"output" : [bOutput stringByAppendingPathComponent:@"victim.m"],
+         @"protected" : directorySentinel }
     ];
     for (NSDictionary *testCase in cases) {
       NSMutableDictionary *entry = [originalEntry mutableCopy];
@@ -4356,6 +4360,10 @@ static NSString *ALNHostDeployProfile(void) {
       XCTAssertNotNil(forgedData);
       XCTAssertTrue([forgedData writeToFile:bManifest atomically:YES]);
       XCTAssertTrue([self writeFile:aGenerated content:@"outside sentinel\n"]);
+      NSString *protectedPath = testCase[@"protected"] ?: aGenerated;
+      if (testCase[@"protected"] != nil) {
+        XCTAssertTrue([self writeFile:protectedPath content:@"outside sentinel\n"]);
+      }
 
       NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
                                                workRoot:workRoot
@@ -4364,7 +4372,7 @@ static NSString *ALNHostDeployProfile(void) {
                                                                     bTemplates, bOutput, bManifest, bTemplate]
                                                exitCode:&code];
       XCTAssertEqual(0, code, @"%@: %@", testCase[@"name"], output);
-      NSString *sentinel = [NSString stringWithContentsOfFile:aGenerated
+      NSString *sentinel = [NSString stringWithContentsOfFile:protectedPath
                                                       encoding:NSUTF8StringEncoding
                                                          error:nil];
       XCTAssertEqualObjects(@"outside sentinel\n", sentinel, @"%@: %@", testCase[@"name"], output);

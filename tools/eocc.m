@@ -776,7 +776,9 @@ int main(int argc, const char *argv[]) {
       if ([staleOutput length] == 0 || [currentOutputPaths containsObject:staleOutput]) {
         continue;
       }
-      if ([[NSFileManager defaultManager] fileExistsAtPath:staleOutput] &&
+      NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:staleOutput
+                                                                                  error:nil];
+      if ([attributes[NSFileType] isEqualToString:NSFileTypeRegular] &&
           [[NSFileManager defaultManager] removeItemAtPath:staleOutput error:nil]) {
         removedCount += 1;
       }
