@@ -786,98 +786,101 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
   NSUInteger handlerErrorCount = 0;
   BOOL reachedRunLimit = NO;
 
+  // Keep fatal errors strongly owned beyond the per-job pool. Publish to the
+  // caller's autoreleasing output parameter only after that pool has drained.
+  NSError *runError = nil;
   for (NSUInteger index = 0; index < maxJobs; index++) {
-    NSError *dequeueError = nil;
-    ALNJobEnvelope *job = [self.jobsAdapter dequeueDueJobAt:runAt error:&dequeueError];
-    if (dequeueError != nil) {
-      if (error != NULL) {
-        *error = ALNServiceError(502, @"failed to dequeue due job", dequeueError);
+    @autoreleasepool {
+      NSError *dequeueError = nil;
+      ALNJobEnvelope *job = [self.jobsAdapter dequeueDueJobAt:runAt error:&dequeueError];
+      if (dequeueError != nil) {
+        runError = ALNServiceError(502, @"failed to dequeue due job", dequeueError);
+        break;
       }
-      return nil;
-    }
-    if (job == nil) {
-      reachedRunLimit = NO;
-      break;
-    }
-
-    leasedCount += 1;
-
-    id<ALNDurableJobAdapter> durable = [self.jobsAdapter respondsToSelector:@selector(completeJob:result:error:)]
-                                          ? (id<ALNDurableJobAdapter>)self.jobsAdapter : nil;
-    ALNJobHeartbeat *heartbeat = nil;
-    if (durable && [job isKindOfClass:[ALNJobLease class]]) {
-      heartbeat = [[ALNJobHeartbeat alloc] init];
-      heartbeat.adapter = durable;
-      heartbeat.job = (ALNJobLease *)job;
-      [[[NSThread alloc] initWithTarget:heartbeat selector:@selector(run) object:nil] start];
-    }
-    NSError *handlerError = nil;
-    NSError *heartbeatError = nil;
-    id result = nil;
-    ALNJobWorkerDisposition disposition;
-    @try {
-      disposition = [runtime handleJob:job error:&handlerError];
-      if (durable && disposition == ALNJobWorkerDispositionAcknowledge &&
-          [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
-        result = [runtime jobWorker:self resultForJob:job];
+      if (job == nil) {
+        reachedRunLimit = NO;
+        break;
       }
-    } @catch (NSException *exception) {
-      // A throwing ("poison") job is a failed attempt: retried with backoff,
-      // then dead-lettered. Letting it escape stopped the worker and left an
-      // in-memory job leased forever (GitHub issue 241).
-      disposition = ALNJobWorkerDispositionRetry;
-      result = nil;
-      handlerError = ALNServiceError(
-          506,
-          [NSString stringWithFormat:@"job handler raised %@: %@", exception.name ?: @"an exception",
-                                     exception.reason ?: @""],
-          nil);
-    } @finally {
-      heartbeatError = [heartbeat stop];
-    }
-    if (heartbeatError) {
-      if (error) *error = ALNServiceError(505, @"job heartbeat failed; completion was not attempted", heartbeatError);
-      return nil;
-    }
-    if (handlerError != nil) {
-      handlerErrorCount += 1;
-    }
 
-    if (disposition == ALNJobWorkerDispositionAcknowledge) {
-      NSError *ackError = nil;
-      BOOL acknowledged = durable ? [durable completeJob:(ALNJobLease *)job result:result error:&ackError]
-                                  : [self.jobsAdapter acknowledgeJobID:job.jobID error:&ackError];
-      if (!acknowledged) {
-        if (error != NULL) {
-          *error = ALNServiceError(503, @"failed to acknowledge job", ackError);
+      leasedCount += 1;
+
+      id<ALNDurableJobAdapter> durable = [self.jobsAdapter respondsToSelector:@selector(completeJob:result:error:)]
+                                            ? (id<ALNDurableJobAdapter>)self.jobsAdapter : nil;
+      ALNJobHeartbeat *heartbeat = nil;
+      if (durable && [job isKindOfClass:[ALNJobLease class]]) {
+        heartbeat = [[ALNJobHeartbeat alloc] init];
+        heartbeat.adapter = durable;
+        heartbeat.job = (ALNJobLease *)job;
+        [[[NSThread alloc] initWithTarget:heartbeat selector:@selector(run) object:nil] start];
+      }
+      NSError *handlerError = nil;
+      NSError *heartbeatError = nil;
+      id result = nil;
+      ALNJobWorkerDisposition disposition;
+      @try {
+        disposition = [runtime handleJob:job error:&handlerError];
+        if (durable && disposition == ALNJobWorkerDispositionAcknowledge &&
+            [runtime respondsToSelector:@selector(jobWorker:resultForJob:)]) {
+          result = [runtime jobWorker:self resultForJob:job];
         }
-        return nil;
+      } @catch (NSException *exception) {
+        // A throwing ("poison") job is a failed attempt: retried with backoff,
+        // then dead-lettered. Letting it escape stopped the worker and left an
+        // in-memory job leased forever (GitHub issue 241).
+        disposition = ALNJobWorkerDispositionRetry;
+        result = nil;
+        handlerError = ALNServiceError(
+            506,
+            [NSString stringWithFormat:@"job handler raised %@: %@", exception.name ?: @"an exception",
+                                       exception.reason ?: @""],
+            nil);
+      } @finally {
+        heartbeatError = [heartbeat stop];
       }
-      acknowledgedCount += 1;
-      continue;
-    }
+      if (heartbeatError) {
+        runError = ALNServiceError(505, @"job heartbeat failed; completion was not attempted", heartbeatError);
+        break;
+      }
+      if (handlerError != nil) {
+        handlerErrorCount += 1;
+      }
 
-    NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
-    if ([runtime respondsToSelector:@selector(jobWorker:retryDelayForJob:handlerError:baseRetryDelay:)]) {
-      retryDelay = [runtime jobWorker:self
-                     retryDelayForJob:job
-                         handlerError:handlerError
-                       baseRetryDelay:retryDelay];
-      if (retryDelay < 0.0) {
-        retryDelay = 0.0;
+      if (disposition == ALNJobWorkerDispositionAcknowledge) {
+        NSError *ackError = nil;
+        BOOL acknowledged = durable ? [durable completeJob:(ALNJobLease *)job result:result error:&ackError]
+                                    : [self.jobsAdapter acknowledgeJobID:job.jobID error:&ackError];
+        if (!acknowledged) {
+          runError = ALNServiceError(503, @"failed to acknowledge job", ackError);
+          break;
+        }
+        acknowledgedCount += 1;
+        continue;
       }
-    }
-    NSError *retryError = nil;
-    BOOL retried = durable ? [durable retryJob:job delaySeconds:retryDelay
-                                failureMessage:handlerError.localizedDescription error:&retryError]
-                           : [self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError];
-    if (!retried) {
-      if (error != NULL) {
-        *error = ALNServiceError(504, @"failed to retry job", retryError);
+
+      NSTimeInterval retryDelay = (self.retryDelaySeconds > 0.0) ? self.retryDelaySeconds : 0.0;
+      if ([runtime respondsToSelector:@selector(jobWorker:retryDelayForJob:handlerError:baseRetryDelay:)]) {
+        retryDelay = [runtime jobWorker:self
+                       retryDelayForJob:job
+                           handlerError:handlerError
+                         baseRetryDelay:retryDelay];
+        if (retryDelay < 0.0) {
+          retryDelay = 0.0;
+        }
       }
-      return nil;
+      NSError *retryError = nil;
+      BOOL retried = durable ? [durable retryJob:job delaySeconds:retryDelay
+                                  failureMessage:handlerError.localizedDescription error:&retryError]
+                             : [self.jobsAdapter retryJob:job delaySeconds:retryDelay error:&retryError];
+      if (!retried) {
+        runError = ALNServiceError(504, @"failed to retry job", retryError);
+        break;
+      }
+      retriedCount += 1;
     }
-    retriedCount += 1;
+  }
+  if (runError != nil) {
+    if (error != NULL) *error = runError;
+    return nil;
   }
 
   if (leasedCount >= maxJobs) {

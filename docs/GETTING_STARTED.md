@@ -129,6 +129,10 @@ installed releases require the patched runtime. Production `propane` and
 binaries. A packaged service on another host needs that host's matching final
 runtime prefix in `ARLEN_RUNTIME_PREFIX` and permission to read/execute it.
 
+The jobs CLI worker drains temporary autoreleased objects between polls,
+including scheduler work and once/error returns. Keep application-owned inner
+pools for long-running job loops; see [Jobs Module](JOBS_MODULE.md#worker-runner).
+
 ### From a git checkout
 
 Use a checkout to work on Arlen itself or to track `main`. Provision the
@@ -386,6 +390,10 @@ The [Durable Jobs guide](DURABLE_JOBS.md) covers setup, transactional enqueue,
 provider result methods, heartbeat pool capacity, shared queue controls, and
 single-scheduler deployment. The default memory adapter is for development and
 tests; file persistence alone does not provide worker crash recovery.
+
+The generic jobs worker drains temporary objects between individual attempts,
+including within one batch. Keep per-page/per-item pools in long handlers;
+see [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
 
 Heartbeat renewal temporaries drain each cycle. Before recording completion or
 retry, the worker waits for in-flight renewal callbacks and their final cleanup;

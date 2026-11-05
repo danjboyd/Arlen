@@ -1217,7 +1217,10 @@ $(BUILD_DIR)/durable-job-probe: $(DURABLE_JOB_PROBE_OBJ) $(ARLEN_FRAMEWORK_LIB)
 $(BUILD_DIR)/file-job-probe: $(OBJ_DIR)/tests/durable_jobs/file_job_probe.o $(ARLEN_FRAMEWORK_LIB)
 >@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
 
-$(UNIT_TEST_BIN): | $(BUILD_DIR)/file-job-probe
+$(BUILD_DIR)/jobs-worker-loop-probe$(TOOL_EXEEXT): $(OBJ_DIR)/tests/fixtures/jobs_worker_loop_probe.o $(ARLEN_FRAMEWORK_LIB)
+>@source $(GNUSTEP_SH) && $(ARLEN_CC) $(OBJC_FLAGS) $(INCLUDE_FLAGS) $^ -o $@ $(BASE_LINK_LIBS)
+
+$(UNIT_TEST_BIN): | $(BUILD_DIR)/file-job-probe $(BUILD_DIR)/jobs-worker-loop-probe$(TOOL_EXEEXT)
 
 # Exercise the vendored parser even on Windows, whose default backend is legacy.
 $(BUILD_DIR)/llhttp-framing-tests: tests/fixtures/http/llhttp_framing.c src/Arlen/Support/third_party/llhttp/llhttp.c src/Arlen/Support/third_party/llhttp/api.c src/Arlen/Support/third_party/llhttp/http.c src/Arlen/Support/third_party/llhttp/llhttp.h

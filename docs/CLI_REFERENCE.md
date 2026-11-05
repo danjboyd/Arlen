@@ -1069,7 +1069,9 @@ Build and run the first-party jobs worker loop for the current app root.
  startup (`ARLEN-BUG-018`)
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
-- Windows: not supported for production until 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
+- drains temporary autoreleased objects after each scheduler/worker iteration,
+  before an idle wait or the next poll; once and error returns also drain
+- Windows: not supported for production, including in 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
 
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
 before jobs module configuration and apply
@@ -1094,7 +1096,7 @@ Run production manager (`propane`) for the current app root.
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
-- Windows: not supported for production until 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
+- Windows: not supported for production, including in 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
 
 ### `arlen routes`
 
@@ -1487,6 +1489,11 @@ Behavior:
 - if that prepare step fails, exits with the same non-zero status and points at `.boomhauer/last_build_error.log`
 - launches `.boomhauer/build/boomhauer-app` in first-party jobs-worker mode
 - compiled app binaries now honor `ARLEN_APP_ROOT`, so `arlen jobs worker`, `bin/jobs-worker`, and `propane` all resolve the correct config/public roots even when invoked from the framework checkout
+
+The generic worker drains a per-job autorelease pool before the next attempt,
+including within one `--limit` batch. Completion results, summaries and fatal
+errors survive pool drainage. Long handlers still need their own per-page or
+per-item pools; see [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
 
 Options:
 

@@ -138,8 +138,8 @@ On 2026-10-21 the local serial validation passed 1,325 unit tests (148 existing
 skips), four runtime tests, and 254 integration tests (82 existing skips);
 integration took 1,070.803 seconds. The existing job timeout remains 90 minutes. `make windows-confidence` (packaged
 release, deploy doctor, propane, jobs-worker) left the workflow with 0.3.0's
-development-only Windows scope; it returns with Windows production in 0.4.0
-(#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
+development-only Windows scope; it remains manual through 0.4.0. Promotion
+requires separately qualified Windows production support (#200). It still fails at deploy doctor: the bash deploy scripts record MSYS
 paths that the native `arlen.exe` cannot open.
 
 ## Goal
@@ -234,7 +234,7 @@ visible but non-required:
  authoritative and the lane stays stably green
 - `windows-preview`
  - purpose: validate Windows runtime parity and the unit suite (packaged
- release parity returns with Windows production in 0.4.0)
+ release parity remains manual through 0.4.0)
  - status: preview confidence, not a required merge gate
  - promotion rule: only promote if Windows leaves preview and the lane is
  operationally stable enough to protect real shipped behavior
@@ -393,6 +393,11 @@ qualification must nevertheless check all five native runtime targets; do
 not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback
+
+The normal unit bundle builds a separate `jobs-worker-loop-probe` process on
+GNUstep/Windows and Apple. It calls the real `ALNRunAppMain` with a fixture jobs
+runtime and checks deterministic object cleanup across idle, busy, run-limit,
+scheduler, once and error paths. The probe uses no RSS threshold or timed wait.
 
 The current workflow policy is:
 
