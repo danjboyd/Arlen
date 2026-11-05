@@ -387,6 +387,10 @@ provider result methods, heartbeat pool capacity, shared queue controls, and
 single-scheduler deployment. The default memory adapter is for development and
 tests; file persistence alone does not provide worker crash recovery.
 
+Heartbeat renewal temporaries drain each cycle. Before recording completion or
+retry, the worker waits for in-flight renewal callbacks and their final cleanup;
+a lost lease prevents completion.
+
 PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
 other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
 jobs and larger cleanup backlogs are revisited by subsequent worker polls.
