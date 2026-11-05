@@ -33,7 +33,7 @@ Purpose:
 - run the unit suite (`make test-unit`) and complete integration suite
   (`make test-integration`) serially on Windows, retaining focused transport checks
 - `make windows-confidence` (packaged release/deploy parity) is not part of the
-  workflow until Windows production support (0.4.0); run it by hand
+  workflow until Windows production support is separately qualified; run it by hand
 
 Required GitHub Actions labels:
 

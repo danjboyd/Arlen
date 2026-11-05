@@ -20,7 +20,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_clang64.ps1 -InnerCommand "
 ```
 
 Windows is supported for development from 0.3.0. Production (`propane`,
-`jobs-worker`, service deploys) is planned for 0.4.0.
+supervised `jobs-worker`, service deploys) remains unsupported in 0.4.0.
 
 ## Linux release runtime
 
@@ -341,7 +341,7 @@ Windows preview CI validates these development layers serially:
 The job retains its 90-minute budget and existing branch-protection policy.
 
 Packaged release/deploy parity (`make windows-confidence`) is a manual lane
-until Windows production support in 0.4.0.
+until Windows production support is separately implemented and qualified.
 
 Linux/GNUstep deploy confidence now validates three layers:
 

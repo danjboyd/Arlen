@@ -1071,7 +1071,7 @@ Build and run the first-party jobs worker loop for the current app root.
 - worker args are passed through (`--env`, `--once`, `--limit`, `--poll-interval-seconds`, `--run-scheduler`, `--scheduler-interval-seconds`)
 - drains temporary autoreleased objects after each scheduler/worker iteration,
   before an idle wait or the next poll; once and error returns also drain
-- Windows: not supported for production until 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
+- Windows: not supported for production, including in 0.4.0. The preview lane exercises `jobs-worker --once` from a packaged release, but there is no supervised Windows worker or service deploy yet
 
 For separate web/worker processes, register `ALNPostgresJobAdapter` in the app
 before jobs module configuration and apply
@@ -1095,7 +1095,7 @@ Run production manager (`propane`) for the current app root.
  both `propane` and `jobs-worker` now prefer that shipped binary even if the
  release app root is no longer a mutable source checkout (`ARLEN-BUG-018`)
 - all production manager settings are called "propane accessories"
-- Windows: not supported for production until 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
+- Windows: not supported for production, including in 0.4.0. `arlen propane` starts from a Windows console, but its worker supervision, reloads and service deploys are not validated there yet
 
 ### `arlen routes`
 

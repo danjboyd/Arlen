@@ -221,7 +221,7 @@ and docs lanes.
 |---|---|
 | Linux, clang-built GNUstep | **Production baseline.** This is the authoritative target. |
 | macOS, Apple runtime | Verified for development and production (propane, launchd deploys). See [Apple Platform](docs/APPLE_PLATFORM.md) for the Linux-only test lanes. |
-| Windows, gnustep-cli `CLANG64` | Supported for development (install, `arlen new`, build, `boomhauer`). Production (`propane`, `jobs-worker`, service deploys) is planned for 0.4.0. See [Windows CLANG64](docs/WINDOWS_CLANG64.md). |
+| Windows, gnustep-cli `CLANG64` | Supported for development (install, `arlen new`, build, `boomhauer`). Production (`propane`, supervised `jobs-worker`, service deploys) is not included in 0.4.0; Windows remains development-only. See [Windows CLANG64](docs/WINDOWS_CLANG64.md). |
 
 The current release is **v0.2.1**. Arlen follows semantic versioning; while it
 is on `0.x`, minor releases may still change public API, with migration notes.
