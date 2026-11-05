@@ -15,6 +15,10 @@
   the existing native arm64 target. Its separate lock preserves runtime source
   revisions, race patches, normal optimization flags and the scoped GNU Make
   4.3 query patch. Public installer CI covers both Ubuntu 24.04 architectures.
+- Drain the jobs CLI worker's autorelease pool after each scheduler/worker
+  iteration, including busy/run-limit continuations and once/error returns.
+  Temporary poll and scheduler objects are released before an idle wait or the
+  next iteration; retained job state and results keep their existing lifetimes.
 
 ## 0.3.2 — 2026-10-27
 
