@@ -302,6 +302,9 @@ case "$suite" in
     compile_sources "$repo_root/tests/durable_jobs/file_job_probe.m"
     link_tool_if_stale "$build_root/file-job-probe" "${compiled_objects[@]}" "$framework_lib"
     ensure_wrapper "$build_root/file-job-probe" "$repo_root/build/file-job-probe"
+    compile_sources "$repo_root/tests/fixtures/jobs_worker_loop_probe.m"
+    link_tool_if_stale "$build_root/jobs-worker-loop-probe" "${compiled_objects[@]}" "$framework_lib"
+    ensure_wrapper "$build_root/jobs-worker-loop-probe" "$repo_root/build/jobs-worker-loop-probe"
     ;;
   integration)
     compile_sources ${module_generated_sources[@]+"${module_generated_sources[@]}"}

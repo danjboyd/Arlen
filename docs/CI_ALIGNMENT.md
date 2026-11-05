@@ -394,6 +394,11 @@ not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback
 
+The normal unit bundle builds a separate `jobs-worker-loop-probe` process on
+GNUstep/Windows and Apple. It calls the real `ALNRunAppMain` with a fixture jobs
+runtime and checks deterministic object cleanup across idle, busy, run-limit,
+scheduler, once and error paths. The probe uses no RSS threshold or timed wait.
+
 The current workflow policy is:
 
 - merge-gate workflows cancel older in-progress runs for the same PR/ref
