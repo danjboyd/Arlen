@@ -5,6 +5,10 @@
 - Add regression coverage for promoted search results with explicit `filter.*`
   parameters on the scoped and unscoped query routes and in JSON query bodies
   (#298). The behavior itself was fixed in 0.3.1 (search 1.2.1).
+- Add automatic Linux runtime setup for Ubuntu 24.04 LTS on amd64, alongside
+  the existing native arm64 target. Its separate lock preserves runtime source
+  revisions, race patches, normal optimization flags and the scoped GNU Make
+  4.3 query patch. Public installer CI covers both Ubuntu 24.04 architectures.
 
 ## 0.3.2 — 2026-10-27
 

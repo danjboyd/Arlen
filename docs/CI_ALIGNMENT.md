@@ -356,8 +356,8 @@ user's machine instead.
 
 `linux-public-toolchain` runs the README's Linux install path in clean
 containers on GitHub-hosted runners: `debian:13` on amd64 and arm64
-(`ubuntu-24.04-arm`), `ubuntu:26.04` on amd64, and `ubuntu:24.04` on native
-arm64 (`ubuntu-24.04-arm`). Each job
+(`ubuntu-24.04-arm`), `ubuntu:26.04` on amd64, and `ubuntu:24.04` on amd64
+(`ubuntu-latest`) and native arm64 (`ubuntu-24.04-arm`). Each job
 creates an unprivileged user with sudo, packages a source archive, and runs
 `tools/release/smoke_install.sh`. Only download/checkout prerequisites are
 preinstalled; the installer itself provisions build dependencies and the
@@ -375,8 +375,8 @@ app. Linux smoke also runs the generated app's request tests through the install
 `arlen test --app` launcher. It then compiles and runs fourteen native runtime concurrency controls, including
 arm64, recording compiler, loader linkage, source/patch/ELF provenance and
 per-control logs. Those normal controls do not substitute for TSan acceptance.
-Existing matrix entries remain, with one new Ubuntu 24.04 arm64 entry in the
-same job. Required check names and branch protection remain unchanged; source builds have a 90-minute
+The five matrix entries include separate Ubuntu 24.04 amd64 and arm64 targets
+in the same job. Required check names and branch protection remain unchanged; source builds have a 90-minute
 budget. Artifacts are uploaded as `native-runtime-<arch>-<index>`.
 `linux-quality` also runs `tools/ci/test_runtime_delivery.py` to verify pinned
 builder rejection, lock equality, immutable-prefix failure preservation,
@@ -389,7 +389,7 @@ It runs on pull requests that touch the installer, packaging, GNUstep env
 helpers, or `GNUmakefile`, on release publish, weekly, and on demand. It is not
 a merge-gate lane; the self-hosted lanes stay the authoritative Linux
 baseline. Required check names and branch protection remain unchanged. Release
-qualification must nevertheless check all four native runtime targets; do
+qualification must nevertheless check all five native runtime targets; do
 not infer arm64 or Ubuntu compatibility from Debian amd64 artifacts.
 
 ## Failure Triage And Fast Feedback

@@ -76,7 +76,7 @@ Options:
 - `--no-modify-path`: do not edit shell startup files
 - `--yes`: consent to prerequisite installation without an interactive prompt
 
-On Debian 13 (amd64/arm64), Ubuntu 24.04 (arm64/aarch64), and
+On Debian 13 (amd64/arm64), Ubuntu 24.04 (amd64/arm64, aarch64), and
 Ubuntu 26.04 (amd64), setup installs native
 build prerequisites with apt (sudo may prompt), then builds Arlen's locked,
 patched normal GNUstep runtime using the checksum-pinned custom builder.

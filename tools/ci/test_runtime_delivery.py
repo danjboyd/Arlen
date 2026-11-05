@@ -21,6 +21,7 @@ class RuntimeTargetTests(unittest.TestCase):
     def test_supported_targets_select_a_distribution_and_architecture_specific_lock(self):
         cases = (("debian", "13", "x86_64", "debian-13-amd64"),
                  ("debian", "13", "aarch64", "debian-13-arm64"),
+                 ("ubuntu", "24.04", "x86_64", "ubuntu-24.04-amd64"),
                  ("ubuntu", "24.04", "aarch64", "ubuntu-24.04-arm64"),
                  ("ubuntu", "26.04", "x86_64", "ubuntu-26.04-amd64"))
         for distro, version, machine, expected in cases:
@@ -32,8 +33,7 @@ class RuntimeTargetTests(unittest.TestCase):
                 self.assertTrue(runtime.lock_for_host().is_file())
 
     def test_other_ubuntu_architectures_and_older_distributions_remain_unsupported(self):
-        for distro, version, machine in (("ubuntu", "24.04", "x86_64"),
-                                        ("ubuntu", "26.04", "aarch64"),
+        for distro, version, machine in (("ubuntu", "26.04", "aarch64"),
                                         ("ubuntu", "22.04", "aarch64"),
                                         ("debian", "12", "aarch64"),
                                         ("ubuntu", "24.04", "riscv64")):
@@ -97,7 +97,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
                 self.assertEqual(compatibility, {
                     "path": "patches/libdispatch/libdispatch-clang21.patch",
                     "sha256": "ffba3eb8d8e2fb14bfde3f664138e03bef8b76817834a869213a32427f85f67d"})
-            if p.name == "ubuntu-24.04-arm64.lock.json":
+            if p.name in ("ubuntu-24.04-amd64.lock.json", "ubuntu-24.04-arm64.lock.json"):
                 compatibility = components[2]["patches"].pop()
                 self.assertEqual(compatibility, {
                     "path": "patches/tools-make/gnustep-config-make43.patch",
@@ -114,6 +114,7 @@ class RuntimeDeliveryTests(unittest.TestCase):
         hashes = {
             "debian-13-amd64": "df809d9d55a613726dd7475a3f45ee55a8dbfebe3913f7a442af94f66adfbb34",
             "debian-13-arm64": "ffbc8a89b7b8ccc43bd191c166b417e7048e2034eeea5e25fb20981165c2381e",
+            "ubuntu-24.04-amd64": "ccebc596ab5856305a55817f3a88e58b82a0d55302bc2ed428ab495d463afd65",
             "ubuntu-24.04-arm64": "a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d",
             "ubuntu-26.04-amd64": "89a81f3c29d5c421c1e8c62e5179d1951aa67a5c42a4e57ae99c9e51bcd2e125"}
         for target, sha in hashes.items():
@@ -127,18 +128,22 @@ class RuntimeDeliveryTests(unittest.TestCase):
                     self.assertEqual(component["configure_args"], ["CFLAGS=-O2", "OBJCFLAGS="])
 
     def test_noble_stages_existing_race_patches_and_scoped_make_query_compatibility(self):
-        with patch.object(runtime, "target", return_value="ubuntu-24.04-arm64"):
-            staged = runtime.stage_lock(self.work)
-        lock = json.loads(staged.read_text())
-        self.assertEqual(staged.name, "ubuntu-24.04-arm64.lock.json")
-        self.assertEqual(runtime.digest(staged), "a4d3736287fd93c10fd47603086260c7896f97e96af05d2371de6fe3d0975c9d")
-        patches = [entry for component in lock["components"] for entry in component["patches"]]
-        self.assertEqual(len(patches), 4)
-        for entry in patches:
-            self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])
-        compatibility = lock["components"][2]["patches"].pop()
-        self.assertEqual(compatibility["path"], "patches/tools-make/gnustep-config-make43.patch")
-        self.assertEqual(lock["components"], json.loads(self.lock.read_text())["components"])
+        for target in ("ubuntu-24.04-amd64", "ubuntu-24.04-arm64"):
+            with self.subTest(target=target):
+                work = self.work / target
+                work.mkdir()
+                with patch.object(runtime, "target", return_value=target):
+                    staged = runtime.stage_lock(work)
+                lock = json.loads(staged.read_text())
+                self.assertEqual(staged.name, target + ".lock.json")
+                self.assertEqual(runtime.digest(staged), runtime.digest(ROOT / "tools/runtime" / (target + ".lock.json")))
+                patches = [entry for component in lock["components"] for entry in component["patches"]]
+                self.assertEqual(len(patches), 4)
+                for entry in patches:
+                    self.assertEqual(runtime.digest(staged.parent / entry["path"]), entry["sha256"])
+                compatibility = lock["components"][2]["patches"].pop()
+                self.assertEqual(compatibility["path"], "patches/tools-make/gnustep-config-make43.patch")
+                self.assertEqual(lock["components"], json.loads(self.lock.read_text())["components"])
 
     def test_make43_query_patch_preserves_jobserver_assignments_and_explicit_client_flags(self):
         text = (ROOT / "tools/runtime/patches/gnustep-config-make43.patch").read_text()
@@ -161,19 +166,22 @@ class RuntimeDeliveryTests(unittest.TestCase):
 
     def test_noble_rejects_another_distribution_or_architecture_without_rewriting_provenance(self):
         original = self.fixture()
-        with patch.object(runtime, "target", return_value="ubuntu-24.04-arm64"), \
-                patch.object(runtime.platform, "machine", return_value="aarch64"):
-            for distro, machine in (("debian-13", "aarch64"),
-                                   ("ubuntu-26.04", "aarch64"),
-                                   ("ubuntu-24.04", "x86_64")):
-                with self.subTest(distro=distro, machine=machine):
-                    prov = dict(original, build_host={"os_version": distro, "machine": machine})
-                    path = self.prefix / runtime.PROVENANCE
-                    path.write_text(json.dumps(prov))
-                    before = path.read_bytes()
-                    with self.assertRaisesRegex(ValueError, "another distribution or architecture"):
-                        runtime.validate(self.prefix, full=True)
-                    self.assertEqual(path.read_bytes(), before)
+        for target, host_machine, other_machine in (
+                ("ubuntu-24.04-amd64", "x86_64", "aarch64"),
+                ("ubuntu-24.04-arm64", "aarch64", "x86_64")):
+            with patch.object(runtime, "target", return_value=target), \
+                    patch.object(runtime.platform, "machine", return_value=host_machine):
+                for distro, machine in (("debian-13", host_machine),
+                                       ("ubuntu-26.04", host_machine),
+                                       ("ubuntu-24.04", other_machine)):
+                    with self.subTest(target=target, distro=distro, machine=machine):
+                        prov = dict(original, build_host={"os_version": distro, "machine": machine})
+                        path = self.prefix / runtime.PROVENANCE
+                        path.write_text(json.dumps(prov))
+                        before = path.read_bytes()
+                        with self.assertRaisesRegex(ValueError, "another distribution or architecture"):
+                            runtime.validate(self.prefix, full=True)
+                        self.assertEqual(path.read_bytes(), before)
 
     def test_validation_rejects_an_old_unoptimized_component_without_relabeling_it(self):
         original = self.fixture()
