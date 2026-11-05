@@ -1218,7 +1218,8 @@ Behavior:
 - `--manifest <file>`: enable manifest-backed incremental transpilation
  - records `template_path`, `logical_path`, `output_path`, `template_hash`, metadata, and diagnostics
  - unchanged generated outputs are reused when the manifest and output file still match
- - stale generated outputs are removed when templates move or disappear
+  - stale generated outputs are removed when templates move or disappear, but only when their validated logical paths resolve to regular output paths inside the selected `--output-dir`
+  - cached `output_path` values cannot authorize deletion outside that directory; a manifest from another template root is ignored and templates are transpiled again
  - stdout switches to `eocc: transpiled <n> templates (reused <n>, removed <n>)`
 - `--registry-out <file>`: emit registry source mapping logical template paths to render symbols
  - if neither `--manifest` nor `--registry-out` is supplied, `eocc` writes `<output-dir>/EOCRegistry.m`

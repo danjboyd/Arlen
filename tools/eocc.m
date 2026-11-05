@@ -36,6 +36,77 @@ static NSString *JoinPath(NSString *base, NSString *suffix) {
   return [base stringByAppendingPathComponent:suffix];
 }
 
+static BOOL PathIsWithinDirectory(NSString *path, NSString *directory) {
+  NSArray<NSString *> *pathParts = [[path stringByStandardizingPath] pathComponents];
+  NSArray<NSString *> *directoryParts = [[directory stringByStandardizingPath] pathComponents];
+  if ([pathParts count] <= [directoryParts count]) {
+    return NO;
+  }
+  for (NSUInteger idx = 0; idx < [directoryParts count]; idx++) {
+#if defined(_WIN32)
+    if ([pathParts[idx] caseInsensitiveCompare:directoryParts[idx]] != NSOrderedSame) {
+#else
+    if (![pathParts[idx] isEqualToString:directoryParts[idx]]) {
+#endif
+      return NO;
+    }
+  }
+  return YES;
+}
+
+static NSArray<NSString *> *SafeManifestLogicalPathParts(NSString *logicalPath) {
+  unichar nul = 0;
+  NSString *nulString = [NSString stringWithCharacters:&nul length:1];
+  if (![logicalPath isKindOfClass:[NSString class]] || [logicalPath length] == 0 ||
+      [logicalPath hasPrefix:@"/"] || [logicalPath containsString:@"\\"] ||
+      [logicalPath containsString:@":"] || [logicalPath containsString:nulString]) {
+    return nil;
+  }
+  NSArray<NSString *> *parts = [logicalPath componentsSeparatedByString:@"/"];
+  for (NSString *part in parts) {
+    if ([part length] == 0 || [part isEqualToString:@"."] || [part isEqualToString:@".."]) {
+      return nil;
+    }
+  }
+  return parts;
+}
+
+// A manifest is a cache, not authority to delete an arbitrary output_path.
+static NSString *SafeStaleOutputPath(NSDictionary *cachedEntry, NSString *outputDir) {
+  NSString *logicalPath = [cachedEntry[@"logical_path"] isKindOfClass:[NSString class]]
+                              ? cachedEntry[@"logical_path"] : nil;
+  NSArray<NSString *> *parts = SafeManifestLogicalPathParts(logicalPath);
+  if (parts == nil) {
+    return nil;
+  }
+
+  NSString *candidate = JoinPath(outputDir, [logicalPath stringByAppendingString:@".m"]);
+  NSString *recordedOutput = [cachedEntry[@"output_path"] isKindOfClass:[NSString class]]
+                                 ? cachedEntry[@"output_path"] : @"";
+  if ([recordedOutput length] > 0 && ![recordedOutput isEqualToString:candidate]) {
+    return nil;
+  }
+
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSString *resolvedRoot = [[outputDir stringByResolvingSymlinksInPath] stringByStandardizingPath];
+  NSString *resolvedCandidate = [[candidate stringByResolvingSymlinksInPath] stringByStandardizingPath];
+  if (!PathIsWithinDirectory(resolvedCandidate, resolvedRoot)) {
+    return nil;
+  }
+
+  // Do not follow a link introduced below the explicitly selected output root.
+  NSString *componentPath = outputDir;
+  for (NSUInteger idx = 0; idx < [parts count]; idx++) {
+    NSString *component = idx + 1 == [parts count]
+                              ? [parts[idx] stringByAppendingString:@".m"] : parts[idx];
+    componentPath = [componentPath stringByAppendingPathComponent:component];
+    if ([fileManager destinationOfSymbolicLinkAtPath:componentPath error:nil] != nil) {
+      return nil;
+    }
+  }
+  return candidate;
+}
+
 static NSString *RegistryIdentifierComponent(NSString *value) {
   NSString *candidate = [value isKindOfClass:[NSString class]] ? value : @"";
   NSMutableString *identifier = [NSMutableString string];
@@ -537,8 +608,12 @@ int main(int argc, const char *argv[]) {
         PrintErrorWithLocation(manifestError);
         return 1;
       }
-      if (cachedManifest != nil) {
+      NSString *cachedTemplateRoot = [cachedManifest[@"template_root"] isKindOfClass:[NSString class]]
+                                         ? cachedManifest[@"template_root"] : @"";
+      if ([cachedTemplateRoot isEqualToString:templateRoot]) {
         cachedEntriesByTemplatePath = ManifestEntriesByTemplatePath(cachedManifest);
+      } else {
+        cachedManifest = nil;
       }
     }
 
@@ -579,15 +654,7 @@ int main(int argc, const char *argv[]) {
       NSString *templateHash = TemplateHash(templateText);
       NSDictionary *cachedEntry = cachedEntriesByTemplatePath[templatePath];
       if (cachedEntry != nil) {
-        NSString *previousOutput =
-            [cachedEntry[@"output_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"output_path"] : @"";
-        if ([previousOutput length] == 0) {
-          NSString *previousLogicalPath =
-              [cachedEntry[@"logical_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"logical_path"] : @"";
-          if ([previousLogicalPath length] > 0) {
-            previousOutput = JoinPath(outputDir, [previousLogicalPath stringByAppendingString:@".m"]);
-          }
-        }
+        NSString *previousOutput = SafeStaleOutputPath(cachedEntry, outputDir);
         if ([previousOutput length] > 0 && ![previousOutput isEqualToString:outFile]) {
           [staleOutputsToRemove addObject:previousOutput];
         }
@@ -699,15 +766,7 @@ int main(int argc, const char *argv[]) {
       if ([cachedTemplatePath length] == 0 || [currentTemplatePaths containsObject:cachedTemplatePath]) {
         continue;
       }
-      NSString *staleOutput =
-          [cachedEntry[@"output_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"output_path"] : @"";
-      if ([staleOutput length] == 0) {
-        NSString *staleLogicalPath =
-            [cachedEntry[@"logical_path"] isKindOfClass:[NSString class]] ? cachedEntry[@"logical_path"] : @"";
-        if ([staleLogicalPath length] > 0) {
-          staleOutput = JoinPath(outputDir, [staleLogicalPath stringByAppendingString:@".m"]);
-        }
-      }
+      NSString *staleOutput = SafeStaleOutputPath(cachedEntry, outputDir);
       if ([staleOutput length] > 0) {
         [staleOutputsToRemove addObject:staleOutput];
       }
