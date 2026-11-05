@@ -391,6 +391,10 @@ provider result methods, heartbeat pool capacity, shared queue controls, and
 single-scheduler deployment. The default memory adapter is for development and
 tests; file persistence alone does not provide worker crash recovery.
 
+The generic jobs worker drains temporary objects between individual attempts,
+including within one batch. Keep per-page/per-item pools in long handlers;
+see [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
+
 PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
 other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
 jobs and larger cleanup backlogs are revisited by subsequent worker polls.

@@ -234,6 +234,16 @@ An optional worker contract for scheduled/asynchronous execution:
 
 `ALNJobWorker` drives dequeue/ack/retry against any `ALNJobAdapter` implementation and is intentionally optional so app/server topology can remain plugin-defined.
 
+Each job attempt runs inside its own autorelease pool, including dequeue,
+handler/result processing, heartbeat shutdown and acknowledgement/retry. The
+pool drains before the next attempt and before the worker returns. This bounds
+temporary object lifetimes within a batch, including a large `maxJobsPerRun`;
+it is not a memory limit for the handler itself. Long handlers should retain
+their own per-page/per-item pools where needed. Returned summaries, fatal
+errors (including underlying errors), and completion results remain owned
+across pool drainage. The run timestamp, retry policy and counter/run-limit
+semantics are unchanged.
+
 ## 13. Production Persistence and Retention Guidance
 
 Recommended production direction by service area:

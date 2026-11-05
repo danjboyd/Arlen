@@ -88,6 +88,13 @@ temporary object lifetimes across polls without clearing retained job state or
 results. A long-running job can still use its own inner pools for large loops;
 keep existing application pools when upgrading the framework.
 
+The underlying generic worker drains a per-job autorelease pool after each
+attempt, before taking another job in the same batch. Handler results and
+errors remain valid through completion/retry, and the run summary remains
+valid after the batch returns. This bounds batch temporary lifetimes; keep
+application-owned per-page/per-item pools inside a long-running handler.
+See [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
+
 ## Definition Metadata
 
 Job definitions may publish operator-facing metadata such as:
