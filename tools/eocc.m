@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <openssl/sha.h>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <sys/stat.h>
 #endif
 
@@ -74,13 +76,27 @@ static NSArray<NSString *> *SafeManifestLogicalPathParts(NSString *logicalPath) 
   return parts;
 }
 
-static BOOL PathIsSymbolicLink(NSString *path) {
+static BOOL PathIsUnsafeForRemoval(NSString *path) {
 #if defined(_WIN32)
-  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
-  return [attributes[NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+  NSString *nativePath = [path stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+  NSMutableData *widePath = [[nativePath dataUsingEncoding:NSUTF16LittleEndianStringEncoding] mutableCopy];
+  const unichar terminator = 0;
+  [widePath appendBytes:&terminator length:sizeof(terminator)];
+  HANDLE handle = CreateFileW((const wchar_t *)widePath.bytes, FILE_READ_ATTRIBUTES,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING,
+                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return YES;
+  }
+  BY_HANDLE_FILE_INFORMATION info;
+  BOOL unsafe = !GetFileInformationByHandle(handle, &info) ||
+                (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+  CloseHandle(handle);
+  return unsafe;
 #else
   struct stat info;
-  return lstat([path fileSystemRepresentation], &info) == 0 && S_ISLNK(info.st_mode);
+  return lstat([path fileSystemRepresentation], &info) != 0 || S_ISLNK(info.st_mode);
 #endif
 }
 
@@ -112,7 +128,7 @@ static NSString *SafeStaleOutputPath(NSDictionary *cachedEntry, NSString *output
     NSString *component = idx + 1 == [parts count]
                               ? [parts[idx] stringByAppendingString:@".m"] : parts[idx];
     componentPath = [componentPath stringByAppendingPathComponent:component];
-    if (PathIsSymbolicLink(componentPath)) {
+    if (PathIsUnsafeForRemoval(componentPath)) {
       return nil;
     }
   }
