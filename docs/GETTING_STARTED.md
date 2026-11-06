@@ -189,6 +189,11 @@ From app root:
 arlen boomhauer --port 3000
 ```
 
+Template builds reuse unchanged generated files. When a template moves or is
+removed, stale generated files are cleaned only from the build's selected
+output directory. Copying a template cache from another app causes a fresh
+transpile.
+
 Then verify:
 
 ```bash

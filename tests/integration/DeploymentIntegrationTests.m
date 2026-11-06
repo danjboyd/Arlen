@@ -4263,6 +4263,221 @@ static NSString *ALNHostDeployProfile(void) {
     XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:currentOutputPath],
                   @"%@", secondOutput);
     XCTAssertTrue([secondOutput containsString:@"removed 1"], @"%@", secondOutput);
+
+    NSString *thirdOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                  workRoot:workRoot
+                                                 arguments:[NSString stringWithFormat:
+                                                                       @"--template-root %@ --output-dir %@ --manifest %@ --logical-prefix current %@",
+                                                                       templateRoot,
+                                                                       outputRoot,
+                                                                       manifestPath,
+                                                                       templatePath]
+                                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", thirdOutput);
+    XCTAssertTrue([thirdOutput containsString:@"reused 1"], @"%@", thirdOutput);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCManifestCannotRemoveOutputOutsideCurrentRoot {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-stale-boundary"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *aRoot = [workRoot stringByAppendingPathComponent:@"tree-a"];
+    NSString *bRoot = [workRoot stringByAppendingPathComponent:@"tree-b"];
+    NSString *aTemplates = [aRoot stringByAppendingPathComponent:@"templates"];
+    NSString *bTemplates = [bRoot stringByAppendingPathComponent:@"templates"];
+    NSString *aOutput = [aRoot stringByAppendingPathComponent:@"generated"];
+    NSString *bOutput = [bRoot stringByAppendingPathComponent:@"generated"];
+    NSString *aTemplate = [aTemplates stringByAppendingPathComponent:@"old.html.eoc"];
+    NSString *bTemplate = [bTemplates stringByAppendingPathComponent:@"new.html.eoc"];
+    NSString *aGenerated = [aOutput stringByAppendingPathComponent:@"old.html.eoc.m"];
+    NSString *directorySentinel = [bOutput stringByAppendingPathComponent:@"victim.m/keep.txt"];
+    NSString *aManifest = [aOutput stringByAppendingPathComponent:@"manifest.json"];
+    NSString *bManifest = [bOutput stringByAppendingPathComponent:@"manifest.json"];
+
+    XCTAssertTrue([self writeFile:aTemplate content:@"<p>old</p>\n"]);
+    XCTAssertTrue([self writeFile:bTemplate content:@"<p>new</p>\n"]);
+    int code = 0;
+    NSString *firstOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                  workRoot:workRoot
+                                                 arguments:[NSString stringWithFormat:
+                                                                       @"--template-root %@ --output-dir %@ --manifest %@ %@",
+                                                                       aTemplates, aOutput, aManifest, aTemplate]
+                                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", firstOutput);
+    NSData *manifestData = [NSData dataWithContentsOfFile:aManifest];
+    XCTAssertNotNil(manifestData);
+    NSDictionary *originalManifest = [NSJSONSerialization JSONObjectWithData:manifestData
+                                                                     options:0
+                                                                       error:nil];
+    XCTAssertNotNil(originalManifest);
+    NSDictionary *originalEntry = [originalManifest[@"entries"] firstObject];
+    XCTAssertNotNil(originalEntry);
+
+    XCTAssertTrue([[NSFileManager defaultManager] createDirectoryAtPath:bOutput
+                                            withIntermediateDirectories:YES
+                                                             attributes:nil
+                                                                  error:nil]);
+    NSString *linkPath = [bOutput stringByAppendingPathComponent:@"link"];
+#if defined(_WIN32)
+    NSString *nativeLink = [linkPath stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+    NSString *nativeTarget = [aOutput stringByReplacingOccurrencesOfString:@"/" withString:@"\\"];
+    int linkCode = 0;
+    NSString *linkOutput = [self runShellCapture:[NSString stringWithFormat:
+        @"MSYS2_ARG_CONV_EXCL='*' cmd /c mklink /J \"%@\" \"%@\"",
+        nativeLink, nativeTarget]
+                                         exitCode:&linkCode];
+    XCTAssertEqual(0, linkCode, @"%@", linkOutput);
+#else
+    NSError *linkError = nil;
+    XCTAssertTrue([[NSFileManager defaultManager] createSymbolicLinkAtPath:linkPath
+                                                        withDestinationPath:aOutput
+                                                                     error:&linkError], @"%@", linkError);
+#endif
+
+    NSArray<NSDictionary *> *cases = @[
+      @{ @"name" : @"copied manifest", @"root" : aTemplates,
+         @"logical" : @"old.html.eoc", @"output" : aGenerated },
+      @{ @"name" : @"forged absolute output", @"root" : bTemplates,
+         @"logical" : @"old.html.eoc", @"output" : aGenerated },
+      @{ @"name" : @"traversal fallback", @"root" : bTemplates,
+         @"logical" : @"../../tree-a/generated/old.html.eoc" },
+      @{ @"name" : @"symlink below output root", @"root" : bTemplates,
+         @"logical" : @"link/old.html.eoc",
+         @"output" : [linkPath stringByAppendingPathComponent:@"old.html.eoc.m"] },
+      @{ @"name" : @"directory named as generated output", @"root" : bTemplates,
+         @"logical" : @"victim", @"output" : [bOutput stringByAppendingPathComponent:@"victim.m"],
+         @"protected" : directorySentinel }
+    ];
+    for (NSDictionary *testCase in cases) {
+      NSMutableDictionary *entry = [originalEntry mutableCopy];
+      entry[@"logical_path"] = testCase[@"logical"];
+      if (testCase[@"output"] != nil) {
+        entry[@"output_path"] = testCase[@"output"];
+      } else {
+        [entry removeObjectForKey:@"output_path"];
+      }
+      NSMutableDictionary *manifest = [originalManifest mutableCopy];
+      manifest[@"template_root"] = testCase[@"root"];
+      manifest[@"entries"] = @[ entry ];
+      NSData *forgedData = [NSJSONSerialization dataWithJSONObject:manifest options:0 error:nil];
+      XCTAssertNotNil(forgedData);
+      XCTAssertTrue([forgedData writeToFile:bManifest atomically:YES]);
+      XCTAssertTrue([self writeFile:aGenerated content:@"outside sentinel\n"]);
+      NSString *protectedPath = testCase[@"protected"] ?: aGenerated;
+      if (testCase[@"protected"] != nil) {
+        XCTAssertTrue([self writeFile:protectedPath content:@"outside sentinel\n"]);
+      }
+
+      NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                               workRoot:workRoot
+                                              arguments:[NSString stringWithFormat:
+                                                                    @"--template-root %@ --output-dir %@ --manifest %@ %@",
+                                                                    bTemplates, bOutput, bManifest, bTemplate]
+                                               exitCode:&code];
+      XCTAssertEqual(0, code, @"%@: %@", testCase[@"name"], output);
+      NSString *sentinel = [NSString stringWithContentsOfFile:protectedPath
+                                                      encoding:NSUTF8StringEncoding
+                                                         error:nil];
+      XCTAssertEqualObjects(@"outside sentinel\n", sentinel, @"%@: %@", testCase[@"name"], output);
+      XCTAssertTrue([output containsString:@"removed 0"], @"%@: %@", testCase[@"name"], output);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCRemovesDisappearedTemplateOutputAndReusesRemainingOutput {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-removed-template"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *oldTemplate = [templateRoot stringByAppendingPathComponent:@"old.html.eoc"];
+    NSString *keepTemplate = [templateRoot stringByAppendingPathComponent:@"keep.html.eoc"];
+    NSString *oldOutput = [outputRoot stringByAppendingPathComponent:@"old.html.eoc.m"];
+    NSString *keepOutput = [outputRoot stringByAppendingPathComponent:@"keep.html.eoc.m"];
+    XCTAssertTrue([self writeFile:oldTemplate content:@"<p>old</p>\n"]);
+    XCTAssertTrue([self writeFile:keepTemplate content:@"<p>keep</p>\n"]);
+
+    int code = 0;
+    NSString *firstOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                  workRoot:workRoot
+                                                 arguments:[NSString stringWithFormat:
+                                                                       @"--template-root %@ --output-dir %@ --manifest %@ %@ %@",
+                                                                       templateRoot, outputRoot, manifestPath,
+                                                                       oldTemplate, keepTemplate]
+                                                  exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", firstOutput);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:oldOutput]);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:keepOutput]);
+
+    NSString *secondOutput = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                                   workRoot:workRoot
+                                                  arguments:[NSString stringWithFormat:
+                                                                        @"--template-root %@ --output-dir %@ --manifest %@ %@",
+                                                                        templateRoot, outputRoot, manifestPath, keepTemplate]
+                                                   exitCode:&code];
+    XCTAssertEqual(0, code, @"%@", secondOutput);
+    XCTAssertTrue([secondOutput containsString:@"reused 1, removed 1"], @"%@", secondOutput);
+    XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:oldOutput]);
+    XCTAssertTrue([[NSFileManager defaultManager] fileExistsAtPath:keepOutput]);
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
+  }
+}
+
+- (void)testEOCCInvalidManifestLeavesGeneratedOutputsUntouched {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *workRoot = [self createTempDirectoryWithPrefix:@"arlen-eocc-invalid-manifest"];
+  XCTAssertNotNil(workRoot);
+  if (workRoot == nil) {
+    return;
+  }
+
+  @try {
+    NSString *templateRoot = [workRoot stringByAppendingPathComponent:@"templates"];
+    NSString *outputRoot = [workRoot stringByAppendingPathComponent:@"generated"];
+    NSString *templatePath = [templateRoot stringByAppendingPathComponent:@"new.html.eoc"];
+    NSString *manifestPath = [outputRoot stringByAppendingPathComponent:@"manifest.json"];
+    NSString *sentinelPath = [outputRoot stringByAppendingPathComponent:@"old.html.eoc.m"];
+    NSString *newOutputPath = [outputRoot stringByAppendingPathComponent:@"new.html.eoc.m"];
+    XCTAssertTrue([self writeFile:templatePath content:@"<p>new</p>\n"]);
+    XCTAssertTrue([self writeFile:sentinelPath content:@"existing generated output\n"]);
+
+    for (NSString *invalidManifest in @[ @"{", @"{\"version\":\"unknown\",\"entries\":[]}" ]) {
+      XCTAssertTrue([self writeFile:manifestPath content:invalidManifest]);
+      int code = 0;
+      NSString *output = [self runEOCCCaptureAtRepoRoot:repoRoot
+                                               workRoot:workRoot
+                                              arguments:[NSString stringWithFormat:
+                                                                    @"--template-root %@ --output-dir %@ --manifest %@ %@",
+                                                                    templateRoot, outputRoot, manifestPath, templatePath]
+                                               exitCode:&code];
+      XCTAssertNotEqual(0, code, @"%@", output);
+      XCTAssertEqualObjects(@"existing generated output\n",
+                            [NSString stringWithContentsOfFile:sentinelPath
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:nil]);
+      XCTAssertFalse([[NSFileManager defaultManager] fileExistsAtPath:newOutputPath]);
+      XCTAssertEqualObjects(invalidManifest,
+                            [NSString stringWithContentsOfFile:manifestPath
+                                                        encoding:NSUTF8StringEncoding
+                                                           error:nil]);
+    }
   } @finally {
     [[NSFileManager defaultManager] removeItemAtPath:workRoot error:nil];
   }
