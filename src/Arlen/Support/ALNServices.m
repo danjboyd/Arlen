@@ -701,24 +701,37 @@ static ALNJobEnvelope *ALNJobEnvelopeFromDictionary(id value) {
 }
 - (void)run {
   @autoreleasepool {
-    [self.condition lock];
-    while (!self.stopping) {
-      NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:self.job.leaseDurationSeconds / 3.0];
-      while (!self.stopping && [deadline timeIntervalSinceNow] > 0) [self.condition waitUntilDate:deadline];
-      if (self.stopping) break;
-      [self.condition unlock];
-      NSError *error = nil;
-      BOOL renewed = [self.adapter renewJob:self.job error:&error];
-      [self.condition lock];
-      if (!renewed) {
-        self.failure = error ?: ALNServiceError(505, @"job heartbeat failed", nil);
-        break;
+    BOOL shouldStop = NO;
+    while (!shouldStop) {
+      @autoreleasepool {
+        [self.condition lock];
+        if (!self.stopping) {
+          NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:self.job.leaseDurationSeconds / 3.0];
+          while (!self.stopping && [deadline timeIntervalSinceNow] > 0) {
+            [self.condition waitUntilDate:deadline];
+          }
+        }
+        shouldStop = self.stopping;
+        [self.condition unlock];
+        if (!shouldStop) {
+          NSError *error = nil;
+          BOOL renewed = [self.adapter renewJob:self.job error:&error];
+          [self.condition lock];
+          if (!renewed) {
+            self.failure = error ?: ALNServiceError(505, @"job heartbeat failed", nil);
+          }
+          shouldStop = self.stopping || !renewed;
+          [self.condition unlock];
+        }
+        // Drain deadline and renewal temporaries without holding the condition.
       }
     }
-    self.finished = YES;
-    [self.condition broadcast];
-    [self.condition unlock];
   }
+  // stop waits for callback quiescence and final cleanup, not an OS-thread join.
+  [self.condition lock];
+  self.finished = YES;
+  [self.condition broadcast];
+  [self.condition unlock];
 }
 - (NSError *)stop {
   [self.condition lock];

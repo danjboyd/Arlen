@@ -137,10 +137,14 @@ clock time controls lease expiration and renewal. The timestamp passed to
 cannot expire a live worker's lease.
 
 `ALNJobWorker` renews leases on a heartbeat thread every one-third of the lease
-duration while a handler executes. It stops and joins that thread before
-completion/retry. A renewal failure prevents completion; the worker returns an
-error and the lease can expire for recovery. A handler cannot be forcibly
-cancelled by that error, so external side effects must remain idempotent.
+duration while a handler executes. Each renewal cycle drains its deadline and
+callback temporaries outside the heartbeat condition lock. Before
+completion/retry, the worker requests heartbeat shutdown and waits for any
+in-flight renewal callback and final autorelease cleanup. This is a callback
+and cleanup boundary, not an operating-system thread join. A renewal failure
+prevents completion; the worker retains the error and the lease can expire for
+recovery. A handler cannot be forcibly cancelled by that error, so external side
+effects must remain idempotent.
 
 Direct adapter consumers must renew their own leases. Use:
 

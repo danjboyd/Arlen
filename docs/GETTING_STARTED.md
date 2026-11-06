@@ -395,6 +395,10 @@ The generic jobs worker drains temporary objects between individual attempts,
 including within one batch. Keep per-page/per-item pools in long handlers;
 see [Job Worker Runtime Contract](ECOSYSTEM_SERVICES.md#12-optional-job-worker-runtime-contract).
 
+Heartbeat renewal temporaries drain each cycle. Before recording completion or
+retry, the worker waits for in-flight renewal callbacks and their final cleanup;
+a lost lease prevents completion.
+
 PostgreSQL workers skip locked expired jobs and busy queue controls when claiming
 other work. Final-attempt cleanup processes at most 100 jobs per poll; skipped
 jobs and larger cleanup backlogs are revisited by subsequent worker polls.
