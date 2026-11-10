@@ -5144,7 +5144,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
 }
 
 - (void)runSSEStreamSession:(ALNSSEClientSession *)session
-               subscription:(ALNEventStreamBrokerSubscription *)subscription {
+               subscription:(ALNEventStreamBrokerSubscription *)subscription
+                   streamID:(NSString *)streamID
+             requestContext:(ALNEventStreamRequestContext *)requestContext {
   if (session == nil) {
     return;
   }
@@ -5159,6 +5161,11 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
         break;
       }
       if (ALNNowMilliseconds() - lastKeepaliveMs >= 15000.0) {
+        // Re-authorize at each keepalive: NO (e.g. a revoked credential) ends the stream; the caller closes it.
+        if (![self.application eventStreamSubscriptionStillAuthorizedToStream:streamID
+                                                                requestContext:requestContext]) {
+          break;
+        }
         if (![session sendKeepalive]) {
           break;
         }
@@ -5556,7 +5563,10 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                 return NO;
               }
               subscriptionHandedOff = YES;  // runSSEStreamSession unsubscribes
-              [self runSSEStreamSession:sseSession subscription:streamSubscription];
+              [self runSSEStreamSession:sseSession
+                           subscription:streamSubscription
+                               streamID:[self eventStreamIdentifierFromResponse:response]
+                         requestContext:response.eventStreamRequestContext];
             } @finally {
               [self releaseHTTPSessionReservation];
             }

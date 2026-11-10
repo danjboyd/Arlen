@@ -208,6 +208,9 @@ NS_ASSUME_NONNULL_BEGIN
                                         error:(NSError *_Nullable *_Nullable)error;
 
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request;
+// YES unless the event stream authorization hook implements the optional re-check and it says NO.
+- (BOOL)eventStreamSubscriptionStillAuthorizedToStream:(NSString *)streamID
+                                        requestContext:(nullable ALNEventStreamRequestContext *)requestContext;
 /// Full dispatch constrained to an existing route. Rejects mounts, built-ins and
 /// a different matched route with 409; never invokes an alternate controller.
 - (ALNResponse *)dispatchRequest:(ALNRequest *)request requiringRoute:(nullable ALNRoute *)route;

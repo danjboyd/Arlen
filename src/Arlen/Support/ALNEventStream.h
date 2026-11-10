@@ -200,6 +200,13 @@ FOUNDATION_EXPORT NSError *ALNEventStreamMakeError(ALNEventStreamErrorCode code,
                                requestContext:(ALNEventStreamRequestContext *)requestContext
                                         error:(NSError *_Nullable *_Nullable)error;
 
+@optional
+// Asked again at each keepalive of a live SSE subscription (every 15 s). NO ends the stream and closes the
+// connection, e.g. when the credential that opened it has since been revoked. Hooks without it keep the old
+// behaviour: authorized once, at subscribe.
+- (BOOL)eventStreamSubscriptionStillAuthorizedToStream:(NSString *)streamID
+                                        requestContext:(ALNEventStreamRequestContext *)requestContext;
+
 @end
 
 @interface ALNInMemoryEventStreamStore : NSObject <ALNEventStreamStore>

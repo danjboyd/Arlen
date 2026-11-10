@@ -5053,6 +5053,21 @@ static void ALNFinalizeResponse(ALNApplication *application,
   return YES;
 }
 
+- (BOOL)eventStreamSubscriptionStillAuthorizedToStream:(NSString *)streamID
+                                        requestContext:(ALNEventStreamRequestContext *)requestContext {
+  id<ALNEventStreamAuthorizationHook> hook = self.eventStreamAuthorizationHook;
+  if (hook == nil || requestContext == nil || ![streamID isKindOfClass:[NSString class]] ||
+      ![hook respondsToSelector:@selector(eventStreamSubscriptionStillAuthorizedToStream:requestContext:)]) {
+    return YES;
+  }
+  @try {
+    return [hook eventStreamSubscriptionStillAuthorizedToStream:streamID requestContext:requestContext];
+  } @catch (NSException *exception) {
+    (void)exception;
+    return NO;  // a hook that fails can't vouch for the subscription
+  }
+}
+
 - (BOOL)authorizeEventStreamAppendToStream:(NSString *)streamID
                                      event:(NSDictionary *)event
                                    context:(ALNContext *)context

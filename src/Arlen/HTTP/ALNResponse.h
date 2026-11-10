@@ -14,6 +14,8 @@ extern NSString *const ALNResponseErrorDomain;
 @property(nonatomic, strong, readonly) NSMutableDictionary *headers;
 @property(nonatomic, strong, readonly) NSMutableData *bodyData;
 @property(nonatomic, assign) BOOL committed;
+// Set by -renderSSEStream: so the server can re-check the subscription at each keepalive.
+@property(nonatomic, strong, nullable) id eventStreamRequestContext;
 @property(nonatomic, copy, nullable) NSString *fileBodyPath;
 /// Pins an already-open regular file through transmission. Do not close or
 /// mutate it while the response is in flight; path replacement cannot redirect it.
