@@ -82,10 +82,23 @@ apps need first.
     client that sends nothing for another interval is closed with `1001`. A
     receive-only subscriber that answers pings stays connected however long it
     is idle. Environment override: `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS`.
-  - Server-sent event streams and WebSocket sessions hold a worker for as long
-    as they stay open. Size `maxConcurrentHTTPWorkers` above the number of
-    streams you expect to be open at once, plus headroom for ordinary
-    requests.
+  - `maxConcurrentWebSocketSessions` (default `256`): open WebSocket sessions.
+    Further upgrades get a `503` with `X-Arlen-Backpressure-Reason:
+    websocket_session_limit`. Environment override:
+    `ARLEN_MAX_WEBSOCKET_SESSIONS`.
+  - `maxConcurrentSSESessions` (default `256`): open server-sent event
+    streams (`renderSSEStream:...`). Further streams get a `503` with
+    `X-Arlen-Backpressure-Reason: sse_session_limit`. Environment override:
+    `ARLEN_MAX_SSE_SESSIONS`. An open stream also counts twice against
+    `maxConcurrentHTTPSessions` (its connection and the stream).
+  - WebSocket sessions and server-sent event streams run on their own thread
+    once the upgrade or the stream's head is sent; they do not hold a worker,
+    so open streams cannot starve ordinary requests (`/healthz` included).
+    This also holds in the serialized `requestDispatchMode`. Bound them with
+    the two limits above. A stream whose client disconnects is closed within
+    about a second. Before Arlen 0.3.3 each open stream held a worker for its
+    whole life, and `maxConcurrentHTTPWorkers` open streams stopped the server
+    from answering anything else.
 
 Generated apps start with:
 

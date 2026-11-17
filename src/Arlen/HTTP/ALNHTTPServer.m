@@ -102,6 +102,7 @@ typedef struct {
 
 typedef struct {
   NSUInteger maxConcurrentWebSocketSessions;
+  NSUInteger maxConcurrentSSESessions;
   NSUInteger maxConcurrentHTTPSessions;
   NSUInteger maxConcurrentHTTPWorkers;
   NSUInteger maxQueuedHTTPConnections;
@@ -575,6 +576,16 @@ static BOOL ALNSignalStopRequested(void) {
   return (atomic_load_explicit(&gSignalStopRequested, memory_order_relaxed) != 0);
 }
 
+#if !defined(_WIN32)
+static void ALNBlockStopSignalsOnCurrentThread(void) {
+  sigset_t stopSignals;
+  sigemptyset(&stopSignals);
+  sigaddset(&stopSignals, SIGINT);
+  sigaddset(&stopSignals, SIGTERM);
+  (void)pthread_sigmask(SIG_BLOCK, &stopSignals, NULL);
+}
+#endif
+
 static BOOL ALNInstallSignalHandler(int sig) {
 #if defined(_WIN32)
   BOOL consoleInstalled = (SetConsoleCtrlHandler(ALNConsoleControlHandler, TRUE) != 0);
@@ -721,6 +732,8 @@ static ALNRuntimeLimits ALNRuntimeLimitsFromConfig(NSDictionary *config) {
   ALNRuntimeLimits out;
   out.maxConcurrentWebSocketSessions =
       ALNConfigUInt(runtimeLimits, @"maxConcurrentWebSocketSessions", 256);
+  out.maxConcurrentSSESessions =
+      ALNConfigUInt(runtimeLimits, @"maxConcurrentSSESessions", 256);
   out.maxConcurrentHTTPSessions =
       ALNConfigUInt(runtimeLimits, @"maxConcurrentHTTPSessions", 256);
   out.maxConcurrentHTTPWorkers =
@@ -4322,6 +4335,13 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
 }
 - (void)runBody {
   (void)[NSThread currentThread];
+#if !defined(_WIN32)
+  // SIGINT and SIGTERM stop the server by interrupting accept() on the accept
+  // thread. Delivered to a background thread instead, they only set the flag
+  // and accept() kept waiting (seen with websocket session threads), so the
+  // server's own threads leave them to the accept thread.
+  ALNBlockStopSignalsOnCurrentThread();
+#endif
   [_startupCondition lock];
   _ready = YES;
   [_startupCondition broadcast];
@@ -4343,6 +4363,16 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
 }
 @end
 
+// A websocket or SSE session handed off from an HTTP worker (see
+// handOffSessionOnClient:body:). Fields are guarded by sessionThreadsLock.
+@interface ALNHTTPSessionThreadRecord : NSObject
+@property(nonatomic, strong) ALNHTTPBackgroundThread *thread;
+@property(nonatomic, assign) BOOL finished;
+@end
+
+@implementation ALNHTTPSessionThreadRecord
+@end
+
 @interface ALNHTTPServer ()
 
 @property(nonatomic, strong, readwrite) ALNApplication *application;
@@ -4350,6 +4380,14 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
 @property(nonatomic, strong) NSLock *runtimeCountersLock;
 @property(nonatomic, assign) NSUInteger activeHTTPSessions;
 @property(nonatomic, assign) NSUInteger activeWebSocketSessions;
+@property(nonatomic, assign) NSUInteger activeSSESessions;
+@property(nonatomic, assign) NSUInteger maxConcurrentSSESessions;
+// Long-lived websocket and SSE sessions run on their own threads, so they do
+// not hold an HTTP worker (or, in serialized mode, the accept loop) for their
+// whole life. Off in --once mode, where the single connection runs inline.
+@property(atomic, assign) BOOL sessionHandoffEnabled;
+@property(nonatomic, strong) NSLock *sessionThreadsLock;
+@property(nonatomic, strong) NSMutableArray<ALNHTTPSessionThreadRecord *> *sessionThreads;
 @property(nonatomic, assign) NSUInteger maxConcurrentHTTPSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentWebSocketSessions;
 @property(nonatomic, assign) NSUInteger maxConcurrentHTTPWorkers;
@@ -4407,8 +4445,13 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     _runtimeCountersLock = [[NSLock alloc] init];
     _activeHTTPSessions = 0;
     _activeWebSocketSessions = 0;
+    _activeSSESessions = 0;
     _maxConcurrentHTTPSessions = 256;
     _maxConcurrentWebSocketSessions = 256;
+    _maxConcurrentSSESessions = 256;
+    _sessionHandoffEnabled = NO;
+    _sessionThreadsLock = [[NSLock alloc] init];
+    _sessionThreads = [NSMutableArray array];
     _maxConcurrentHTTPWorkers = 8;
     _maxQueuedHTTPConnections = 256;
     _requestParserBackend = [ALNRequest resolvedParserBackend];
@@ -4557,6 +4600,14 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   return self.shouldRun && !ALNSignalStopRequested();
 }
 
+// A stop signal handled on any thread but the accept thread only sets the
+// flag. Threads that notice it call this, so accept() wakes either way.
+- (void)wakeAcceptLoopIfStopSignalled {
+  if (ALNSignalStopRequested()) {
+    [self requestStop];
+  }
+}
+
 - (NSUInteger)queuedHTTPClientCountLocked {
   NSUInteger queued = [self.pendingHTTPClientFDs count];
   if (self.pendingHTTPClientFDHeadIndex >= queued) {
@@ -4666,7 +4717,8 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
           [self.application.logger error:@"http connection exception"
                                    fields:@{ @"exception" : exception.description ?: @"" }];
         } @finally {
-          // A parked connection now belongs to the idle-connection watcher.
+          // A parked connection now belongs to the idle-connection watcher, and
+          // a handed-off one to its websocket/SSE session thread.
           if (!parked) {
             [self releaseHTTPSessionReservation];
             ALNSocketClose(clientFd);
@@ -4870,6 +4922,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
       ALNSocketClose(ALNSocketHandleFromNumber(boxed));
     }
     free(pollFDs);
+    [self wakeAcceptLoopIfStopSignalled];
     self.idleConnectionWatcherRunning = NO;
     [self.idleConnectionLock lock];
     ALNSocketHandle wakeRead = self.idleConnectionWakeReadFD;
@@ -4939,6 +4992,118 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     self.activeWebSocketSessions -= 1;
   }
   [self.runtimeCountersLock unlock];
+}
+
+- (BOOL)reserveSSESessionWithLimit:(NSUInteger)limit {
+  [self.runtimeCountersLock lock];
+  BOOL allowed = YES;
+  if (limit > 0 && self.activeSSESessions >= limit) {
+    allowed = NO;
+  } else {
+    self.activeSSESessions += 1;
+  }
+  [self.runtimeCountersLock unlock];
+  return allowed;
+}
+
+- (void)releaseSSESessionReservation {
+  [self.runtimeCountersLock lock];
+  if (self.activeSSESessions > 0) {
+    self.activeSSESessions -= 1;
+  }
+  [self.runtimeCountersLock unlock];
+}
+
+// Joins session threads whose body has returned. Called before each handoff,
+// so finished sessions do not accumulate.
+- (BOOL)reapFinishedSessionThreads {
+  NSMutableArray<ALNHTTPBackgroundThread *> *finished = [NSMutableArray array];
+  [self.sessionThreadsLock lock];
+  NSIndexSet *done = [self.sessionThreads
+      indexesOfObjectsPassingTest:^BOOL(ALNHTTPSessionThreadRecord *record, NSUInteger idx, BOOL *stop) {
+        (void)idx;
+        (void)stop;
+        return record.finished && record.thread != nil;
+      }];
+  for (ALNHTTPSessionThreadRecord *record in [self.sessionThreads objectsAtIndexes:done]) {
+    [finished addObject:record.thread];
+  }
+  [self.sessionThreads removeObjectsAtIndexes:done];
+  [self.sessionThreadsLock unlock];
+  BOOL joined = YES;
+  for (ALNHTTPBackgroundThread *thread in finished) {
+    joined = [thread join] && joined;
+  }
+  return joined;
+}
+
+// Websocket and SSE sessions last as long as the client stays connected. Run
+// inline they held an HTTP worker for that whole time, so maxConcurrentHTTPWorkers
+// open streams (8 by default) left no worker for any other request, /healthz
+// included. After the upgrade or the stream head, the session moves to its own
+// thread; the worker returns to the pool. The thread runs body, then releases
+// the connection's HTTP session reservation and closes the socket.
+//
+// Returns YES when the session thread now owns the connection: the caller must
+// leave the socket open and keep its reservation. Returns NO (handoff disabled,
+// stopping, or no thread) and the caller runs body inline, as before.
+- (BOOL)handOffSessionOnClient:(ALNSocketHandle)clientFd body:(void (^)(void))body {
+  if (!self.sessionHandoffEnabled || ![self shouldContinueRunning] || body == nil) {
+    return NO;
+  }
+  (void)[self reapFinishedSessionThreads];
+  ALNHTTPSessionThreadRecord *record = [[ALNHTTPSessionThreadRecord alloc] init];
+  [self.sessionThreadsLock lock];
+  [self.sessionThreads addObject:record];
+  [self.sessionThreadsLock unlock];
+
+  ALNHTTPBackgroundThread *thread = [[ALNHTTPBackgroundThread alloc] init];
+  BOOL started = [thread startWithBody:^{
+    @autoreleasepool {
+      @try {
+        body();
+      } @catch (NSException *exception) {
+        [self.application.logger error:@"http session exception"
+                                 fields:@{ @"exception" : exception.description ?: @"" }];
+      } @finally {
+        [self releaseHTTPSessionReservation];
+        ALNSocketClose(clientFd);
+        [self.sessionThreadsLock lock];
+        record.finished = YES;
+        [self.sessionThreadsLock unlock];
+        [self wakeAcceptLoopIfStopSignalled];
+      }
+    }
+  }];
+  [self.sessionThreadsLock lock];
+  if (started) {
+    record.thread = thread;
+  } else {
+    [self.sessionThreads removeObjectIdenticalTo:record];
+  }
+  [self.sessionThreadsLock unlock];
+  return started;
+}
+
+// At shutdown, after the HTTP workers have stopped (so no new handoffs). Each
+// session loop checks shouldContinueRunning at least once a second.
+- (BOOL)waitForSessionThreads {
+  BOOL joined = YES;
+  while (YES) {
+    [self.sessionThreadsLock lock];
+    NSArray<ALNHTTPSessionThreadRecord *> *records = [self.sessionThreads copy];
+    [self.sessionThreads removeAllObjects];
+    [self.sessionThreadsLock unlock];
+    if ([records count] == 0) {
+      break;
+    }
+    for (ALNHTTPSessionThreadRecord *record in records) {
+      if (record.thread != nil) {
+        joined = [record.thread join] && joined;
+      }
+    }
+  }
+  return joined;
 }
 
 - (NSString *)webSocketModeFromResponse:(ALNResponse *)response {
@@ -5224,6 +5389,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
 // overflowed queue it closes the session and shuts the socket down, which also
 // ends the session's blocked read loop; the client resumes from its cursor.
 - (void)runWebSocketStreamSender:(ALNWebSocketClientSession *)session {
+#if !defined(_WIN32)
+  ALNBlockStopSignalsOnCurrentThread();
+#endif
   @autoreleasepool {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
       (void)[session.streamGate waitForQueuedEvents:1.0];
@@ -5244,6 +5412,17 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   double lastKeepaliveMs = ALNNowMilliseconds();
   @try {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
+      // An SSE client sends nothing after its request, so a readable socket
+      // means it closed (or sent bytes we discard). Without this check a
+      // closed stream was noticed only when a send failed, up to the 15 s
+      // keepalive later, and held its session reservation until then.
+      if (ALNWebSocketWaitReadable(session.clientFd, 0) != 0) {
+        char discard[512];
+        ssize_t received = ALNSocketRecv(session.clientFd, discard, sizeof(discard), 0);
+        if (received <= 0) {
+          break;
+        }
+      }
       // Live events go out from this thread (see ALNEventStreamDeliveryGate).
       // An overflowed queue ends the stream; the client resumes with
       // Last-Event-ID.
@@ -5265,12 +5444,15 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   }
 }
 
-- (void)handleClient:(ALNSocketHandle)clientFd {
-  (void)[self serveClient:clientFd resumed:NO allowPark:NO];
+// Serialized and --once modes, on the accept thread. Returns YES when a session
+// thread now owns the connection (see handOffSessionOnClient:body:).
+- (BOOL)handleClient:(ALNSocketHandle)clientFd {
+  return [self serveClient:clientFd resumed:NO allowPark:NO];
 }
 
-// Returns YES when the connection was parked with the idle-connection watcher;
-// the caller must then leave the socket open and keep its session reservation.
+// Returns YES when the connection was parked with the idle-connection watcher
+// or handed to a websocket/SSE session thread; the caller must then leave the
+// socket open and keep its session reservation.
 - (BOOL)serveClient:(ALNSocketHandle)clientFd resumed:(BOOL)resumed allowPark:(BOOL)allowPark {
   // The server only adds timing headers; the performance log is the application's.
   BOOL performanceHeaders =
@@ -5538,6 +5720,7 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
             }
           }
 
+          BOOL sessionHandedOff = NO;
           @try {
             if ([self sendWebSocketHandshakeForRequest:request response:response clientFd:clientFd]) {
               if (webSocketSession == nil) {
@@ -5549,21 +5732,37 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                     break;
                   }
                 }
-                // The read loop below blocks on the socket, so live events go
-                // out from a sender thread.
-                [NSThread detachNewThreadSelector:@selector(runWebSocketStreamSender:)
-                                         toTarget:self
-                                       withObject:webSocketSession];
               }
-              [self runWebSocketSessionWithMode:webSocketMode
-                                        channel:webSocketChannel
-                                        session:webSocketSession
-                                   subscription:channelSubscription
-                              streamSubscription:streamSubscription
-                                       clientFd:clientFd];
-              // Marks the session closed even when the peer vanished without a
-              // close frame, so a stream sender thread ends with it.
-              [webSocketSession sendCloseFrame];
+              ALNWebSocketClientSession *session = webSocketSession;
+              void (^runSession)(void) = ^{
+                if ([webSocketMode isEqualToString:@"stream"]) {
+                  // The read loop below blocks on the socket, so live events go
+                  // out from a sender thread.
+                  [NSThread detachNewThreadSelector:@selector(runWebSocketStreamSender:)
+                                           toTarget:self
+                                         withObject:session];
+                }
+                [self runWebSocketSessionWithMode:webSocketMode
+                                          channel:webSocketChannel
+                                          session:session
+                                     subscription:channelSubscription
+                                streamSubscription:streamSubscription
+                                         clientFd:clientFd];
+                // Marks the session closed even when the peer vanished without a
+                // close frame, so a stream sender thread ends with it.
+                [session sendCloseFrame];
+              };
+              sessionHandedOff = [self handOffSessionOnClient:clientFd
+                                                         body:^{
+                                                           @try {
+                                                             runSession();
+                                                           } @finally {
+                                                             [self releaseWebSocketSessionReservation];
+                                                           }
+                                                         }];
+              if (!sessionHandedOff) {
+                runSession();
+              }
             } else {
               if (channelSubscription != nil) {
                 [[ALNRealtimeHub sharedHub] unsubscribe:channelSubscription];
@@ -5573,9 +5772,11 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
               }
             }
           } @finally {
-            [self releaseWebSocketSessionReservation];
+            if (!sessionHandedOff) {
+              [self releaseWebSocketSessionReservation];
+            }
           }
-          return NO;
+          return sessionHandedOff;
         }
 
         if ([sseMode isEqualToString:@"stream"]) {
@@ -5636,6 +5837,20 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
               (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
               return NO;
             }
+            if (![self reserveSSESessionWithLimit:self.maxConcurrentSSESessions]) {
+              [self releaseHTTPSessionReservation];
+              ALNResponse *busyResponse = ALNErrorResponse(503, @"server busy\n");
+              [busyResponse setHeader:@"Retry-After" value:@"1"];
+              [busyResponse setHeader:@"X-Arlen-Backpressure-Reason" value:@"sse_session_limit"];
+              [busyResponse setHeader:@"Connection" value:@"close"];
+              ALNEnsurePerformanceHeaders(busyResponse,
+                                          performanceHeaders,
+                                          parseMs,
+                                          ALNNowMilliseconds() - requestStartMs);
+              (void)ALNSendResponse(clientFd, self.application, busyResponse, performanceHeaders, YES);
+              return NO;
+            }
+            BOOL sessionHandedOff = NO;
             @try {
               if (!ALNSendSSEHeaders(clientFd, response)) {
                 return NO;
@@ -5649,16 +5864,31 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                 return NO;
               }
               subscriptionHandedOff = YES;  // runSSEStreamSession unsubscribes
-              [self runSSEStreamSession:sseSession subscription:streamSubscription];
+              sessionHandedOff = [self handOffSessionOnClient:clientFd
+                                                         body:^{
+                                                           @try {
+                                                             [self runSSEStreamSession:sseSession
+                                                                          subscription:streamSubscription];
+                                                           } @finally {
+                                                             [self releaseSSESessionReservation];
+                                                             [self releaseHTTPSessionReservation];
+                                                           }
+                                                         }];
+              if (!sessionHandedOff) {
+                [self runSSEStreamSession:sseSession subscription:streamSubscription];
+              }
             } @finally {
-              [self releaseHTTPSessionReservation];
+              if (!sessionHandedOff) {
+                [self releaseSSESessionReservation];
+                [self releaseHTTPSessionReservation];
+              }
             }
+            return sessionHandedOff;
           } @finally {
             if (!subscriptionHandedOff && streamSubscription != nil) {
               [self.application.eventStreamBroker unsubscribe:streamSubscription];
             }
           }
-          return NO;
         }
 
         // Request dispatch mode does not force connection close; keep-alive follows HTTP semantics.
@@ -5720,6 +5950,8 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     self.serializeRequestDispatch = [requestDispatchMode isEqualToString:@"serialized"];
     self.maxConcurrentHTTPSessions = runtimeLimits.maxConcurrentHTTPSessions;
     self.maxConcurrentWebSocketSessions = runtimeLimits.maxConcurrentWebSocketSessions;
+    self.maxConcurrentSSESessions = runtimeLimits.maxConcurrentSSESessions;
+    self.sessionHandoffEnabled = !once;
     self.maxConcurrentHTTPWorkers = runtimeLimits.maxConcurrentHTTPWorkers;
     self.maxQueuedHTTPConnections = runtimeLimits.maxQueuedHTTPConnections;
     self.keepAliveParkAfterMilliseconds = runtimeLimits.keepAliveParkAfterMilliseconds;
@@ -5895,16 +6127,21 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
           ALNSocketClose(clientFd);
         }
       } else {
+        BOOL handedOff = NO;
         @try {
           @autoreleasepool {
-            [self handleClient:clientFd];
+            handedOff = [self handleClient:clientFd];
           }
         } @catch (NSException *exception) {
+          handedOff = NO;
           [self.application.logger error:@"http connection exception"
                                    fields:@{ @"exception" : exception.description ?: @"" }];
         } @finally {
-          [self releaseHTTPSessionReservation];
-          ALNSocketClose(clientFd);
+          // A handed-off session thread closes the connection itself.
+          if (!handedOff) {
+            [self releaseHTTPSessionReservation];
+            ALNSocketClose(clientFd);
+          }
         }
       }
 
@@ -5931,6 +6168,11 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     // and idle watcher has finished, including native thread destructors.
     if (![self waitForHTTPBackgroundThreads]) {
       fprintf(stderr, "%s: failed to join HTTP background threads\n", [self.serverName UTF8String]);
+      exitCode = 1;
+    }
+    // After the workers, so no handoff can start a new session thread.
+    if (![self waitForSessionThreads]) {
+      fprintf(stderr, "%s: failed to join websocket/SSE session threads\n", [self.serverName UTF8String]);
       exitCode = 1;
     }
     [ALNRealtimeHub sharedHub].fanout = nil;

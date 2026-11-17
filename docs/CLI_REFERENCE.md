@@ -1325,6 +1325,8 @@ Behavior:
 - watch mode retries failed builds automatically (`ARLEN_BOOMHAUER_BUILD_ERROR_RETRY_SECONDS`, default `2`) even when no additional watched-file fingerprint change is observed
 - concurrent HTTP sessions are bounded by `runtimeLimits.maxConcurrentHTTPSessions` (default `256`)
 - websocket session upgrades are bounded by `runtimeLimits.maxConcurrentWebSocketSessions` (default `256`)
+- server-sent event streams are bounded by `runtimeLimits.maxConcurrentSSESessions` (default `256`)
+- open websocket sessions and event streams run on their own threads and do not hold a request worker
 - requests run on `runtimeLimits.maxConcurrentHTTPWorkers` worker threads (default `8`). An idle keep-alive connection releases its worker after `runtimeLimits.keepAliveParkAfterMilliseconds` (default `5`) and is picked up again when its next request arrives (see `docs/CONFIGURATION_REFERENCE.md`)
 - request dispatch mode is controlled by `requestDispatchMode` (`concurrent` default)
  - `serialized` mode keeps dispatch execution deterministic while still honoring HTTP keep-alive negotiation
@@ -1340,6 +1342,10 @@ Behavior:
  - status `503 Service Unavailable`
  - header `Retry-After: 1`
  - header `X-Arlen-Backpressure-Reason: websocket_session_limit`
+- server-sent event stream limit violations return deterministic overload diagnostics:
+ - status `503 Service Unavailable`
+ - header `Retry-After: 1`
+ - header `X-Arlen-Backpressure-Reason: sse_session_limit`
 - realtime channel subscription cap violations return deterministic overload diagnostics:
  - status `503 Service Unavailable`
  - header `Retry-After: 1`
@@ -1449,6 +1455,7 @@ Environment:
 - `ARLEN_REQUEST_BODY_MIN_BYTES_PER_SECOND` (default `1024`; minimum average body rate after the grace period, else `408`; `0` disables; overrides `requestLimits.requestBodyMinBytesPerSecond`)
 - `ARLEN_REQUEST_BODY_MIN_RATE_GRACE_SECONDS` (default `10`; seconds before the minimum body rate applies; overrides `requestLimits.requestBodyMinRateGraceSeconds`)
 - `ARLEN_MAX_WEBSOCKET_SESSIONS` (runtime websocket session limit; legacy `MOJOOBJC_MAX_WEBSOCKET_SESSIONS` also accepted)
+- `ARLEN_MAX_SSE_SESSIONS` (runtime server-sent event stream limit)
 - `ARLEN_WEBSOCKET_ALLOWED_ORIGINS` (comma-separated websocket `Origin` allowlist; normalized to scheme/host/port; legacy `MOJOOBJC_WEBSOCKET_ALLOWED_ORIGINS` also accepted)
 - `ARLEN_MAX_HTTP_WORKERS` (runtime HTTP worker pool size; legacy `MOJOOBJC_MAX_HTTP_WORKERS` also accepted)
 - `ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS` (`runtimeLimits.webSocketPingIntervalSeconds`; idle WebSocket ping interval, `0` disables)

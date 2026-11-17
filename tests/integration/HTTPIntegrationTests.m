@@ -3005,6 +3005,154 @@
   }
 }
 
+// Websocket and SSE sessions ran inline on the HTTP worker for their whole life,
+// so maxConcurrentHTTPWorkers open streams (8 by default) starved every other
+// request, /healthz included; in serialized mode one stream blocked the accept
+// loop. tests/fixtures/http/session_starvation_probe.py holds the streams open
+// and checks /healthz, the sessions themselves, the session limit and its
+// release, and shutdown with sessions open.
+- (NSString *)sessionStarvationProbeForPort:(int)port
+                                       mode:(NSString *)mode
+                                   sessions:(NSUInteger)sessions
+                                      limit:(NSUInteger)limit
+                                  serverPID:(int)serverPID {
+  NSString *script = [NSString stringWithContentsOfFile:@"tests/fixtures/http/session_starvation_probe.py"
+                                               encoding:NSUTF8StringEncoding
+                                                  error:NULL] ?: @"";
+#if defined(_WIN32)
+  serverPID = 0;  // No SIGTERM to send.
+#endif
+  NSDictionary *values = @{
+    @"__PORT__" : [NSString stringWithFormat:@"%d", port],
+    @"__MODE__" : mode,
+    @"__SESSIONS__" : [NSString stringWithFormat:@"%lu", (unsigned long)sessions],
+    @"__LIMIT__" : [NSString stringWithFormat:@"%lu", (unsigned long)limit],
+    @"__PID__" : [NSString stringWithFormat:@"%d", serverPID],
+  };
+  for (NSString *key in values) {
+    script = [script stringByReplacingOccurrencesOfString:key withString:values[key]];
+  }
+  return script;
+}
+
+- (void)assertSessionStarvationProbeOnServer:(NSTask *)server
+                                        port:(int)port
+                                        mode:(NSString *)mode
+                                    sessions:(NSUInteger)sessions
+                                       limit:(NSUInteger)limit {
+  NSString *script = [self sessionStarvationProbeForPort:port
+                                                    mode:mode
+                                                sessions:sessions
+                                                   limit:limit
+                                               serverPID:server.processIdentifier];
+  int code = 0;
+  NSString *output = [self runPythonScript:script exitCode:&code];
+  XCTAssertEqual(0, code, @"%@", output);
+  XCTAssertTrue([output containsString:@"session starvation checks passed"], @"%@", output);
+#if !defined(_WIN32)
+  // The probe sent SIGTERM with sessions still open; the server must stop
+  // cleanly, joining its session threads.
+  XCTAssertTrue(ALNTestWaitForTaskExit(server, 10.0), @"server still running 10 s after SIGTERM");
+  if (![server isRunning]) {
+    XCTAssertEqual(0, [server terminationStatus]);
+  }
+#endif
+}
+
+- (void)testOpenWebSocketSessionsDoNotStarveHTTPWorkers {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_MAX_HTTP_WORKERS=8 ARLEN_MAX_WEBSOCKET_SESSIONS=16 "
+                               @"exec ./build/boomhauer --port %d",
+                               port]
+  ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    [self assertSessionStarvationProbeOnServer:server port:port mode:@"ws" sessions:16 limit:16];
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
+- (void)testOpenWebSocketSessionsDoNotBlockSerializedAcceptLoop {
+  int port = [self randomPort];
+  NSTask *server = [[NSTask alloc] init];
+  server.launchPath = ALNTestBashPath();
+  server.arguments = @[
+    @"-lc",
+    [NSString stringWithFormat:@"ARLEN_REQUEST_DISPATCH_MODE=serialized ARLEN_MAX_WEBSOCKET_SESSIONS=4 "
+                               @"exec ./build/boomhauer --port %d",
+                               port]
+  ];
+  server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+  server.standardError = [NSFileHandle fileHandleWithNullDevice];
+  [server launch];
+  @try {
+    BOOL ready = NO;
+    (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+    XCTAssertTrue(ready);
+    if (!ready) return;
+    [self assertSessionStarvationProbeOnServer:server port:port mode:@"ws" sessions:4 limit:4];
+  } @finally {
+    (void)ALNTestStopServerTask(server);
+  }
+}
+
+- (void)testOpenSSESessionsDoNotStarveHTTPWorkers {
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-sse-starvation-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/event_stream_app.m"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
+                                   "runtimeLimits = { maxConcurrentHTTPWorkers = 8; maxConcurrentSSESessions = 16; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+                                                     [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                                              envPrefix]
+                                          exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[ @"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+                                       [self shellQuoted:[appRoot stringByAppendingPathComponent:
+                                                                      ALNTestAppBinaryRelativePath()]],
+                                       port] ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = server.standardOutput;
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      [self assertSessionStarvationProbeOnServer:server port:port mode:@"sse" sessions:16 limit:16];
+    } @finally {
+      (void)ALNTestStopServerTask(server);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+}
+
 - (void)testRealtimeChannelSubscriberLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
@@ -4329,7 +4477,7 @@
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
     XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
                           content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
-                                   // Each SSE client holds a worker; the probe runs 12 plus 3 appenders.
+                                   // Headroom for the 3 appenders; SSE clients no longer hold workers.
                                    "runtimeLimits = { maxConcurrentHTTPWorkers = 32; }; }"]);
     NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
                                                      [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];

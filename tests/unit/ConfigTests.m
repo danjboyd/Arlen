@@ -330,6 +330,7 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxConcurrentSSESessions"] integerValue]);
   XCTAssertEqual((NSInteger)8, [runtimeLimits[@"maxConcurrentHTTPWorkers"] integerValue]);
   XCTAssertEqual((NSInteger)256, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
   XCTAssertEqual((NSInteger)0, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);
@@ -479,6 +480,7 @@
   setenv("ARLEN_MAX_HTTP_SESSIONS", "17", 1);
   setenv("ARLEN_SECURITY_PROFILE", "strict", 1);
   setenv("ARLEN_MAX_WEBSOCKET_SESSIONS", "9", 1);
+  setenv("ARLEN_MAX_SSE_SESSIONS", "5", 1);
   setenv("ARLEN_MAX_HTTP_WORKERS", "3", 1);
   setenv("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS", "11", 1);
   setenv("ARLEN_MAX_REALTIME_SUBSCRIBERS", "41", 1);
@@ -556,6 +558,7 @@
   unsetenv("ARLEN_MAX_HTTP_SESSIONS");
   unsetenv("ARLEN_SECURITY_PROFILE");
   unsetenv("ARLEN_MAX_WEBSOCKET_SESSIONS");
+  unsetenv("ARLEN_MAX_SSE_SESSIONS");
   unsetenv("ARLEN_MAX_HTTP_WORKERS");
   unsetenv("ARLEN_MAX_QUEUED_HTTP_CONNECTIONS");
   unsetenv("ARLEN_MAX_REALTIME_SUBSCRIBERS");
@@ -628,6 +631,7 @@
   NSDictionary *runtimeLimits = config[@"runtimeLimits"];
   XCTAssertEqual((NSInteger)17, [runtimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   XCTAssertEqual((NSInteger)9, [runtimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  XCTAssertEqual((NSInteger)5, [runtimeLimits[@"maxConcurrentSSESessions"] integerValue]);
   XCTAssertEqual((NSInteger)3, [runtimeLimits[@"maxConcurrentHTTPWorkers"] integerValue]);
   XCTAssertEqual((NSInteger)11, [runtimeLimits[@"maxQueuedHTTPConnections"] integerValue]);
   XCTAssertEqual((NSInteger)41, [runtimeLimits[@"maxRealtimeTotalSubscribers"] integerValue]);

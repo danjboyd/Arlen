@@ -519,6 +519,7 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
       ALNEnvValueCompat("ARLEN_MAX_HTTP_SESSIONS", "MOJOOBJC_MAX_HTTP_SESSIONS");
   NSString *maxWebSocketSessions =
       ALNEnvValueCompat("ARLEN_MAX_WEBSOCKET_SESSIONS", "MOJOOBJC_MAX_WEBSOCKET_SESSIONS");
+  NSString *maxSSESessions = ALNEnvValueCompat("ARLEN_MAX_SSE_SESSIONS", NULL);
   NSString *maxHTTPWorkers =
       ALNEnvValueCompat("ARLEN_MAX_HTTP_WORKERS", "MOJOOBJC_MAX_HTTP_WORKERS");
   NSString *webSocketPingIntervalSeconds = ALNEnvValueCompat("ARLEN_WEBSOCKET_PING_INTERVAL_SECONDS", NULL);
@@ -731,6 +732,10 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   ALNApplyIntegerOverride(runtimeLimits,
                           maxWebSocketSessions,
                           @"maxConcurrentWebSocketSessions",
+                          1);
+  ALNApplyIntegerOverride(runtimeLimits,
+                          maxSSESessions,
+                          @"maxConcurrentSSESessions",
                           1);
   ALNApplyIntegerOverride(runtimeLimits,
                           maxHTTPWorkers,
@@ -1111,6 +1116,9 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
   }
   if (finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] == nil) {
     finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] = @(256);
+  }
+  if (finalRuntimeLimits[@"maxConcurrentSSESessions"] == nil) {
+    finalRuntimeLimits[@"maxConcurrentSSESessions"] = @(256);
   }
   if (finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] == nil) {
     finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] = @(8);
@@ -1552,6 +1560,8 @@ NSString *ALNNormalizedEnvironmentName(NSString *name) {
       @([finalRuntimeLimits[@"maxConcurrentHTTPSessions"] integerValue]);
   finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] =
       @([finalRuntimeLimits[@"maxConcurrentWebSocketSessions"] integerValue]);
+  finalRuntimeLimits[@"maxConcurrentSSESessions"] =
+      @([finalRuntimeLimits[@"maxConcurrentSSESessions"] integerValue]);
   NSInteger maxWorkers = [finalRuntimeLimits[@"maxConcurrentHTTPWorkers"] integerValue];
   if (maxWorkers < 1) {
     maxWorkers = 8;

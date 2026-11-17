@@ -119,6 +119,7 @@ requestDispatchMode = "concurrent";
 runtimeLimits = {
   maxConcurrentHTTPSessions = 256;
   maxConcurrentWebSocketSessions = 256;
+  maxConcurrentSSESessions = 256;
 };
 ```
 
@@ -131,6 +132,9 @@ When HTTP session limit is exceeded, workers return deterministic overload diagn
 (`503 Service Unavailable` with `X-Arlen-Backpressure-Reason: http_session_limit`).
 When websocket session limit is exceeded, workers return deterministic overload diagnostics
 (`503 Service Unavailable` with `X-Arlen-Backpressure-Reason: websocket_session_limit`).
+When server-sent event stream limit is exceeded, workers return deterministic overload diagnostics
+(`503 Service Unavailable` with `X-Arlen-Backpressure-Reason: sse_session_limit`).
+Open WebSocket sessions and event streams run on their own threads, not on HTTP workers.
 
 Cluster controls:
 
@@ -187,6 +191,7 @@ Environment fallbacks:
 - `ARLEN_CLUSTER_EXPECTED_NODES`
 - `ARLEN_MAX_HTTP_SESSIONS`
 - `ARLEN_MAX_WEBSOCKET_SESSIONS`
+- `ARLEN_MAX_SSE_SESSIONS`
 - `ARLEN_REQUEST_DISPATCH_MODE` (`concurrent` by default; set `serialized` to force deterministic serialized dispatch)
 
 `propane` exports resolved cluster values to worker processes, so CLI overrides are consistently applied at runtime.
