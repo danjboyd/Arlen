@@ -1085,6 +1085,7 @@ static NSDictionary *ALNEventStreamResyncPayload(ALNEventStreamReplayResult *res
                                  limit,
                                  replayWindow);
   [self.context.response clearBody];
+  self.context.response.eventStreamRequestContext = [ALNEventStreamRequestContext requestContextWithContext:self.context];
   self.context.response.committed = YES;
   return YES;
 }

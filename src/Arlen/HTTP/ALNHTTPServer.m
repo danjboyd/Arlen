@@ -5405,7 +5405,9 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
 }
 
 - (void)runSSEStreamSession:(ALNSSEClientSession *)session
-               subscription:(ALNEventStreamBrokerSubscription *)subscription {
+               subscription:(ALNEventStreamBrokerSubscription *)subscription
+                   streamID:(NSString *)streamID
+             requestContext:(ALNEventStreamRequestContext *)requestContext {
   if (session == nil) {
     return;
   }
@@ -5431,6 +5433,11 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
         break;
       }
       if (ALNNowMilliseconds() - lastKeepaliveMs >= 15000.0) {
+        // Re-authorize at each keepalive: NO (e.g. a revoked credential) ends the stream; the caller closes it.
+        if (![self.application eventStreamSubscriptionStillAuthorizedToStream:streamID
+                                                                requestContext:requestContext]) {
+          break;
+        }
         if (![session sendKeepalive]) {
           break;
         }
@@ -5864,18 +5871,25 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                 return NO;
               }
               subscriptionHandedOff = YES;  // runSSEStreamSession unsubscribes
+              NSString *sseStreamID = [self eventStreamIdentifierFromResponse:response];
+              ALNEventStreamRequestContext *sseRequestContext = response.eventStreamRequestContext;
               sessionHandedOff = [self handOffSessionOnClient:clientFd
                                                          body:^{
                                                            @try {
                                                              [self runSSEStreamSession:sseSession
-                                                                          subscription:streamSubscription];
+                                                                          subscription:streamSubscription
+                                                                              streamID:sseStreamID
+                                                                        requestContext:sseRequestContext];
                                                            } @finally {
                                                              [self releaseSSESessionReservation];
                                                              [self releaseHTTPSessionReservation];
                                                            }
                                                          }];
               if (!sessionHandedOff) {
-                [self runSSEStreamSession:sseSession subscription:streamSubscription];
+                [self runSSEStreamSession:sseSession
+                             subscription:streamSubscription
+                                 streamID:sseStreamID
+                           requestContext:sseRequestContext];
               }
             } @finally {
               if (!sessionHandedOff) {
