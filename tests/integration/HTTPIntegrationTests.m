@@ -3153,6 +3153,72 @@
   }
 }
 
+// A child process started from a request (worker) thread must not inherit a
+// blocked SIGINT/SIGTERM, or a plain kill never stops it. The server must still
+// stop on SIGTERM. Linux only: the child reads its mask from /proc.
+- (void)testChildProcessesStartedFromRequestThreadsCanBeSignalled {
+#if !defined(__linux__)
+  return;
+#else
+  NSString *repoRoot = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *appRoot = [self createTempDirectoryWithPrefix:@"arlen-child-signal-mask-app"];
+  XCTAssertNotNil(appRoot);
+  if (appRoot == nil) return;
+  @try {
+    NSString *entrypoint = [NSString stringWithContentsOfFile:@"tests/fixtures/http/child_signal_mask_app.m"
+                                                     encoding:NSUTF8StringEncoding
+                                                        error:NULL];
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"app_lite.m"] content:entrypoint]);
+    XCTAssertTrue([self writeFile:[appRoot stringByAppendingPathComponent:@"config/app.plist"]
+                          content:@"{ host = \"127.0.0.1\"; port = 3000; logLevel = error; csrf = { enabled = NO; }; "
+                                   "runtimeLimits = { maxConcurrentHTTPWorkers = 4; }; }"]);
+    NSString *envPrefix = [NSString stringWithFormat:@"ARLEN_FRAMEWORK_ROOT=%@ ARLEN_APP_ROOT=%@",
+                                                     [self shellQuoted:repoRoot], [self shellQuoted:appRoot]];
+    int prepareCode = 0;
+    NSString *prepareOutput = [self runShellCapture:[NSString stringWithFormat:@"%@ ./bin/boomhauer --prepare-only 2>&1",
+                                                                              envPrefix]
+                                          exitCode:&prepareCode];
+    XCTAssertEqual(0, prepareCode, @"%@", prepareOutput);
+    if (prepareCode != 0) return;
+
+    int port = [self randomPort];
+    NSTask *server = [[NSTask alloc] init];
+    server.launchPath = ALNTestBashPath();
+    server.arguments = @[ @"-lc", [NSString stringWithFormat:@"%@ exec %@ --port %d", envPrefix,
+                                       [self shellQuoted:[appRoot stringByAppendingPathComponent:
+                                                                      ALNTestAppBinaryRelativePath()]],
+                                       port] ];
+    server.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    server.standardError = server.standardOutput;
+    [server launch];
+    @try {
+      BOOL ready = NO;
+      (void)[self requestPathWithRetries:@"/healthz" port:port attempts:60 success:&ready];
+      XCTAssertTrue(ready);
+      if (!ready) return;
+      // Several requests, so more than one worker thread answers.
+      for (NSInteger attempt = 0; attempt < 6; attempt++) {
+        BOOL answered = NO;
+        NSString *body = [self requestPathWithRetries:@"/child-mask" port:port attempts:10 success:&answered];
+        XCTAssertTrue(answered, @"%@", body);
+        NSDictionary *mask = [NSJSONSerialization JSONObjectWithData:[body dataUsingEncoding:NSUTF8StringEncoding]
+                                                             options:0
+                                                               error:NULL];
+        XCTAssertNotNil(mask[@"sigblk"], @"%@", body);
+        XCTAssertEqualObjects(@0, mask[@"sigint_blocked"], @"child SigBlk %@", mask[@"sigblk"]);
+        XCTAssertEqualObjects(@0, mask[@"sigterm_blocked"], @"child SigBlk %@", mask[@"sigblk"]);
+      }
+      XCTAssertEqual(0, kill(server.processIdentifier, SIGTERM));
+      XCTAssertTrue(ALNTestWaitForTaskExit(server, 10.0), @"server still running 10 s after SIGTERM");
+    } @finally {
+      (void)ALNTestStopServerTask(server);
+    }
+  } @finally {
+    [[NSFileManager defaultManager] removeItemAtPath:appRoot error:NULL];
+  }
+#endif
+}
+
 - (void)testRealtimeChannelSubscriberLimitReturns503UnderBackpressure {
   int port = [self randomPort];
   NSTask *server = [[NSTask alloc] init];
