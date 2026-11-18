@@ -27,6 +27,7 @@ Single route descriptor containing method/path pattern/controller/action and mat
 | `operationID` | `NSString *` | `nonatomic, copy` | Public `operationID` property available on `ALNRoute`. |
 | `tags` | `NSArray *` | `nonatomic, copy` | Public `tags` property available on `ALNRoute`. |
 | `requiredScopes` | `NSArray *` | `nonatomic, copy` | Public `requiredScopes` property available on `ALNRoute`. |
+| `anyOfScopes` | `NSArray *` | `nonatomic, copy` | Public `anyOfScopes` property available on `ALNRoute`. |
 | `requiredRoles` | `NSArray *` | `nonatomic, copy` | Public `requiredRoles` property available on `ALNRoute`. |
 | `policyNames` | `NSArray *` | `nonatomic, copy` | Public `policyNames` property available on `ALNRoute`. |
 | `source` | `NSString *` | `nonatomic, copy` | Public `source` property available on `ALNRoute`. |

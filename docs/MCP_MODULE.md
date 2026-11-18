@@ -268,7 +268,10 @@ rejects mounted-app delegation and any route mismatch before an alternate
 controller can execute.
 
 The MCP endpoint accepts `requiredScopes`, `requiredRoles`, and named `policies`
-in its config. Custom tools need their own service permissions. Route-backed
+in its config. `requiredScopes` is all-of; `requiredAnyScopes` admits a caller holding at
+least one of the listed scopes (checked after `requiredScopes`; a refusal is 403
+`Missing required scope` with `any_of_scopes`). Each tool still applies its own
+`requiredScopes`. Custom tools need their own service permissions. Route-backed
 tools retain the original route's permissions and path-based policies. Custom
 tools have private paths, so attach policies by name instead of relying on an
 unrelated HTTP route's path-prefix rules. `tools/list` only shows a caller the

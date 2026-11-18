@@ -12,7 +12,7 @@ python3 tools/docs/generate_api_reference.py
 - Public headers: `95`
 - Symbols: `169`
 - Public methods: `1140`
-- Public properties: `533`
+- Public properties: `534`
 
 ## API Surface Boundary
 
