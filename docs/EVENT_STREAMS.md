@@ -96,6 +96,16 @@ static void ConfigureRealtime(ALNApplication *app) {
 }
 ```
 
+A hook may also implement the optional
+`-eventStreamSubscriptionStillAuthorizedToStream:requestContext:`. Arlen calls
+it at each keepalive of a live SSE stream (every 15 seconds), with the request
+context recorded at subscribe. Returning `NO` (for example, once the caller's
+credential is revoked) ends the stream and closes the connection, and so does
+raising an exception. A hook without the method keeps the subscribe-time
+decision for the stream's whole life. The call runs on the SSE session's own
+thread, not the request thread, so the method must be safe to call
+concurrently with the hook's other methods.
+
 The in-memory store and broker are useful for local development and focused
 tests. Production durability should come from a real store adapter.
 
