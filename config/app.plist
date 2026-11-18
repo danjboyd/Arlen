@@ -16,6 +16,7 @@
   runtimeLimits = {
     maxConcurrentHTTPSessions = 256;
     maxConcurrentWebSocketSessions = 256;
+    maxConcurrentSSESessions = 256;
   };
   database = {
     connectionString = "";

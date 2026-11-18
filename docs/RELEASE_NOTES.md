@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Run WebSocket sessions and server-sent event streams on their own threads.
+  Each open session used to hold an HTTP worker for its whole life, so
+  `maxConcurrentHTTPWorkers` open streams (8 by default) left no worker for any
+  other request, `/healthz` included; in the serialized `requestDispatchMode` a
+  single open stream blocked the accept loop. After the upgrade or the stream's
+  head the session now moves to its own thread, and the server joins those
+  threads at shutdown. Add `runtimeLimits.maxConcurrentSSESessions` (default
+  `256`, `ARLEN_MAX_SSE_SESSIONS`; over the limit: `503` with
+  `X-Arlen-Backpressure-Reason: sse_session_limit`) alongside the existing
+  WebSocket session limit. An event stream whose client disconnects is now
+  closed within about a second, not at the next failed send. SIGINT/SIGTERM
+  are left to the accept thread, so shutdown no longer depends on which thread
+  the kernel delivers them to.
 - Windows remains development-only in 0.4.0. Production hosting, supervised jobs
   workers and service deploys are deferred beyond this release; existing
   production refusal remains in place.
