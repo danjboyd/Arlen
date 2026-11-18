@@ -152,7 +152,7 @@ static NSString *Encode(NSString *value) {
       [self.path rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._-"] invertedSet]].location != NSNotFound ||
       [@[@"/healthz", @"/readyz", @"/livez", @"/metrics", @"/clusterz"] containsObject:[self.path stringByDeletingPathExtension]])
     return ALNMCPFail(error, @"MCP path must be a literal non-root HTTP path");
-  for (NSString *key in @[@"allowedOrigins", @"requiredScopes", @"requiredRoles", @"policies"]) {
+  for (NSString *key in @[@"allowedOrigins", @"requiredScopes", @"requiredAnyScopes", @"requiredRoles", @"policies"]) {
     id values = config[key] ?: @[];
     if (![values isKindOfClass:[NSArray class]]) return ALNMCPFail(error, @"MCP access settings must be string arrays");
     for (id value in values) if (!String(value) || ![value length]) return ALNMCPFail(error, @"MCP access settings require nonempty strings");
@@ -191,6 +191,7 @@ static NSString *Encode(NSString *value) {
                                       controllerClass:[ALNMCPController class] action:@"endpoint"];
     route.includeInOpenAPI = NO;
     route.requiredScopes = config[@"requiredScopes"] ?: @[];
+    route.anyOfScopes = config[@"requiredAnyScopes"] ?: @[];  // the transport admits a token holding any one of these
     route.requiredRoles = config[@"requiredRoles"] ?: @[];
     route.policyNames = config[@"policies"] ?: @[];
   }

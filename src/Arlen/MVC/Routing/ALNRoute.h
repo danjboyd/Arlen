@@ -49,6 +49,8 @@ typedef NS_ENUM(NSUInteger, ALNRouteInvocationReturnKind) {
 @property(nonatomic, copy) NSString *operationID;
 @property(nonatomic, copy) NSArray *tags;
 @property(nonatomic, copy) NSArray *requiredScopes;
+// Scopes of which the caller needs at least one (any-of), checked after requiredScopes (all-of). Empty: no any-of check.
+@property(nonatomic, copy) NSArray *anyOfScopes;
 @property(nonatomic, copy) NSArray *requiredRoles;
 @property(nonatomic, copy) NSArray *policyNames;
 @property(nonatomic, copy) NSString *source;

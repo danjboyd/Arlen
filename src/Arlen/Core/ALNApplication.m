@@ -540,7 +540,7 @@ static BOOL ALNRouteCanUseCompiledFastAction(ALNApplication *application, ALNRou
   if ([route.requestSchema count] > 0 || [route.responseSchema count] > 0) {
     return NO;
   }
-  if ([route.requiredScopes count] > 0 || [route.requiredRoles count] > 0) {
+  if ([route.requiredScopes count] > 0 || [route.anyOfScopes count] > 0 || [route.requiredRoles count] > 0) {
     return NO;
   }
   return YES;
@@ -4287,10 +4287,11 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                                          ALNRoute *route,
                                          NSString *requestID) {
   NSArray *requiredScopes = ALNNormalizedUniqueStrings(route.requiredScopes);
+  NSArray *anyOfScopes = ALNNormalizedUniqueStrings(route.anyOfScopes);
   NSArray *requiredRoles = ALNNormalizedUniqueStrings(route.requiredRoles);
   NSUInteger minimumAssuranceLevel = route.minimumAuthAssuranceLevel;
   NSUInteger maximumAuthenticationAgeSeconds = route.maximumAuthenticationAgeSeconds;
-  BOOL requiresRoleOrScope = ([requiredScopes count] > 0 || [requiredRoles count] > 0);
+  BOOL requiresRoleOrScope = ([requiredScopes count] > 0 || [anyOfScopes count] > 0 || [requiredRoles count] > 0);
   BOOL requiresAssurance = (minimumAssuranceLevel > 0 || maximumAuthenticationAgeSeconds > 0);
   if (!requiresRoleOrScope && !requiresAssurance) {
     return YES;
@@ -4344,6 +4345,19 @@ static BOOL ALNApplyAuthContractIfNeeded(ALNApplication *application,
                               @"Missing required scope",
                               @{
                                 @"required_scopes" : requiredScopes,
+                                @"granted_scopes" : [context authScopes] ?: @[],
+                              });
+    return NO;
+  }
+  if ([anyOfScopes count] > 0 &&
+      ![[NSSet setWithArray:[context authScopes] ?: @[]] intersectsSet:[NSSet setWithArray:anyOfScopes]]) {
+    ALNApplyForbiddenResponse(application,
+                              request,
+                              response,
+                              requestID,
+                              @"Missing required scope",
+                              @{
+                                @"any_of_scopes" : anyOfScopes,
                                 @"granted_scopes" : [context authScopes] ?: @[],
                               });
     return NO;

@@ -50,6 +50,7 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   if ([credential isEqual:@"Bearer elevated"]) [ALNAuth applyClaims:@{@"sub": @"reader", @"scope": @"catalog:read", @"roles": @[@"reader"], @"aal": @2, @"auth_time": @((NSInteger)[[NSDate date] timeIntervalSince1970])} toContext:context];
   if ([credential isEqual:@"Bearer stale"]) [ALNAuth applyClaims:@{@"sub": @"reader", @"scope": @"catalog:read", @"roles": @[@"reader"], @"aal": @2, @"auth_time": @((NSInteger)[[NSDate date] timeIntervalSince1970] - 3600)} toContext:context];
   if ([credential isEqual:@"Bearer visitor"]) [ALNAuth applyClaims:@{@"sub": @"visitor"} toContext:context];
+  if ([credential isEqual:@"Bearer worker"]) [ALNAuth applyClaims:@{@"sub": @"worker", @"scope": @"work:tools"} toContext:context];
   if ([[context headerValueForName:@"x-deny-middleware"] isEqual:context.routeName]) {
     context.response.statusCode = 429; context.response.committed = YES; return NO;
   }
@@ -158,6 +159,28 @@ static NSDictionary *ObjectSchema(void) { return @{ @"type": @"object", @"proper
   for (NSString *method in @[@"GET", @"DELETE", @"PUT"]) XCTAssertEqual(405, [self send:@{} headers:nil method:method path:@"/mcp"].statusCode);
   XCTAssertEqual(0u, Calls);
 }
+- (void)testTransportAnyOfScopesAdmitsATokenWithAnyOneOfThem {
+  [self configure:@{@"mcp": @{@"enabled": @YES, @"requiredAnyScopes": @[@"catalog:read", @"work:tools"]}}];
+  [self routeTool]; [self install];
+  NSDictionary *list = @{@"jsonrpc": @"2.0", @"id": @1, @"method": @"tools/list"};
+  XCTAssertEqual(200, [self send:list headers:@{@"authorization": @"Bearer reader"} method:@"POST" path:@"/mcp"].statusCode);
+  XCTAssertEqual(200, [self send:list headers:@{@"authorization": @"Bearer worker"} method:@"POST" path:@"/mcp"].statusCode);
+  XCTAssertEqual(403, [self send:list headers:@{@"authorization": @"Bearer visitor"} method:@"POST" path:@"/mcp"].statusCode);
+  XCTAssertEqual(401, [self send:list headers:@{@"authorization": @""} method:@"POST" path:@"/mcp"].statusCode);
+  ALNRoute *transport = nil;
+  for (id value in [self.app.router allRoutes])
+    if ([value isKindOfClass:[ALNRoute class]] && [[(ALNRoute *)value name] isEqual:@"mcp.transport.POST"]) transport = value;
+  XCTAssertEqualObjects((@[@"catalog:read", @"work:tools"]), transport.anyOfScopes);
+  XCTAssertEqualObjects(@[], transport.requiredScopes);
+}
+
+- (void)testTransportAnyOfScopesMustBeStrings {
+  [self configure:@{@"mcp": @{@"enabled": @YES, @"requiredAnyScopes": @[@""]}}];
+  NSError *error = nil;
+  XCTAssertFalse([self.module registerWithApplication:self.app error:&error]);
+  XCTAssertNotNil(error);
+}
+
 - (void)testProtocolErrorsAreSeparateFromExecutionErrors {
   [self routeTool]; [self install];
   XCTAssertEqualObjects(@(-32601), [self rpc:@"resources/list" params:nil headers:nil][@"error"][@"code"]);

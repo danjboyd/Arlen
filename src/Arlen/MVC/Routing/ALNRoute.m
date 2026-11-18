@@ -138,6 +138,7 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
     _operationID = @"";
     _tags = @[];
     _requiredScopes = @[];
+    _anyOfScopes = @[];
     _requiredRoles = @[];
     _policyNames = @[];
     _source = @"code";
@@ -401,6 +402,9 @@ static NSString *ALNNormalizedPathForFastMatch(NSString *path) {
   }
   if ([self.requiredScopes count] > 0) {
     representation[@"requiredScopes"] = self.requiredScopes;
+  }
+  if ([self.anyOfScopes count] > 0) {
+    representation[@"anyOfScopes"] = self.anyOfScopes;
   }
   if ([self.requiredRoles count] > 0) {
     representation[@"requiredRoles"] = self.requiredRoles;
