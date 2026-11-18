@@ -12,9 +12,26 @@
   `256`, `ARLEN_MAX_SSE_SESSIONS`; over the limit: `503` with
   `X-Arlen-Backpressure-Reason: sse_session_limit`) alongside the existing
   WebSocket session limit. An event stream whose client disconnects is now
-  closed within about a second, not at the next failed send. SIGINT/SIGTERM
-  are left to the accept thread, so shutdown no longer depends on which thread
-  the kernel delivers them to.
+  closed within about a second, not at the next failed send.
+- SIGINT and SIGTERM stop the server whichever thread receives them, and no
+  server thread blocks them any more. The stop handler writes to a wake channel
+  that the accept loop polls alongside the listening socket. Before, server
+  threads blocked both signals, and every child process an app started from a
+  request (`posix_spawn`, `system()`, `popen()`, `fork`) inherited the blocked
+  mask, so a plain `kill` could not stop it (#347).
+- Windows: Ctrl+C, Ctrl+Break, console close and shutdown now stop the server.
+  The console control handler only set the stop flag, so the accept thread
+  stayed in `accept()` and the process never exited; it now wakes the accept
+  loop through the same channel, as does `requestStop` (#347).
+- Live SSE subscriptions can be re-authorized: an optional
+  `ALNEventStreamAuthorizationHook` method,
+  `-eventStreamSubscriptionStillAuthorizedToStream:requestContext:`, is asked at
+  each keepalive (every 15 s); `NO`, or an exception, ends the stream. Hooks
+  without it keep the old behaviour (authorized once, at subscribe).
+- Routes can require any one of several scopes: `ALNRoute.anyOfScopes` admits a
+  caller holding at least one listed scope, checked after the all-of
+  `requiredScopes`. The MCP module's `requiredAnyScopes` config sets it on its
+  transport routes, while each tool keeps its own `requiredScopes`.
 - Windows remains development-only in 0.4.0. Production hosting, supervised jobs
   workers and service deploys are deferred beyond this release; existing
   production refusal remains in place.
