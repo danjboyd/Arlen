@@ -151,6 +151,15 @@ static _Atomic(sig_atomic_t) gSignalStopRequested = 0;
 // Signal handlers may only use atomic operations that cannot acquire a lock.
 _Static_assert(__atomic_always_lock_free(sizeof(gSignalStopRequested), 0),
                "HTTP signal-stop flag must always be lock-free");
+#if !defined(_WIN32)
+// Write end of the running server's signal wake channel, or -1. The stop-signal
+// handler writes one byte to it, so accept() wakes whichever thread took the
+// signal; no thread has to block SIGINT/SIGTERM (a blocked mask would be
+// inherited by every child process an app starts from that thread).
+static _Atomic(int) gSignalWakeWriteFD = -1;
+_Static_assert(__atomic_always_lock_free(sizeof(gSignalWakeWriteFD), 0),
+               "HTTP signal wake descriptor must always be lock-free");
+#endif
 
 static void *ALNReallocWithFaults(void *pointer, size_t size);
 
@@ -570,21 +579,22 @@ static void ALNWakeChannelClose(ALNSocketHandle readEnd, ALNSocketHandle writeEn
 static void ALNHandleSignal(int sig) {
   (void)sig;
   atomic_store_explicit(&gSignalStopRequested, 1, memory_order_relaxed);
+#if !defined(_WIN32)
+  // Async-signal-safe: an atomic load and a non-blocking write(); errno is kept
+  // for the interrupted thread.
+  int wakeFD = atomic_load_explicit(&gSignalWakeWriteFD, memory_order_relaxed);
+  if (wakeFD >= 0) {
+    int savedErrno = errno;
+    uint8_t byte = 1;
+    (void)write(wakeFD, &byte, 1);
+    errno = savedErrno;
+  }
+#endif
 }
 
 static BOOL ALNSignalStopRequested(void) {
   return (atomic_load_explicit(&gSignalStopRequested, memory_order_relaxed) != 0);
 }
-
-#if !defined(_WIN32)
-static void ALNBlockStopSignalsOnCurrentThread(void) {
-  sigset_t stopSignals;
-  sigemptyset(&stopSignals);
-  sigaddset(&stopSignals, SIGINT);
-  sigaddset(&stopSignals, SIGTERM);
-  (void)pthread_sigmask(SIG_BLOCK, &stopSignals, NULL);
-}
-#endif
 
 static BOOL ALNInstallSignalHandler(int sig) {
 #if defined(_WIN32)
@@ -4335,13 +4345,9 @@ static void *ALNHTTPBackgroundThreadMain(void *context) {
 }
 - (void)runBody {
   (void)[NSThread currentThread];
-#if !defined(_WIN32)
-  // SIGINT and SIGTERM stop the server by interrupting accept() on the accept
-  // thread. Delivered to a background thread instead, they only set the flag
-  // and accept() kept waiting (seen with websocket session threads), so the
-  // server's own threads leave them to the accept thread.
-  ALNBlockStopSignalsOnCurrentThread();
-#endif
+  // SIGINT and SIGTERM may land on this thread: the handler wakes the accept
+  // loop through gSignalWakeWriteFD, so the signals stay unblocked here and in
+  // any child process started from this thread.
   [_startupCondition lock];
   _ready = YES;
   [_startupCondition broadcast];
@@ -5389,9 +5395,6 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
 // overflowed queue it closes the session and shuts the socket down, which also
 // ends the session's blocked read loop; the client resumes from its cursor.
 - (void)runWebSocketStreamSender:(ALNWebSocketClientSession *)session {
-#if !defined(_WIN32)
-  ALNBlockStopSignalsOnCurrentThread();
-#endif
   @autoreleasepool {
     while ([self shouldContinueRunning] && ![session isClosedSnapshot]) {
       (void)[session.streamGate waitForQueuedEvents:1.0];
@@ -5955,6 +5958,10 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
   }
 
   int exitCode = 0;
+#if !defined(_WIN32)
+  ALNSocketHandle signalWakeRead = ALNInvalidSocketHandle;
+  ALNSocketHandle signalWakeWrite = ALNInvalidSocketHandle;
+#endif
   @try {
     ALNServerSocketTuning tuning = ALNTuningFromConfig(config);
     ALNRuntimeLimits runtimeLimits = ALNRuntimeLimitsFromConfig(config);
@@ -5991,6 +5998,18 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
                                    userInfo:nil];
     }
 
+#if !defined(_WIN32)
+    // Published before the handlers go in, so a signal handled on any thread wakes
+    // accept() (non-blocking, close-on-exec: children never see it).
+    if (!ALNWakeChannelOpen(&signalWakeRead, &signalWakeWrite)) {
+      fprintf(stderr, "%s: signal wake channel setup failed\n", [self.serverName UTF8String]);
+      exitCode = 1;
+      @throw [NSException exceptionWithName:@"ALNServerStartFailed"
+                                     reason:@"signal wake channel setup failed"
+                                   userInfo:nil];
+    }
+    atomic_store_explicit(&gSignalWakeWriteFD, (int)signalWakeWrite, memory_order_relaxed);
+#endif
     if (!ALNInstallSignalHandler(SIGINT) || !ALNInstallSignalHandler(SIGTERM)) {
       fprintf(stderr, "%s: signal handler setup failed\n", [self.serverName UTF8String]);
       exitCode = 1;
@@ -6090,6 +6109,29 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
     }
 
     while ([self shouldContinueRunning]) {
+#if !defined(_WIN32)
+      // Wait for a client or a stop signal, whichever thread the signal hit.
+      ALNPollEntry acceptWait[2];
+      ALNPollEntrySet(&acceptWait[0], serverFd);
+      ALNPollEntrySet(&acceptWait[1], signalWakeRead);
+      int acceptReady = ALNSocketPoll(acceptWait, 2, -1);
+      if (acceptReady < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        ALNReportSocketError("poll(accept)");
+        break;
+      }
+      if (acceptWait[1].revents != 0) {
+        ALNWakeChannelDrain(signalWakeRead);
+        if (![self shouldContinueRunning]) {
+          break;
+        }
+      }
+      if ((acceptWait[0].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)) == 0) {
+        continue;
+      }
+#endif
       ALNSocketHandle clientFd = ALNSocketAccept(serverFd);
       if (clientFd == ALNInvalidSocketHandle) {
         if (errno == EINTR) {
@@ -6177,6 +6219,16 @@ void ALNReportStartupFailure(NSString *prefix, NSString *message) {
       ALNSocketClose(self.serverSocketFD);
     }
     self.serverSocketFD = ALNInvalidSocketHandle;
+#if !defined(_WIN32)
+    // Unpublish before closing, so a late signal never writes to a reused descriptor.
+    if (signalWakeWrite != ALNInvalidSocketHandle) {
+      int expected = (int)signalWakeWrite;
+      (void)atomic_compare_exchange_strong(&gSignalWakeWriteFD, &expected, -1);
+      ALNWakeChannelClose(signalWakeRead, signalWakeWrite);
+      signalWakeRead = ALNInvalidSocketHandle;
+      signalWakeWrite = ALNInvalidSocketHandle;
+    }
+#endif
     [self requestStop];
     // Keep the application and its libraries alive until every HTTP worker
     // and idle watcher has finished, including native thread destructors.
